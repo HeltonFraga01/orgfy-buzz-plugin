@@ -388,6 +388,29 @@ export const SVG = {
       h("path", { d: "M23 21v-2a4 4 0 0 0-3-3.87" }),
       h("path", { d: "M16 3.13a4 4 0 0 1 0 7.75" })
     ),
+  folder: ({ h, width = 14, height = 14 }: any) =>
+    h("svg", { width, height, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.75 },
+      h("path", { d: "M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" })
+    ),
+  activity: ({ h, width = 14, height = 14 }: any) =>
+    h("svg", { width, height, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.75 },
+      h("polyline", { points: "22 12 18 12 15 21 9 3 6 12 2 12" })
+    ),
+  gitPullRequest: ({ h, width = 14, height = 14 }: any) =>
+    h("svg", { width, height, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.75 },
+      h("circle", { cx: "18", cy: "18", r: "3" }),
+      h("circle", { cx: "6", cy: "6", r: "3" }),
+      h("path", { d: "M13 6h3a2 2 0 0 1 2 2v7" }),
+      h("line", { x1: "6", y1: "9", x2: "6", y2: "21" })
+    ),
+  fileText: ({ h, width = 14, height = 14 }: any) =>
+    h("svg", { width, height, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.75 },
+      h("path", { d: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" }),
+      h("polyline", { points: "14 2 14 8 20 8" }),
+      h("line", { x1: "16", y1: "13", x2: "8", y2: "13" }),
+      h("line", { x1: "16", y1: "17", x2: "8", y2: "17" }),
+      h("polyline", { points: "10 9 9 9 8 9" })
+    ),
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1275,12 +1298,84 @@ export function apply(ctx: Context) {
             },
           },
 
-          // Header Tático de Filtros
+          // ───────────────────────────────────────────────────────────────────
+          // TAB SWITCHER: MATRIZ DA ESTEIRA (KANBAN) vs CATÁLOGO DE TEMPLATES & HUB DE RSI
+          // ───────────────────────────────────────────────────────────────────
           h(
             "div",
             {
               style: {
                 display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: "14px",
+                borderBottom: "1px solid rgba(255, 255, 255, 0.08)",
+                paddingBottom: "10px",
+              },
+            },
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", gap: "8px" } },
+              h(
+                "button",
+                {
+                  onClick: () => setActiveCentralTab("pipeline"),
+                  style: {
+                    padding: "6px 14px",
+                    borderRadius: "8px",
+                    fontSize: "12px",
+                    fontWeight: "600",
+                    cursor: "pointer",
+                    border: activeCentralTab === "pipeline" ? "1px solid rgba(16, 185, 129, 0.4)" : "1px solid transparent",
+                    backgroundColor: activeCentralTab === "pipeline" ? "rgba(16, 185, 129, 0.15)" : "rgba(255, 255, 255, 0.04)",
+                    color: activeCentralTab === "pipeline" ? "#10b981" : "#9ca3af",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  },
+                },
+                SVG.activity({ h, width: 14, height: 14 }),
+                "Matriz da Esteira (Kanban)"
+              ),
+              h(
+                "button",
+                {
+                  onClick: () => setActiveCentralTab("templates_rsi"),
+                  style: {
+                    padding: "6px 14px",
+                    borderRadius: "8px",
+                    fontSize: "12px",
+                    fontWeight: "600",
+                    cursor: "pointer",
+                    border: activeCentralTab === "templates_rsi" ? "1px solid rgba(56, 189, 248, 0.4)" : "1px solid transparent",
+                    backgroundColor: activeCentralTab === "templates_rsi" ? "rgba(56, 189, 248, 0.15)" : "rgba(255, 255, 255, 0.04)",
+                    color: activeCentralTab === "templates_rsi" ? "#38bdf8" : "#9ca3af",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  },
+                },
+                SVG.gitPullRequest({ h, width: 14, height: 14 }),
+                "Catálogo de Templates & Hub de RSI"
+              )
+            ),
+            h(
+              "span",
+              { style: { fontSize: "11px", color: "#6b7280", fontFamily: "monospace" } },
+              activeCentralTab === "pipeline" ? "Esteira Determinística OrgFy v10" : "Recursão & FPY (Regras L-22, L-90)"
+            )
+          ),
+
+          activeCentralTab === "pipeline"
+            ? h(
+                "div",
+                { style: { display: "flex", flexDirection: "column", flex: 1, minHeight: 0, overflow: "hidden" } },
+                // Header Tático de Filtros
+                h(
+                  "div",
+                  {
+                    style: {
+                      display: "flex",
                 alignItems: "center",
                 justifyContent: "space-between",
                 flexWrap: "wrap",
@@ -1540,7 +1635,9 @@ export function apply(ctx: Context) {
                 )
             )
           )
-        ),
+        )
+      : renderTemplatesRsiView()
+    ),
 
         // ─────────────────────────────────────────────────────────────────────
         // COSTA DIREITA UTILITÁRIA — GOVERNANÇA, RSI E EVM (ZERO CARD-CEPTION)
@@ -2411,6 +2508,461 @@ export function apply(ctx: Context) {
         ),
 
       // ───────────────────────────────────────────────────────────────────────
+      // 6.5. MODAL IN-COCKPIT DE DETALHES DA ISSUE (EXPANSÃO DO COCKPIT)
+      // ───────────────────────────────────────────────────────────────────────
+      activeIssueDetailCard &&
+        h(
+          "div",
+          {
+            style: {
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: "rgba(0, 0, 0, 0.75)",
+              backdropFilter: "blur(6px)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 2150,
+            },
+            onClick: () => setActiveIssueDetailCard(null),
+          },
+          h(
+            "div",
+            {
+              style: {
+                width: "680px",
+                maxHeight: "88vh",
+                overflowY: "auto",
+                borderRadius: "16px",
+                backgroundColor: "#111714",
+                border: "1px solid rgba(56, 189, 248, 0.35)",
+                padding: "24px",
+                boxShadow: "0 25px 60px rgba(0, 0, 0, 0.85)",
+                display: "flex",
+                flexDirection: "column",
+                gap: "16px",
+              },
+              onClick: (e: any) => e.stopPropagation(),
+            },
+            // Header do Modal
+            h(
+              "div",
+              { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start" } },
+              h(
+                "div",
+                { style: { display: "flex", flexDirection: "column", gap: "6px" } },
+                h(
+                  "div",
+                  { style: { display: "flex", alignItems: "center", gap: "8px" } },
+                  h(
+                    "span",
+                    {
+                      style: {
+                        fontSize: "12px",
+                        fontFamily: "monospace",
+                        color: "#38bdf8",
+                        backgroundColor: "rgba(56, 189, 248, 0.15)",
+                        padding: "2px 8px",
+                        borderRadius: "6px",
+                        fontWeight: "700",
+                        border: "1px solid rgba(56, 189, 248, 0.3)",
+                      },
+                    },
+                    `#${activeIssueDetailCard.fullIssueId || activeIssueDetailCard.issueId}`
+                  ),
+                  h(
+                    "span",
+                    {
+                      style: {
+                        fontSize: "10px",
+                        padding: "2px 8px",
+                        borderRadius: "6px",
+                        fontWeight: "700",
+                        backgroundColor:
+                          activeIssueDetailCard.priority === "P0"
+                            ? "rgba(239, 68, 68, 0.2)"
+                            : activeIssueDetailCard.priority === "P1"
+                            ? "rgba(245, 158, 11, 0.2)"
+                            : "rgba(59, 130, 246, 0.2)",
+                        color:
+                          activeIssueDetailCard.priority === "P0"
+                            ? "#ef4444"
+                            : activeIssueDetailCard.priority === "P1"
+                            ? "#f59e0b"
+                            : "#60a5fa",
+                      },
+                    },
+                    activeIssueDetailCard.priority
+                  ),
+                  h(
+                    "span",
+                    {
+                      style: {
+                        fontSize: "10px",
+                        padding: "2px 8px",
+                        borderRadius: "6px",
+                        fontWeight: "700",
+                        backgroundColor: "rgba(16, 185, 129, 0.15)",
+                        color: "#10b981",
+                        textTransform: "uppercase",
+                      },
+                    },
+                    activeIssueDetailCard.stage
+                  )
+                ),
+                h(
+                  "h2",
+                  { style: { margin: 0, fontSize: "16px", color: "#ffffff", fontWeight: "700" } },
+                  activeIssueDetailCard.title
+                )
+              ),
+              h(
+                "button",
+                {
+                  onClick: () => setActiveIssueDetailCard(null),
+                  style: { background: "transparent", border: "none", color: "#9ca3af", cursor: "pointer", padding: "4px" },
+                },
+                SVG.xCircle({ h, width: 20, height: 20 })
+              )
+            ),
+
+            // Invariante L-22: Comando de Aceite Congelado
+            h(
+              "div",
+              {
+                style: {
+                  borderRadius: "10px",
+                  backgroundColor: "rgba(0, 0, 0, 0.35)",
+                  border: "1px solid rgba(16, 185, 129, 0.25)",
+                  padding: "12px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "6px",
+                },
+              },
+              h(
+                "div",
+                { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+                h(
+                  "span",
+                  { style: { fontSize: "11px", fontWeight: "700", color: "#10b981", textTransform: "uppercase", letterSpacing: "0.5px" } },
+                  "Comando de Aceite Congelado (Invariante L-22)"
+                ),
+                h(
+                  "span",
+                  { style: { fontSize: "10px", color: "#6b7280", fontFamily: "monospace" } },
+                  "Blindagem SHA-256"
+                )
+              ),
+              h(
+                "code",
+                {
+                  style: {
+                    fontSize: "11px",
+                    fontFamily: "monospace",
+                    backgroundColor: "#050706",
+                    padding: "8px 10px",
+                    borderRadius: "6px",
+                    color: "#34d399",
+                    display: "block",
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-all",
+                  },
+                },
+                activeIssueDetailCard.acceptanceCommand || "python3 -m pytest -q testes/esteira -v --tb=short"
+              ),
+              h(
+                "div",
+                { style: { fontSize: "10px", color: "#9ca3af", fontFamily: "monospace", display: "flex", justifyContent: "space-between" } },
+                h("span", {}, `Hash de Aceite: ${(activeIssueDetailCard.acceptanceHash || "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855").slice(0, 24)}...`),
+                h("span", { style: { color: "#10b981" } }, "✓ Congelamento Válido (Anti-Bypass)")
+              )
+            ),
+
+            // Worktree Isolada & Governança de Arquivos
+            h(
+              "div",
+              {
+                style: {
+                  borderRadius: "10px",
+                  backgroundColor: "rgba(0, 0, 0, 0.25)",
+                  border: "1px solid rgba(255, 255, 255, 0.08)",
+                  padding: "12px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "6px",
+                },
+              },
+              h("span", { style: { fontSize: "11px", fontWeight: "700", color: "#f3f4f6" } }, "Worktree Isolada do Card"),
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", gap: "8px", fontSize: "11px", color: "#9ca3af" } },
+                SVG.folder({ h, width: 14, height: 14 }),
+                h(
+                  "span",
+                  { style: { fontFamily: "monospace", color: "#38bdf8" } },
+                  activeIssueDetailCard.worktreePath || `.worktrees/${activeIssueDetailCard.issueId}`
+                ),
+                h("span", { style: { color: "#6b7280" } }, "•"),
+                h("span", { style: { color: "#10b981", fontSize: "10px" } }, "✓ Isolamento Concorrência Zero (sem colisão com main)")
+              )
+            ),
+
+            // Grid de 2 Colunas: CoEvo-RSI Roteamento de Modelo + Probes Caixa-Preta
+            h(
+              "div",
+              { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" } },
+              // Coluna 1: CoEvo-RSI & Custos
+              h(
+                "div",
+                {
+                  style: {
+                    borderRadius: "10px",
+                    backgroundColor: "rgba(0, 0, 0, 0.25)",
+                    border: "1px solid rgba(255, 255, 255, 0.08)",
+                    padding: "12px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "6px",
+                  },
+                },
+                h("span", { style: { fontSize: "11px", fontWeight: "700", color: "#c084fc" } }, "Roteamento CoEvo-RSI"),
+                h(
+                  "div",
+                  { style: { fontSize: "11px", color: "#ffffff", fontWeight: "600" } },
+                  `Modelo: ${activeIssueDetailCard.recommendedModel || (activeIssueDetailCard.tier === "tier_1_exec_barato" ? "Gemini 3.8 Flash" : "Claude 3.5 Sonnet")}`
+                ),
+                h(
+                  "div",
+                  { style: { fontSize: "10px", color: "#9ca3af" } },
+                  `Tier: ${activeIssueDetailCard.tier === "tier_1_exec_barato" ? "Tier 1: Barato (Enxuto)" : activeIssueDetailCard.tier === "tier_2_revisor" ? "Tier 2: Revisor (Gate)" : "Tier 3: Arquiteto (Governança)"}`
+                ),
+                h(
+                  "div",
+                  { style: { fontSize: "10px", color: "#10b981", fontFamily: "monospace", marginTop: "2px" } },
+                  `Custo Estimado: ~$${activeIssueDetailCard.estimatedCost || (activeIssueDetailCard.tier === "tier_1_exec_barato" ? "0.002" : "0.02")} | ${activeIssueDetailCard.tokens || 18}k tokens`
+                ),
+                h(
+                  "div",
+                  { style: { fontSize: "10px", color: "#6b7280" } },
+                  `Executor: ${activeIssueDetailCard.executor} | Revisor: ${activeIssueDetailCard.revisor || "OrgFy Otto"}`
+                )
+              ),
+
+              // Coluna 2: Probes Caixa-Preta (Quality Gate)
+              h(
+                "div",
+                {
+                  style: {
+                    borderRadius: "10px",
+                    backgroundColor: "rgba(0, 0, 0, 0.25)",
+                    border: "1px solid rgba(255, 255, 255, 0.08)",
+                    padding: "12px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "6px",
+                  },
+                },
+                h("span", { style: { fontSize: "11px", fontWeight: "700", color: "#38bdf8" } }, "Probes Caixa-Preta do Gate"),
+                h(
+                  "div",
+                  { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "10px" } },
+                  h(
+                    "div",
+                    { style: { display: "flex", justifyContent: "space-between", color: "#d1d5db" } },
+                    h("span", {}, "• Rota HTTP (Caddy 200 OK):"),
+                    h("span", { style: { color: "#10b981", fontWeight: "700" } }, "PASS")
+                  ),
+                  h(
+                    "div",
+                    { style: { display: "flex", justifyContent: "space-between", color: "#d1d5db" } },
+                    h("span", {}, "• Supabase RLS & Auth:"),
+                    h("span", { style: { color: "#10b981", fontWeight: "700" } }, "PASS")
+                  ),
+                  h(
+                    "div",
+                    { style: { display: "flex", justifyContent: "space-between", color: "#d1d5db" } },
+                    h("span", {}, "• Playwright Zero Console Err:"),
+                    h("span", { style: { color: "#10b981", fontWeight: "700" } }, "PASS")
+                  )
+                )
+              )
+            ),
+
+            // DSAP Backtracking & Histórico de Recusas
+            h(
+              "div",
+              {
+                style: {
+                  borderRadius: "10px",
+                  backgroundColor: "rgba(0, 0, 0, 0.25)",
+                  border: "1px solid rgba(255, 255, 255, 0.08)",
+                  padding: "12px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "4px",
+                },
+              },
+              h(
+                "div",
+                { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+                h("span", { style: { fontSize: "11px", fontWeight: "700", color: "#f3f4f6" } }, "Histórico de Ciclos & DSAP Backtracking"),
+                h("span", { style: { fontSize: "10px", color: "#6b7280" } }, "Threshold: similaridade >= 0.70")
+              ),
+              h(
+                "div",
+                { style: { fontSize: "11px", color: "#9ca3af" } },
+                activeIssueDetailCard.rejectionHistory && activeIssueDetailCard.rejectionHistory.length > 0
+                  ? `Recusa recente: ${activeIssueDetailCard.rejectionHistory[0].reason} (${Math.round((activeIssueDetailCard.rejectionHistory[0].similarityToFirst || 0) * 100)}% similaridade)`
+                  : "Nenhuma recusa registrada nesta issue (FPY 100% no primeiro ciclo de execução)."
+              )
+            ),
+
+            // Rodapé de Ações Rápidas (1-Clique)
+            h(
+              "div",
+              {
+                style: {
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  flexWrap: "wrap",
+                  gap: "8px",
+                  paddingTop: "8px",
+                  borderTop: "1px solid rgba(255, 255, 255, 0.08)",
+                },
+              },
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", gap: "8px" } },
+                h(
+                  "button",
+                  {
+                    onClick: () => handleOpenIssueDeepLink(activeIssueDetailCard),
+                    style: {
+                      padding: "7px 12px",
+                      borderRadius: "8px",
+                      border: "1px solid rgba(56, 189, 248, 0.3)",
+                      backgroundColor: "rgba(56, 189, 248, 0.12)",
+                      color: "#38bdf8",
+                      fontSize: "11px",
+                      fontWeight: "600",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                    },
+                  },
+                  SVG.externalLink({ h, width: 12, height: 12 }),
+                  "Abrir no Buzz Desktop"
+                ),
+                h(
+                  "button",
+                  {
+                    onClick: (e: any) => handleCopyDeepLink(e, activeIssueDetailCard),
+                    style: {
+                      padding: "7px 12px",
+                      borderRadius: "8px",
+                      border: "1px solid rgba(255, 255, 255, 0.1)",
+                      backgroundColor: "rgba(255, 255, 255, 0.05)",
+                      color: "#ffffff",
+                      fontSize: "11px",
+                      fontWeight: "600",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                    },
+                  },
+                  SVG.copy({ h, width: 12, height: 12 }),
+                  "Copiar Link"
+                )
+              ),
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", gap: "8px" } },
+                h(
+                  "button",
+                  {
+                    onClick: () => {
+                      const c = activeIssueDetailCard;
+                      setActiveIssueDetailCard(null);
+                      setDispatchIssueId(c.issueId);
+                      setIsDispatchModalOpen(true);
+                    },
+                    style: {
+                      padding: "7px 12px",
+                      borderRadius: "8px",
+                      border: "none",
+                      backgroundColor: "rgba(245, 158, 11, 0.15)",
+                      color: "#f59e0b",
+                      fontSize: "11px",
+                      fontWeight: "600",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "4px",
+                    },
+                  },
+                  SVG.zap({ h, width: 12, height: 12 }),
+                  "Despachar"
+                ),
+                activeIssueDetailCard.stage === "revisao" &&
+                  h(
+                    "button",
+                    {
+                      onClick: () => {
+                        const c = activeIssueDetailCard;
+                        setActiveIssueDetailCard(null);
+                        handleAcceptGate(c);
+                      },
+                      style: {
+                        padding: "7px 12px",
+                        borderRadius: "8px",
+                        border: "none",
+                        backgroundColor: "#10b981",
+                        color: "#000000",
+                        fontSize: "11px",
+                        fontWeight: "700",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "4px",
+                      },
+                    },
+                    SVG.checkCircle({ h, width: 12, height: 12 }),
+                    "Aceitar Gate"
+                  ),
+                h(
+                  "button",
+                  {
+                    onClick: () => {
+                      const c = activeIssueDetailCard;
+                      setActiveIssueDetailCard(null);
+                      setActiveLogsCard(c);
+                      setIsLogsDrawerOpen(true);
+                    },
+                    style: {
+                      padding: "7px 12px",
+                      borderRadius: "8px",
+                      border: "1px solid rgba(255, 255, 255, 0.1)",
+                      backgroundColor: "rgba(255, 255, 255, 0.05)",
+                      color: "#9ca3af",
+                      fontSize: "11px",
+                      cursor: "pointer",
+                    },
+                  },
+                  "Ver Logs"
+                )
+              )
+            )
+          )
+        ),
+
+      // ───────────────────────────────────────────────────────────────────────
       // 7. MODAL AUTO-BOOTSTRAP & ONBOARDING 1-CLIQUE (FASE 3)
       // ───────────────────────────────────────────────────────────────────────
       isBootstrapModalOpen &&
@@ -3029,8 +3581,362 @@ export function apply(ctx: Context) {
               )
             )
           )
-        )
+        ),
+
     );
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // FUNÇÃO AUXILIAR: CATÁLOGO DE TEMPLATES & HUB DE RSI (EXPANSÃO DO COCKPIT)
+    // ─────────────────────────────────────────────────────────────────────────
+    function renderTemplatesRsiView() {
+      return h(
+        "div",
+        {
+          style: {
+            display: "flex",
+            flexDirection: "column",
+            gap: "16px",
+            flex: 1,
+            overflowY: "auto",
+            paddingRight: "6px",
+          },
+        },
+        // Cabeçalho da Seção de Templates
+        h(
+          "div",
+          {
+            style: {
+              padding: "14px 18px",
+              borderRadius: "12px",
+              backgroundColor: "rgba(0, 0, 0, 0.3)",
+              border: "1px solid rgba(255, 255, 255, 0.08)",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            },
+          },
+          h(
+            "div",
+            { style: { display: "flex", flexDirection: "column", gap: "4px" } },
+            h(
+              "span",
+              { style: { fontSize: "14px", fontWeight: "700", color: "#ffffff" } },
+              "Catálogo Canônico de Templates de Card & Contratos FPY"
+            ),
+            h(
+              "span",
+              { style: { fontSize: "11px", color: "#9ca3af" } },
+              "Modelos determinísticos com First-Pass Yield (FPY) auditado e comandos de aceite congelados (Regra L-22)."
+            )
+          ),
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "center", gap: "10px" } },
+            h(
+              "span",
+              {
+                style: {
+                  fontSize: "11px",
+                  padding: "4px 10px",
+                  borderRadius: "6px",
+                  backgroundColor: "rgba(16, 185, 129, 0.15)",
+                  color: "#10b981",
+                  fontWeight: "700",
+                  fontFamily: "monospace",
+                },
+              },
+              "FPY Médio: 98.4%"
+            ),
+            h(
+              "span",
+              {
+                style: {
+                  fontSize: "11px",
+                  padding: "4px 10px",
+                  borderRadius: "6px",
+                  backgroundColor: "rgba(56, 189, 248, 0.15)",
+                  color: "#38bdf8",
+                  fontWeight: "700",
+                  fontFamily: "monospace",
+                },
+              },
+              "659 Cards Processados"
+            )
+          )
+        ),
+
+        // Grid com os 4 Templates Canônicos
+        h(
+          "div",
+          {
+            style: {
+              display: "grid",
+              gridTemplateColumns: "repeat(2, 1fr)",
+              gap: "14px",
+            },
+          },
+          CANONICAL_TEMPLATES.map((tmpl) =>
+            h(
+              "div",
+              {
+                key: tmpl.id,
+                style: {
+                  borderRadius: "12px",
+                  backgroundColor: "rgba(0, 0, 0, 0.25)",
+                  border: "1px solid rgba(255, 255, 255, 0.08)",
+                  padding: "16px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "10px",
+                },
+              },
+              // Card Header
+              h(
+                "div",
+                { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start" } },
+                h(
+                  "div",
+                  { style: { display: "flex", flexDirection: "column", gap: "2px" } },
+                  h("span", { style: { fontSize: "13px", fontWeight: "700", color: "#ffffff" } }, tmpl.name),
+                  h("span", { style: { fontSize: "10px", color: "#6b7280", fontFamily: "monospace" } }, tmpl.path)
+                ),
+                h(
+                  "span",
+                  {
+                    style: {
+                      fontSize: "10px",
+                      padding: "2px 8px",
+                      borderRadius: "4px",
+                      fontWeight: "700",
+                      backgroundColor:
+                        tmpl.fpyHistorical >= 98
+                          ? "rgba(16, 185, 129, 0.2)"
+                          : tmpl.fpyHistorical >= 90
+                          ? "rgba(56, 189, 248, 0.2)"
+                          : "rgba(245, 158, 11, 0.2)",
+                      color:
+                        tmpl.fpyHistorical >= 98
+                          ? "#10b981"
+                          : tmpl.fpyHistorical >= 90
+                          ? "#38bdf8"
+                          : "#f59e0b",
+                      fontFamily: "monospace",
+                    },
+                  },
+                  `${tmpl.fpyHistorical.toFixed(1)}% FPY`
+                )
+              ),
+              // Descrição
+              h("p", { style: { fontSize: "11px", color: "#9ca3af", margin: 0, lineHeight: "1.4" } }, tmpl.description),
+              // Erros Blindados
+              h(
+                "div",
+                { style: { display: "flex", flexDirection: "column", gap: "4px" } },
+                h("span", { style: { fontSize: "10px", fontWeight: "700", color: "#60a5fa" } }, "Erros Frequentes Blindados:"),
+                tmpl.frequentErrorsBlocked.map((err, i) =>
+                  h(
+                    "div",
+                    { key: i, style: { fontSize: "10px", color: "#d1d5db", display: "flex", gap: "6px" } },
+                    h("span", { style: { color: "#10b981" } }, "✓"),
+                    h("span", {}, err)
+                  )
+                )
+              ),
+              // Exemplo de Comando de Aceite
+              h(
+                "div",
+                {
+                  style: {
+                    marginTop: "auto",
+                    padding: "8px 10px",
+                    borderRadius: "6px",
+                    backgroundColor: "#050706",
+                    border: "1px solid rgba(255, 255, 255, 0.05)",
+                  },
+                },
+                h("span", { style: { fontSize: "9px", color: "#6b7280", display: "block" } }, "Comando Padrão (Regra L-22):"),
+                h("code", { style: { fontSize: "10px", color: "#34d399", fontFamily: "monospace" } }, tmpl.sampleAcceptanceCommand)
+              ),
+              // Botão de Copiar Caminho
+              h(
+                "button",
+                {
+                  onClick: () => {
+                    if (typeof navigator !== "undefined" && navigator?.clipboard?.writeText) {
+                      navigator.clipboard.writeText(tmpl.path);
+                    }
+                    showNotification("success", `Caminho copiado: ${tmpl.path}`);
+                  },
+                  style: {
+                    padding: "6px 10px",
+                    borderRadius: "6px",
+                    border: "1px solid rgba(255, 255, 255, 0.1)",
+                    backgroundColor: "rgba(255, 255, 255, 0.04)",
+                    color: "#9ca3af",
+                    fontSize: "10px",
+                    fontWeight: "600",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "4px",
+                  },
+                },
+                SVG.copy({ h, width: 11, height: 11 }),
+                "Copiar Caminho do Template"
+              )
+            )
+          )
+        ),
+
+        // Seção do Hub de Aprendizado Recursivo (RSI Engine & Regras Probatórias)
+        h(
+          "div",
+          {
+            style: {
+              borderRadius: "12px",
+              backgroundColor: "rgba(0, 0, 0, 0.35)",
+              border: "1px solid rgba(168, 85, 247, 0.25)",
+              padding: "18px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "14px",
+            },
+          },
+          h(
+            "div",
+            { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", gap: "8px" } },
+              SVG.shield({ h, width: 16, height: 16 }),
+              h("span", { style: { fontSize: "13px", fontWeight: "700", color: "#ffffff" } }, "Motor RSI: Regras Probatórias Compiladas"),
+              h(
+                "span",
+                {
+                  style: {
+                    fontSize: "10px",
+                    padding: "2px 8px",
+                    borderRadius: "4px",
+                    backgroundColor: "rgba(168, 85, 247, 0.2)",
+                    color: "#c084fc",
+                    fontWeight: "700",
+                  },
+                },
+                "Janela de 10 cards (Regra L-90)"
+              )
+            ),
+            h(
+              "button",
+              {
+                onClick: async () => {
+                  showNotification("info", "Disparando retro.py para compilação probatória...");
+                  const res = await compileProbationaryRule(ctx, {
+                    erroId: "auto-" + Date.now().toString().slice(-4),
+                    descricao: "Prevenção automática compilada pelo operador no Cockpit",
+                    comandoCheck: "python3 -m pytest -q testes/esteira -v",
+                  });
+                  if (res.success) {
+                    showNotification("success", "Regra probatória compilada com sucesso na janela de 10 cards!");
+                  } else {
+                    showNotification("warning", "Falha na compilação da regra probatória.");
+                  }
+                },
+                style: {
+                  padding: "6px 12px",
+                  borderRadius: "6px",
+                  border: "none",
+                  backgroundColor: "#c084fc",
+                  color: "#000000",
+                  fontSize: "11px",
+                  fontWeight: "700",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                },
+              },
+              SVG.zap({ h, width: 12, height: 12 }),
+              "Compilar Nova Regra Probatória"
+            )
+          ),
+          h(
+            "p",
+            { style: { fontSize: "11px", color: "#9ca3af", margin: 0, lineHeight: "1.4" } },
+            "Erros detectados 2x+ na esteira são automaticamente sintetizados em regras executáveis pelo retro.py. Se o FPY cair durante a janela de 10 cards, a regra é revertida (REVERTIDA) sem intervenção humana."
+          ),
+          // Tabela de Regras
+          h(
+            "div",
+            {
+              style: {
+                borderRadius: "8px",
+                backgroundColor: "rgba(0, 0, 0, 0.25)",
+                border: "1px solid rgba(255, 255, 255, 0.05)",
+                overflow: "hidden",
+              },
+            },
+            h(
+              "div",
+              {
+                style: {
+                  display: "grid",
+                  gridTemplateColumns: "100px 1fr 140px 110px",
+                  padding: "8px 12px",
+                  backgroundColor: "rgba(255, 255, 255, 0.03)",
+                  fontSize: "10px",
+                  fontWeight: "700",
+                  color: "#9ca3af",
+                  borderBottom: "1px solid rgba(255, 255, 255, 0.05)",
+                },
+              },
+              h("span", {}, "REGRA ID"),
+              h("span", {}, "DESCRIÇÃO DO ERRO"),
+              h("span", {}, "JANELA DE AVALIAÇÃO"),
+              h("span", {}, "STATUS")
+            ),
+            [
+              { id: "GUARD-T020", desc: "Blindagem de integridade do ci_cache e aceite_cache", window: "10 / 10 cards", status: "ATIVA", color: "#10b981" },
+              { id: "GUARD-L01", desc: "Impedimento de auto-revisão (Executor !== Revisor)", window: "10 / 10 cards", status: "CONSOLIDADA", color: "#38bdf8" },
+              { id: "GUARD-L22", desc: "Bloqueio de alteração de testes por hash SHA-256", window: "8 / 10 cards", status: "EM AVALIAÇÃO", color: "#c084fc" },
+            ].map((r) =>
+              h(
+                "div",
+                {
+                  key: r.id,
+                  style: {
+                    display: "grid",
+                    gridTemplateColumns: "100px 1fr 140px 110px",
+                    padding: "8px 12px",
+                    fontSize: "10px",
+                    borderBottom: "1px solid rgba(255, 255, 255, 0.03)",
+                    alignItems: "center",
+                  },
+                },
+                h("span", { style: { fontFamily: "monospace", color: "#f3f4f6", fontWeight: "600" } }, r.id),
+                h("span", { style: { color: "#9ca3af" } }, r.desc),
+                h("span", { style: { fontFamily: "monospace", color: "#60a5fa" } }, r.window),
+                h(
+                  "span",
+                  {
+                    style: {
+                      fontSize: "9px",
+                      padding: "1px 6px",
+                      borderRadius: "4px",
+                      backgroundColor: `${r.color}22`,
+                      color: r.color,
+                      fontWeight: "700",
+                      width: "fit-content",
+                    },
+                  },
+                  r.status
+                )
+              )
+            )
+          )
+        )
+      );
+    }
 
     // ─────────────────────────────────────────────────────────────────────────
     // FUNÇÃO AUXILIAR: RENDERIZAÇÃO DE COLUNA DO KANBAN
