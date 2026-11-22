@@ -147,14 +147,17 @@ export async function fetchLiveEsteiraState(ctx: any, empresa?: string) {
       ? `.esteira/estado/esteira-minima-${slug}-state.json`
       : ".esteira/estado/esteira-minima-state.json";
 
-  const [boardManifest, esteiraStateTenant, placarState, regrasState, porteiroState, metricasTurnos] = await Promise.all([
+  const todayCompact = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  const [boardManifest, esteiraStateTenant, placarHoje, placarFallback, regrasState, porteiroState, metricasTurnos] = await Promise.all([
     readOrgfyJson<BoardManifest | null>(ctx, "empresas/board.json", null),
     readOrgfyJson<EsteiraMinimaState | null>(ctx, tenantEsteiraPath, null),
+    readOrgfyJson<PlacarState | null>(ctx, `../.scratch/placar-${todayCompact}.json`, null),
     readOrgfyJson<PlacarState | null>(ctx, ".scratch/placar-20h.json", null),
     readOrgfyJson<RegrasProbatoriasState | null>(ctx, ".esteira/estado/regras-probatorias.json", null),
     readOrgfyJson<any>(ctx, ".esteira/estado/porteiro-state.json", null),
     readOrgfyJson<any>(ctx, ".scratch/metricas_turnos.json", null),
   ]);
+  const placarState = placarHoje ?? placarFallback;
 
   const esteiraState =
     esteiraStateTenant ??
@@ -551,8 +554,15 @@ export async function executeDespachar(
     if (options.onOutput) options.onOutput(chunk);
   };
 
-  const command = `cd "${ORGFY_ABS_PATH}" && python3 ferramentas/esteira/despachar --empresa "${options.empresa}" "${options.issueId}" "${options.executor}" "${options.revisor}"`;
-  appendChunk(`[EXEC] ${command}\n`);
+  const pyArgs = [
+    `${ORGFY_ABS_PATH}/ferramentas/esteira/despachar`,
+    "--empresa",
+    options.empresa,
+    options.issueId,
+    options.executor,
+    options.revisor,
+  ];
+  appendChunk(`[EXEC] python3 ${pyArgs.join(" ")}\n`);
 
   if (!ctx?.host?.spawn) {
     appendChunk("[SIMULADO] Aceite congelado para " + options.issueId + ". Tier classificado. Despachado com sucesso.\n");
@@ -560,8 +570,9 @@ export async function executeDespachar(
   }
 
   try {
-    const proc = await ctx.host.spawn("bash", {
-      args: [command],
+    const proc = await ctx.host.spawn("python", {
+      args: pyArgs,
+      cwd: ORGFY_ABS_PATH,
       onStdout: appendChunk,
       onStderr: appendChunk,
     });
@@ -596,14 +607,19 @@ export async function executeGate(
     if (options.onOutput) options.onOutput(chunk);
   };
 
-  const safeMotivo = options.motivo.replace(/"/g, '\\"');
-  let command = `cd "${ORGFY_ABS_PATH}" && python3 ferramentas/esteira/gate --empresa "${options.empresa}" "${options.prId}" ${options.acao}`;
+  const pyArgs = [
+    `${ORGFY_ABS_PATH}/ferramentas/esteira/gate`,
+    "--empresa",
+    options.empresa,
+    options.prId,
+    options.acao,
+  ];
   if (options.acao === "recusado") {
-    command += ` "${safeMotivo}"`;
+    pyArgs.push(options.motivo);
   }
-  command += ` --revisor "${options.revisor}"`;
+  pyArgs.push("--revisor", options.revisor);
 
-  appendChunk(`[EXEC] ${command}\n`);
+  appendChunk(`[EXEC] python3 ${pyArgs.join(" ")}\n`);
 
   if (!ctx?.host?.spawn) {
     appendChunk(`[SIMULADO] Gate ${options.acao} emitido para ${options.prId} por ${options.revisor}.\n`);
@@ -611,8 +627,9 @@ export async function executeGate(
   }
 
   try {
-    const proc = await ctx.host.spawn("bash", {
-      args: [command],
+    const proc = await ctx.host.spawn("python", {
+      args: pyArgs,
+      cwd: ORGFY_ABS_PATH,
       onStdout: appendChunk,
       onStderr: appendChunk,
     });
@@ -643,8 +660,13 @@ export async function executePorteiroSync(
     if (options.onOutput) options.onOutput(chunk);
   };
 
-  const command = `cd "${ORGFY_ABS_PATH}" && python3 ferramentas/esteira/porteiro.py --empresa "${options.empresa}" --uma-vez`;
-  appendChunk(`[EXEC] ${command}\n`);
+  const pyArgs = [
+    `${ORGFY_ABS_PATH}/ferramentas/esteira/porteiro.py`,
+    "--empresa",
+    options.empresa,
+    "--uma-vez",
+  ];
+  appendChunk(`[EXEC] python3 ${pyArgs.join(" ")}\n`);
 
   if (!ctx?.host?.spawn) {
     appendChunk("[SIMULADO] Porteiro sincronizado com sucesso.\n");
@@ -652,8 +674,9 @@ export async function executePorteiroSync(
   }
 
   try {
-    const proc = await ctx.host.spawn("bash", {
-      args: [command],
+    const proc = await ctx.host.spawn("python", {
+      args: pyArgs,
+      cwd: ORGFY_ABS_PATH,
       onStdout: appendChunk,
       onStderr: appendChunk,
     });

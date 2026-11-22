@@ -95,14 +95,17 @@ function formatFullDateTime(dateInput) {
 async function fetchLiveEsteiraState(ctx, empresa) {
   const slug = empresa && empresa !== "all" ? empresa : "orgfy";
   const tenantEsteiraPath = slug !== "orgfy" ? `.esteira/estado/esteira-minima-${slug}-state.json` : ".esteira/estado/esteira-minima-state.json";
-  const [boardManifest, esteiraStateTenant, placarState, regrasState, porteiroState, metricasTurnos] = await Promise.all([
+  const todayCompact = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10).replace(/-/g, "");
+  const [boardManifest, esteiraStateTenant, placarHoje, placarFallback, regrasState, porteiroState, metricasTurnos] = await Promise.all([
     readOrgfyJson(ctx, "empresas/board.json", null),
     readOrgfyJson(ctx, tenantEsteiraPath, null),
+    readOrgfyJson(ctx, `../.scratch/placar-${todayCompact}.json`, null),
     readOrgfyJson(ctx, ".scratch/placar-20h.json", null),
     readOrgfyJson(ctx, ".esteira/estado/regras-probatorias.json", null),
     readOrgfyJson(ctx, ".esteira/estado/porteiro-state.json", null),
     readOrgfyJson(ctx, ".scratch/metricas_turnos.json", null)
   ]);
+  const placarState = placarHoje ?? placarFallback;
   const esteiraState = esteiraStateTenant ?? (slug !== "orgfy" ? await readOrgfyJson(ctx, ".esteira/estado/esteira-minima-state.json", null) : null);
   return {
     boardManifest,
@@ -369,16 +372,24 @@ async function executeDespachar(ctx, options) {
     combinedOutput += chunk;
     if (options.onOutput) options.onOutput(chunk);
   };
-  const command = `cd "${ORGFY_ABS_PATH}" && python3 ferramentas/esteira/despachar --empresa "${options.empresa}" "${options.issueId}" "${options.executor}" "${options.revisor}"`;
-  appendChunk(`[EXEC] ${command}
+  const pyArgs = [
+    `${ORGFY_ABS_PATH}/ferramentas/esteira/despachar`,
+    "--empresa",
+    options.empresa,
+    options.issueId,
+    options.executor,
+    options.revisor
+  ];
+  appendChunk(`[EXEC] python3 ${pyArgs.join(" ")}
 `);
   if (!((_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.spawn)) {
     appendChunk("[SIMULADO] Aceite congelado para " + options.issueId + ". Tier classificado. Despachado com sucesso.\n");
     return { code: 0, output: combinedOutput };
   }
   try {
-    const proc = await ctx.host.spawn("bash", {
-      args: [command],
+    const proc = await ctx.host.spawn("python", {
+      args: pyArgs,
+      cwd: ORGFY_ABS_PATH,
       onStdout: appendChunk,
       onStderr: appendChunk
     });
@@ -401,13 +412,18 @@ async function executeGate(ctx, options) {
     combinedOutput += chunk;
     if (options.onOutput) options.onOutput(chunk);
   };
-  const safeMotivo = options.motivo.replace(/"/g, '\\"');
-  let command = `cd "${ORGFY_ABS_PATH}" && python3 ferramentas/esteira/gate --empresa "${options.empresa}" "${options.prId}" ${options.acao}`;
+  const pyArgs = [
+    `${ORGFY_ABS_PATH}/ferramentas/esteira/gate`,
+    "--empresa",
+    options.empresa,
+    options.prId,
+    options.acao
+  ];
   if (options.acao === "recusado") {
-    command += ` "${safeMotivo}"`;
+    pyArgs.push(options.motivo);
   }
-  command += ` --revisor "${options.revisor}"`;
-  appendChunk(`[EXEC] ${command}
+  pyArgs.push("--revisor", options.revisor);
+  appendChunk(`[EXEC] python3 ${pyArgs.join(" ")}
 `);
   if (!((_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.spawn)) {
     appendChunk(`[SIMULADO] Gate ${options.acao} emitido para ${options.prId} por ${options.revisor}.
@@ -415,8 +431,9 @@ async function executeGate(ctx, options) {
     return { code: 0, output: combinedOutput };
   }
   try {
-    const proc = await ctx.host.spawn("bash", {
-      args: [command],
+    const proc = await ctx.host.spawn("python", {
+      args: pyArgs,
+      cwd: ORGFY_ABS_PATH,
       onStdout: appendChunk,
       onStderr: appendChunk
     });
@@ -439,16 +456,22 @@ async function executePorteiroSync(ctx, options) {
     combinedOutput += chunk;
     if (options.onOutput) options.onOutput(chunk);
   };
-  const command = `cd "${ORGFY_ABS_PATH}" && python3 ferramentas/esteira/porteiro.py --empresa "${options.empresa}" --uma-vez`;
-  appendChunk(`[EXEC] ${command}
+  const pyArgs = [
+    `${ORGFY_ABS_PATH}/ferramentas/esteira/porteiro.py`,
+    "--empresa",
+    options.empresa,
+    "--uma-vez"
+  ];
+  appendChunk(`[EXEC] python3 ${pyArgs.join(" ")}
 `);
   if (!((_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.spawn)) {
     appendChunk("[SIMULADO] Porteiro sincronizado com sucesso.\n");
     return { code: 0, output: combinedOutput };
   }
   try {
-    const proc = await ctx.host.spawn("bash", {
-      args: [command],
+    const proc = await ctx.host.spawn("python", {
+      args: pyArgs,
+      cwd: ORGFY_ABS_PATH,
       onStdout: appendChunk,
       onStderr: appendChunk
     });

@@ -113,7 +113,7 @@ def find_latest_placar(scratch_dir: Path) -> Optional[Path]:
 
 
 def analyze_transitions(
-    jsonl_path: Path, now_utc: datetime
+    jsonl_path: Path, now_utc: datetime, archive_path: Optional[Path] = None
 ) -> Tuple[Dict[str, Any], Dict[str, Any], int]:
     events: List[Dict[str, Any]] = []
     if jsonl_path.exists():
@@ -140,6 +140,7 @@ def analyze_transitions(
     total_loops_rev_exec = 0
     total_conflitos = 0
     all_parsed_ts: List[datetime] = []
+    issues_already_feito: set[str] = set()
 
     for ev in events:
         dt = parse_timestamp(ev.get("ts") or ev.get("timestamp"))
@@ -153,6 +154,9 @@ def analyze_transitions(
 
         if new_st == "feito":
             daily_counts[day_key]["merges"] += 1
+            if issue_id:
+                issues_already_feito.add(issue_id.lower())
+                issues_already_feito.add(issue_id[:8].lower())
         if new_st == "conflito":
             total_conflitos += 1
             daily_counts[day_key]["conflitos"] += 1
@@ -162,6 +166,30 @@ def analyze_transitions(
 
         if issue_id:
             by_issue[issue_id].append((dt, ev))
+
+    # Complementa com resolved-issues-archive.json quando esteira-transicoes.jsonl estiver defasado
+    if archive_path is not None:
+        archive = safe_load_json(archive_path)
+        if isinstance(archive, dict):
+            for item in archive.get("itens", []):
+                if not isinstance(item, dict):
+                    continue
+                iid = str(item.get("fullIssueId") or item.get("issueId") or "").strip()
+                if not iid:
+                    continue
+                if iid.lower() in issues_already_feito or iid[:8].lower() in issues_already_feito:
+                    continue
+                dt = parse_timestamp(item.get("resolvidoEm"))
+                if dt is None:
+                    continue
+                all_parsed_ts.append(dt)
+                day_key = dt.strftime("%Y-%m-%d")
+                daily_counts[day_key]["merges"] += 1
+                issues_already_feito.add(iid.lower())
+                issues_already_feito.add(iid[:8].lower())
+                by_issue[iid].append(
+                    (dt, {"issue_id": iid, "estado_anterior": "revisao", "estado_novo": "feito"})
+                )
 
     # Anchor rolling windows to now_utc (or latest event date if clock differs)
     anchor = now_utc
@@ -640,7 +668,8 @@ def generate_kpis(
     sentinela_path = scratch_dir / "sentinela-esteira-state.json"
     placar_path = find_latest_placar(scratch_dir)
 
-    fluxo, qualidade, transicoes_linhas = analyze_transitions(transicoes_path, now)
+    archive_path = scratch_dir / "resolved-issues-archive.json"
+    fluxo, qualidade, transicoes_linhas = analyze_transitions(transicoes_path, now, archive_path=archive_path)
     economia, nm_usage_itens = analyze_economy(
         metricas_path=metricas_path,
         nm_usage_path=nm_usage_path,
