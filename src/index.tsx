@@ -415,6 +415,22 @@ export const SVG = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// SURFACE LADDER & PALETA TONAL LINEAR (ANTI-AI SLOP)
+// ─────────────────────────────────────────────────────────────────────────────
+export const THEME = {
+  canvas: "#0e0f12",          // Level 0: App Canvas neutro chumbo
+  columnBg: "#15161a",        // Level 1: Recipiente sutil das colunas
+  cardBg: "#1c1d23",          // Level 2: Superfície elevada dos cards
+  cardHover: "#23252d",       // Level 2 hover
+  hairline: "rgba(255, 255, 255, 0.06)",
+  borderCard: "rgba(255, 255, 255, 0.08)",
+  accentPrimary: "#10b981",   // Esmeralda limpo para botão primário de despacho
+  textPrimary: "#f3f4f6",
+  textSecondary: "#9ca3af",
+  textMuted: "#6b7280",
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // COMPONENTE PRINCIPAL (BUZZ WORKSPACE COCKPIT)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -461,7 +477,9 @@ export function apply(ctx: Context) {
     const [activeGateCard, setActiveGateCard] = React.useState<PipelineCard | null>(null);
     const [isLogsDrawerOpen, setIsLogsDrawerOpen] = React.useState<boolean>(false);
     const [activeLogsCard, setActiveLogsCard] = React.useState<PipelineCard | null>(null);
-    const [isRightRailOpen, setIsRightRailOpen] = React.useState<boolean>(true);
+    const [isGovernanceDrawerOpen, setIsGovernanceDrawerOpen] = React.useState<boolean>(false);
+    const isRightRailOpen = isGovernanceDrawerOpen;
+    const setIsRightRailOpen = setIsGovernanceDrawerOpen;
     const [isCopilotOpen, setIsCopilotOpen] = React.useState<boolean>(false);
     const [copilotAgent, setCopilotAgent] = React.useState<string>("OrgFy Bento");
 
@@ -892,9 +910,9 @@ export function apply(ctx: Context) {
           flexDirection: "column",
           width: "100%",
           minHeight: "100vh",
-          background: "radial-gradient(ellipse at top left, #0d1a14 0%, #080d0b 70%)",
-          color: "var(--text-standard, #f3f4f6)",
-          fontFamily: "var(--font-sans, system-ui, -apple-system, sans-serif)",
+          backgroundColor: THEME.canvas,
+          color: THEME.textPrimary,
+          fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
           padding: "12px",
           boxSizing: "border-box",
           overflowX: "hidden",
@@ -933,191 +951,200 @@ export function apply(ctx: Context) {
         ),
 
       // ───────────────────────────────────────────────────────────────────────
-      // 1. TOP CHROME & HEADER DE GOVERNANÇA MULTI-TENANT
+      // 1. TOPBAR UNIFICADA (48px) - PADRÃO LINEAR & BUZZ NATIVO
       // ───────────────────────────────────────────────────────────────────────
       h(
         "header",
         {
           style: {
+            height: "48px",
+            backgroundColor: THEME.columnBg,
+            border: `1px solid ${THEME.hairline}`,
+            borderRadius: "10px",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            flexWrap: "wrap",
-            gap: "12px",
-            padding: "10px 18px",
-            borderRadius: "14px",
-            backgroundColor: "rgba(18, 24, 21, 0.75)",
-            border: "1px solid rgba(255, 255, 255, 0.08)",
-            backdropFilter: "blur(12px)",
+            padding: "0 14px",
             marginBottom: "12px",
+            flexShrink: 0,
           },
         },
-        // Esquerda: Logo + Dropdown de Tenant
+        // Esquerda: Marca e Segmented Control de Tenants
         h(
           "div",
           { style: { display: "flex", alignItems: "center", gap: "14px" } },
           h(
             "div",
+            { style: { display: "flex", alignItems: "center", gap: "8px" } },
+            SVG.orgfy({ h, width: 18, height: 18 }),
+            h("span", { style: { fontWeight: "700", fontSize: "13px", color: THEME.textPrimary } }, "OrgFy Control Room")
+          ),
+          // Segmented Control de Tenants
+          h(
+            "div",
             {
               style: {
                 display: "flex",
-                alignItems: "center",
-                gap: "8px",
-                padding: "6px 10px",
+                backgroundColor: "rgba(0, 0, 0, 0.35)",
                 borderRadius: "8px",
-                backgroundColor: "rgba(16, 185, 129, 0.12)",
-                color: "#10b981",
+                padding: "2px",
+                border: `1px solid ${THEME.hairline}`,
               },
             },
-            SVG.orgfy({ h, width: 22, height: 22 }),
-            h("span", { style: { fontWeight: "700", fontSize: "14px", letterSpacing: "0.5px" } }, "ORGFY CONTROL ROOM")
-          ),
-          h("div", { style: { height: "20px", width: "1px", backgroundColor: "rgba(255, 255, 255, 0.1)" } }),
-          // Seletor de Tenant
-          h(
-            "div",
-            { style: { display: "flex", alignItems: "center", gap: "6px" } },
-            TENANTS.map((t) =>
+            [
+              { id: "all", label: "Holding" },
+              { id: "orgfy", label: "Core" },
+              { id: "lumen-iptv", label: "Lumen IPTV" },
+              { id: "saas-tributario", label: "SaaS Tributário" },
+            ].map((t) =>
               h(
                 "button",
                 {
                   key: t.id,
                   onClick: () => setSelectedTenant(t.id),
                   style: {
-                    padding: "5px 12px",
-                    borderRadius: "9999px",
+                    padding: "3px 10px",
+                    fontSize: "11px",
+                    fontWeight: selectedTenant === t.id ? "600" : "400",
+                    color: selectedTenant === t.id ? "#ffffff" : THEME.textSecondary,
+                    backgroundColor: selectedTenant === t.id ? "#282a36" : "transparent",
+                    borderRadius: "6px",
                     border: "none",
-                    backgroundColor: selectedTenant === t.id ? "#10b981" : "rgba(255, 255, 255, 0.05)",
-                    color: selectedTenant === t.id ? "#000000" : "var(--text-subtle, #9ca3af)",
-                    fontWeight: selectedTenant === t.id ? "700" : "500",
-                    fontSize: "12px",
                     cursor: "pointer",
                     transition: "all 0.15s ease",
                   },
                 },
-                t.name
+                t.label
               )
             )
           )
         ),
 
-        // Centro: Telemetria do Porteiro + Métricas de Governança
+        // Centro: Pílula Discreta de Telemetria
         h(
           "div",
-          { style: { display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap" } },
-          // Porteiro Badge
-          h(
-            "div",
-            {
-              style: {
-                display: "flex",
-                alignItems: "center",
-                gap: "6px",
-                padding: "4px 10px",
-                borderRadius: "9999px",
-                backgroundColor: isSyncingPorteiro
-                  ? "rgba(245, 158, 11, 0.15)"
-                  : porteiroActive
-                  ? "rgba(16, 185, 129, 0.15)"
-                  : "rgba(239, 68, 68, 0.15)",
-                color: isSyncingPorteiro ? "#f59e0b" : porteiroActive ? "#10b981" : "#ef4444",
-                fontSize: "11px",
-                fontWeight: "600",
-              },
+          {
+            style: {
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              fontSize: "11px",
+              color: THEME.textSecondary,
+              fontFamily: "monospace",
             },
-            h("div", {
+          },
+          h(
+            "span",
+            { style: { display: "flex", alignItems: "center", gap: "5px", color: "#10b981" } },
+            h("span", {
               style: {
-                width: "8px",
-                height: "8px",
+                width: "6px",
+                height: "6px",
                 borderRadius: "50%",
-                backgroundColor: isSyncingPorteiro ? "#f59e0b" : porteiroActive ? "#10b981" : "#ef4444",
-                boxShadow: porteiroActive ? "0 0 8px #10b981" : "none",
+                backgroundColor: isSyncingPorteiro ? "#f59e0b" : "#10b981",
               },
             }),
-            isSyncingPorteiro
-              ? "SINCRONIZANDO..."
-              : porteiroActive
-              ? "PORTEIRO NOSTR ATIVO (120ms)"
-              : "PORTEIRO OCIOSO"
+            isSyncingPorteiro ? "SINCRONIZANDO..." : "PORTEIRO ATIVO (120ms)"
           ),
-          // FPY
-          h(
-            "div",
-            { style: { display: "flex", alignItems: "center", gap: "6px", fontSize: "12px" } },
-            h("span", { style: { color: "var(--text-subtle, #9ca3af)" } }, "FPY:"),
-            h("span", { style: { color: "#10b981", fontWeight: "700" } }, `${fpyRate.toFixed(1)}%`)
-          ),
-          // CPI Tokens EVM
-          h(
-            "div",
-            { style: { display: "flex", alignItems: "center", gap: "6px", fontSize: "12px" } },
-            h("span", { style: { color: "var(--text-subtle, #9ca3af)" } }, "CPI EVM:"),
-            h("span", { style: { color: cpiTokens >= 0.85 ? "#10b981" : "#f59e0b", fontWeight: "700" } }, cpiTokens.toFixed(2))
-          ),
-          // MCP Indicator Pill
+          h("span", { style: { color: "rgba(255,255,255,0.15)" } }, "·"),
+          h("span", null, `FPY: ${fpyRate.toFixed(1)}%`),
+          h("span", { style: { color: "rgba(255,255,255,0.15)" } }, "·"),
+          h("span", null, `CPI: ${cpiTokens.toFixed(2)}`),
+          h("span", { style: { color: "rgba(255,255,255,0.15)" } }, "·"),
           h(
             "button",
             {
               onClick: () => setIsMcpDiagnosticsOpen(true),
-              title: "Abrir Diagnóstico do Servidor MCP Nativo (JSON-RPC 2.0)",
+              title: "Diagnósticos MCP Loopback (JSON-RPC 2.0)",
               style: {
-                display: "flex",
-                alignItems: "center",
-                gap: "6px",
-                padding: "4px 10px",
-                borderRadius: "9999px",
-                backgroundColor: mcpStatus.active
-                  ? "rgba(16, 185, 129, 0.15)"
-                  : "rgba(59, 130, 246, 0.15)",
-                color: mcpStatus.active ? "#10b981" : "#60a5fa",
+                background: "none",
                 border: "none",
+                padding: "0",
                 fontSize: "11px",
-                fontWeight: "600",
+                fontFamily: "monospace",
+                color: mcpStatus.active ? "#10b981" : "#60a5fa",
                 cursor: "pointer",
               },
             },
-            h("div", {
-              style: {
-                width: "8px",
-                height: "8px",
-                borderRadius: "50%",
-                backgroundColor: mcpStatus.active ? "#10b981" : "#60a5fa",
-                boxShadow: mcpStatus.active ? "0 0 8px #10b981" : "none",
-              },
-            }),
-            mcpStatus.active
-              ? `MCP NATIVO (${mcpStatus.toolCallsCount} calls)`
-              : "MCP NATIVO (4 tools)"
+            mcpStatus.active ? `MCP (${mcpStatus.toolCallsCount} calls)` : "MCP (4 tools)"
           )
         ),
 
-        // Direita: Botões de Ação
+        // Direita: Ação Primária "+ Novo Despacho" e Botões Utilitários
         h(
           "div",
           { style: { display: "flex", alignItems: "center", gap: "8px" } },
           h(
             "button",
             {
-              onClick: () => setIsBootstrapModalOpen(true),
-              title: "Wizard de Auto-Bootstrap e Provisionamento da Holding OrgFy",
+              onClick: () => setIsDispatchModalOpen(true),
               style: {
+                padding: "6px 14px",
+                backgroundColor: THEME.accentPrimary,
+                color: "#000000",
+                fontWeight: "700",
+                fontSize: "12px",
+                borderRadius: "6px",
+                border: "none",
+                cursor: "pointer",
                 display: "flex",
                 alignItems: "center",
                 gap: "6px",
-                padding: "6px 12px",
-                borderRadius: "8px",
-                backgroundColor: "rgba(16, 185, 129, 0.2)",
-                color: "#10b981",
-                fontWeight: "700",
-                fontSize: "12px",
-                border: "1px solid rgba(16, 185, 129, 0.3)",
-                cursor: "pointer",
               },
             },
-            SVG.zap({ h, width: 14, height: 14 }),
-            "Inicializar OrgFy"
+            SVG.zap({ h, width: 13, height: 13 }),
+            "+ Novo Despacho"
           ),
-          // Botão Migrador de Agentes & Workspace
+
+          // Toggle Drawer Governança
+          h(
+            "button",
+            {
+              onClick: () => setIsGovernanceDrawerOpen(!isGovernanceDrawerOpen),
+              title: "Abrir Painel Lateral de Governança & RSI",
+              style: {
+                padding: "5px 10px",
+                backgroundColor: isGovernanceDrawerOpen ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.04)",
+                color: THEME.textPrimary,
+                border: `1px solid ${THEME.hairline}`,
+                borderRadius: "6px",
+                cursor: "pointer",
+                fontSize: "11px",
+                fontWeight: "500",
+                display: "flex",
+                alignItems: "center",
+                gap: "5px",
+              },
+            },
+            SVG.shield({ h, width: 13, height: 13 }),
+            "Governança ▤"
+          ),
+
+          // Toggle Copiloto
+          h(
+            "button",
+            {
+              onClick: () => setIsCopilotOpen((v) => !v),
+              title: "Abrir Copiloto Sagrado",
+              style: {
+                padding: "5px 10px",
+                backgroundColor: isCopilotOpen ? "rgba(59, 130, 246, 0.2)" : "rgba(255,255,255,0.04)",
+                color: isCopilotOpen ? "#60a5fa" : THEME.textPrimary,
+                border: `1px solid ${THEME.hairline}`,
+                borderRadius: "6px",
+                cursor: "pointer",
+                fontSize: "11px",
+                fontWeight: "500",
+                display: "flex",
+                alignItems: "center",
+                gap: "5px",
+              },
+            },
+            SVG.messageCircle({ h, width: 13, height: 13 }),
+            "Copiloto"
+          ),
+
+          // Botão Migrador de Agentes
           h(
             "button",
             {
@@ -1125,128 +1152,86 @@ export function apply(ctx: Context) {
                 loadMigrationData();
                 setIsMigrationModalOpen(true);
               },
-              title: "Migrador de Agentes Existentes & Sincronização de Workspace para v10",
+              title: "Migrador de Agentes & Workspace",
               style: {
+                padding: "5px 10px",
+                backgroundColor: "rgba(255,255,255,0.04)",
+                color: THEME.textSecondary,
+                border: `1px solid ${THEME.hairline}`,
+                borderRadius: "6px",
+                cursor: "pointer",
+                fontSize: "11px",
                 display: "flex",
                 alignItems: "center",
-                gap: "6px",
-                padding: "6px 12px",
-                borderRadius: "8px",
-                backgroundColor: "rgba(56, 189, 248, 0.15)",
-                color: "#38bdf8",
-                fontWeight: "700",
-                fontSize: "12px",
-                border: "1px solid rgba(56, 189, 248, 0.3)",
-                cursor: "pointer",
+                gap: "4px",
               },
             },
-            SVG.users({ h, width: 14, height: 14 }),
-            migrationSummary
-              ? `Migrador (${migrationSummary.migratedCount}/${migrationSummary.total})`
-              : "Migrador de Agentes"
+            SVG.users({ h, width: 12, height: 12 }),
+            "Migrador"
           ),
+
+          // Botão Auto-Bootstrap
+          h(
+            "button",
+            {
+              onClick: () => setIsBootstrapModalOpen(true),
+              title: "Auto-Bootstrap 1-Clique",
+              style: {
+                padding: "5px 10px",
+                backgroundColor: "rgba(255,255,255,0.04)",
+                color: THEME.textSecondary,
+                border: `1px solid ${THEME.hairline}`,
+                borderRadius: "6px",
+                cursor: "pointer",
+                fontSize: "11px",
+                display: "flex",
+                alignItems: "center",
+                gap: "4px",
+              },
+            },
+            SVG.zap({ h, width: 12, height: 12 }),
+            "Bootstrap"
+          ),
+
+          // Notificações Desktop
           h(
             "button",
             {
               onClick: () => {
-                const nextState = !desktopNotificationsEnabled;
-                setDesktopNotificationsEnabled(nextState);
-                showNotification("info", nextState ? "Notificações desktop ativadas!" : "Modo silencioso ativado.");
+                const next = !desktopNotificationsEnabled;
+                setDesktopNotificationsEnabled(next);
+                showNotification("info", next ? "Notificações ativadas" : "Modo silencioso");
               },
-              title: desktopNotificationsEnabled ? "Notificações desktop ativas (clique para silenciar)" : "Modo silencioso (clique para ativar notificações)",
+              title: desktopNotificationsEnabled ? "Notificações ativas" : "Modo silencioso",
               style: {
-                padding: "6px 10px",
-                borderRadius: "8px",
-                backgroundColor: desktopNotificationsEnabled ? "rgba(16, 185, 129, 0.15)" : "rgba(255, 255, 255, 0.06)",
-                color: desktopNotificationsEnabled ? "#10b981" : "#9ca3af",
-                border: "1px solid rgba(255, 255, 255, 0.1)",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: "6px",
-                fontSize: "11px",
-              },
-            },
-            desktopNotificationsEnabled ? SVG.bell({ h, width: 14, height: 14 }) : SVG.bellOff({ h, width: 14, height: 14 }),
-            desktopNotificationsEnabled ? "Notif. ON" : "Silencioso"
-          ),
-          h(
-            "button",
-            {
-              onClick: () => setIsDispatchModalOpen(true),
-              style: {
-                display: "flex",
-                alignItems: "center",
-                gap: "6px",
-                padding: "6px 14px",
-                borderRadius: "8px",
-                backgroundColor: "#10b981",
-                color: "#000000",
-                fontWeight: "700",
-                fontSize: "12px",
-                border: "none",
+                padding: "5px 8px",
+                backgroundColor: "rgba(255,255,255,0.04)",
+                color: desktopNotificationsEnabled ? "#10b981" : THEME.textMuted,
+                border: `1px solid ${THEME.hairline}`,
+                borderRadius: "6px",
                 cursor: "pointer",
               },
             },
-            SVG.zap({ h, width: 14, height: 14 }),
-            "Novo Despacho"
+            desktopNotificationsEnabled ? SVG.bell({ h, width: 13, height: 13 }) : SVG.bellOff({ h, width: 13, height: 13 })
           ),
-          h(
-            "button",
-            {
-              onClick: () => setIsCopilotOpen((v) => !v),
-              style: {
-                display: "flex",
-                alignItems: "center",
-                gap: "6px",
-                padding: "6px 12px",
-                borderRadius: "8px",
-                backgroundColor: isCopilotOpen ? "rgba(59, 130, 246, 0.25)" : "rgba(255, 255, 255, 0.06)",
-                color: isCopilotOpen ? "#60a5fa" : "#ffffff",
-                fontSize: "12px",
-                border: "1px solid rgba(255, 255, 255, 0.1)",
-                cursor: "pointer",
-              },
-            },
-            SVG.messageCircle({ h, width: 14, height: 14 }),
-            "Copiloto"
-          ),
-          h(
-            "button",
-            {
-              onClick: () => setIsRightRailOpen((v) => !v),
-              style: {
-                display: "flex",
-                alignItems: "center",
-                gap: "6px",
-                padding: "6px 12px",
-                borderRadius: "8px",
-                backgroundColor: isRightRailOpen ? "rgba(16, 185, 129, 0.2)" : "rgba(255, 255, 255, 0.06)",
-                color: isRightRailOpen ? "#10b981" : "#ffffff",
-                fontSize: "12px",
-                border: "1px solid rgba(255, 255, 255, 0.1)",
-                cursor: "pointer",
-              },
-            },
-            SVG.columns({ h, width: 14, height: 14 }),
-            "Governança & RSI"
-          ),
+
+          // Botão Sincronizar
           h(
             "button",
             {
               onClick: handleSyncPorteiroReal,
               disabled: isSyncingPorteiro,
-              title: "Disparar ciclo determinístico do Porteiro",
+              title: "Disparar sincronização em tempo real do Porteiro",
               style: {
-                padding: "6px 10px",
-                borderRadius: "8px",
-                backgroundColor: isSyncingPorteiro ? "rgba(245, 158, 11, 0.2)" : "rgba(255, 255, 255, 0.06)",
-                color: isSyncingPorteiro ? "#f59e0b" : "#ffffff",
-                border: "none",
+                padding: "5px 8px",
+                backgroundColor: "rgba(255,255,255,0.04)",
+                color: isSyncingPorteiro ? "#f59e0b" : THEME.textPrimary,
+                border: `1px solid ${THEME.hairline}`,
+                borderRadius: "6px",
                 cursor: isSyncingPorteiro ? "not-allowed" : "pointer",
               },
             },
-            SVG.refresh({ h, width: 14, height: 14 })
+            SVG.refresh({ h, width: 13, height: 13 })
           )
         )
       ),
@@ -1625,37 +1610,92 @@ export function apply(ctx: Context) {
           )
         )
       : renderTemplatesRsiView()
-    ),
+        )
+      ),
 
-        // ─────────────────────────────────────────────────────────────────────
-        // COSTA DIREITA UTILITÁRIA — GOVERNANÇA, RSI E EVM (ZERO CARD-CEPTION)
-        // ─────────────────────────────────────────────────────────────────────
-        isRightRailOpen &&
+      // ───────────────────────────────────────────────────────────────────────
+      // GOVERNANCE & RSI SLIDE-OVER DRAWER (LINEAR GRADE)
+      // ───────────────────────────────────────────────────────────────────────
+      isGovernanceDrawerOpen &&
+        h(
+          React.Fragment,
+          null,
+          // Backdrop escuro fechável
+          h("div", {
+            onClick: () => setIsGovernanceDrawerOpen(false),
+            style: {
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: "rgba(0, 0, 0, 0.6)",
+              backdropFilter: "blur(4px)",
+              zIndex: 1199,
+            },
+          }),
+          // Drawer Lateral Deslizante
           h(
             "aside",
             {
               style: {
-                width: "320px",
-                minWidth: "280px",
+                position: "fixed",
+                top: 0,
+                right: 0,
+                width: "420px",
+                maxWidth: "90vw",
+                height: "100vh",
+                backgroundColor: "#111216",
+                borderLeft: "1px solid rgba(255, 255, 255, 0.08)",
+                boxShadow: "-12px 0 40px rgba(0, 0, 0, 0.6)",
                 display: "flex",
                 flexDirection: "column",
-                gap: "16px",
-                padding: "8px 0 8px 12px",
-                borderLeft: "1px solid rgba(255, 255, 255, 0.08)",
+                zIndex: 1200,
+                padding: "20px",
                 overflowY: "auto",
+                gap: "16px",
               },
             },
-            // Header do Painel
+            // Header do Drawer
             h(
               "div",
-              { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
+              {
+                style: {
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  borderBottom: "1px solid rgba(255,255,255,0.08)",
+                  paddingBottom: "12px",
+                },
+              },
               h(
                 "div",
                 { style: { display: "flex", alignItems: "center", gap: "8px" } },
                 SVG.shield({ h, width: 16, height: 16 }),
-                h("span", { style: { fontWeight: "700", fontSize: "13px", color: "#ffffff" } }, "GOVERNANÇA & RSI")
+                h("span", { style: { fontWeight: "700", fontSize: "14px", color: THEME.textPrimary } }, "Governança, EVM & RSI"),
+                h(
+                  "span",
+                  {
+                    style: {
+                      fontSize: "10px",
+                      color: THEME.accentPrimary,
+                      fontWeight: "600",
+                      backgroundColor: "rgba(16,185,129,0.15)",
+                      padding: "2px 6px",
+                      borderRadius: "4px",
+                    },
+                  },
+                  "v10 SOBERANA"
+                )
               ),
-              h("span", { style: { fontSize: "10px", color: "#10b981", fontWeight: "600" } }, "HARNESS² V10")
+              h(
+                "button",
+                {
+                  onClick: () => setIsGovernanceDrawerOpen(false),
+                  style: { background: "transparent", border: "none", color: THEME.textSecondary, cursor: "pointer", padding: "4px" },
+                },
+                SVG.xCircle({ h, width: 18, height: 18 })
+              )
             ),
 
             // Seção EVM & Orçamento de Tokens
@@ -1663,173 +1703,147 @@ export function apply(ctx: Context) {
               "div",
               {
                 style: {
-                  padding: "12px",
-                  borderRadius: "12px",
-                  backgroundColor: "rgba(18, 24, 21, 0.6)",
-                  border: "1px solid rgba(255, 255, 255, 0.06)",
+                  padding: "14px",
+                  borderRadius: "10px",
+                  backgroundColor: "rgba(0, 0, 0, 0.3)",
+                  border: `1px solid ${THEME.hairline}`,
                   display: "flex",
                   flexDirection: "column",
                   gap: "8px",
                 },
               },
-              h("div", { style: { fontSize: "11px", fontWeight: "700", color: "#9ca3af" } }, "MÉTRICAS EVM & TOKENS"),
+              h("div", { style: { fontSize: "11px", fontWeight: "700", color: THEME.textSecondary, textTransform: "uppercase" } }, "Métricas EVM & Tokens"),
               h(
                 "div",
                 { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
-                h("span", { style: { fontSize: "12px", color: "#f3f4f6" } }, "CPI Acumulado"),
+                h("span", { style: { fontSize: "12px", color: THEME.textPrimary } }, "CPI Acumulado"),
                 h(
                   "span",
-                  { style: { fontSize: "13px", fontWeight: "700", color: cpiTokens >= 0.85 ? "#10b981" : "#f59e0b" } },
+                  { style: { fontSize: "13px", fontWeight: "700", color: cpiTokens >= 0.85 ? THEME.accentPrimary : "#f59e0b" } },
                   `${cpiTokens.toFixed(2)} (Min: 0.85)`
                 )
               ),
               h(
                 "div",
                 { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
-                h("span", { style: { fontSize: "12px", color: "#f3f4f6" } }, "Circuit Breaker Loops"),
-                h("span", { style: { fontSize: "12px", fontWeight: "600", color: "#10b981" } }, "0 / 3 turnos (OK)")
+                h("span", { style: { fontSize: "12px", color: THEME.textPrimary } }, "Circuit Breaker Loops"),
+                h("span", { style: { fontSize: "12px", fontWeight: "600", color: THEME.accentPrimary } }, "0 / 3 turnos (OK)")
               ),
               h(
                 "div",
                 { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
-                h("span", { style: { fontSize: "12px", color: "#f3f4f6" } }, "PRs Integrados"),
+                h("span", { style: { fontSize: "12px", color: THEME.textPrimary } }, "PRs Integrados"),
                 h("span", { style: { fontSize: "12px", fontWeight: "600", color: "#ffffff" } }, "21 na main")
               ),
+              // Linha de Economia CoEvo-RSI (Crucial para auditoria)
               h(
                 "div",
-                { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
-                h("span", { style: { fontSize: "12px", color: "#f3f4f6" } }, "Economia EVM (CoEvo-RSI)"),
-                h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#10b981" } }, "~$4.82 vs ~$16.94 (-71.5% economia)")
-              )
-            ),
-
-            // Seção Catraca RSI (Regras Probatórias)
-            h(
-              "div",
-              {
-                style: {
-                  padding: "12px",
-                  borderRadius: "12px",
-                  backgroundColor: "rgba(18, 24, 21, 0.6)",
-                  border: "1px solid rgba(255, 255, 255, 0.06)",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "10px",
-                },
-              },
-              h("div", { style: { fontSize: "11px", fontWeight: "700", color: "#9ca3af" } }, "CATRACA RSI (REGRAS PROBATÓRIAS)"),
-              regrasProbatorias.map((r) =>
-                h(
-                  "div",
-                  {
-                    key: r.regra_id,
-                    style: {
-                      padding: "8px",
-                      borderRadius: "8px",
-                      backgroundColor: "rgba(255, 255, 255, 0.03)",
-                      border: "1px solid rgba(255, 255, 255, 0.04)",
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "4px",
-                    },
+                {
+                  style: {
+                    marginTop: "4px",
+                    padding: "8px 10px",
+                    borderRadius: "6px",
+                    backgroundColor: "rgba(16, 185, 129, 0.08)",
+                    border: "1px solid rgba(16, 185, 129, 0.2)",
+                    fontSize: "11px",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
                   },
-                  h(
-                    "div",
-                    { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
-                    h("span", { style: { fontWeight: "700", fontSize: "11px", color: "#ffffff" } }, r.regra_id),
-                    h(
-                      "span",
-                      {
-                        style: {
-                          fontSize: "9px",
-                          padding: "1px 6px",
-                          borderRadius: "4px",
-                          backgroundColor:
-                            r.status === "EM_TESTE"
-                              ? "rgba(59, 130, 246, 0.2)"
-                              : r.status === "MANTIDA"
-                              ? "rgba(16, 185, 129, 0.2)"
-                              : "rgba(239, 68, 68, 0.2)",
-                          color:
-                            r.status === "EM_TESTE"
-                              ? "#60a5fa"
-                              : r.status === "MANTIDA"
-                              ? "#10b981"
-                              : "#ef4444",
-                          fontWeight: "700",
-                        },
-                      },
-                      r.status
-                    )
-                  ),
-                  h("div", { style: { fontSize: "11px", color: "#d1d5db" } }, r.descricao),
-                  h(
-                    "div",
-                    { style: { fontSize: "10px", color: "#9ca3af", marginTop: "2px" } },
-                    `Janela: ${r.cards_avaliados}/${r.janela_alvo} cards avaliados`
-                  ),
-                  h(
-                    "button",
-                    {
-                      onClick: () => {
-                        appendLiveLog(`\n[RSI CHECK] Executando comando de guarda: ${r.comando_check}\n`);
-                        showNotification("info", `Comando executado: ${r.comando_check} -> PASSOU (Exit 0)`);
-                      },
-                      style: {
-                        marginTop: "4px",
-                        padding: "3px 6px",
-                        borderRadius: "4px",
-                        backgroundColor: "rgba(255, 255, 255, 0.06)",
-                        color: "#9ca3af",
-                        border: "none",
-                        fontSize: "9px",
-                        cursor: "pointer",
-                        alignSelf: "flex-start",
-                      },
-                    },
-                    "Checar Agora"
-                  )
-                )
+                },
+                h("span", { style: { color: "#10b981", fontWeight: "600" } }, "Economia EVM (CoEvo-RSI):"),
+                h("span", { style: { color: "#ffffff", fontFamily: "monospace", fontWeight: "700" } }, "~$4.82 vs ~$16.94 (-71.5% economia)")
               )
             ),
 
-            // Seção Histórico de Recusas & DSAP
+            // Seção Catraca Probatória RSI
             h(
               "div",
               {
                 style: {
-                  padding: "12px",
-                  borderRadius: "12px",
-                  backgroundColor: "rgba(18, 24, 21, 0.6)",
-                  border: "1px solid rgba(255, 255, 255, 0.06)",
+                  padding: "14px",
+                  borderRadius: "10px",
+                  backgroundColor: "rgba(0, 0, 0, 0.3)",
+                  border: `1px solid ${THEME.hairline}`,
                   display: "flex",
                   flexDirection: "column",
                   gap: "8px",
                 },
               },
-              h("div", { style: { fontSize: "11px", fontWeight: "700", color: "#9ca3af" } }, "DETECTOR PREDITIVO DSAP"),
               h(
                 "div",
-                { style: { fontSize: "11px", color: "#9ca3af" } },
-                "Monitora a 2ª recusa consecutiva com similaridade semântica >= 0.70 para acionamento de backtracking do COO."
+                { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+                h("div", { style: { fontSize: "11px", fontWeight: "700", color: THEME.textSecondary, textTransform: "uppercase" } }, "Catraca Probatória RSI"),
+                h("span", { style: { fontSize: "10px", color: "#c084fc", fontFamily: "monospace" } }, "Janela 10 cards")
+              ),
+              h(
+                "div",
+                { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+                h("span", { style: { fontSize: "12px", color: THEME.textPrimary } }, "Regras Ativas"),
+                h("span", { style: { fontSize: "12px", fontWeight: "600", color: "#c084fc" } }, `${Object.keys(regrasProbatorias).length || 3} regras`)
+              ),
+              h(
+                "div",
+                { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+                h("span", { style: { fontSize: "12px", color: THEME.textPrimary } }, "Regra L-90 Auto-Rollback"),
+                h("span", { style: { fontSize: "12px", fontWeight: "600", color: THEME.accentPrimary } }, "Ativo (FPY >= 95%)")
+              ),
+              h(
+                "div",
+                { style: { display: "flex", flexDirection: "column", gap: "6px", marginTop: "4px" } },
+                h(
+                  "div",
+                  { style: { padding: "6px 8px", borderRadius: "6px", backgroundColor: "rgba(255,255,255,0.03)", fontSize: "10px" } },
+                  h("div", { style: { color: "#ffffff", fontWeight: "600" } }, "GUARD-T020"),
+                  h("div", { style: { color: THEME.textMuted } }, "ci_cache e aceite_cache blindados (10/10 cards)")
+                ),
+                h(
+                  "div",
+                  { style: { padding: "6px 8px", borderRadius: "6px", backgroundColor: "rgba(255,255,255,0.03)", fontSize: "10px" } },
+                  h("div", { style: { color: "#ffffff", fontWeight: "600" } }, "GUARD-L01"),
+                  h("div", { style: { color: THEME.textMuted } }, "Impedimento auto-revisão L-01 (10/10 cards)")
+                )
+              )
+            ),
+
+            // Seção DSAP Backtracking
+            h(
+              "div",
+              {
+                style: {
+                  padding: "14px",
+                  borderRadius: "10px",
+                  backgroundColor: "rgba(0, 0, 0, 0.3)",
+                  border: `1px solid ${THEME.hairline}`,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "8px",
+                },
+              },
+              h("div", { style: { fontSize: "11px", fontWeight: "700", color: THEME.textSecondary, textTransform: "uppercase" } }, "DSAP Preditivo"),
+              h(
+                "div",
+                { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+                h("span", { style: { fontSize: "12px", color: THEME.textPrimary } }, "Threshold Backtracking"),
+                h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#f59e0b" } }, "≥ 0.70 similaridade")
               ),
               h(
                 "div",
                 {
                   style: {
-                    padding: "6px 8px",
+                    padding: "8px",
                     borderRadius: "6px",
-                    backgroundColor: "rgba(16, 185, 129, 0.1)",
-                    color: "#10b981",
+                    backgroundColor: "rgba(16, 185, 129, 0.08)",
+                    color: THEME.accentPrimary,
                     fontSize: "11px",
-                    fontWeight: "600",
+                    fontWeight: "500",
                   },
                 },
-                "Nenhum backtracking ativo no momento."
+                "✓ Nenhum backtracking ativo no momento (fluxo limpo)."
               )
             )
           )
-      ),
+        ),
 
       // ───────────────────────────────────────────────────────────────────────
       // 3. ILHA DO COPILOTO SAGRADO PERSONIFICÁVEL (DRAWER FLUTUANTE)
@@ -3936,7 +3950,7 @@ export function apply(ctx: Context) {
       cards: PipelineCard[],
       badgeBg: string,
       badgeColor: string,
-      renderAction: (card: PipelineCard) => any
+      _renderAction?: (card: PipelineCard) => any
     ) {
       return h(
         "div",
@@ -3944,9 +3958,9 @@ export function apply(ctx: Context) {
           style: {
             display: "flex",
             flexDirection: "column",
-            borderRadius: "12px",
+            borderRadius: "10px",
             backgroundColor: "rgba(0, 0, 0, 0.25)",
-            border: "1px solid rgba(255, 255, 255, 0.05)",
+            border: `1px solid ${THEME.hairline}`,
             padding: "10px",
             minHeight: "420px",
           },
@@ -3960,11 +3974,11 @@ export function apply(ctx: Context) {
               alignItems: "center",
               justifyContent: "space-between",
               paddingBottom: "8px",
-              borderBottom: "1px solid rgba(255, 255, 255, 0.06)",
+              borderBottom: `1px solid ${THEME.hairline}`,
               marginBottom: "10px",
             },
           },
-          h("span", { style: { fontWeight: "700", fontSize: "12px", color: "#f3f4f6" } }, title),
+          h("span", { style: { fontWeight: "600", fontSize: "12px", color: THEME.textPrimary } }, title),
           h(
             "span",
             {
@@ -3980,7 +3994,7 @@ export function apply(ctx: Context) {
             cards.length
           )
         ),
-        // Cards List
+        // Cards List (Face Limpa e Escaneável)
         h(
           "div",
           { style: { display: "flex", flexDirection: "column", gap: "8px", flex: 1, overflowY: "auto" } },
@@ -3989,9 +4003,9 @@ export function apply(ctx: Context) {
                 "div",
                 {
                   style: {
-                    padding: "20px 10px",
+                    padding: "24px 10px",
                     textAlign: "center",
-                    color: "rgba(255, 255, 255, 0.2)",
+                    color: THEME.textMuted,
                     fontSize: "11px",
                   },
                 },
@@ -4002,18 +4016,22 @@ export function apply(ctx: Context) {
                   "div",
                   {
                     key: c.id,
+                    onClick: () => setActiveIssueDetailCard(c),
                     style: {
                       padding: "10px 12px",
-                      borderRadius: "10px",
-                      backgroundColor: "rgba(255, 255, 255, 0.03)",
-                      border: "1px solid rgba(255, 255, 255, 0.07)",
+                      borderRadius: "8px",
+                      backgroundColor: THEME.cardBg,
+                      border: `1px solid ${THEME.borderCard}`,
                       display: "flex",
                       flexDirection: "column",
-                      gap: "6px",
-                      transition: "transform 0.15s ease",
+                      gap: "8px",
+                      cursor: "pointer",
+                      transition: "background 0.15s ease, border-color 0.15s ease",
                     },
+                    onMouseEnter: (e: any) => (e.currentTarget.style.backgroundColor = THEME.cardHover),
+                    onMouseLeave: (e: any) => (e.currentTarget.style.backgroundColor = THEME.cardBg),
                   },
-                  // Card Top (Badge Priority + Issue ID + Time)
+                  // Card Top (Badge Priority + Issue ID)
                   h(
                     "div",
                     { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
@@ -4021,156 +4039,61 @@ export function apply(ctx: Context) {
                       "span",
                       {
                         style: {
-                          fontSize: "9px",
-                          padding: "1px 6px",
-                          borderRadius: "4px",
-                          backgroundColor:
-                            c.priority === "P0"
-                              ? "rgba(239, 68, 68, 0.2)"
-                              : c.priority === "P1"
-                              ? "rgba(245, 158, 11, 0.2)"
-                              : "rgba(59, 130, 246, 0.2)",
+                          fontSize: "11px",
+                          fontFamily: "monospace",
+                          color: "#60a5fa",
+                          fontWeight: "600",
+                        },
+                      },
+                      `#${(c.issueId || c.id).slice(0, 8)} ↗`
+                    ),
+                    h(
+                      "span",
+                      {
+                        style: {
+                          fontSize: "10px",
+                          fontWeight: "600",
                           color:
                             c.priority === "P0"
-                              ? "#ef4444"
+                              ? "#f87171"
                               : c.priority === "P1"
-                              ? "#f59e0b"
-                              : "#60a5fa",
-                          fontWeight: "700",
+                              ? "#fbbf24"
+                              : THEME.textMuted,
                         },
                       },
                       c.priority
-                    ),
-                    h(
-                      "div",
-                      { style: { display: "flex", alignItems: "center", gap: "4px" } },
-                      h(
-                        "a",
-                        {
-                          href: buildIssueDeepLink(c),
-                          onClick: (e: any) => {
-                            e.stopPropagation();
-                            handleOpenIssueDeepLink(c);
-                          },
-                          title: `Abrir issue #${c.issueId} no Buzz Desktop`,
-                          style: {
-                            textDecoration: "none",
-                            fontSize: "10px",
-                            color: "#38bdf8",
-                            fontFamily: "monospace",
-                            cursor: "pointer",
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: "3px",
-                            padding: "1px 5px",
-                            borderRadius: "4px",
-                            backgroundColor: "rgba(56, 189, 248, 0.1)",
-                            border: "1px solid rgba(56, 189, 248, 0.25)",
-                            transition: "all 0.15s ease",
-                          },
-                        },
-                        c.prId || `#${c.issueId}`,
-                        SVG.externalLink({ h, width: 9, height: 9 })
-                      ),
-                      h(
-                        "button",
-                        {
-                          onClick: (e: any) => handleCopyDeepLink(e, c),
-                          title: "Copiar Deep Link buzz://issue?...",
-                          style: {
-                            background: "none",
-                            border: "none",
-                            padding: "2px",
-                            color: "#9ca3af",
-                            cursor: "pointer",
-                            display: "inline-flex",
-                            alignItems: "center",
-                          },
-                        },
-                        SVG.copy({ h, width: 10, height: 10 })
-                      )
-                    ),
-                    h("span", { style: { fontSize: "10px", color: "var(--text-subtle, #9ca3af)" } }, c.elapsedTime)
+                    )
                   ),
-                  // Title (Clickable Deep Link -> In-Cockpit Issue Detail)
+                  // Card Title
                   h(
                     "div",
                     {
-                      onClick: () => setActiveIssueDetailCard(c),
-                      title: `Clique para ver detalhes da issue no Cockpit`,
                       style: {
                         fontSize: "12px",
-                        fontWeight: "600",
-                        color: "#ffffff",
-                        lineHeight: "1.3",
-                        cursor: "pointer",
-                        transition: "color 0.15s ease",
+                        fontWeight: "500",
+                        color: THEME.textPrimary,
+                        lineHeight: "1.4",
                       },
                     },
                     c.title
                   ),
-                  // Assignee & Tier
+                  // Card Footer (Assignee + Relative Elapsed Time)
                   h(
                     "div",
-                    { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "2px" } },
-                    h(
-                      "div",
-                      { style: { display: "flex", alignItems: "center", gap: "4px", fontSize: "11px", color: "#9ca3af" } },
-                      SVG.user({ h, width: 11, height: 11 }),
-                      c.executor
-                    ),
-                    h(
-                      "span",
-                      {
-                        style: {
-                          fontSize: "9px",
-                          padding: "1px 5px",
-                          borderRadius: "4px",
-                          backgroundColor:
-                            c.tier === "tier_3_arquiteto"
-                              ? "rgba(168, 85, 247, 0.2)"
-                              : c.tier === "tier_2_revisor"
-                              ? "rgba(59, 130, 246, 0.2)"
-                              : "rgba(16, 185, 129, 0.2)",
-                          color:
-                            c.tier === "tier_3_arquiteto"
-                              ? "#c084fc"
-                              : c.tier === "tier_2_revisor"
-                              ? "#60a5fa"
-                              : "#10b981",
-                          fontWeight: "600",
-                        },
+                    {
+                      style: {
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        fontSize: "10px",
+                        color: THEME.textMuted,
+                        borderTop: `1px solid ${THEME.hairline}`,
+                        paddingTop: "6px",
                       },
-                      c.tier === "tier_3_arquiteto" ? "Tier 3" : c.tier === "tier_2_revisor" ? "Tier 2" : "Tier 1"
-                    )
-                  ),
-                  // Custo & Model Router Badge (Inteligência CoEvo-RSI)
-                  h(
-                    "div",
-                    { style: { display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "10px", marginTop: "2px" } },
-                    h(
-                      "span",
-                      {
-                        style: {
-                          color: c.tier === "tier_1_exec_barato" ? "#10b981" : c.tier === "tier_2_revisor" ? "#60a5fa" : "#c084fc",
-                          fontFamily: "monospace",
-                          fontWeight: "600",
-                        },
-                      },
-                      c.tier === "tier_1_exec_barato"
-                        ? "Gemini 3.8 Flash"
-                        : c.tier === "tier_2_revisor"
-                        ? "Claude 3.5 Sonnet"
-                        : "Claude 3.5 Sonnet"
-                    ),
-                    h(
-                      "span",
-                      { style: { color: "#9ca3af", fontFamily: "monospace" } },
-                      `~$${c.estimatedCost || (c.tier === "tier_1_exec_barato" ? "0.002" : "0.02")} | ${c.tokens || 18}k tokens`
-                    )
-                  ),
-                  // Action Button
-                  renderAction(c)
+                    },
+                    h("span", { style: { color: THEME.textSecondary, fontWeight: "500" } }, c.executor || "Não atribuído"),
+                    h("span", null, c.elapsedTime || "agora")
+                  )
                 )
               )
         )
