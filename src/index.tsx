@@ -44,8 +44,38 @@ import {
   compileProbationaryRule,
   type CardTemplateItem,
 } from "./services/templates-rsi";
+import {
+  fetchKpisEsteira,
+  recalculateKpisNow,
+  type KpisEsteiraPayload,
+  type KpiHistoryPoint,
+} from "./services/kpi-service";
+import {
+  renderIntelligenceTab,
+  createChannelPulsePanel,
+} from "./components/IntelligenceTab";
+import {
+  acquireCheckoutLock,
+  releaseCheckoutLock,
+  listActiveLocks,
+  evaluateBudgetGate,
+  evaluateGovernanceAndReact,
+  lintCardForDispatch,
+  registerGovernanceAgentHooks,
+} from "./services/governance-engine";
 
-export const inject = ["react", "pages", "settingsCards", "host", "navigation", "agents"];
+export const inject = [
+  "react",
+  "pages",
+  "settingsCards",
+  "host",
+  "navigation",
+  "agents",
+  "panels",
+  "artifactStorage",
+  "notifications",
+  "decisions",
+];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CANONICAL DATA & FALLBACK CONSTANTS
@@ -616,7 +646,46 @@ export function apply(ctx: Context) {
 
     // Expansão: Modal In-Cockpit de Detalhes da Issue e Abas da Ilha Central
     const [activeIssueDetailCard, setActiveIssueDetailCard] = React.useState<PipelineCard | null>(null);
-    const [activeCentralTab, setActiveCentralTab] = React.useState<"pipeline" | "templates_rsi">("pipeline");
+    const [activeCentralTab, setActiveCentralTab] = React.useState<"pipeline" | "templates_rsi" | "inteligencia">("pipeline");
+
+    // Estado da Onda 2 & 3: Inteligência & Saúde + Governança de Ciclo Fechado
+    const [kpisData, setKpisData] = React.useState<KpisEsteiraPayload | null>(null);
+    const [kpisHistory, setKpisHistory] = React.useState<KpiHistoryPoint[]>([]);
+    const [kpisError, setKpisError] = React.useState<string | null>(null);
+    const [isRecalculatingKpis, setIsRecalculatingKpis] = React.useState<boolean>(false);
+    const [governanceSummary, setGovernanceSummary] = React.useState<string | null>(null);
+
+    const loadKpis = React.useCallback(async () => {
+      const res = await fetchKpisEsteira(ctx);
+      setKpisData(res.kpis);
+      setKpisHistory(res.history);
+      setKpisError(res.error);
+    }, []);
+
+    React.useEffect(() => {
+      loadKpis();
+    }, [loadKpis]);
+
+    const handleRecalculateKpis = React.useCallback(async () => {
+      setIsRecalculatingKpis(true);
+      try {
+        const recalc = await recalculateKpisNow(ctx);
+        if (!recalc.ok) {
+          setKpisError(recalc.output || "Falha ao recalcular KPIs");
+        } else {
+          await loadKpis();
+        }
+      } finally {
+        setIsRecalculatingKpis(false);
+      }
+    }, [loadKpis]);
+
+    const handleRunGovernanceEval = React.useCallback(async () => {
+      const evalRes = await evaluateGovernanceAndReact(ctx, { dryRun: false, autoWake: true });
+      setGovernanceSummary(
+        `Orçamento: ${evalRes.budget.statusOrcamento} | Alertas: ${evalRes.alertsDetected} | Notificações: ${evalRes.notificationsSent.length} | Wakes: ${evalRes.wakesTriggered.length} | Cooldown: ${evalRes.skippedByCooldown.length}`
+      );
+    }, []);
 
     // Estados de Execução Concorrente e Loading (Fase 2)
     const [isExecutingDispatch, setIsExecutingDispatch] = React.useState<boolean>(false);
@@ -1521,12 +1590,40 @@ export function apply(ctx: Context) {
                 },
                 SVG.gitPullRequest({ h, width: 14, height: 14 }),
                 "Catálogo de Templates & Hub de RSI"
+              ),
+              h(
+                "button",
+                {
+                  onClick: () => {
+                    setActiveCentralTab("inteligencia");
+                    loadKpis();
+                  },
+                  style: {
+                    padding: "6px 14px",
+                    borderRadius: "8px",
+                    fontSize: "12px",
+                    fontWeight: "600",
+                    cursor: "pointer",
+                    border: activeCentralTab === "inteligencia" ? "1px solid rgba(168, 85, 247, 0.45)" : "1px solid transparent",
+                    backgroundColor: activeCentralTab === "inteligencia" ? "rgba(168, 85, 247, 0.16)" : "rgba(255, 255, 255, 0.04)",
+                    color: activeCentralTab === "inteligencia" ? "#c084fc" : "#9ca3af",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  },
+                },
+                SVG.activity({ h, width: 14, height: 14 }),
+                "Inteligência & Saúde"
               )
             ),
             h(
               "span",
               { style: { fontSize: "11px", color: "#6b7280", fontFamily: "monospace" } },
-              activeCentralTab === "pipeline" ? "Esteira Determinística OrgFy v10" : "Recursão & FPY (Regras L-22, L-90)"
+              activeCentralTab === "pipeline"
+                ? "Esteira Determinística OrgFy v11"
+                : activeCentralTab === "inteligencia"
+                ? "Telemetria Real, Economia & Governança de Ciclo Fechado"
+                : "Recursão & FPY (Regras L-22, L-90)"
             )
           ),
 
@@ -2072,6 +2169,17 @@ export function apply(ctx: Context) {
             )
           )
         )
+      : activeCentralTab === "inteligencia"
+      ? renderIntelligenceTab({
+          h,
+          kpis: kpisData,
+          history: kpisHistory,
+          error: kpisError,
+          isRecalculating: isRecalculatingKpis,
+          onRecalculate: handleRecalculateKpis,
+          onRunGovernanceEval: handleRunGovernanceEval,
+          governanceSummary,
+        })
       : renderTemplatesRsiView()
         )
       ),
@@ -5227,25 +5335,54 @@ export function apply(ctx: Context) {
     });
   }
 
+  // ── ONDA 2: SIDEBAR DE PULSO NO CANAL (#esteira-orgfy) via ctx.panels ──
+  if ((ctx as any).panels?.register) {
+    try {
+      const ChannelPulseComponent = createChannelPulsePanel(ctx, async () => {
+        const res = await fetchKpisEsteira(ctx);
+        return res.kpis;
+      });
+      (ctx as any).panels.register({
+        id: "orgfy-channel-pulse",
+        title: "Pulso OrgFy",
+        channelPlacement: "side",
+        channelLauncher: { label: "Pulso OrgFy" },
+        component: ChannelPulseComponent,
+      });
+      console.log("[ORGFY] Sidebar panel orgfy-channel-pulse registrado com sucesso.");
+    } catch (err) {
+      console.warn("[ORGFY] Falha ao registrar sidebar panel:", err);
+    }
+  }
+
+  // ── ONDA 3: HOOKS DE GOVERNANÇA NO CICLO DOS AGENTES ──
+  registerGovernanceAgentHooks(ctx);
+
   // ── INJEÇÃO DE INSTRUÇÕES DETERMINÍSTICAS NO PROMPT DO AGENTE (<plugin-instructions>) ──
   if ((ctx.agents as any)?.addInstructions) {
     try {
       (ctx.agents as any).addInstructions({
-        id: "orgfy-governance-v10",
-        text: `Esteira OrgFy v10 (Holding Cortexx) — Governança Determinística:
+        id: "orgfy-governance-v11",
+        text: `Esteira OrgFy v11 (Holding Cortexx) — Governança Determinística & Ciclo Fechado:
 Você opera sobre a fábrica de software agêntica da holding Cortexx (empresas: orgfy, lumen-iptv, saas-tributario).
 Regras Invariantes:
 - L-01 a L-90: Qualquer modificação de código deve ser estritamente rastreada e validada pela esteira determinística.
 - L-22: O comando de aceite é imutável e blindado por hash SHA-256 no momento do despacho. Nunca afrouxe critérios de aceite.
 - L-90: Regras probatórias RSI em .scratch/regras-probatorias.json são avaliadas contra o FPY histórico (First Pass Yield).
+- Hard Cap Orçamentário (80% alerta / 100% bloqueio): Despachos são bloqueados ao atingir 100% do teto diário salvo board_override=true.
+- Checkout Lock Atômico: Nenhum card pode ser executado em paralelo por dois agentes; adquira lock antes de atuar.
 - DSAP Backtracking: Na 2ª recusa consecutiva com similaridade >= 0.70, o card entra em backtracking para o COO re-escopar.
 Ferramentas nativas disponíveis neste plugin:
 1. orgfy_status({ empresa? }): Consulta o placar de 20h, FPY, CPI de tokens, contagem de aceites, merged e raias da esteira.
 2. orgfy_kanban_read({ stage?, empresa? }): Lê a matriz Kanban completa (triagem, despachado, execucao, revisao, feito) com comandos de aceite, hashes e worktrees.
-3. orgfy_despachar({ issue_id, executor, revisor, empresa? }): Despacha card para execução em worktree isolado sem colisão com main.
+3. orgfy_despachar({ issue_id, executor, revisor, empresa?, board_override? }): Despacha card em worktree isolado respeitando Hard Cap orçamentário e lock atômico.
 4. orgfy_gate({ pr_id, decisao, motivo, revisor, empresa? }): Aplica o Gate Caixa-Preta (aceito/recusado) com probes de validação.
 5. orgfy_porteiro_sync({ empresa? }): Dispara sincronização determinística de eventos Nostr e ciclo de execução.
-Consulte sempre orgfy_status ou orgfy_kanban_read para inspecionar cards e métricas reais antes de agir.`
+6. orgfy_kpis({ recalcular? }): Lê os KPIs reais de Fluxo, Qualidade, Economia e Higiene (kpis-esteira.json) e opcionalmente recalcula via script Python.
+7. orgfy_checkout_lock({ action, issue_id?, agent_id?, ttl_minutes? }): Gerencia lock atômico de checkout (acquire, release, list) para evitar trabalho duplicado.
+8. orgfy_governanca_avaliar({ dry_run?, auto_wake? }): Avalia orçamento, fila de revisão, WIP órfão e estagnação nível 3, disparando alertas/wakes com cooldown anti-spam.
+9. orgfy_lint_card({ title, objective?, done_when?, acceptance_command?, executor?, revisor? }): Audita qualidade semântica e regras L-01/L-22 antes do despacho.
+Consulte sempre orgfy_status, orgfy_kpis ou orgfy_kanban_read para inspecionar métricas reais antes de agir.`
       });
       console.log("[ORGFY] ctx.agents.addInstructions registrado com sucesso.");
     } catch (err) {
@@ -5258,7 +5395,7 @@ Consulte sempre orgfy_status ou orgfy_kanban_read para inspecionar cards e métr
     try {
       (ctx.agents as any).addTool({
         name: "orgfy_status",
-        description: "Retorna a telemetria em tempo real da esteira OrgFy v10 com cards_por_raia derivados diretamente do Kanban real e métricas de runtime/placar separadas (sem fallbacks hardcoded).",
+        description: "Retorna a telemetria em tempo real da esteira OrgFy v11 com cards_por_raia derivados diretamente do Kanban real e métricas de runtime/placar separadas (sem fallbacks hardcoded).",
         inputSchema: {
           type: "object",
           properties: {
@@ -5316,7 +5453,7 @@ Consulte sempre orgfy_status ou orgfy_kanban_read para inspecionar cards e métr
 
       (ctx.agents as any).addTool({
         name: "orgfy_despachar",
-        description: "Despacha um card de issue para execução em worktree isolado sem colisão com a main conforme as regras v10 da esteira OrgFy.",
+        description: "Despacha um card de issue para execução em worktree isolado sem colisão com a main, validando Hard Cap orçamentário (100%) e checkout lock atômico.",
         inputSchema: {
           type: "object",
           properties: {
@@ -5324,10 +5461,31 @@ Consulte sempre orgfy_status ou orgfy_kanban_read para inspecionar cards e métr
             executor: { type: "string", description: "Nome do agente executor (ex: 'OrgFy Val', 'OrgFy Atlas')" },
             revisor: { type: "string", description: "Nome do agente revisor (ex: 'OrgFy Teo', 'OrgFy Bento')" },
             empresa: { type: "string", description: "Slug da empresa (default: 'orgfy')" },
+            board_override: { type: "boolean", description: "Autorização explícita da diretoria para ultrapassar 100% do teto diário" },
           },
           required: ["issue_id", "executor", "revisor"],
         },
         call: async (_client: any, _context: any, args: any) => {
+          const kpiRes = await fetchKpisEsteira(ctx);
+          const budgetGate = evaluateBudgetGate(kpiRes.kpis, Boolean(args?.board_override));
+          if (!budgetGate.allowed) {
+            return JSON.stringify({
+              status: "blocked",
+              code: "BUDGET_HARD_CAP_REACHED",
+              budgetGate,
+            }, null, 2);
+          }
+
+          const lockRes = await acquireCheckoutLock(ctx, args.issue_id, args.executor, 60);
+          if (!lockRes.ok) {
+            return JSON.stringify({
+              status: "blocked",
+              code: lockRes.code,
+              message: lockRes.message,
+              lock: lockRes.lock,
+            }, null, 2);
+          }
+
           const res = await executeDespachar(ctx, {
             empresa: args?.empresa || "orgfy",
             issueId: args.issue_id,
@@ -5337,6 +5495,8 @@ Consulte sempre orgfy_status ou orgfy_kanban_read para inspecionar cards e métr
           return JSON.stringify({
             status: res.code === 0 ? "ok" : "error",
             exitCode: res.code,
+            budgetGate,
+            lock: lockRes.lock,
             output: res.output,
           }, null, 2);
         },
@@ -5344,7 +5504,7 @@ Consulte sempre orgfy_status ou orgfy_kanban_read para inspecionar cards e métr
 
       (ctx.agents as any).addTool({
         name: "orgfy_gate",
-        description: "Aplica o Gate Caixa-Preta da esteira OrgFy v10 a um PR (aceito ou recusado) com validação de probes Caddy, Supabase RLS e Playwright.",
+        description: "Aplica o Gate Caixa-Preta da esteira OrgFy v11 a um PR (aceito ou recusado) com validação de probes Caddy, Supabase RLS e Playwright.",
         inputSchema: {
           type: "object",
           properties: {
@@ -5393,7 +5553,121 @@ Consulte sempre orgfy_status ou orgfy_kanban_read para inspecionar cards e métr
         },
       });
 
-      console.log("[ORGFY] 5 agentTools registradas com sucesso no harness do Buzz.");
+      // ── ONDA 2: AGENT TOOL DE TELEMETRIA E KPIS REAIS ──
+      (ctx.agents as any).addTool({
+        name: "orgfy_kpis",
+        description: "Retorna os KPIs determinísticos reais da esteira OrgFy v11 (Fluxo, Qualidade, Economia, Higiene e Alertas Ativos) a partir de kpis-esteira.json, com opção de recálculo sob demanda.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            recalcular: { type: "boolean", description: "Se true, executa scripts/gerar_kpis_esteira.py antes de ler o snapshot" },
+          },
+        },
+        call: async (_client: any, _context: any, args: any) => {
+          let recalcOutput: string | null = null;
+          if (args?.recalcular) {
+            const recalc = await recalculateKpisNow(ctx);
+            recalcOutput = recalc.output;
+          }
+          const res = await fetchKpisEsteira(ctx);
+          return JSON.stringify({
+            disponivel: res.disponivel,
+            error: res.error,
+            recalcOutput,
+            kpis: res.kpis,
+            history_points: res.history.length,
+          }, null, 2);
+        },
+      });
+
+      // ── ONDA 3: LOCK ATÔMICO DE CHECKOUT ──
+      (ctx.agents as any).addTool({
+        name: "orgfy_checkout_lock",
+        description: "Gerencia locks atômicos de checkout por issue_id para evitar execução duplicada entre agentes (action: 'acquire' | 'release' | 'list').",
+        inputSchema: {
+          type: "object",
+          properties: {
+            action: { type: "string", enum: ["acquire", "release", "list"], description: "Ação de lock desejada" },
+            issue_id: { type: "string", description: "Identificador da issue (obrigatório para acquire/release)" },
+            agent_id: { type: "string", description: "Nome ou ID do agente solicitante (obrigatório para acquire)" },
+            ttl_minutes: { type: "number", description: "Tempo de expiração do lock em minutos (default: 60)" },
+          },
+          required: ["action"],
+        },
+        call: async (_client: any, _context: any, args: any) => {
+          const action = args?.action;
+          if (action === "list") {
+            const locks = await listActiveLocks(ctx);
+            return JSON.stringify({ ok: true, total: locks.length, locks }, null, 2);
+          }
+          if (action === "acquire") {
+            if (!args?.issue_id || !args?.agent_id) {
+              return JSON.stringify({ ok: false, code: "MISSING_FIELDS", message: "issue_id e agent_id são obrigatórios" }, null, 2);
+            }
+            const res = await acquireCheckoutLock(ctx, args.issue_id, args.agent_id, args?.ttl_minutes || 60);
+            return JSON.stringify(res, null, 2);
+          }
+          if (action === "release") {
+            if (!args?.issue_id) {
+              return JSON.stringify({ ok: false, code: "MISSING_FIELDS", message: "issue_id é obrigatório" }, null, 2);
+            }
+            const res = await releaseCheckoutLock(ctx, args.issue_id, args?.agent_id);
+            return JSON.stringify(res, null, 2);
+          }
+          return JSON.stringify({ ok: false, code: "INVALID_ACTION", message: `Ação desconhecida: ${action}` }, null, 2);
+        },
+      });
+
+      // ── ONDA 3: MOTOR DE GOVERNANÇA DE CICLO FECHADO ──
+      (ctx.agents as any).addTool({
+        name: "orgfy_governanca_avaliar",
+        description: "Avalia os KPIs reais contra regras de governança (Orçamento 80%/100%, Gargalo de Revisão, WIP Órfão e Estagnação Nível 3) e dispara notificações/wakes com cooldown anti-spam de 15 min.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            dry_run: { type: "boolean", description: "Se true, apenas simula as ações sem disparar notificações ou wakes" },
+            auto_wake: { type: "boolean", description: "Se true, acorda automaticamente agentes responsáveis via ctx.agents.wake quando aplicável" },
+          },
+        },
+        call: async (_client: any, _context: any, args: any) => {
+          const evalRes = await evaluateGovernanceAndReact(ctx, {
+            dryRun: Boolean(args?.dry_run),
+            autoWake: args?.auto_wake !== false,
+          });
+          return JSON.stringify(evalRes, null, 2);
+        },
+      });
+
+      // ── ONDA 3: LINTER SEMÂNTICO + L-01/L-22 DE CARDS ──
+      (ctx.agents as any).addTool({
+        name: "orgfy_lint_card",
+        description: "Audita um card antes do despacho validando regras determinísticas L-01/L-22 (segregação executor/revisor, comando de aceite verificável) e revisão semântica via ctx.decisions.decide.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            title: { type: "string", description: "Título do card" },
+            objective: { type: "string", description: "Objetivo claro da entrega" },
+            done_when: { type: "string", description: "Critério objetivo de pronto (Feito Quando)" },
+            acceptance_command: { type: "string", description: "Comando determinístico de aceite (L-22)" },
+            executor: { type: "string", description: "Agente executor proposto" },
+            revisor: { type: "string", description: "Agente revisor proposto" },
+          },
+          required: ["title"],
+        },
+        call: async (_client: any, _context: any, args: any) => {
+          const descricao = [args.objective, args.done_when].filter(Boolean).join(" | ");
+          const lintRes = await lintCardForDispatch(ctx, {
+            titulo: args.title,
+            descricao: descricao || undefined,
+            acceptanceCommand: args.acceptance_command,
+            executor: args.executor,
+            revisor: args.revisor,
+          });
+          return JSON.stringify(lintRes, null, 2);
+        },
+      });
+
+      console.log("[ORGFY] 9 agentTools registradas com sucesso no harness do Buzz (Ondas 1, 2 e 3).");
     } catch (err) {
       console.warn("[ORGFY] Falha ao registrar agentTools:", err);
     }

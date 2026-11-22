@@ -1348,7 +1348,1100 @@ async function compileProbationaryRule(ctx, options) {
     return { success: false, output: combinedOutput };
   }
 }
-const inject = ["react", "pages", "settingsCards", "host", "navigation", "agents"];
+const KPI_SNAPSHOT_PATH = "/Users/heltonfraga/.buzz/.scratch/kpis-esteira.json";
+const KPI_SCRIPT_PATH = "/Users/heltonfraga/.buzz/REPOS/orgfy-buzz-plugin/scripts/gerar_kpis_esteira.py";
+const ARTIFACT_COLLECTION = "orgfy_kpi_history_v1";
+const LOCAL_STORAGE_KEY = "orgfy_kpi_history_v1";
+const MAX_HISTORY_POINTS = 60;
+async function readHistory(ctx) {
+  try {
+    const store = ctx.artifactStorage;
+    if (store == null ? void 0 : store.list) {
+      const items = await store.list(ARTIFACT_COLLECTION);
+      if (Array.isArray(items)) {
+        return items.map((it) => (it == null ? void 0 : it.value) ?? it).filter((p) => p && typeof p.ts === "string").slice(-MAX_HISTORY_POINTS);
+      }
+    }
+  } catch {
+  }
+  try {
+    if (typeof localStorage !== "undefined") {
+      const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed.slice(-MAX_HISTORY_POINTS);
+      }
+    }
+  } catch {
+  }
+  return [];
+}
+async function recordKpiSnapshotHistory(ctx, kpis) {
+  var _a, _b, _c, _d, _e;
+  const point = {
+    ts: kpis.gerado_em || (/* @__PURE__ */ new Date()).toISOString(),
+    fpy_real_pct: ((_a = kpis.qualidade) == null ? void 0 : _a.fpy_real_pct) ?? null,
+    fila_revisao_atual: ((_b = kpis.fluxo) == null ? void 0 : _b.fila_revisao_atual) ?? 0,
+    orphan_wip_count: ((_c = kpis.higiene) == null ? void 0 : _c.orphan_wip_count) ?? 0,
+    uso_teto_diario_pct: ((_d = kpis.economia) == null ? void 0 : _d.uso_teto_diario_pct) ?? 0,
+    vazao_7d: ((_e = kpis.fluxo) == null ? void 0 : _e.vazao_7d) ?? 0
+  };
+  try {
+    const store = ctx.artifactStorage;
+    if (store == null ? void 0 : store.put) {
+      await store.put(ARTIFACT_COLLECTION, point.ts, point);
+    }
+  } catch {
+  }
+  const prev = await readHistory(ctx);
+  const filtered = prev.filter((p) => p.ts !== point.ts);
+  const next = [...filtered, point].slice(-MAX_HISTORY_POINTS);
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(next));
+    }
+  } catch {
+  }
+  return next;
+}
+async function fetchKpisEsteira(ctx) {
+  const host = ctx.host;
+  const history = await readHistory(ctx);
+  if (!(host == null ? void 0 : host.readFile)) {
+    return {
+      disponivel: false,
+      error: "API ctx.host.readFile indisponível neste ambiente.",
+      sourcePath: KPI_SNAPSHOT_PATH,
+      kpis: null,
+      history
+    };
+  }
+  try {
+    const raw = await host.readFile(KPI_SNAPSHOT_PATH);
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || !parsed.fluxo || !parsed.economia) {
+      return {
+        disponivel: false,
+        error: "Arquivo kpis-esteira.json inválido ou incompleto.",
+        sourcePath: KPI_SNAPSHOT_PATH,
+        kpis: null,
+        history
+      };
+    }
+    const updatedHistory = await recordKpiSnapshotHistory(ctx, parsed);
+    return {
+      disponivel: true,
+      error: null,
+      sourcePath: KPI_SNAPSHOT_PATH,
+      kpis: parsed,
+      history: updatedHistory
+    };
+  } catch (err) {
+    return {
+      disponivel: false,
+      error: (err == null ? void 0 : err.message) || "Não foi possível ler kpis-esteira.json.",
+      sourcePath: KPI_SNAPSHOT_PATH,
+      kpis: null,
+      history
+    };
+  }
+}
+async function recalculateKpisNow(ctx) {
+  const host = ctx.host;
+  let output = "";
+  try {
+    if (host == null ? void 0 : host.exec) {
+      const res = await host.exec("python", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
+      output = [res == null ? void 0 : res.stdout, res == null ? void 0 : res.stderr].filter(Boolean).join("\n").trim();
+    } else if (host == null ? void 0 : host.spawn) {
+      const proc = await host.spawn("python", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
+      if (proc == null ? void 0 : proc.exited) {
+        await proc.exited;
+      }
+      output = "Recálculo executado via subprocesso.";
+    }
+  } catch (err) {
+    output = `Aviso ao executar script: ${(err == null ? void 0 : err.message) || err}`;
+  }
+  const result = await fetchKpisEsteira(ctx);
+  return {
+    ok: result.disponivel,
+    output,
+    result
+  };
+}
+const CARD_BG = "rgba(0, 0, 0, 0.28)";
+const BORDER = "1px solid rgba(255, 255, 255, 0.08)";
+function formatMin(min) {
+  if (min === null || !Number.isFinite(min)) return "--";
+  if (min < 60) return `${min.toFixed(0)}m`;
+  const hrs = min / 60;
+  if (hrs < 24) return `${hrs.toFixed(1)}h`;
+  return `${(hrs / 24).toFixed(1)}d`;
+}
+function formatNum(val) {
+  if (val === null || val === void 0 || !Number.isFinite(val)) return "--";
+  return val.toLocaleString("pt-BR");
+}
+function renderDailyTrendSvg(h, series) {
+  const width = 520;
+  const height = 148;
+  const padLeft = 28;
+  const padRight = 12;
+  const padTop = 16;
+  const padBottom = 26;
+  const plotW = width - padLeft - padRight;
+  const plotH = height - padTop - padBottom;
+  const maxVal = Math.max(
+    1,
+    ...series.map((d) => Math.max(d.merges, d.retrabalhos + d.conflitos))
+  );
+  const barGroupW = series.length > 0 ? plotW / series.length : plotW;
+  const barW = Math.max(6, Math.min(18, barGroupW * 0.48));
+  return h(
+    "svg",
+    {
+      viewBox: `0 0 ${width} ${height}`,
+      style: { width: "100%", height: "148px", display: "block" }
+    },
+    // Grid lines
+    [0, 0.5, 1].map((ratio, idx) => {
+      const y = padTop + plotH * (1 - ratio);
+      const label = Math.round(maxVal * ratio);
+      return h(
+        "g",
+        { key: `grid-${idx}` },
+        h("line", {
+          x1: padLeft,
+          y1: y,
+          x2: width - padRight,
+          y2: y,
+          stroke: "rgba(255,255,255,0.08)",
+          strokeDasharray: idx === 0 ? "none" : "3 3",
+          strokeWidth: 1
+        }),
+        h(
+          "text",
+          {
+            x: padLeft - 6,
+            y: y + 3,
+            textAnchor: "end",
+            fill: "#6b7280",
+            fontSize: "9",
+            fontFamily: "monospace"
+          },
+          String(label)
+        )
+      );
+    }),
+    // Bars
+    series.map((d, i) => {
+      const cx = padLeft + i * barGroupW + barGroupW / 2;
+      const mergeH = d.merges / maxVal * plotH;
+      const reworkTotal = d.retrabalhos + d.conflitos;
+      const reworkH = reworkTotal / maxVal * plotH;
+      const dayLabel = d.dia.slice(8, 10);
+      return h(
+        "g",
+        { key: d.dia },
+        h("rect", {
+          x: cx - barW / 2,
+          y: padTop + plotH - mergeH,
+          width: barW,
+          height: Math.max(mergeH, d.merges > 0 ? 2 : 0),
+          rx: 3,
+          fill: "#10b981"
+        }),
+        reworkTotal > 0 && h("rect", {
+          x: cx - barW / 2 + barW * 0.55,
+          y: padTop + plotH - reworkH,
+          width: Math.max(4, barW * 0.45),
+          height: Math.max(reworkH, 3),
+          rx: 2,
+          fill: "#f59e0b"
+        }),
+        i % 2 === 0 && h(
+          "text",
+          {
+            x: cx,
+            y: height - 8,
+            textAnchor: "middle",
+            fill: "#9ca3af",
+            fontSize: "9",
+            fontFamily: "monospace"
+          },
+          dayLabel
+        )
+      );
+    })
+  );
+}
+function renderBudgetGaugeSvg(h, pct, status) {
+  const clamped = Math.max(0, Math.min(100, pct));
+  const fill = status === "BLOQUEADO_100" ? "#ef4444" : status === "ALERTA_80" ? "#f59e0b" : "#10b981";
+  return h(
+    "svg",
+    {
+      viewBox: "0 0 360 36",
+      style: { width: "100%", height: "36px", display: "block" }
+    },
+    h("rect", {
+      x: 0,
+      y: 12,
+      width: 360,
+      height: 12,
+      rx: 6,
+      fill: "rgba(255,255,255,0.08)"
+    }),
+    h("rect", {
+      x: 0,
+      y: 12,
+      width: Math.max(clamped > 0 ? 4 : 0, clamped / 100 * 360),
+      height: 12,
+      rx: 6,
+      fill
+    }),
+    // Marca 80% (Soft Cap Paperclip)
+    h("line", {
+      x1: 288,
+      y1: 8,
+      x2: 288,
+      y2: 28,
+      stroke: "#f59e0b",
+      strokeWidth: 1.5,
+      strokeDasharray: "2 2"
+    }),
+    h(
+      "text",
+      {
+        x: 288,
+        y: 7,
+        textAnchor: "middle",
+        fill: "#f59e0b",
+        fontSize: "8.5",
+        fontFamily: "monospace"
+      },
+      "80%"
+    ),
+    // Marca 100% (Hard Cap)
+    h("line", {
+      x1: 359,
+      y1: 8,
+      x2: 359,
+      y2: 28,
+      stroke: "#ef4444",
+      strokeWidth: 1.5
+    }),
+    h(
+      "text",
+      {
+        x: 348,
+        y: 7,
+        textAnchor: "end",
+        fill: "#ef4444",
+        fontSize: "8.5",
+        fontFamily: "monospace"
+      },
+      "100%"
+    )
+  );
+}
+function renderIntelligenceTab(props) {
+  const { h, kpis, history, error, isRecalculating, onRecalculate, onRunGovernanceEval, governanceSummary } = props;
+  if (!kpis) {
+    return h(
+      "div",
+      {
+        style: {
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: "12px",
+          padding: "32px",
+          color: "#9ca3af",
+          textAlign: "center"
+        }
+      },
+      h(
+        "div",
+        { style: { fontSize: "14px", fontWeight: "700", color: "#f3f4f6" } },
+        "Snapshot kpis-esteira.json ainda não disponível"
+      ),
+      h(
+        "div",
+        { style: { fontSize: "12px", maxWidth: "460px", lineHeight: "1.5" } },
+        error || "Execute o motor determinístico da Onda 1 para consolidar transições, uso do NexusMind e higiene do backlog sem dados mockados."
+      ),
+      h(
+        "button",
+        {
+          onClick: onRecalculate,
+          disabled: isRecalculating,
+          style: {
+            padding: "8px 16px",
+            borderRadius: "8px",
+            border: "none",
+            backgroundColor: "#10b981",
+            color: "#000000",
+            fontWeight: "700",
+            fontSize: "12px",
+            cursor: isRecalculating ? "wait" : "pointer"
+          }
+        },
+        isRecalculating ? "Recalculando KPIs..." : "Gerar KPIs Reais Agora"
+      )
+    );
+  }
+  const budgetColor = kpis.economia.status_orcamento === "BLOQUEADO_100" ? "#ef4444" : kpis.economia.status_orcamento === "ALERTA_80" ? "#f59e0b" : "#10b981";
+  return h(
+    "div",
+    {
+      style: {
+        display: "flex",
+        flexDirection: "column",
+        gap: "14px",
+        flex: 1,
+        minHeight: 0,
+        overflowY: "auto",
+        paddingRight: "6px"
+      }
+    },
+    // Barra Superior de Ação e Freshness
+    h(
+      "div",
+      {
+        style: {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: "10px",
+          padding: "12px 14px",
+          borderRadius: "10px",
+          backgroundColor: CARD_BG,
+          border: BORDER
+        }
+      },
+      h(
+        "div",
+        { style: { display: "flex", flexDirection: "column", gap: "2px" } },
+        h(
+          "span",
+          { style: { fontSize: "13px", fontWeight: "700", color: "#f3f4f6" } },
+          "Painel de Inteligência & Saúde — Melhoria Contínua (Zero Vaidade)"
+        ),
+        h(
+          "span",
+          { style: { fontSize: "11px", color: "#9ca3af", fontFamily: "monospace" } },
+          `Fontes: ${kpis.fontes.transicoes_linhas} transições · ${kpis.fontes.nm_usage_itens} reqs NexusMind · ${kpis.fontes.placar_arquivo || "sem placar"} · ${history.length} snapshots`
+        )
+      ),
+      h(
+        "div",
+        { style: { display: "flex", alignItems: "center", gap: "8px" } },
+        onRunGovernanceEval && h(
+          "button",
+          {
+            onClick: onRunGovernanceEval,
+            style: {
+              padding: "6px 12px",
+              borderRadius: "6px",
+              border: "1px solid rgba(56, 189, 248, 0.35)",
+              backgroundColor: "rgba(56, 189, 248, 0.14)",
+              color: "#38bdf8",
+              fontSize: "11px",
+              fontWeight: "600",
+              cursor: "pointer"
+            }
+          },
+          "Avaliar Governança (Onda 3)"
+        ),
+        h(
+          "button",
+          {
+            onClick: onRecalculate,
+            disabled: isRecalculating,
+            style: {
+              padding: "6px 12px",
+              borderRadius: "6px",
+              border: "none",
+              backgroundColor: "#10b981",
+              color: "#000000",
+              fontSize: "11px",
+              fontWeight: "700",
+              cursor: isRecalculating ? "wait" : "pointer"
+            }
+          },
+          isRecalculating ? "Recalculando..." : "Recalcular KPIs agora"
+        )
+      )
+    ),
+    governanceSummary && h(
+      "div",
+      {
+        style: {
+          padding: "10px 14px",
+          borderRadius: "8px",
+          backgroundColor: "rgba(56, 189, 248, 0.1)",
+          border: "1px solid rgba(56, 189, 248, 0.3)",
+          fontSize: "11px",
+          color: "#e0f2fe",
+          fontFamily: "monospace"
+        }
+      },
+      governanceSummary
+    ),
+    // 4 Cards Principais (4 Pilares de Decisão)
+    h(
+      "div",
+      {
+        style: {
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
+          gap: "10px"
+        }
+      },
+      // Pilar 1: Gargalo de Revisão
+      h(
+        "div",
+        { style: { padding: "12px 14px", borderRadius: "10px", backgroundColor: CARD_BG, border: BORDER } },
+        h("div", { style: { fontSize: "10px", fontWeight: "700", color: "#9ca3af", textTransform: "uppercase" } }, "1. Gargalo de Revisão"),
+        h(
+          "div",
+          { style: { fontSize: "22px", fontWeight: "700", color: kpis.fluxo.fila_revisao_atual >= 10 ? "#f59e0b" : "#10b981", marginTop: "4px" } },
+          `${kpis.fluxo.fila_revisao_atual} na fila`
+        ),
+        h(
+          "div",
+          { style: { fontSize: "11px", color: "#9ca3af", marginTop: "4px", fontFamily: "monospace" } },
+          `Espera P50 ${formatMin(kpis.fluxo.revisao_espera_p50_min)} · P90 ${formatMin(kpis.fluxo.revisao_espera_p90_min)}`
+        )
+      ),
+      // Pilar 2: FPY Real & Retrabalho
+      h(
+        "div",
+        { style: { padding: "12px 14px", borderRadius: "10px", backgroundColor: CARD_BG, border: BORDER } },
+        h("div", { style: { fontSize: "10px", fontWeight: "700", color: "#9ca3af", textTransform: "uppercase" } }, "2. Qualidade (FPY Real)"),
+        h(
+          "div",
+          { style: { fontSize: "22px", fontWeight: "700", color: "#10b981", marginTop: "4px" } },
+          kpis.qualidade.fpy_real_pct !== null ? `${kpis.qualidade.fpy_real_pct.toFixed(1)}%` : "--"
+        ),
+        h(
+          "div",
+          { style: { fontSize: "11px", color: "#9ca3af", marginTop: "4px", fontFamily: "monospace" } },
+          `${kpis.qualidade.cards_aceitos_primeira} 1ª vez · ${kpis.qualidade.cards_com_retrabalho} retrabalho (${kpis.qualidade.taxa_retrabalho_pct}%)`
+        )
+      ),
+      // Pilar 3: Economia & ROI
+      h(
+        "div",
+        { style: { padding: "12px 14px", borderRadius: "10px", backgroundColor: CARD_BG, border: BORDER } },
+        h("div", { style: { fontSize: "10px", fontWeight: "700", color: "#9ca3af", textTransform: "uppercase" } }, "3. Economia & Cache"),
+        h(
+          "div",
+          { style: { fontSize: "22px", fontWeight: "700", color: budgetColor, marginTop: "4px" } },
+          `${kpis.economia.status_orcamento} (${kpis.economia.uso_teto_diario_pct}%)`
+        ),
+        h(
+          "div",
+          { style: { fontSize: "11px", color: "#9ca3af", marginTop: "4px", fontFamily: "monospace" } },
+          `Cache ${kpis.economia.cache_hit_ratio_pct}% · ${formatNum(kpis.economia.tokens_por_card_integrado)} tok/card`
+        )
+      ),
+      // Pilar 4: Higiene & Orphan WIP
+      h(
+        "div",
+        { style: { padding: "12px 14px", borderRadius: "10px", backgroundColor: CARD_BG, border: BORDER } },
+        h("div", { style: { fontSize: "10px", fontWeight: "700", color: "#9ca3af", textTransform: "uppercase" } }, "4. Higiene & Estagnação"),
+        h(
+          "div",
+          { style: { fontSize: "22px", fontWeight: "700", color: kpis.higiene.orphan_wip_pct >= 25 ? "#f59e0b" : "#10b981", marginTop: "4px" } },
+          `${kpis.higiene.orphan_wip_count} órfãos (${kpis.higiene.orphan_wip_pct}%)`
+        ),
+        h(
+          "div",
+          { style: { fontSize: "11px", color: "#9ca3af", marginTop: "4px", fontFamily: "monospace" } },
+          `Nível 3: ${kpis.higiene.estagnados_nivel_3} · Nível 2: ${kpis.higiene.estagnados_nivel_2}`
+        )
+      )
+    ),
+    // Linha 2: Gráfico SVG de Tendência 14d + Medidor Orçamento 80%/100%
+    h(
+      "div",
+      {
+        style: {
+          display: "grid",
+          gridTemplateColumns: "1.45fr 1fr",
+          gap: "12px"
+        }
+      },
+      // Gráfico 14 dias
+      h(
+        "div",
+        { style: { padding: "14px", borderRadius: "10px", backgroundColor: CARD_BG, border: BORDER } },
+        h(
+          "div",
+          { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" } },
+          h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, "Vazão Diária (14 dias): Merges vs. Retrabalho"),
+          h(
+            "span",
+            { style: { fontSize: "10px", color: "#9ca3af", fontFamily: "monospace" } },
+            `7d: ${kpis.fluxo.vazao_7d} · 30d: ${kpis.fluxo.vazao_30d}`
+          )
+        ),
+        renderDailyTrendSvg(h, kpis.fluxo.serie_diaria_14d || [])
+      ),
+      // Medidor de Orçamento 80%/100% + Alertas
+      h(
+        "div",
+        { style: { padding: "14px", borderRadius: "10px", backgroundColor: CARD_BG, border: BORDER, display: "flex", flexDirection: "column", gap: "10px" } },
+        h("div", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, "Guardrail Econômico (80% Alerta / 100% Trava)"),
+        renderBudgetGaugeSvg(h, kpis.economia.uso_teto_diario_pct, kpis.economia.status_orcamento),
+        h(
+          "div",
+          { style: { display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#9ca3af", fontFamily: "monospace" } },
+          h("span", null, `Hoje: ${formatNum(kpis.economia.tokens_hoje)} tok`),
+          h("span", null, `Teto: ${formatNum(kpis.economia.teto_diario_tokens)} tok`)
+        ),
+        h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: "6px", marginTop: "4px" } },
+          kpis.alertas_ativos.length === 0 ? h("div", { style: { fontSize: "11px", color: "#10b981" } }, "Nenhum alerta crítico ativo.") : kpis.alertas_ativos.map(
+            (al) => h(
+              "div",
+              {
+                key: al.codigo,
+                style: {
+                  padding: "6px 8px",
+                  borderRadius: "6px",
+                  backgroundColor: al.severidade === "critical" ? "rgba(239, 68, 68, 0.14)" : "rgba(245, 158, 11, 0.12)",
+                  border: al.severidade === "critical" ? "1px solid rgba(239, 68, 68, 0.35)" : "1px solid rgba(245, 158, 11, 0.3)",
+                  fontSize: "10.5px",
+                  color: "#f3f4f6"
+                }
+              },
+              h("div", { style: { fontWeight: "700", color: al.severidade === "critical" ? "#f87171" : "#fbbf24" } }, al.mensagem),
+              h("div", { style: { color: "#cbd5e1", marginTop: "2px" } }, al.acao_sugerida)
+            )
+          )
+        )
+      )
+    ),
+    // Linha 3: Eficiência por Modelo NexusMind + Top Worktrees Estagnados
+    h(
+      "div",
+      {
+        style: {
+          display: "grid",
+          gridTemplateColumns: "1.25fr 1fr",
+          gap: "12px"
+        }
+      },
+      // Tabela de Modelos
+      h(
+        "div",
+        { style: { padding: "14px", borderRadius: "10px", backgroundColor: CARD_BG, border: BORDER } },
+        h(
+          "div",
+          { style: { display: "flex", justifyContent: "space-between", marginBottom: "8px" } },
+          h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, "ROI & Eficiência por Modelo (NexusMind)"),
+          h("span", { style: { fontSize: "11px", color: "#10b981", fontFamily: "monospace" } }, `Amostra: $${kpis.economia.custo_usd_total_amostra.toFixed(4)} USD`)
+        ),
+        kpis.economia.por_modelo.length === 0 ? h("div", { style: { fontSize: "11px", color: "#6b7280" } }, "Sem registros em nm_usage.json.") : h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: "6px" } },
+          kpis.economia.por_modelo.map(
+            (m) => h(
+              "div",
+              {
+                key: `${m.modelo}-${m.grupo}`,
+                style: {
+                  display: "grid",
+                  gridTemplateColumns: "1.4fr 0.7fr 0.7fr 0.7fr 0.8fr",
+                  gap: "6px",
+                  padding: "6px 8px",
+                  borderRadius: "6px",
+                  backgroundColor: "rgba(255,255,255,0.03)",
+                  fontSize: "11px",
+                  fontFamily: "monospace",
+                  alignItems: "center"
+                }
+              },
+              h("span", { style: { color: "#f3f4f6", fontWeight: "600", overflow: "hidden", textOverflow: "ellipsis" } }, `${m.modelo} (${m.grupo})`),
+              h("span", { style: { color: "#9ca3af" } }, `${m.requisicoes} req`),
+              h("span", { style: { color: "#10b981" } }, `$${m.custo_usd.toFixed(3)}`),
+              h("span", { style: { color: "#38bdf8" } }, `${m.cache_hit_pct}% hit`),
+              h("span", { style: { color: "#fbbf24", textAlign: "right" } }, `${Math.round(m.latencia_media_ms)}ms`)
+            )
+          )
+        )
+      ),
+      // Top Estagnados
+      h(
+        "div",
+        { style: { padding: "14px", borderRadius: "10px", backgroundColor: CARD_BG, border: BORDER } },
+        h("div", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6", marginBottom: "8px" } }, "Top Estagnados no Sentinela (Ação Imediata)"),
+        kpis.higiene.top_estagnados.length === 0 ? h("div", { style: { fontSize: "11px", color: "#10b981" } }, "Nenhum worktree estagnado.") : h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: "5px" } },
+          kpis.higiene.top_estagnados.slice(0, 6).map(
+            (st) => h(
+              "div",
+              {
+                key: st.chave,
+                style: {
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "5px 8px",
+                  borderRadius: "6px",
+                  backgroundColor: "rgba(255,255,255,0.03)",
+                  fontSize: "10.5px",
+                  fontFamily: "monospace"
+                }
+              },
+              h("span", { style: { color: "#cbd5e1", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "70%" } }, st.chave),
+              h("span", { style: { color: st.nivel >= 3 ? "#f87171" : "#fbbf24", fontWeight: "700" } }, `N${st.nivel} · ${st.ciclos} ciclos`)
+            )
+          )
+        )
+      )
+    )
+  );
+}
+function createChannelPulsePanel(ctx, fetchKpis) {
+  const React = ctx.react;
+  const h = React.createElement;
+  return function OrgFyChannelPulsePanel() {
+    const [kpis, setKpis] = React.useState(null);
+    const [loading, setLoading] = React.useState(true);
+    const load = async () => {
+      setLoading(true);
+      try {
+        const data = await fetchKpis();
+        setKpis(data);
+      } finally {
+        setLoading(false);
+      }
+    };
+    React.useEffect(() => {
+      load();
+    }, []);
+    return h(
+      "div",
+      {
+        style: {
+          padding: "12px",
+          display: "flex",
+          flexDirection: "column",
+          gap: "10px",
+          color: "#f3f4f6",
+          fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          fontSize: "12px"
+        }
+      },
+      h(
+        "div",
+        { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+        h("strong", { style: { fontSize: "13px" } }, "OrgFy Pulse"),
+        h(
+          "button",
+          {
+            onClick: load,
+            style: {
+              padding: "3px 8px",
+              borderRadius: "6px",
+              border: "1px solid rgba(255,255,255,0.12)",
+              backgroundColor: "rgba(255,255,255,0.05)",
+              color: "#cbd5e1",
+              fontSize: "10px",
+              cursor: "pointer"
+            }
+          },
+          loading ? "..." : "Atualizar"
+        )
+      ),
+      !kpis ? h("div", { style: { color: "#9ca3af", fontSize: "11px" } }, loading ? "Carregando telemetria..." : "Sem snapshot kpis-esteira.json.") : h(
+        "div",
+        { style: { display: "flex", flexDirection: "column", gap: "8px" } },
+        h(
+          "div",
+          { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" } },
+          h(
+            "div",
+            { style: { padding: "8px", borderRadius: "8px", backgroundColor: "rgba(255,255,255,0.04)" } },
+            h("div", { style: { fontSize: "10px", color: "#9ca3af" } }, "Orçamento"),
+            h("div", { style: { fontWeight: "700", color: kpis.economia.status_orcamento === "OK" ? "#10b981" : "#f59e0b" } }, kpis.economia.status_orcamento)
+          ),
+          h(
+            "div",
+            { style: { padding: "8px", borderRadius: "8px", backgroundColor: "rgba(255,255,255,0.04)" } },
+            h("div", { style: { fontSize: "10px", color: "#9ca3af" } }, "FPY Real"),
+            h("div", { style: { fontWeight: "700", color: "#10b981" } }, kpis.qualidade.fpy_real_pct !== null ? `${kpis.qualidade.fpy_real_pct}%` : "--")
+          ),
+          h(
+            "div",
+            { style: { padding: "8px", borderRadius: "8px", backgroundColor: "rgba(255,255,255,0.04)" } },
+            h("div", { style: { fontSize: "10px", color: "#9ca3af" } }, "Fila Revisão"),
+            h("div", { style: { fontWeight: "700", color: "#f59e0b" } }, `${kpis.fluxo.fila_revisao_atual} cards`)
+          ),
+          h(
+            "div",
+            { style: { padding: "8px", borderRadius: "8px", backgroundColor: "rgba(255,255,255,0.04)" } },
+            h("div", { style: { fontSize: "10px", color: "#9ca3af" } }, "WIP Órfão"),
+            h("div", { style: { fontWeight: "700", color: "#f87171" } }, `${kpis.higiene.orphan_wip_count} (${kpis.higiene.orphan_wip_pct}%)`)
+          )
+        ),
+        kpis.alertas_ativos.slice(0, 3).map(
+          (al) => h(
+            "div",
+            {
+              key: al.codigo,
+              style: {
+                padding: "6px 8px",
+                borderRadius: "6px",
+                backgroundColor: "rgba(245, 158, 11, 0.12)",
+                border: "1px solid rgba(245, 158, 11, 0.25)",
+                fontSize: "10.5px"
+              }
+            },
+            al.mensagem
+          )
+        )
+      )
+    );
+  };
+}
+const LOCKS_FILE_PATH = "/Users/heltonfraga/.buzz/.scratch/orgfy-locks.json";
+const DEFAULT_LOCK_TTL_MS = 30 * 60 * 1e3;
+const DEFAULT_COOLDOWN_MS = 15 * 60 * 1e3;
+const memoryLocks = /* @__PURE__ */ new Map();
+const alertCooldowns = /* @__PURE__ */ new Map();
+function purgeExpiredLocks(now) {
+  for (const [key, rec] of memoryLocks.entries()) {
+    if (rec.expiresAt <= now) {
+      memoryLocks.delete(key);
+    }
+  }
+}
+async function syncLocksFromDisk(ctx) {
+  const host = ctx.host;
+  if (!(host == null ? void 0 : host.readFile)) return;
+  try {
+    const raw = await host.readFile(LOCKS_FILE_PATH);
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const now = Date.now();
+      for (const [k, v] of Object.entries(parsed)) {
+        if (v && typeof v.agentKey === "string" && typeof v.expiresAt === "number" && v.expiresAt > now) {
+          if (!memoryLocks.has(k)) {
+            memoryLocks.set(k, {
+              issueId: k,
+              agentKey: v.agentKey,
+              acquiredAt: Number(v.acquiredAt || now),
+              expiresAt: v.expiresAt
+            });
+          }
+        }
+      }
+    }
+  } catch {
+  }
+}
+async function persistLocksToDisk(ctx) {
+  const host = ctx.host;
+  if (!(host == null ? void 0 : host.writeFile)) return;
+  try {
+    const obj = {};
+    for (const [k, v] of memoryLocks.entries()) {
+      obj[k] = v;
+    }
+    await host.writeFile(LOCKS_FILE_PATH, JSON.stringify(obj, null, 2));
+  } catch {
+  }
+}
+async function acquireCheckoutLock(ctx, issueId, agentKey, ttlMs = DEFAULT_LOCK_TTL_MS, nowMs = Date.now()) {
+  const cleanIssue = String(issueId || "").trim();
+  const cleanAgent = String(agentKey || "").trim();
+  if (!cleanIssue || !cleanAgent) {
+    return {
+      ok: false,
+      code: "LOCK_CONFLICT",
+      message: "issueId e agentKey são obrigatórios para checkout atômico."
+    };
+  }
+  await syncLocksFromDisk(ctx);
+  purgeExpiredLocks(nowMs);
+  const existing = memoryLocks.get(cleanIssue);
+  if (existing && existing.expiresAt > nowMs) {
+    if (existing.agentKey === cleanAgent) {
+      const renewed = {
+        issueId: cleanIssue,
+        agentKey: cleanAgent,
+        acquiredAt: existing.acquiredAt,
+        expiresAt: nowMs + ttlMs
+      };
+      memoryLocks.set(cleanIssue, renewed);
+      await persistLocksToDisk(ctx);
+      return {
+        ok: true,
+        code: "RENEWED",
+        lock: renewed,
+        message: `Lock de ${cleanIssue} renovado para ${cleanAgent}.`
+      };
+    }
+    return {
+      ok: false,
+      code: "LOCK_CONFLICT",
+      conflictOwner: existing.agentKey,
+      lock: existing,
+      message: `LOCK_CONFLICT: Card ${cleanIssue} já está reservado por ${existing.agentKey} até ${new Date(existing.expiresAt).toISOString()}.`
+    };
+  }
+  const created = {
+    issueId: cleanIssue,
+    agentKey: cleanAgent,
+    acquiredAt: nowMs,
+    expiresAt: nowMs + ttlMs
+  };
+  memoryLocks.set(cleanIssue, created);
+  await persistLocksToDisk(ctx);
+  return {
+    ok: true,
+    code: "ACQUIRED",
+    lock: created,
+    message: `Lock atômico adquirido para ${cleanIssue} por ${cleanAgent}.`
+  };
+}
+async function releaseCheckoutLock(ctx, issueId, agentKey, force = false) {
+  const cleanIssue = String(issueId || "").trim();
+  await syncLocksFromDisk(ctx);
+  purgeExpiredLocks(Date.now());
+  const existing = memoryLocks.get(cleanIssue);
+  if (!existing) {
+    return {
+      ok: true,
+      code: "NOT_FOUND",
+      message: `Nenhum lock ativo encontrado para ${cleanIssue}.`
+    };
+  }
+  if (!force && agentKey && existing.agentKey !== agentKey) {
+    return {
+      ok: false,
+      code: "OWNER_MISMATCH",
+      conflictOwner: existing.agentKey,
+      message: `Lock de ${cleanIssue} pertence a ${existing.agentKey}, não a ${agentKey}.`
+    };
+  }
+  memoryLocks.delete(cleanIssue);
+  await persistLocksToDisk(ctx);
+  return {
+    ok: true,
+    code: "RELEASED",
+    message: `Lock de ${cleanIssue} liberado com sucesso.`
+  };
+}
+async function listActiveLocks(ctx, nowMs = Date.now()) {
+  await syncLocksFromDisk(ctx);
+  purgeExpiredLocks(nowMs);
+  return Array.from(memoryLocks.values());
+}
+function evaluateBudgetGate(kpis, boardOverride = false) {
+  var _a, _b;
+  const usoPct = ((_a = kpis == null ? void 0 : kpis.economia) == null ? void 0 : _a.uso_teto_diario_pct) ?? 0;
+  const status = ((_b = kpis == null ? void 0 : kpis.economia) == null ? void 0 : _b.status_orcamento) ?? "OK";
+  if (status === "BLOQUEADO_100" || usoPct >= 100) {
+    if (boardOverride) {
+      return {
+        allowed: true,
+        code: "OVERRIDE_ALLOWED",
+        usoPct,
+        statusOrcamento: "BLOQUEADO_100",
+        message: `Teto diário de 100% atingido (${usoPct}%), liberado excepcionalmente via boardOverride.`
+      };
+    }
+    return {
+      allowed: false,
+      code: "BUDGET_HARD_CAP_REACHED",
+      usoPct,
+      statusOrcamento: "BLOQUEADO_100",
+      message: `BUDGET_HARD_CAP_REACHED: Consumo diário em ${usoPct}% do teto. Informe boardOverride: true para liberar manualmente.`
+    };
+  }
+  if (status === "ALERTA_80" || usoPct >= 80) {
+    return {
+      allowed: true,
+      code: "SOFT_CAP_80",
+      usoPct,
+      statusOrcamento: "ALERTA_80",
+      message: `Alerta suave: consumo diário em ${usoPct}% do teto (priorizar modelos Tier 1).`
+    };
+  }
+  return {
+    allowed: true,
+    code: "OK",
+    usoPct,
+    statusOrcamento: "OK",
+    message: `Orçamento diário saudável (${usoPct}% do teto).`
+  };
+}
+function canTriggerWithCooldown(key, nowMs, commit = true, cooldownMs = DEFAULT_COOLDOWN_MS) {
+  const last = alertCooldowns.get(key);
+  if (last !== void 0 && nowMs - last < cooldownMs) {
+    return false;
+  }
+  if (commit) {
+    alertCooldowns.set(key, nowMs);
+  }
+  return true;
+}
+async function evaluateGovernanceAndReact(ctx, options = {}) {
+  const nowMs = options.nowMs ?? Date.now();
+  const kpiRes = await fetchKpisEsteira(ctx);
+  const kpis = kpiRes.kpis;
+  const locks = await listActiveLocks(ctx, nowMs);
+  const budget = evaluateBudgetGate(kpis, false);
+  const notificationsSent = [];
+  const wakesTriggered = [];
+  const skippedByCooldown = [];
+  const alerts = (kpis == null ? void 0 : kpis.alertas_ativos) ?? [];
+  for (const al of alerts) {
+    const cooldownKey = `alert:${al.codigo}`;
+    if (!canTriggerWithCooldown(cooldownKey, nowMs, !options.dryRun)) {
+      skippedByCooldown.push(al.codigo);
+      continue;
+    }
+    if (!options.dryRun) {
+      try {
+        const notifApi = ctx.notifications;
+        if (notifApi == null ? void 0 : notifApi.notify) {
+          await notifApi.notify({
+            title: `OrgFy [${al.codigo}]`,
+            body: al.mensagem
+          });
+        }
+      } catch {
+      }
+      notificationsSent.push(al.codigo);
+    }
+    if (options.autoWake && !options.dryRun && (al.codigo === "REVIEW_QUEUE_BOTTLENECK" || al.codigo === "STAGNATION_LEVEL_3")) {
+      const wakeKey = options.reviewerAgentKey || "OrgFy Bento";
+      const wakeCooldownKey = `wake:${al.codigo}:${wakeKey}`;
+      if (canTriggerWithCooldown(wakeCooldownKey, nowMs)) {
+        try {
+          const agentsApi = ctx.agents;
+          if (agentsApi == null ? void 0 : agentsApi.wake) {
+            await agentsApi.wake(wakeKey, {
+              channel: options.channel || "#esteira-orgfy",
+              text: `[ORGFY GOVERNANÇA] ${al.mensagem} Ação recomendada: ${al.acao_sugerida}`
+            });
+            wakesTriggered.push(`${wakeKey}:${al.codigo}`);
+          }
+        } catch {
+        }
+      } else {
+        skippedByCooldown.push(`wake:${al.codigo}`);
+      }
+    }
+  }
+  return {
+    ok: true,
+    evaluatedAt: new Date(nowMs).toISOString(),
+    budget,
+    activeLocksCount: locks.length,
+    alertsDetected: alerts.length,
+    notificationsSent,
+    wakesTriggered,
+    skippedByCooldown
+  };
+}
+async function lintCardForDispatch(ctx, input) {
+  var _a;
+  const issues = [];
+  const titulo = String(input.titulo || "").trim();
+  const cmd = String(input.acceptanceCommand || "").trim();
+  const desc = String(input.descricao || "").trim();
+  if (!titulo || titulo.length < 10) {
+    issues.push("Título muito curto ou ausente (mínimo 10 caracteres).");
+  }
+  if (!cmd) {
+    issues.push("Regra L-22 violada: comando de aceite executável (acceptanceCommand) ausente.");
+  } else if (/^(todo|tbd|none|n\/a)$/i.test(cmd)) {
+    issues.push("Regra L-22 violada: acceptanceCommand contém placeholder não executável.");
+  }
+  if (input.executor && input.revisor && input.executor.trim() === input.revisor.trim()) {
+    issues.push("Regra L-01 violada: executor e revisor não podem ser o mesmo agente.");
+  }
+  let usedDecisionsApi = false;
+  let score = issues.length === 0 ? 1 : Math.max(0.2, 1 - issues.length * 0.3);
+  try {
+    const decisionsApi = ctx.decisions;
+    if ((decisionsApi == null ? void 0 : decisionsApi.decide) && issues.length === 0 && (titulo || desc)) {
+      const decisionRes = await decisionsApi.decide({
+        state: {
+          issueId: input.issueId || "draft",
+          titulo,
+          acceptanceCommand: cmd,
+          descricao: desc
+        },
+        questions: [
+          {
+            id: "atomic_scope",
+            type: "yes_no",
+            prompt: "O escopo deste card é atômico e verificável pelo comando de aceite informado?"
+          }
+        ]
+      });
+      usedDecisionsApi = true;
+      const ans = ((_a = decisionRes == null ? void 0 : decisionRes.answers) == null ? void 0 : _a.atomic_scope) ?? (decisionRes == null ? void 0 : decisionRes.atomic_scope);
+      if (ans === false || ans === "no") {
+        issues.push("Avaliação semântica (ctx.decisions): escopo amplo demais ou pouco verificável.");
+        score = 0.55;
+      }
+    }
+  } catch {
+  }
+  const approved = issues.length === 0;
+  return {
+    approved,
+    score: Number(score.toFixed(2)),
+    usedDecisionsApi,
+    issues,
+    recommendation: approved ? "Card aprovado no pré-voo L-01/L-22 e pronto para despacho atômico." : "Corrija as pendências acima antes de despachar para evitar retrabalho no Gate."
+  };
+}
+function registerGovernanceAgentHooks(ctx) {
+  const agentsApi = ctx.agents;
+  if (!(agentsApi == null ? void 0 : agentsApi.registerHook)) return false;
+  try {
+    agentsApi.registerHook({
+      id: "orgfy-post-turn-governance",
+      harness: "all",
+      event: "turn.completed",
+      run: async () => {
+        await evaluateGovernanceAndReact(ctx, { dryRun: false, autoWake: false });
+      }
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+const inject = [
+  "react",
+  "pages",
+  "settingsCards",
+  "host",
+  "navigation",
+  "agents",
+  "panels",
+  "artifactStorage",
+  "notifications",
+  "decisions"
+];
 const TENANTS = [
   { id: "all", name: "Holding OrgFy", badge: "Cross-Workspace", slug: "all" },
   { id: "orgfy", name: "OrgFy Core", badge: "Core Framework", slug: "orgfy" },
@@ -1851,7 +2944,7 @@ const THEME = {
   textMuted: "#6b7280"
 };
 function apply(ctx) {
-  var _a, _b;
+  var _a, _b, _c;
   const React = ctx.react;
   const h = React.createElement;
   function OrgFyCockpit() {
@@ -1911,6 +3004,39 @@ function apply(ctx) {
     const [migrationLog, setMigrationLog] = React.useState("");
     const [activeIssueDetailCard, setActiveIssueDetailCard] = React.useState(null);
     const [activeCentralTab, setActiveCentralTab] = React.useState("pipeline");
+    const [kpisData, setKpisData] = React.useState(null);
+    const [kpisHistory, setKpisHistory] = React.useState([]);
+    const [kpisError, setKpisError] = React.useState(null);
+    const [isRecalculatingKpis, setIsRecalculatingKpis] = React.useState(false);
+    const [governanceSummary, setGovernanceSummary] = React.useState(null);
+    const loadKpis = React.useCallback(async () => {
+      const res = await fetchKpisEsteira(ctx);
+      setKpisData(res.kpis);
+      setKpisHistory(res.history);
+      setKpisError(res.error);
+    }, []);
+    React.useEffect(() => {
+      loadKpis();
+    }, [loadKpis]);
+    const handleRecalculateKpis = React.useCallback(async () => {
+      setIsRecalculatingKpis(true);
+      try {
+        const recalc = await recalculateKpisNow(ctx);
+        if (!recalc.ok) {
+          setKpisError(recalc.output || "Falha ao recalcular KPIs");
+        } else {
+          await loadKpis();
+        }
+      } finally {
+        setIsRecalculatingKpis(false);
+      }
+    }, [loadKpis]);
+    const handleRunGovernanceEval = React.useCallback(async () => {
+      const evalRes = await evaluateGovernanceAndReact(ctx, { dryRun: false, autoWake: true });
+      setGovernanceSummary(
+        `Orçamento: ${evalRes.budget.statusOrcamento} | Alertas: ${evalRes.alertsDetected} | Notificações: ${evalRes.notificationsSent.length} | Wakes: ${evalRes.wakesTriggered.length} | Cooldown: ${evalRes.skippedByCooldown.length}`
+      );
+    }, []);
     const [isExecutingDispatch, setIsExecutingDispatch] = React.useState(false);
     const [isExecutingGate, setIsExecutingGate] = React.useState(false);
     const [liveLogStream, setLiveLogStream] = React.useState(
@@ -2017,7 +3143,7 @@ function apply(ctx) {
       showNotification("success", `Deep link copiado: buzz://issue?id=${(c.fullIssueId || c.issueId).slice(0, 8)}...`);
     };
     const loadRealState = async () => {
-      var _a2, _b2, _c, _d;
+      var _a2, _b2, _c2, _d;
       try {
         const [live, status, liveCards] = await Promise.all([
           fetchLiveEsteiraState(ctx),
@@ -2031,7 +3157,7 @@ function apply(ctx) {
         }
         if (typeof (status == null ? void 0 : status.cpi_tokens) === "number") {
           setCpiTokens(status.cpi_tokens);
-        } else if (((_c = (_b2 = live.metricasTurnos) == null ? void 0 : _b2.governanca_orcamento) == null ? void 0 : _c.cpi_tokens) !== void 0) {
+        } else if (((_c2 = (_b2 = live.metricasTurnos) == null ? void 0 : _b2.governanca_orcamento) == null ? void 0 : _c2.cpi_tokens) !== void 0) {
           setCpiTokens(live.metricasTurnos.governanca_orcamento.cpi_tokens);
         }
         if (typeof (status == null ? void 0 : status.porteiro_online) === "boolean") {
@@ -2734,12 +3860,36 @@ function apply(ctx) {
                 },
                 SVG.gitPullRequest({ h, width: 14, height: 14 }),
                 "Catálogo de Templates & Hub de RSI"
+              ),
+              h(
+                "button",
+                {
+                  onClick: () => {
+                    setActiveCentralTab("inteligencia");
+                    loadKpis();
+                  },
+                  style: {
+                    padding: "6px 14px",
+                    borderRadius: "8px",
+                    fontSize: "12px",
+                    fontWeight: "600",
+                    cursor: "pointer",
+                    border: activeCentralTab === "inteligencia" ? "1px solid rgba(168, 85, 247, 0.45)" : "1px solid transparent",
+                    backgroundColor: activeCentralTab === "inteligencia" ? "rgba(168, 85, 247, 0.16)" : "rgba(255, 255, 255, 0.04)",
+                    color: activeCentralTab === "inteligencia" ? "#c084fc" : "#9ca3af",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px"
+                  }
+                },
+                SVG.activity({ h, width: 14, height: 14 }),
+                "Inteligência & Saúde"
               )
             ),
             h(
               "span",
               { style: { fontSize: "11px", color: "#6b7280", fontFamily: "monospace" } },
-              activeCentralTab === "pipeline" ? "Esteira Determinística OrgFy v10" : "Recursão & FPY (Regras L-22, L-90)"
+              activeCentralTab === "pipeline" ? "Esteira Determinística OrgFy v11" : activeCentralTab === "inteligencia" ? "Telemetria Real, Economia & Governança de Ciclo Fechado" : "Recursão & FPY (Regras L-22, L-90)"
             )
           ),
           activeCentralTab === "pipeline" ? h(
@@ -3243,7 +4393,16 @@ function apply(ctx) {
                 )
               )
             )
-          ) : renderTemplatesRsiView()
+          ) : activeCentralTab === "inteligencia" ? renderIntelligenceTab({
+            h,
+            kpis: kpisData,
+            history: kpisHistory,
+            error: kpisError,
+            isRecalculating: isRecalculatingKpis,
+            onRecalculate: handleRecalculateKpis,
+            onRunGovernanceEval: handleRunGovernanceEval,
+            governanceSummary
+          }) : renderTemplatesRsiView()
         )
       ),
       // ───────────────────────────────────────────────────────────────────────
@@ -6228,35 +7387,60 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
       component: OrgFySettingsCard
     });
   }
-  if ((_a = ctx.agents) == null ? void 0 : _a.addInstructions) {
+  if ((_a = ctx.panels) == null ? void 0 : _a.register) {
+    try {
+      const ChannelPulseComponent = createChannelPulsePanel(ctx, async () => {
+        const res = await fetchKpisEsteira(ctx);
+        return res.kpis;
+      });
+      ctx.panels.register({
+        id: "orgfy-channel-pulse",
+        title: "Pulso OrgFy",
+        channelPlacement: "side",
+        channelLauncher: { label: "Pulso OrgFy" },
+        component: ChannelPulseComponent
+      });
+      console.log("[ORGFY] Sidebar panel orgfy-channel-pulse registrado com sucesso.");
+    } catch (err) {
+      console.warn("[ORGFY] Falha ao registrar sidebar panel:", err);
+    }
+  }
+  registerGovernanceAgentHooks(ctx);
+  if ((_b = ctx.agents) == null ? void 0 : _b.addInstructions) {
     try {
       ctx.agents.addInstructions({
-        id: "orgfy-governance-v10",
-        text: `Esteira OrgFy v10 (Holding Cortexx) — Governança Determinística:
+        id: "orgfy-governance-v11",
+        text: `Esteira OrgFy v11 (Holding Cortexx) — Governança Determinística & Ciclo Fechado:
 Você opera sobre a fábrica de software agêntica da holding Cortexx (empresas: orgfy, lumen-iptv, saas-tributario).
 Regras Invariantes:
 - L-01 a L-90: Qualquer modificação de código deve ser estritamente rastreada e validada pela esteira determinística.
 - L-22: O comando de aceite é imutável e blindado por hash SHA-256 no momento do despacho. Nunca afrouxe critérios de aceite.
 - L-90: Regras probatórias RSI em .scratch/regras-probatorias.json são avaliadas contra o FPY histórico (First Pass Yield).
+- Hard Cap Orçamentário (80% alerta / 100% bloqueio): Despachos são bloqueados ao atingir 100% do teto diário salvo board_override=true.
+- Checkout Lock Atômico: Nenhum card pode ser executado em paralelo por dois agentes; adquira lock antes de atuar.
 - DSAP Backtracking: Na 2ª recusa consecutiva com similaridade >= 0.70, o card entra em backtracking para o COO re-escopar.
 Ferramentas nativas disponíveis neste plugin:
 1. orgfy_status({ empresa? }): Consulta o placar de 20h, FPY, CPI de tokens, contagem de aceites, merged e raias da esteira.
 2. orgfy_kanban_read({ stage?, empresa? }): Lê a matriz Kanban completa (triagem, despachado, execucao, revisao, feito) com comandos de aceite, hashes e worktrees.
-3. orgfy_despachar({ issue_id, executor, revisor, empresa? }): Despacha card para execução em worktree isolado sem colisão com main.
+3. orgfy_despachar({ issue_id, executor, revisor, empresa?, board_override? }): Despacha card em worktree isolado respeitando Hard Cap orçamentário e lock atômico.
 4. orgfy_gate({ pr_id, decisao, motivo, revisor, empresa? }): Aplica o Gate Caixa-Preta (aceito/recusado) com probes de validação.
 5. orgfy_porteiro_sync({ empresa? }): Dispara sincronização determinística de eventos Nostr e ciclo de execução.
-Consulte sempre orgfy_status ou orgfy_kanban_read para inspecionar cards e métricas reais antes de agir.`
+6. orgfy_kpis({ recalcular? }): Lê os KPIs reais de Fluxo, Qualidade, Economia e Higiene (kpis-esteira.json) e opcionalmente recalcula via script Python.
+7. orgfy_checkout_lock({ action, issue_id?, agent_id?, ttl_minutes? }): Gerencia lock atômico de checkout (acquire, release, list) para evitar trabalho duplicado.
+8. orgfy_governanca_avaliar({ dry_run?, auto_wake? }): Avalia orçamento, fila de revisão, WIP órfão e estagnação nível 3, disparando alertas/wakes com cooldown anti-spam.
+9. orgfy_lint_card({ title, objective?, done_when?, acceptance_command?, executor?, revisor? }): Audita qualidade semântica e regras L-01/L-22 antes do despacho.
+Consulte sempre orgfy_status, orgfy_kpis ou orgfy_kanban_read para inspecionar métricas reais antes de agir.`
       });
       console.log("[ORGFY] ctx.agents.addInstructions registrado com sucesso.");
     } catch (err) {
       console.warn("[ORGFY] Falha ao registrar addInstructions:", err);
     }
   }
-  if ((_b = ctx.agents) == null ? void 0 : _b.addTool) {
+  if ((_c = ctx.agents) == null ? void 0 : _c.addTool) {
     try {
       ctx.agents.addTool({
         name: "orgfy_status",
-        description: "Retorna a telemetria em tempo real da esteira OrgFy v10 com cards_por_raia derivados diretamente do Kanban real e métricas de runtime/placar separadas (sem fallbacks hardcoded).",
+        description: "Retorna a telemetria em tempo real da esteira OrgFy v11 com cards_por_raia derivados diretamente do Kanban real e métricas de runtime/placar separadas (sem fallbacks hardcoded).",
         inputSchema: {
           type: "object",
           properties: {
@@ -6312,18 +7496,37 @@ Consulte sempre orgfy_status ou orgfy_kanban_read para inspecionar cards e métr
       });
       ctx.agents.addTool({
         name: "orgfy_despachar",
-        description: "Despacha um card de issue para execução em worktree isolado sem colisão com a main conforme as regras v10 da esteira OrgFy.",
+        description: "Despacha um card de issue para execução em worktree isolado sem colisão com a main, validando Hard Cap orçamentário (100%) e checkout lock atômico.",
         inputSchema: {
           type: "object",
           properties: {
             issue_id: { type: "string", description: "Identificador curto ou completo da issue (ex: '5c569a9e')" },
             executor: { type: "string", description: "Nome do agente executor (ex: 'OrgFy Val', 'OrgFy Atlas')" },
             revisor: { type: "string", description: "Nome do agente revisor (ex: 'OrgFy Teo', 'OrgFy Bento')" },
-            empresa: { type: "string", description: "Slug da empresa (default: 'orgfy')" }
+            empresa: { type: "string", description: "Slug da empresa (default: 'orgfy')" },
+            board_override: { type: "boolean", description: "Autorização explícita da diretoria para ultrapassar 100% do teto diário" }
           },
           required: ["issue_id", "executor", "revisor"]
         },
         call: async (_client, _context, args) => {
+          const kpiRes = await fetchKpisEsteira(ctx);
+          const budgetGate = evaluateBudgetGate(kpiRes.kpis, Boolean(args == null ? void 0 : args.board_override));
+          if (!budgetGate.allowed) {
+            return JSON.stringify({
+              status: "blocked",
+              code: "BUDGET_HARD_CAP_REACHED",
+              budgetGate
+            }, null, 2);
+          }
+          const lockRes = await acquireCheckoutLock(ctx, args.issue_id, args.executor, 60);
+          if (!lockRes.ok) {
+            return JSON.stringify({
+              status: "blocked",
+              code: lockRes.code,
+              message: lockRes.message,
+              lock: lockRes.lock
+            }, null, 2);
+          }
           const res = await executeDespachar(ctx, {
             empresa: (args == null ? void 0 : args.empresa) || "orgfy",
             issueId: args.issue_id,
@@ -6333,13 +7536,15 @@ Consulte sempre orgfy_status ou orgfy_kanban_read para inspecionar cards e métr
           return JSON.stringify({
             status: res.code === 0 ? "ok" : "error",
             exitCode: res.code,
+            budgetGate,
+            lock: lockRes.lock,
             output: res.output
           }, null, 2);
         }
       });
       ctx.agents.addTool({
         name: "orgfy_gate",
-        description: "Aplica o Gate Caixa-Preta da esteira OrgFy v10 a um PR (aceito ou recusado) com validação de probes Caddy, Supabase RLS e Playwright.",
+        description: "Aplica o Gate Caixa-Preta da esteira OrgFy v11 a um PR (aceito ou recusado) com validação de probes Caddy, Supabase RLS e Playwright.",
         inputSchema: {
           type: "object",
           properties: {
@@ -6386,7 +7591,113 @@ Consulte sempre orgfy_status ou orgfy_kanban_read para inspecionar cards e métr
           }, null, 2);
         }
       });
-      console.log("[ORGFY] 5 agentTools registradas com sucesso no harness do Buzz.");
+      ctx.agents.addTool({
+        name: "orgfy_kpis",
+        description: "Retorna os KPIs determinísticos reais da esteira OrgFy v11 (Fluxo, Qualidade, Economia, Higiene e Alertas Ativos) a partir de kpis-esteira.json, com opção de recálculo sob demanda.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            recalcular: { type: "boolean", description: "Se true, executa scripts/gerar_kpis_esteira.py antes de ler o snapshot" }
+          }
+        },
+        call: async (_client, _context, args) => {
+          let recalcOutput = null;
+          if (args == null ? void 0 : args.recalcular) {
+            const recalc = await recalculateKpisNow(ctx);
+            recalcOutput = recalc.output;
+          }
+          const res = await fetchKpisEsteira(ctx);
+          return JSON.stringify({
+            disponivel: res.disponivel,
+            error: res.error,
+            recalcOutput,
+            kpis: res.kpis,
+            history_points: res.history.length
+          }, null, 2);
+        }
+      });
+      ctx.agents.addTool({
+        name: "orgfy_checkout_lock",
+        description: "Gerencia locks atômicos de checkout por issue_id para evitar execução duplicada entre agentes (action: 'acquire' | 'release' | 'list').",
+        inputSchema: {
+          type: "object",
+          properties: {
+            action: { type: "string", enum: ["acquire", "release", "list"], description: "Ação de lock desejada" },
+            issue_id: { type: "string", description: "Identificador da issue (obrigatório para acquire/release)" },
+            agent_id: { type: "string", description: "Nome ou ID do agente solicitante (obrigatório para acquire)" },
+            ttl_minutes: { type: "number", description: "Tempo de expiração do lock em minutos (default: 60)" }
+          },
+          required: ["action"]
+        },
+        call: async (_client, _context, args) => {
+          const action = args == null ? void 0 : args.action;
+          if (action === "list") {
+            const locks = await listActiveLocks(ctx);
+            return JSON.stringify({ ok: true, total: locks.length, locks }, null, 2);
+          }
+          if (action === "acquire") {
+            if (!(args == null ? void 0 : args.issue_id) || !(args == null ? void 0 : args.agent_id)) {
+              return JSON.stringify({ ok: false, code: "MISSING_FIELDS", message: "issue_id e agent_id são obrigatórios" }, null, 2);
+            }
+            const res = await acquireCheckoutLock(ctx, args.issue_id, args.agent_id, (args == null ? void 0 : args.ttl_minutes) || 60);
+            return JSON.stringify(res, null, 2);
+          }
+          if (action === "release") {
+            if (!(args == null ? void 0 : args.issue_id)) {
+              return JSON.stringify({ ok: false, code: "MISSING_FIELDS", message: "issue_id é obrigatório" }, null, 2);
+            }
+            const res = await releaseCheckoutLock(ctx, args.issue_id, args == null ? void 0 : args.agent_id);
+            return JSON.stringify(res, null, 2);
+          }
+          return JSON.stringify({ ok: false, code: "INVALID_ACTION", message: `Ação desconhecida: ${action}` }, null, 2);
+        }
+      });
+      ctx.agents.addTool({
+        name: "orgfy_governanca_avaliar",
+        description: "Avalia os KPIs reais contra regras de governança (Orçamento 80%/100%, Gargalo de Revisão, WIP Órfão e Estagnação Nível 3) e dispara notificações/wakes com cooldown anti-spam de 15 min.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            dry_run: { type: "boolean", description: "Se true, apenas simula as ações sem disparar notificações ou wakes" },
+            auto_wake: { type: "boolean", description: "Se true, acorda automaticamente agentes responsáveis via ctx.agents.wake quando aplicável" }
+          }
+        },
+        call: async (_client, _context, args) => {
+          const evalRes = await evaluateGovernanceAndReact(ctx, {
+            dryRun: Boolean(args == null ? void 0 : args.dry_run),
+            autoWake: (args == null ? void 0 : args.auto_wake) !== false
+          });
+          return JSON.stringify(evalRes, null, 2);
+        }
+      });
+      ctx.agents.addTool({
+        name: "orgfy_lint_card",
+        description: "Audita um card antes do despacho validando regras determinísticas L-01/L-22 (segregação executor/revisor, comando de aceite verificável) e revisão semântica via ctx.decisions.decide.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            title: { type: "string", description: "Título do card" },
+            objective: { type: "string", description: "Objetivo claro da entrega" },
+            done_when: { type: "string", description: "Critério objetivo de pronto (Feito Quando)" },
+            acceptance_command: { type: "string", description: "Comando determinístico de aceite (L-22)" },
+            executor: { type: "string", description: "Agente executor proposto" },
+            revisor: { type: "string", description: "Agente revisor proposto" }
+          },
+          required: ["title"]
+        },
+        call: async (_client, _context, args) => {
+          const descricao = [args.objective, args.done_when].filter(Boolean).join(" | ");
+          const lintRes = await lintCardForDispatch(ctx, {
+            titulo: args.title,
+            descricao: descricao || void 0,
+            acceptanceCommand: args.acceptance_command,
+            executor: args.executor,
+            revisor: args.revisor
+          });
+          return JSON.stringify(lintRes, null, 2);
+        }
+      });
+      console.log("[ORGFY] 9 agentTools registradas com sucesso no harness do Buzz (Ondas 1, 2 e 3).");
     } catch (err) {
       console.warn("[ORGFY] Falha ao registrar agentTools:", err);
     }

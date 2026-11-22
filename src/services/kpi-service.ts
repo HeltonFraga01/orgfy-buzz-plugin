@@ -1,0 +1,261 @@
+import type { Context } from "@buzz/author";
+
+export interface DailySeriesPoint {
+  dia: string;
+  merges: number;
+  retrabalhos: number;
+  conflitos: number;
+}
+
+export interface ModelUsageRow {
+  modelo: string;
+  grupo: string;
+  requisicoes: number;
+  custo_usd: number;
+  tokens_totais: number;
+  cache_hit_pct: number;
+  latencia_media_ms: number;
+}
+
+export interface OrphanCardEntry {
+  issue_id: string;
+  titulo: string;
+  estado: string;
+}
+
+export interface StagnatedEntry {
+  chave: string;
+  ciclos: number;
+  nivel: number;
+}
+
+export interface ActiveKpiAlert {
+  codigo: string;
+  severidade: "info" | "warn" | "critical";
+  mensagem: string;
+  acao_sugerida: string;
+}
+
+export interface KpisEsteiraPayload {
+  schema_version: string;
+  gerado_em: string;
+  janela_dias: number;
+  fontes: {
+    scratch_dir?: string;
+    transicoes_linhas: number;
+    nm_usage_itens: number;
+    placar_arquivo: string | null;
+    sentinela_entradas: number;
+  };
+  fluxo: {
+    vazao_total_feito: number;
+    vazao_7d: number;
+    vazao_30d: number;
+    fila_revisao_atual: number;
+    revisao_espera_p50_min: number | null;
+    revisao_espera_p90_min: number | null;
+    lead_time_p50_min: number | null;
+    lead_time_p90_min: number | null;
+    taxa_conflito_pct: number;
+    serie_diaria_14d: DailySeriesPoint[];
+  };
+  qualidade: {
+    fpy_real_pct: number | null;
+    cards_aceitos_primeira: number;
+    cards_com_retrabalho: number;
+    taxa_retrabalho_pct: number;
+    total_loops_revisao_execucao: number;
+    total_conflitos_integracao: number;
+  };
+  economia: {
+    teto_diario_tokens: number;
+    tokens_hoje: number;
+    tokens_7d: number;
+    tokens_30d: number;
+    tokens_historico_acumulado?: number;
+    uso_teto_diario_pct: number;
+    status_orcamento: "OK" | "ALERTA_80" | "BLOQUEADO_100";
+    cards_integrados_30d: number;
+    tokens_por_card_integrado: number | null;
+    cpi_real: number | null;
+    custo_usd_total_amostra: number;
+    cache_hit_ratio_pct: number;
+    por_modelo: ModelUsageRow[];
+  };
+  higiene: {
+    wip_total_ativo: number;
+    wip_atribuido: number;
+    orphan_wip_count: number;
+    orphan_wip_pct: number;
+    top_orfaos: OrphanCardEntry[];
+    estagnados_nivel_3: number;
+    estagnados_nivel_2: number;
+    top_estagnados: StagnatedEntry[];
+  };
+  alertas_ativos: ActiveKpiAlert[];
+}
+
+export interface KpiHistoryPoint {
+  ts: string;
+  fpy_real_pct: number | null;
+  fila_revisao_atual: number;
+  orphan_wip_count: number;
+  uso_teto_diario_pct: number;
+  vazao_7d: number;
+}
+
+export interface KpiReadResult {
+  disponivel: boolean;
+  error: string | null;
+  sourcePath: string;
+  kpis: KpisEsteiraPayload | null;
+  history: KpiHistoryPoint[];
+}
+
+export const KPI_SNAPSHOT_PATH = "/Users/heltonfraga/.buzz/.scratch/kpis-esteira.json";
+export const KPI_SCRIPT_PATH = "/Users/heltonfraga/.buzz/REPOS/orgfy-buzz-plugin/scripts/gerar_kpis_esteira.py";
+const ARTIFACT_COLLECTION = "orgfy_kpi_history_v1";
+const LOCAL_STORAGE_KEY = "orgfy_kpi_history_v1";
+const MAX_HISTORY_POINTS = 60;
+
+async function readHistory(ctx: Context): Promise<KpiHistoryPoint[]> {
+  try {
+    const store = (ctx as any).artifactStorage;
+    if (store?.list) {
+      const items = await store.list(ARTIFACT_COLLECTION);
+      if (Array.isArray(items)) {
+        return items
+          .map((it: any) => it?.value ?? it)
+          .filter((p: any) => p && typeof p.ts === "string")
+          .slice(-MAX_HISTORY_POINTS);
+      }
+    }
+  } catch {
+    // Fallback silencioso para localStorage
+  }
+
+  try {
+    if (typeof localStorage !== "undefined") {
+      const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed.slice(-MAX_HISTORY_POINTS);
+      }
+    }
+  } catch {
+    // Ignore storage errors in headless tests
+  }
+  return [];
+}
+
+export async function recordKpiSnapshotHistory(
+  ctx: Context,
+  kpis: KpisEsteiraPayload
+): Promise<KpiHistoryPoint[]> {
+  const point: KpiHistoryPoint = {
+    ts: kpis.gerado_em || new Date().toISOString(),
+    fpy_real_pct: kpis.qualidade?.fpy_real_pct ?? null,
+    fila_revisao_atual: kpis.fluxo?.fila_revisao_atual ?? 0,
+    orphan_wip_count: kpis.higiene?.orphan_wip_count ?? 0,
+    uso_teto_diario_pct: kpis.economia?.uso_teto_diario_pct ?? 0,
+    vazao_7d: kpis.fluxo?.vazao_7d ?? 0,
+  };
+
+  try {
+    const store = (ctx as any).artifactStorage;
+    if (store?.put) {
+      await store.put(ARTIFACT_COLLECTION, point.ts, point);
+    }
+  } catch {
+    // Continua com localStorage fallback
+  }
+
+  const prev = await readHistory(ctx);
+  const filtered = prev.filter((p) => p.ts !== point.ts);
+  const next = [...filtered, point].slice(-MAX_HISTORY_POINTS);
+
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(next));
+    }
+  } catch {
+    // Ignore
+  }
+  return next;
+}
+
+export async function fetchKpisEsteira(ctx: Context): Promise<KpiReadResult> {
+  const host = (ctx as any).host;
+  const history = await readHistory(ctx);
+
+  if (!host?.readFile) {
+    return {
+      disponivel: false,
+      error: "API ctx.host.readFile indisponível neste ambiente.",
+      sourcePath: KPI_SNAPSHOT_PATH,
+      kpis: null,
+      history,
+    };
+  }
+
+  try {
+    const raw = await host.readFile(KPI_SNAPSHOT_PATH);
+    const parsed = JSON.parse(raw) as KpisEsteiraPayload;
+    if (!parsed || typeof parsed !== "object" || !parsed.fluxo || !parsed.economia) {
+      return {
+        disponivel: false,
+        error: "Arquivo kpis-esteira.json inválido ou incompleto.",
+        sourcePath: KPI_SNAPSHOT_PATH,
+        kpis: null,
+        history,
+      };
+    }
+    const updatedHistory = await recordKpiSnapshotHistory(ctx, parsed);
+    return {
+      disponivel: true,
+      error: null,
+      sourcePath: KPI_SNAPSHOT_PATH,
+      kpis: parsed,
+      history: updatedHistory,
+    };
+  } catch (err: any) {
+    return {
+      disponivel: false,
+      error: err?.message || "Não foi possível ler kpis-esteira.json.",
+      sourcePath: KPI_SNAPSHOT_PATH,
+      kpis: null,
+      history,
+    };
+  }
+}
+
+export async function recalculateKpisNow(ctx: Context): Promise<{
+  ok: boolean;
+  output: string;
+  result: KpiReadResult;
+}> {
+  const host = (ctx as any).host;
+  let output = "";
+
+  try {
+    if (host?.exec) {
+      const res = await host.exec("python", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
+      output = [res?.stdout, res?.stderr].filter(Boolean).join("\n").trim();
+    } else if (host?.spawn) {
+      const proc = await host.spawn("python", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
+      if (proc?.exited) {
+        await proc.exited;
+      }
+      output = "Recálculo executado via subprocesso.";
+    }
+  } catch (err: any) {
+    output = `Aviso ao executar script: ${err?.message || err}`;
+  }
+
+  const result = await fetchKpisEsteira(ctx);
+  return {
+    ok: result.disponivel,
+    output,
+    result,
+  };
+}
