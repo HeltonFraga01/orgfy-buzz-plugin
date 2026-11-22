@@ -2,9 +2,10 @@
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
-    "moduleResolution": "bundler",
-    "jsx": "preserve",
+    "moduleResolution": "Bundler",
+    "jsx": "react",
     "strict": true,
+    "noEmit": true,
     "skipLibCheck": true,
     "types": [
       "@buzz/author"
