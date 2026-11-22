@@ -1,0 +1,51 @@
+{
+  "id": "digital.cortexx.orgfy",
+  "name": "OrgFy Control Room",
+  "apiVersion": 1,
+  "description": "Painel de controle, governança determinística e orquestração autônoma da esteira OrgFy v10 para a Holding Cortexx.",
+  "discovery": {
+    "category": "developer-tools-and-integrations",
+    "tags": [
+      "OrgFy",
+      "Cortexx",
+      "Esteira",
+      "Governance",
+      "CI-CD",
+      "Kanban",
+      "Nostr"
+    ]
+  },
+  "host": {
+    "networkOrigins": [
+      "https://api.cortexx.digital",
+      "https://orgfy.communities.buzz.xyz"
+    ],
+    "files": true,
+    "mcp": true,
+    "processes": [
+      {
+        "id": "bash",
+        "program": "bash",
+        "args": ["-c"]
+      },
+      {
+        "id": "python",
+        "program": "python3",
+        "args": ["-c"]
+      },
+      {
+        "id": "git",
+        "program": "git",
+        "args": []
+      }
+    ],
+    "commands": [
+      {
+        "id": "orgfy-status",
+        "program": "python3",
+        "args": ["ferramentas/esteira/quadro.py", "--json"],
+        "maxOutputBytes": 131072
+      }
+    ]
+  }
+}
