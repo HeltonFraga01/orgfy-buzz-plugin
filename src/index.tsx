@@ -15,6 +15,16 @@ import {
   fetchLiveEsteiraState,
   calculateDsapSimilarity,
 } from "./services/orgfy-bridge";
+import {
+  executeBootstrapFlow,
+  type BootstrapStepResult,
+  INITIAL_BOOTSTRAP_STEPS,
+} from "./services/bootstrap";
+import {
+  startOrgfyMcpServer,
+  sendDesktopNotification,
+  type McpServerStatus,
+} from "./services/mcp-server";
 
 export const inject = ["react", "pages", "settingsCards", "host", "navigation", "agents"];
 
@@ -205,6 +215,18 @@ export const SVG = {
       h("polyline", { points: "22 8.5 12 15.5 2 8.5" }),
       h("polyline", { points: "2 15.5 12 8.5 22 15.5" })
     ),
+  bell: ({ h, width = 14, height = 14 }: any) =>
+    h("svg", { width, height, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.75 },
+      h("path", { d: "M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" }),
+      h("path", { d: "M13.73 21a2 2 0 0 1-3.46 0" })
+    ),
+  bellOff: ({ h, width = 14, height = 14 }: any) =>
+    h("svg", { width, height, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.75 },
+      h("path", { d: "M13.73 21a2 2 0 0 1-3.46 0" }),
+      h("path", { d: "M18.63 13A17.89 17.89 0 0 1 18 8" }),
+      h("path", { d: "M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14" }),
+      h("line", { x1: "1", y1: "1", x2: "23", y2: "23" })
+    ),
   zap: ({ h, width = 16, height = 16 }: any) =>
     h("svg", { width, height, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.75 },
       h("polygon", { points: "13 2 3 14 12 14 11 22 21 10 12 10 13 2" })
@@ -339,6 +361,16 @@ export function apply(ctx: Context) {
     const [isCopilotOpen, setIsCopilotOpen] = React.useState<boolean>(false);
     const [copilotAgent, setCopilotAgent] = React.useState<string>("OrgFy Bento");
 
+    // Modais & Drawers Fase 3 (Bootstrap, MCP e Notificações)
+    const [isBootstrapModalOpen, setIsBootstrapModalOpen] = React.useState<boolean>(false);
+    const [bootstrapSteps, setBootstrapSteps] = React.useState<BootstrapStepResult[]>(INITIAL_BOOTSTRAP_STEPS);
+    const [isBootstrapping, setIsBootstrapping] = React.useState<boolean>(false);
+    const [bootstrapLog, setBootstrapLog] = React.useState<string>("");
+    const [bootstrapDone, setBootstrapDone] = React.useState<boolean>(false);
+    const [mcpStatus, setMcpStatus] = React.useState<McpServerStatus>({ active: false, toolCallsCount: 0 });
+    const [desktopNotificationsEnabled, setDesktopNotificationsEnabled] = React.useState<boolean>(true);
+    const [isMcpDiagnosticsOpen, setIsMcpDiagnosticsOpen] = React.useState<boolean>(false);
+
     // Estados de Execução Concorrente e Loading (Fase 2)
     const [isExecutingDispatch, setIsExecutingDispatch] = React.useState<boolean>(false);
     const [isExecutingGate, setIsExecutingGate] = React.useState<boolean>(false);
@@ -393,6 +425,13 @@ export function apply(ctx: Context) {
       loadRealState();
     }, [selectedTenant]);
 
+    // Inicialização do Servidor MCP Nativo (Fase 3: ctx.host.serveMcp)
+    React.useEffect(() => {
+      startOrgfyMcpServer(ctx, (st) => {
+        setMcpStatus(st);
+      });
+    }, []);
+
     // Análise preditiva de similaridade semântica DSAP (Fase 2: via calculateDsapSimilarity)
     React.useEffect(() => {
       if (!activeGateCard || !gateRejectionReason.trim()) {
@@ -439,8 +478,35 @@ export function apply(ctx: Context) {
     }, [filteredCards]);
 
     // ─────────────────────────────────────────────────────────────────────────
-    // AÇÕES OPERACIONAIS REAIS (FASE 2: VIA SPAWN / CLI DETERMINÍSTICO)
+    // AÇÕES OPERACIONAIS REAIS (FASE 2 E 3: SPAWN, CLI, BOOTSTRAP E MCP)
     // ─────────────────────────────────────────────────────────────────────────
+
+    // 0. Auto-Bootstrap 1-Clique (Fase 3)
+    const handleRunBootstrap = async () => {
+      setIsBootstrapping(true);
+      setBootstrapLog("[BOOTSTRAP] Iniciando auto-provisionamento 1-clique da Holding OrgFy...\n");
+      try {
+        const res = await executeBootstrapFlow(ctx, (updatedSteps) => {
+          setBootstrapSteps(updatedSteps);
+        });
+        setBootstrapLog((prev) => prev + res.log);
+        if (res.success) {
+          setBootstrapDone(true);
+          showNotification("success", "Auto-bootstrap e provisionamento concluídos com sucesso!");
+          if (desktopNotificationsEnabled) {
+            sendDesktopNotification(ctx, "OrgFy: Esteira Pronta", "Auto-bootstrap e provisionamento concluídos com sucesso!");
+          }
+          await loadRealState();
+        } else {
+          showNotification("warning", "Bootstrap finalizado com avisos. Verifique os logs.");
+        }
+      } catch (err: any) {
+        showNotification("warning", `Falha no bootstrap: ${err?.message || err}`);
+        setBootstrapLog((prev) => prev + `[ERRO] ${err?.message || err}\n`);
+      } finally {
+        setIsBootstrapping(false);
+      }
+    };
 
     // 1. Disparo Real de Despacho
     const handleExecuteDispatch = async () => {
@@ -485,6 +551,9 @@ export function apply(ctx: Context) {
         setIsDispatchModalOpen(false);
         setDispatchIssueId("");
         showNotification("success", `Card ${dispatchIssueId} despachado com sucesso via CLI!`);
+        if (desktopNotificationsEnabled) {
+          sendDesktopNotification(ctx, "OrgFy: Novo Despacho", `Card ${dispatchIssueId} despachado para ${dispatchExecutor} com sucesso.`);
+        }
       } catch (err: any) {
         showNotification("warning", `Falha no despacho determinístico: ${err?.message || err}`);
       } finally {
@@ -523,6 +592,9 @@ export function apply(ctx: Context) {
         setIsGateModalOpen(false);
         setActiveGateCard(null);
         showNotification("success", `PR ${card.prId || card.issueId} ACEITO no Gate! FPY mantido em 100%.`);
+        if (desktopNotificationsEnabled) {
+          sendDesktopNotification(ctx, "OrgFy: PR Aceito no Gate", `PR ${card.prId || card.issueId} aprovado com conformidade aos probes caixa-preta.`);
+        }
       } catch (err: any) {
         showNotification("warning", `Falha no Gate: ${err?.message || err}`);
       } finally {
@@ -552,8 +624,22 @@ export function apply(ctx: Context) {
 
         if (dsapWarning) {
           showNotification("warning", `[DSAP BACKTRACKING] Disparado! Similaridade de ${Math.round(dsapSimilarity * 100)}% acionou o COO.`);
+          if (desktopNotificationsEnabled) {
+            sendDesktopNotification(ctx, "⚠️ [DSAP BACKTRACKING]", `Alerta de estagnação semântica acionou o COO para re-escopo (PR #${card.prId || card.issueId})`);
+          }
         } else {
           showNotification("info", `PR devolvido ao executor para correções.`);
+          if (desktopNotificationsEnabled) {
+            sendDesktopNotification(ctx, "OrgFy: Gate Recusado", `PR #${card.prId || card.issueId} devolvido ao executor para correções.`);
+          }
+        }
+
+        if (desktopNotificationsEnabled) {
+          const title = dsapWarning ? "🚨 [DSAP BACKTRACKING] Alerta de Recusa" : "OrgFy: PR Recusado no Gate";
+          const body = dsapWarning
+            ? `Card ${card.prId || card.issueId} teve 2ª recusa com similaridade de ${Math.round(dsapSimilarity * 100)}%. COO Bento acionado!`
+            : `Card ${card.prId || card.issueId} recusado no Gate: ${gateRejectionReason}`;
+          sendDesktopNotification(ctx, title, body);
         }
 
         const updated = pipelineCards.map((c) => {
@@ -789,6 +875,41 @@ export function apply(ctx: Context) {
             { style: { display: "flex", alignItems: "center", gap: "6px", fontSize: "12px" } },
             h("span", { style: { color: "var(--text-subtle, #9ca3af)" } }, "CPI EVM:"),
             h("span", { style: { color: cpiTokens >= 0.85 ? "#10b981" : "#f59e0b", fontWeight: "700" } }, cpiTokens.toFixed(2))
+          ),
+          // MCP Indicator Pill
+          h(
+            "button",
+            {
+              onClick: () => setIsMcpDiagnosticsOpen(true),
+              title: "Abrir Diagnóstico do Servidor MCP Nativo (JSON-RPC 2.0)",
+              style: {
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "4px 10px",
+                borderRadius: "9999px",
+                backgroundColor: mcpStatus.active
+                  ? "rgba(16, 185, 129, 0.15)"
+                  : "rgba(59, 130, 246, 0.15)",
+                color: mcpStatus.active ? "#10b981" : "#60a5fa",
+                border: "none",
+                fontSize: "11px",
+                fontWeight: "600",
+                cursor: "pointer",
+              },
+            },
+            h("div", {
+              style: {
+                width: "8px",
+                height: "8px",
+                borderRadius: "50%",
+                backgroundColor: mcpStatus.active ? "#10b981" : "#60a5fa",
+                boxShadow: mcpStatus.active ? "0 0 8px #10b981" : "none",
+              },
+            }),
+            mcpStatus.active
+              ? `MCP NATIVO (${mcpStatus.toolCallsCount} calls)`
+              : "MCP NATIVO (4 tools)"
           )
         ),
 
@@ -796,6 +917,53 @@ export function apply(ctx: Context) {
         h(
           "div",
           { style: { display: "flex", alignItems: "center", gap: "8px" } },
+          h(
+            "button",
+            {
+              onClick: () => setIsBootstrapModalOpen(true),
+              title: "Wizard de Auto-Bootstrap e Provisionamento da Holding OrgFy",
+              style: {
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "6px 12px",
+                borderRadius: "8px",
+                backgroundColor: "rgba(16, 185, 129, 0.2)",
+                color: "#10b981",
+                fontWeight: "700",
+                fontSize: "12px",
+                border: "1px solid rgba(16, 185, 129, 0.3)",
+                cursor: "pointer",
+              },
+            },
+            SVG.zap({ h, width: 14, height: 14 }),
+            "Inicializar OrgFy"
+          ),
+          h(
+            "button",
+            {
+              onClick: () => {
+                const nextState = !desktopNotificationsEnabled;
+                setDesktopNotificationsEnabled(nextState);
+                showNotification("info", nextState ? "Notificações desktop ativadas!" : "Modo silencioso ativado.");
+              },
+              title: desktopNotificationsEnabled ? "Notificações desktop ativas (clique para silenciar)" : "Modo silencioso (clique para ativar notificações)",
+              style: {
+                padding: "6px 10px",
+                borderRadius: "8px",
+                backgroundColor: desktopNotificationsEnabled ? "rgba(16, 185, 129, 0.15)" : "rgba(255, 255, 255, 0.06)",
+                color: desktopNotificationsEnabled ? "#10b981" : "#9ca3af",
+                border: "1px solid rgba(255, 255, 255, 0.1)",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                fontSize: "11px",
+              },
+            },
+            desktopNotificationsEnabled ? SVG.bell({ h, width: 14, height: 14 }) : SVG.bellOff({ h, width: 14, height: 14 }),
+            desktopNotificationsEnabled ? "Notif. ON" : "Silencioso"
+          ),
           h(
             "button",
             {
@@ -2038,6 +2206,860 @@ export function apply(ctx: Context) {
               `testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED\n` +
               `[ORGFY WORKER] 2 passed in 1.42s. Probes caixa-preta engatilhados.\n` +
               `[ORGFY NOSTR] Evento kind:1618 publicado em wss://orgfy.communities.buzz.xyz (sub-second wake)`
+          )
+        ),
+
+      // ───────────────────────────────────────────────────────────────────────
+      // 7. MODAL DE DIAGNÓSTICO DO SERVIDOR MCP NATIVO (JSON-RPC 2.0 LOOPBACK)
+      // ───────────────────────────────────────────────────────────────────────
+      isMcpDiagnosticsOpen &&
+        h(
+          "div",
+          {
+            style: {
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: "rgba(0, 0, 0, 0.75)",
+              backdropFilter: "blur(8px)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 2000,
+            },
+          },
+          h(
+            "div",
+            {
+              style: {
+                width: "600px",
+                maxWidth: "92vw",
+                maxHeight: "88vh",
+                overflowY: "auto",
+                borderRadius: "16px",
+                backgroundColor: "#0d1310",
+                border: "1px solid rgba(16, 185, 129, 0.25)",
+                boxShadow: "0 20px 50px rgba(0, 0, 0, 0.8)",
+                padding: "24px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "16px",
+              },
+            },
+            // Header do Modal
+            h(
+              "div",
+              { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", gap: "10px" } },
+                SVG.cpu({ h, width: 22, height: 22 }),
+                h(
+                  "div",
+                  null,
+                  h("div", { style: { fontWeight: "700", fontSize: "15px", color: "#f3f4f6" } }, "Servidor MCP Nativo Loopback"),
+                  h("div", { style: { fontSize: "11px", color: "#9ca3af" } }, "Controle autônomo por agentes via JSON-RPC 2.0 (ctx.host.serveMcp)")
+                )
+              ),
+              h(
+                "button",
+                {
+                  onClick: () => setIsMcpDiagnosticsOpen(false),
+                  style: { background: "transparent", border: "none", color: "#9ca3af", cursor: "pointer" },
+                },
+                SVG.xCircle({ h, width: 18, height: 18 })
+              )
+            ),
+            // Status bar
+            h(
+              "div",
+              {
+                style: {
+                  padding: "10px 14px",
+                  borderRadius: "10px",
+                  backgroundColor: "rgba(16, 185, 129, 0.08)",
+                  border: "1px solid rgba(16, 185, 129, 0.2)",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  fontSize: "12px",
+                },
+              },
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", gap: "8px" } },
+                h("div", {
+                  style: {
+                    width: "8px",
+                    height: "8px",
+                    borderRadius: "50%",
+                    backgroundColor: mcpStatus.active ? "#10b981" : "#ef4444",
+                    boxShadow: mcpStatus.active ? "0 0 8px #10b981" : "none",
+                  },
+                }),
+                h("span", { style: { fontWeight: "600", color: "#10b981" } }, mcpStatus.active ? `SERVIDOR ATIVO (${mcpStatus.toolCallsCount} chamadas)` : "DESCONECTADO")
+              ),
+              h("span", { style: { fontFamily: "monospace", color: "#9ca3af" } }, mcpStatus.url || "http://127.0.0.1:8765/mcp")
+            ),
+            // Tools Disponíveis
+            h("div", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, "Ferramentas Homologadas (4 Ferramentas Canônicas):"),
+            h(
+              "div",
+              { style: { display: "flex", flexDirection: "column", gap: "8px" } },
+              [
+                { name: "orgfy_status", desc: "Telemetria agregada, FPY (100%), CPI (0.94), cards ativos e catraca RSI." },
+                { name: "orgfy_despachar", desc: "Invocação determinística de despacho com validação L-01 (executor ≠ revisor)." },
+                { name: "orgfy_gate", desc: "Veredito de aceite/recusa do revisor com probes caixa-preta e cálculo DSAP." },
+                { name: "orgfy_porteiro_sync", desc: "Reconciliação determinística pontual (porteiro.py --uma-vez)." },
+              ].map((tool) =>
+                h(
+                  "div",
+                  {
+                    key: tool.name,
+                    style: {
+                      padding: "8px 12px",
+                      borderRadius: "8px",
+                      backgroundColor: "rgba(255, 255, 255, 0.03)",
+                      border: "1px solid rgba(255, 255, 255, 0.06)",
+                    },
+                  },
+                  h("div", { style: { fontFamily: "monospace", fontSize: "12px", fontWeight: "700", color: "#60a5fa" } }, tool.name),
+                  h("div", { style: { fontSize: "11px", color: "#9ca3af", marginTop: "2px" } }, tool.desc)
+                )
+              )
+            ),
+            // Snippet de Conexão Externa
+            h("div", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, "Integração Externa (Claude Desktop / Antigravity / Goose / Pi):"),
+            h(
+              "pre",
+              {
+                style: {
+                  margin: 0,
+                  padding: "10px 14px",
+                  borderRadius: "8px",
+                  backgroundColor: "#080c0a",
+                  border: "1px solid rgba(255, 255, 255, 0.08)",
+                  fontSize: "10.5px",
+                  color: "#10b981",
+                  fontFamily: "monospace",
+                  overflowX: "auto",
+                },
+              },
+              JSON.stringify(
+                {
+                  mcpServers: {
+                    orgfy: {
+                      url: mcpStatus.url || "http://127.0.0.1:8765/mcp",
+                      tools: ["orgfy_status", "orgfy_despachar", "orgfy_gate", "orgfy_porteiro_sync"],
+                    },
+                  },
+                },
+                null,
+                2
+              )
+            ),
+            // Botões do Modal
+            h(
+              "div",
+              { style: { display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "8px" } },
+              h(
+                "button",
+                {
+                  onClick: () => {
+                    navigator.clipboard.writeText(
+                      JSON.stringify(
+                        {
+                          mcpServers: {
+                            orgfy: {
+                              url: mcpStatus.url || "http://127.0.0.1:8765/mcp",
+                              tools: ["orgfy_status", "orgfy_despachar", "orgfy_gate", "orgfy_porteiro_sync"],
+                            },
+                          },
+                        },
+                        null,
+                        2
+                      )
+                    );
+                    showNotification("success", "Configuração copiada para o clipboard!");
+                  },
+                  style: {
+                    padding: "8px 14px",
+                    borderRadius: "8px",
+                    backgroundColor: "rgba(255, 255, 255, 0.08)",
+                    border: "none",
+                    color: "#ffffff",
+                    fontSize: "12px",
+                    cursor: "pointer",
+                  },
+                },
+                "Copiar Config"
+              ),
+              h(
+                "button",
+                {
+                  onClick: () => setIsMcpDiagnosticsOpen(false),
+                  style: {
+                    padding: "8px 16px",
+                    borderRadius: "8px",
+                    backgroundColor: "#10b981",
+                    border: "none",
+                    color: "#000000",
+                    fontWeight: "700",
+                    fontSize: "12px",
+                    cursor: "pointer",
+                  },
+                },
+                "Fechar"
+              )
+            )
+          )
+        ),
+
+      // ───────────────────────────────────────────────────────────────────────
+      // 8. MODAL WIZARD DE AUTO-BOOTSTRAP & ONBOARDING (1-CLIQUE)
+      // ───────────────────────────────────────────────────────────────────────
+      isBootstrapModalOpen &&
+        h(
+          "div",
+          {
+            style: {
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: "rgba(0, 0, 0, 0.75)",
+              backdropFilter: "blur(8px)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 2000,
+            },
+          },
+          h(
+            "div",
+            {
+              style: {
+                width: "640px",
+                maxWidth: "92vw",
+                maxHeight: "90vh",
+                overflowY: "auto",
+                borderRadius: "16px",
+                backgroundColor: "#0d1310",
+                border: "1px solid rgba(59, 130, 246, 0.3)",
+                boxShadow: "0 20px 50px rgba(0, 0, 0, 0.8)",
+                padding: "24px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "16px",
+              },
+            },
+            // Header do Modal
+            h(
+              "div",
+              { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", gap: "10px" } },
+                SVG.zap({ h, width: 22, height: 22 }),
+                h(
+                  "div",
+                  null,
+                  h("div", { style: { fontWeight: "700", fontSize: "15px", color: "#f3f4f6" } }, "Wizard de Auto-Bootstrap & Onboarding"),
+                  h("div", { style: { fontSize: "11px", color: "#9ca3af" } }, "Provisionamento completo da esteira determinística OrgFy v10 em 1-Clique")
+                )
+              ),
+              h(
+                "button",
+                {
+                  onClick: () => setIsBootstrapModalOpen(false),
+                  disabled: isBootstrapping,
+                  style: { background: "transparent", border: "none", color: "#9ca3af", cursor: isBootstrapping ? "not-allowed" : "pointer" },
+                },
+                SVG.xCircle({ h, width: 18, height: 18 })
+              )
+            ),
+            // Barra de Progresso Viva (0% a 100%)
+            (() => {
+              const completedCount = bootstrapSteps.filter((s) => s.status === "success").length;
+              const pct = Math.round((completedCount / bootstrapSteps.length) * 100);
+              return h(
+                "div",
+                { style: { display: "flex", flexDirection: "column", gap: "6px" } },
+                h(
+                  "div",
+                  { style: { display: "flex", justifyContent: "space-between", fontSize: "11px" } },
+                  h("span", { style: { color: "#9ca3af" } }, "Progresso do Provisionamento:"),
+                  h("span", { style: { color: pct === 100 ? "#10b981" : "#60a5fa", fontWeight: "700" } }, `${pct}%`)
+                ),
+                h(
+                  "div",
+                  {
+                    style: {
+                      width: "100%",
+                      height: "6px",
+                      borderRadius: "9999px",
+                      backgroundColor: "rgba(255, 255, 255, 0.08)",
+                      overflow: "hidden",
+                    },
+                  },
+                  h("div", {
+                    style: {
+                      width: `${pct}%`,
+                      height: "100%",
+                      borderRadius: "9999px",
+                      background: pct === 100 ? "linear-gradient(90deg, #10b981, #34d399)" : "linear-gradient(90deg, #3b82f6, #60a5fa)",
+                      transition: "width 0.4s ease",
+                    },
+                  })
+                )
+              );
+            })(),
+            // Stepper de Etapas
+            h(
+              "div",
+              { style: { display: "flex", flexDirection: "column", gap: "10px" } },
+              bootstrapSteps.map((step, idx) => {
+                const isSuccess = step.status === "success";
+                const isRunning = step.status === "running";
+                const isError = step.status === "error";
+
+                return h(
+                  "div",
+                  {
+                    key: step.step,
+                    style: {
+                      padding: "10px 14px",
+                      borderRadius: "10px",
+                      backgroundColor: isRunning
+                        ? "rgba(59, 130, 246, 0.08)"
+                        : isSuccess
+                        ? "rgba(16, 185, 129, 0.05)"
+                        : "rgba(255, 255, 255, 0.03)",
+                      border: "1px solid " + (isRunning
+                        ? "rgba(59, 130, 246, 0.3)"
+                        : isSuccess
+                        ? "rgba(16, 185, 129, 0.2)"
+                        : isError
+                        ? "rgba(239, 68, 68, 0.3)"
+                        : "rgba(255, 255, 255, 0.06)"),
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                    },
+                  },
+                  h(
+                    "div",
+                    { style: { display: "flex", alignItems: "center", gap: "10px" } },
+                    h(
+                      "div",
+                      {
+                        style: {
+                          width: "22px",
+                          height: "22px",
+                          borderRadius: "50%",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          backgroundColor: isSuccess
+                            ? "rgba(16, 185, 129, 0.2)"
+                            : isRunning
+                            ? "rgba(59, 130, 246, 0.2)"
+                            : "rgba(255, 255, 255, 0.08)",
+                          color: isSuccess ? "#10b981" : isRunning ? "#60a5fa" : "#9ca3af",
+                          fontSize: "11px",
+                          fontWeight: "700",
+                        },
+                      },
+                      isSuccess
+                        ? SVG.checkCircle({ h, width: 14, height: 14 })
+                        : isRunning
+                        ? SVG.refresh({ h, width: 12, height: 12 })
+                        : isError
+                        ? SVG.xCircle({ h, width: 14, height: 14 })
+                        : idx + 1
+                    ),
+                    h(
+                      "div",
+                      null,
+                      h("div", { style: { fontSize: "12px", fontWeight: "600", color: "#f3f4f6" } }, step.label),
+                      step.details && h("div", { style: { fontSize: "11px", color: isError ? "#ef4444" : "#9ca3af", marginTop: "2px" } }, step.details)
+                    )
+                  ),
+                  h(
+                    "span",
+                    {
+                      style: {
+                        fontSize: "10px",
+                        fontWeight: "700",
+                        padding: "2px 8px",
+                        borderRadius: "9999px",
+                        backgroundColor: isSuccess
+                          ? "rgba(16, 185, 129, 0.15)"
+                          : isRunning
+                          ? "rgba(59, 130, 246, 0.15)"
+                          : isError
+                          ? "rgba(239, 68, 68, 0.15)"
+                          : "rgba(255, 255, 255, 0.05)",
+                        color: isSuccess ? "#10b981" : isRunning ? "#60a5fa" : isError ? "#ef4444" : "#9ca3af",
+                      },
+                    },
+                    isSuccess ? "VERIFICADO" : isRunning ? "PROCESSANDO..." : isError ? "FALHA" : "PENDENTE"
+                  )
+                );
+              })
+            ),
+            // Terminal de Logs
+            h(
+              "pre",
+              {
+                style: {
+                  margin: 0,
+                  padding: "10px 14px",
+                  borderRadius: "8px",
+                  backgroundColor: "#080c0a",
+                  border: "1px solid rgba(255, 255, 255, 0.08)",
+                  fontSize: "10.5px",
+                  color: "#10b981",
+                  fontFamily: "monospace",
+                  maxHeight: "130px",
+                  overflowY: "auto",
+                  lineHeight: "1.4",
+                },
+              },
+              bootstrapLog || "[BOOTSTRAP] Pronto para inicialização. Clique no botão abaixo para iniciar o provisionamento."
+            ),
+            // Ações do Modal
+            h(
+              "div",
+              { style: { display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "4px" } },
+              h(
+                "button",
+                {
+                  onClick: () => setIsBootstrapModalOpen(false),
+                  disabled: isBootstrapping,
+                  style: {
+                    padding: "8px 14px",
+                    borderRadius: "8px",
+                    backgroundColor: "rgba(255, 255, 255, 0.08)",
+                    border: "none",
+                    color: "#ffffff",
+                    fontSize: "12px",
+                    cursor: isBootstrapping ? "not-allowed" : "pointer",
+                  },
+                },
+                "Fechar"
+              ),
+              h(
+                "button",
+                {
+                  onClick: handleRunBootstrap,
+                  disabled: isBootstrapping,
+                  style: {
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    padding: "8px 18px",
+                    borderRadius: "8px",
+                    backgroundColor: bootstrapDone ? "#10b981" : "#3b82f6",
+                    border: "none",
+                    color: "#ffffff",
+                    fontWeight: "700",
+                    fontSize: "12px",
+                    cursor: isBootstrapping ? "not-allowed" : "pointer",
+                    boxShadow: isBootstrapping ? "none" : "0 4px 14px rgba(59, 130, 246, 0.4)",
+                  },
+                },
+                isBootstrapping
+                  ? [SVG.refresh({ h, width: 14, height: 14 }), "Executando Auto-Bootstrap..."]
+                  : bootstrapDone
+                  ? [SVG.checkCircle({ h, width: 14, height: 14 }), "Re-executar Bootstrap"]
+                  : [SVG.zap({ h, width: 14, height: 14 }), "Inicializar Tudo em 1-Clique"]
+              )
+            )
+          )
+        ),
+
+      // ───────────────────────────────────────────────────────────────────────
+      // 7. MODAL AUTO-BOOTSTRAP & ONBOARDING 1-CLIQUE (FASE 3)
+      // ───────────────────────────────────────────────────────────────────────
+      isBootstrapModalOpen &&
+        h(
+          "div",
+          {
+            style: {
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: "rgba(0, 0, 0, 0.75)",
+              backdropFilter: "blur(6px)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 2200,
+            },
+          },
+          h(
+            "div",
+            {
+              style: {
+                width: "560px",
+                borderRadius: "16px",
+                backgroundColor: "#111714",
+                border: "1px solid rgba(16, 185, 129, 0.25)",
+                padding: "24px",
+                boxShadow: "0 25px 60px rgba(0, 0, 0, 0.85)",
+                display: "flex",
+                flexDirection: "column",
+                gap: "16px",
+              },
+            },
+            // Header
+            h(
+              "div",
+              { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", gap: "8px" } },
+                SVG.zap({ h, width: 20, height: 20 }),
+                h("h3", { style: { margin: 0, fontSize: "16px", color: "#ffffff", fontWeight: "700" } }, "Auto-Bootstrap da Holding OrgFy")
+              ),
+              h(
+                "button",
+                {
+                  onClick: () => !isBootstrapping && setIsBootstrapModalOpen(false),
+                  disabled: isBootstrapping,
+                  style: { background: "transparent", border: "none", color: "#9ca3af", cursor: isBootstrapping ? "not-allowed" : "pointer" },
+                },
+                SVG.xCircle({ h, width: 18, height: 18 })
+              )
+            ),
+            h(
+              "p",
+              { style: { margin: 0, fontSize: "12px", color: "#9ca3af", lineHeight: "1.4" } },
+              "Provisionamento determinístico de ponta a ponta: diagnóstico de binários locais (python3, git, docker), integridade do repositório, canal Nostr NIP-29 (#esteira-orgfy), registro dos 4 agentes canônicos e sincronização do Porteiro."
+            ),
+            // Progress Bar
+            (() => {
+              const successCount = bootstrapSteps.filter((s) => s.status === "success").length;
+              const pct = Math.round((successCount / bootstrapSteps.length) * 100);
+              return h(
+                "div",
+                { style: { display: "flex", flexDirection: "column", gap: "6px" } },
+                h(
+                  "div",
+                  { style: { display: "flex", justifyContent: "space-between", fontSize: "11px" } },
+                  h("span", { style: { color: "#9ca3af" } }, "Progresso do Provisionamento:"),
+                  h("span", { style: { color: pct === 100 ? "#10b981" : "#60a5fa", fontWeight: "700" } }, `${pct}%`)
+                ),
+                h(
+                  "div",
+                  {
+                    style: {
+                      height: "6px",
+                      borderRadius: "9999px",
+                      backgroundColor: "rgba(255, 255, 255, 0.08)",
+                      overflow: "hidden",
+                    },
+                  },
+                  h("div", {
+                    style: {
+                      height: "100%",
+                      width: `${pct}%`,
+                      backgroundColor: pct === 100 ? "#10b981" : "#3b82f6",
+                      transition: "width 0.3s ease",
+                    },
+                  })
+                )
+              );
+            })(),
+            // Stepper List
+            h(
+              "div",
+              {
+                style: {
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "10px",
+                  maxHeight: "260px",
+                  overflowY: "auto",
+                  padding: "8px 0",
+                },
+              },
+              bootstrapSteps.map((s, idx) => {
+                const statusColor =
+                  s.status === "success"
+                    ? "#10b981"
+                    : s.status === "running"
+                    ? "#f59e0b"
+                    : s.status === "error"
+                    ? "#ef4444"
+                    : "#6b7280";
+                return h(
+                  "div",
+                  {
+                    key: s.step,
+                    style: {
+                      display: "flex",
+                      alignItems: "flex-start",
+                      gap: "12px",
+                      padding: "8px 12px",
+                      borderRadius: "8px",
+                      backgroundColor: "rgba(255, 255, 255, 0.03)",
+                      border: "1px solid rgba(255, 255, 255, 0.06)",
+                    },
+                  },
+                  h(
+                    "div",
+                    { style: { marginTop: "2px", color: statusColor } },
+                    s.status === "success"
+                      ? SVG.checkCircle({ h, width: 14, height: 14 })
+                      : s.status === "running"
+                      ? SVG.refresh({ h, width: 14, height: 14 })
+                      : s.status === "error"
+                      ? SVG.alertTriangle({ h, width: 14, height: 14 })
+                      : h("div", {
+                          style: {
+                            width: "12px",
+                            height: "12px",
+                            borderRadius: "50%",
+                            border: "1.5px solid #6b7280",
+                          },
+                        })
+                  ),
+                  h(
+                    "div",
+                    { style: { display: "flex", flexDirection: "column", gap: "2px", flex: 1 } },
+                    h(
+                      "span",
+                      { style: { fontSize: "12px", fontWeight: "600", color: "#f3f4f6" } },
+                      `${idx + 1}. ${s.label}`
+                    ),
+                    s.details &&
+                      h(
+                        "span",
+                        { style: { fontSize: "11px", color: statusColor, fontFamily: "monospace" } },
+                        s.details
+                      )
+                  )
+                );
+              })
+            ),
+            // Actions
+            h(
+              "div",
+              { style: { display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "6px" } },
+              h(
+                "button",
+                {
+                  onClick: () => setIsBootstrapModalOpen(false),
+                  disabled: isBootstrapping,
+                  style: {
+                    padding: "8px 16px",
+                    borderRadius: "8px",
+                    backgroundColor: "transparent",
+                    border: "1px solid rgba(255, 255, 255, 0.15)",
+                    color: "#9ca3af",
+                    fontSize: "12px",
+                    cursor: isBootstrapping ? "not-allowed" : "pointer",
+                  },
+                },
+                "Fechar"
+              ),
+              h(
+                "button",
+                {
+                  onClick: handleRunBootstrap,
+                  disabled: isBootstrapping,
+                  style: {
+                    padding: "8px 18px",
+                    borderRadius: "8px",
+                    backgroundColor: "#10b981",
+                    border: "none",
+                    color: "#000000",
+                    fontWeight: "700",
+                    fontSize: "12px",
+                    cursor: isBootstrapping ? "not-allowed" : "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  },
+                },
+                isBootstrapping
+                  ? [SVG.refresh({ h, width: 14, height: 14 }), "Executando Auto-Bootstrap..."]
+                  : [SVG.zap({ h, width: 14, height: 14 }), "⚡ Inicializar Tudo em 1-Clique"]
+              )
+            )
+          )
+        ),
+
+      // ───────────────────────────────────────────────────────────────────────
+      // 8. MODAL DIAGNÓSTICO DO SERVIDOR MCP NATIVO (FASE 3)
+      // ───────────────────────────────────────────────────────────────────────
+      isMcpDiagnosticsOpen &&
+        h(
+          "div",
+          {
+            style: {
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: "rgba(0, 0, 0, 0.75)",
+              backdropFilter: "blur(6px)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 2200,
+            },
+          },
+          h(
+            "div",
+            {
+              style: {
+                width: "580px",
+                borderRadius: "16px",
+                backgroundColor: "#111714",
+                border: "1px solid rgba(59, 130, 246, 0.3)",
+                padding: "24px",
+                boxShadow: "0 25px 60px rgba(0, 0, 0, 0.85)",
+                display: "flex",
+                flexDirection: "column",
+                gap: "16px",
+              },
+            },
+            // Header
+            h(
+              "div",
+              { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", gap: "8px" } },
+                SVG.cpu({ h, width: 20, height: 20 }),
+                h("h3", { style: { margin: 0, fontSize: "16px", color: "#ffffff", fontWeight: "700" } }, "Servidor MCP Nativo — Diagnóstico Técnico")
+              ),
+              h(
+                "button",
+                {
+                  onClick: () => setIsMcpDiagnosticsOpen(false),
+                  style: { background: "transparent", border: "none", color: "#9ca3af", cursor: "pointer" },
+                },
+                SVG.xCircle({ h, width: 18, height: 18 })
+              )
+            ),
+            // Info Bar
+            h(
+              "div",
+              {
+                style: {
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: "10px",
+                  padding: "12px",
+                  backgroundColor: "rgba(255, 255, 255, 0.03)",
+                  borderRadius: "10px",
+                  border: "1px solid rgba(255, 255, 255, 0.08)",
+                  fontSize: "11px",
+                },
+              },
+              h(
+                "div",
+                null,
+                h("span", { style: { color: "#9ca3af" } }, "Protocolo: "),
+                h("span", { style: { color: "#60a5fa", fontWeight: "600" } }, "JSON-RPC 2.0 Loopback")
+              ),
+              h(
+                "div",
+                null,
+                h("span", { style: { color: "#9ca3af" } }, "Status: "),
+                h(
+                  "span",
+                  { style: { color: mcpStatus.active ? "#10b981" : "#60a5fa", fontWeight: "600" } },
+                  mcpStatus.active ? "🟢 ATIVO (ctx.host.serveMcp)" : "🟢 PRONTO / LOOPBACK"
+                )
+              ),
+              h(
+                "div",
+                null,
+                h("span", { style: { color: "#9ca3af" } }, "Chamadas Registradas: "),
+                h("span", { style: { color: "#10b981", fontWeight: "700" } }, `${mcpStatus.toolCallsCount} invocação(ões)`)
+              ),
+              h(
+                "div",
+                null,
+                h("span", { style: { color: "#9ca3af" } }, "Clientes Suportados: "),
+                h("span", { style: { color: "#ffffff" } }, "Antigravity, Claude, Goose, Pi")
+              )
+            ),
+            // Tools Section
+            h(
+              "div",
+              { style: { display: "flex", flexDirection: "column", gap: "8px" } },
+              h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, "Ferramentas Homologadas (4 Tools):"),
+              [
+                {
+                  name: "orgfy_status",
+                  desc: "Telemetria agregada ao vivo: FPY, CPI, cards ativos e catraca de regras probatórias RSI.",
+                },
+                {
+                  name: "orgfy_despachar",
+                  desc: "Invocação determinística de despacho com validação mecânica L-01 (executor !== revisor).",
+                },
+                {
+                  name: "orgfy_gate",
+                  desc: "Decisão oficial de Gate Caixa-Preta (aceito/recusado) com holdout verification e alerta DSAP.",
+                },
+                {
+                  name: "orgfy_porteiro_sync",
+                  desc: "Disparo pontual do ciclo determinístico do Porteiro Nostr para reconciliar filas de PR e main.",
+                },
+              ].map((tool) =>
+                h(
+                  "div",
+                  {
+                    key: tool.name,
+                    style: {
+                      padding: "8px 12px",
+                      borderRadius: "8px",
+                      backgroundColor: "rgba(255, 255, 255, 0.02)",
+                      border: "1px solid rgba(255, 255, 255, 0.06)",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "2px",
+                    },
+                  },
+                  h("span", { style: { fontSize: "12px", fontFamily: "monospace", color: "#10b981", fontWeight: "700" } }, tool.name),
+                  h("span", { style: { fontSize: "11px", color: "#9ca3af" } }, tool.desc)
+                )
+              )
+            ),
+            // Close Button
+            h(
+              "div",
+              { style: { display: "flex", justifyContent: "flex-end", marginTop: "6px" } },
+              h(
+                "button",
+                {
+                  onClick: () => setIsMcpDiagnosticsOpen(false),
+                  style: {
+                    padding: "8px 18px",
+                    borderRadius: "8px",
+                    backgroundColor: "#3b82f6",
+                    border: "none",
+                    color: "#ffffff",
+                    fontWeight: "600",
+                    fontSize: "12px",
+                    cursor: "pointer",
+                  },
+                },
+                "Entendido"
+              )
+            )
           )
         )
     );

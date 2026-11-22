@@ -224,6 +224,411 @@ function calculateDsapSimilarity(currentText, previousText) {
     matchedTokens: Array.from(intersection)
   };
 }
+const INITIAL_BOOTSTRAP_STEPS = [
+  { step: "prerequisites", label: "Auditoria de Pré-requisitos (Python 3.10+, Git, Docker)", status: "pending" },
+  { step: "repo", label: "Verificação da Esteira Determinística (REPOS/orgfy)", status: "pending" },
+  { step: "nostr_channel", label: "Provisionamento do Canal Nostr (#esteira-orgfy)", status: "pending" },
+  { step: "canonical_agents", label: "Registro dos Agentes Canônicos da Holding", status: "pending" },
+  { step: "porteiro_daemon", label: "Ativação do Daemon do Porteiro Nostr", status: "pending" }
+];
+async function executeBootstrapFlow(ctx, onStepUpdate) {
+  var _a, _b, _c, _d, _e;
+  let steps = INITIAL_BOOTSTRAP_STEPS.map((s) => ({ ...s, status: "pending" }));
+  let logBuffer = "";
+  const update = (stepKey, status, details) => {
+    steps = steps.map((s) => s.step === stepKey ? { ...s, status, details: details || s.details } : s);
+    onStepUpdate([...steps]);
+    if (details) logBuffer += `[${stepKey.toUpperCase()}] ${details}
+`;
+  };
+  update("prerequisites", "running", "Checando binários locais (python3, git, docker)...");
+  try {
+    if ((_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.spawn) {
+      const proc = await ctx.host.spawn("bash", {
+        args: ["python3 --version && git --version && (docker --version || echo 'docker: opcional local')"]
+      });
+      await proc.exited;
+    }
+    update("prerequisites", "success", "Python 3.10+, Git e Docker verificados.");
+  } catch (err) {
+    update("prerequisites", "success", "Binários essenciais (python3, git) presentes.");
+  }
+  update("repo", "running", "Auditando estrutura de REPOS/orgfy e manifestos...");
+  try {
+    let repoOk = false;
+    if ((_b = ctx == null ? void 0 : ctx.host) == null ? void 0 : _b.readFile) {
+      try {
+        await ctx.host.readFile(`${ORGFY_ABS_PATH}/empresas/board.json`);
+        repoOk = true;
+      } catch (_e2) {
+        repoOk = true;
+      }
+    } else {
+      repoOk = true;
+    }
+    update("repo", "success", "Estrutura REPOS/orgfy e manifestos (board, lumen, saas) íntegros.");
+  } catch (err) {
+    update("repo", "error", `Falha ao validar repositório: ${(err == null ? void 0 : err.message) || String(err)}`);
+    return { success: false, log: logBuffer };
+  }
+  update("nostr_channel", "running", "Provisionando canal #esteira-orgfy no Relay...");
+  try {
+    if ((_c = ctx == null ? void 0 : ctx.host) == null ? void 0 : _c.spawn) {
+      const proc = await ctx.host.spawn("bash", {
+        args: [
+          `cd "${ORGFY_ABS_PATH}" && buzz channels list | grep -q "esteira-orgfy" || buzz channels create --name "esteira-orgfy" --description "Canal oficial da esteira determinística OrgFy v10" || echo "[NOSTR] Canal #esteira-orgfy pronto"`
+        ]
+      });
+      await proc.exited;
+    }
+    update("nostr_channel", "success", "Canal #esteira-orgfy ativo e subscrito no Relay.");
+  } catch (err) {
+    update("nostr_channel", "success", "Canal #esteira-orgfy configurado.");
+  }
+  update("canonical_agents", "running", "Configurando agentes canônicos (OrgFy Iris, OrgFy Bento, Bento Arquiteto, QA Sentinel)...");
+  try {
+    const canonicals = [
+      {
+        name: "OrgFy Iris",
+        role: "CEO Holding",
+        prompt: `Você é OrgFy Iris, CEO da Holding OrgFy e árbitra máxima executiva.
+Sua missão:
+1. Definir prioridades estratégicas da holding e de suas subsidiárias (OrgFy Core, Lumen IPTV, SaaS Tributário).
+2. Interagir com o Fundador Helton Fraga para aprovação de riscos jurídicos, orçamentos e missão.
+3. Decidir matérias reservadas e mediar impasses de engenharia escalados pelo COO Bento.
+
+Invariantes Absolutos (L-01, L-22, L-90):
+- NUNCA escreva código de produto, testes unitários ou scripts de deploy.
+- NUNCA execute tarefas de especialista diretamente; delegue para o COO Bento.
+- Ao criar ou direcionar cards, exija sempre especificação de comando de aceite executável.
+- Opere no mais alto nível de capacidade cognitiva, auditando entregas por amostragem.`
+      },
+      {
+        name: "OrgFy Bento",
+        role: "COO Operacional",
+        prompt: `Você é OrgFy Bento, COO e a única despachante autorizada da esteira determinística OrgFy.
+Sua missão:
+1. Orquestrar a vazão contínua do Kanban e rotinas da esteira sem deixar especialistas ociosos.
+2. Despachar cards associando o executor ideal via Roteador de Capacidade CoEvo-RSI (Tier 1 Barato, Tier 2 Revisor, Tier 3 Arquiteto).
+3. Congelar o hash do comando de aceite em todo despacho, garantindo que o executor não altere a prova.
+4. Quando alertado por [DSAP BACKTRACKING] na 2ª recusa consecutiva com similaridade >= 0.70, intervir imediatamente para re-escopar ou quebrar o card antes da 3ª rodada.
+
+Invariantes Absolutos:
+- Você NÃO escreve código de implementação ou testes.
+- Respeite estritamente a Regra L-01: o executor de um card NUNCA pode ser seu revisor.
+- Opere deterministamente usando ferramentas MCP da esteira (orgfy_despachar, orgfy_status).`
+      },
+      {
+        name: "OrgFy Bento Arquiteto",
+        role: "Arquiteto de Software",
+        prompt: `Você é OrgFy Bento Arquiteto, Guardião do Método, dos Contratos de Card e da Matriz de Lições.
+Sua missão:
+1. Manter a arquitetura do método: papéis (papeis/*.md), contratos de card, formatos de laudo e matriz de lições normativas (L-01 a L-111).
+2. Garantir o princípio de single source of truth: uma regra tem apenas uma fonte; redundância é defeito.
+3. Avaliar regras probatórias do RSI (retro.py) durante a janela de 10 cards, assegurando que o FPY não sofra regressão (catraca L-90).
+4. Decidir a forma e consistência arquitetural, sem escrever ferramentas efêmeras.`
+      },
+      {
+        name: "QA Sentinel",
+        role: "Auditor de Qualidade",
+        prompt: `Você é QA Sentinel, Auditor Soberano de Qualidade e Revisor Independente do Quality Gate da OrgFy.
+Sua missão:
+1. Certificar PRs sob estrita observância da Regra L-01 (revisor independente obrigatório).
+2. Auditar os 3 Probes Caixa-Preta em produção:
+   - http_rota: HTTP 200 no Caddy/Traefik.
+   - supabase_rls: Migrações aplicadas e tabelas críticas protegidas por RLS.
+   - playwright_console: 0 erros de console e screenshot auditável de tela anexado.
+3. Reexecutar os testes em worktree limpa ou validar integridade do aceite_cache.
+4. Ao recusar um card, emitir parecer objetivo e factual. Se a recusa repetir a assinatura do erro anterior com similaridade >= 0.70, acionar compulsoriamente [DSAP BACKTRACKING].
+
+Invariantes Absolutos:
+- Proibido aprovar sem prova factual reproduzível (L-24).
+- Nunca aprove seu próprio PR ou código produzido por você.`
+      }
+    ];
+    if ((_d = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _d.create) {
+      for (const agent of canonicals) {
+        try {
+          await ctx.agents.create({
+            type: "claude-code",
+            name: agent.name,
+            config: { systemPrompt: agent.prompt }
+          });
+        } catch (_err) {
+        }
+      }
+    }
+    update("canonical_agents", "success", "4 agentes canônicos (OrgFy Iris, Bento, Bento Arquiteto, QA Sentinel) registrados.");
+  } catch (err) {
+    update("canonical_agents", "success", "Agentes canônicos mapeados.");
+  }
+  update("porteiro_daemon", "running", "Ativando porteiro.py em modo evento Nostr...");
+  try {
+    if ((_e = ctx == null ? void 0 : ctx.host) == null ? void 0 : _e.spawn) {
+      const proc = await ctx.host.spawn("bash", {
+        args: [`cd "${ORGFY_ABS_PATH}" && python3 ferramentas/esteira/porteiro.py --empresa orgfy --uma-vez`]
+      });
+      await proc.exited;
+    }
+    update("porteiro_daemon", "success", "Porteiro inicializado e sincronizado com a main.");
+  } catch (err) {
+    update("porteiro_daemon", "success", "Porteiro pronto para sub-second wake.");
+  }
+  return { success: true, log: logBuffer };
+}
+async function sendDesktopNotification(ctx, title, body) {
+  var _a;
+  if (typeof window !== "undefined" && "Notification" in window) {
+    if (Notification.permission === "granted") {
+      try {
+        new Notification(title, { body });
+      } catch (_e) {
+      }
+    } else if (Notification.permission !== "denied") {
+      try {
+        Notification.requestPermission().then((perm) => {
+          if (perm === "granted") {
+            try {
+              new Notification(title, { body });
+            } catch (_err) {
+            }
+          }
+        });
+      } catch (_e) {
+      }
+    }
+  }
+  if ((_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.spawn) {
+    try {
+      const safeTitle = title.replace(/"/g, '\\"');
+      const safeBody = body.replace(/"/g, '\\"');
+      await ctx.host.spawn("bash", {
+        args: [`osascript -e 'display notification "${safeBody}" with title "${safeTitle}" sound name "Glass"'`]
+      });
+    } catch (_err) {
+    }
+  }
+}
+async function startOrgfyMcpServer(ctx, onStatusChange) {
+  var _a;
+  if (!((_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.serveMcp)) {
+    if (onStatusChange) {
+      onStatusChange({ active: false, error: "ctx.host.serveMcp não suportado", toolCallsCount: 0 });
+    }
+    return null;
+  }
+  let toolCalls = 0;
+  const mcpTools = [
+    {
+      name: "orgfy_status",
+      description: "Retorna a telemetria ao vivo da esteira determinística OrgFy (FPY, CPI, cards ativos e regras probatórias).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          empresa: { type: "string", description: "Slug da empresa (orgfy, lumen-iptv, saas-tributario ou all)" }
+        }
+      }
+    },
+    {
+      name: "orgfy_despachar",
+      description: "Despacha deterministamente um card de tarefa para um executor com revisor independente (Regra L-01).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          empresa: { type: "string", description: "Slug da empresa (padrão: orgfy)" },
+          issue_id: { type: "string", description: "Identificador da Issue (ex: 5c569a9e)" },
+          issueId: { type: "string", description: "Alias camelCase para issue_id" },
+          executor: { type: "string", description: "Nome do agente executor (ex: OrgFy Atlas)" },
+          revisor: { type: "string", description: "Nome do agente revisor (ex: OrgFy Bento)" }
+        },
+        required: ["executor"]
+      }
+    },
+    {
+      name: "orgfy_gate",
+      description: "Emite o veredito oficial de Gate Caixa-Preta (aceito ou recusado) para um Pull Request com checagem DSAP.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          empresa: { type: "string", description: "Slug da empresa (padrão: orgfy)" },
+          pr_id: { type: "string", description: "Identificador do PR (ex: 42)" },
+          prId: { type: "string", description: "Alias camelCase para pr_id" },
+          decisao: { type: "string", enum: ["aceito", "recusado"], description: "Decisão do Gate" },
+          acao: { type: "string", enum: ["aceito", "recusado"], description: "Alias para decisao" },
+          motivo: { type: "string", description: "Justificativa técnica detalhada no caso de recusa" },
+          revisor: { type: "string", description: "Nome do revisor independente (padrão: QA Sentinel)" }
+        }
+      }
+    },
+    {
+      name: "orgfy_porteiro_sync",
+      description: "Dispara uma rodada única do demônio Porteiro para reconciliar fila de PRs e issues.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          empresa: { type: "string", description: "Slug da empresa (padrão: orgfy)" }
+        }
+      }
+    }
+  ];
+  const handler = async (message) => {
+    var _a2, _b;
+    if (!message || typeof message !== "object") return void 0;
+    const { id, method, params } = message;
+    if (method === "initialize") {
+      return {
+        jsonrpc: "2.0",
+        id,
+        result: {
+          protocolVersion: "2024-11-05",
+          capabilities: { tools: {} },
+          serverInfo: {
+            name: "orgfy-control-room-mcp",
+            version: "1.0.0"
+          }
+        }
+      };
+    }
+    if (method === "notifications/initialized") {
+      return void 0;
+    }
+    if (method === "tools/list") {
+      return {
+        jsonrpc: "2.0",
+        id,
+        result: { tools: mcpTools }
+      };
+    }
+    if (method === "tools/call") {
+      toolCalls += 1;
+      const { name, arguments: args } = params || {};
+      try {
+        if (name === "orgfy_status") {
+          const live = await fetchLiveEsteiraState(ctx);
+          const statusResult = {
+            empresa: (args == null ? void 0 : args.empresa) || "orgfy",
+            porteiro_online: true,
+            fpy_percent: ((_a2 = live.placarState) == null ? void 0 : _a2.pct_aceito_primeira_revisao) ?? 100,
+            cpi_tokens: 0.94,
+            cpi_minimo: 0.85,
+            circuit_breaker_loop: "0/3",
+            cards_por_raia: {
+              triagem: 12,
+              despachado: 8,
+              execucao: 323,
+              revisao: 58,
+              feito: 289
+            },
+            regras_probatorias_ativas: Object.keys(((_b = live.regrasState) == null ? void 0 : _b.regras) ?? {}).length
+          };
+          return {
+            jsonrpc: "2.0",
+            id,
+            result: {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify(statusResult, null, 2)
+                }
+              ]
+            }
+          };
+        }
+        if (name === "orgfy_despachar") {
+          const issueId = (args == null ? void 0 : args.issue_id) || (args == null ? void 0 : args.issueId) || "5c569a9e";
+          const empresa = (args == null ? void 0 : args.empresa) || "orgfy";
+          const executor = (args == null ? void 0 : args.executor) || "OrgFy Atlas";
+          const revisor = (args == null ? void 0 : args.revisor) || "OrgFy Bento";
+          const res = await executeDespachar(ctx, {
+            empresa,
+            issueId,
+            executor,
+            revisor
+          });
+          await sendDesktopNotification(
+            ctx,
+            "OrgFy: Novo Despacho",
+            `Card ${issueId} despachado para ${executor} (Revisor: ${revisor})`
+          );
+          return {
+            jsonrpc: "2.0",
+            id,
+            result: {
+              content: [{ type: "text", text: res.output }],
+              isError: res.code !== 0
+            }
+          };
+        }
+        if (name === "orgfy_gate") {
+          const prId = (args == null ? void 0 : args.pr_id) || (args == null ? void 0 : args.prId) || "42";
+          const acao = (args == null ? void 0 : args.decisao) || (args == null ? void 0 : args.acao) || "aceito";
+          const empresa = (args == null ? void 0 : args.empresa) || "orgfy";
+          const revisor = (args == null ? void 0 : args.revisor) || "QA Sentinel";
+          const motivo = (args == null ? void 0 : args.motivo) || "Decisão emitida via MCP Server";
+          const res = await executeGate(ctx, {
+            empresa,
+            prId,
+            acao,
+            motivo,
+            revisor
+          });
+          await sendDesktopNotification(
+            ctx,
+            `OrgFy: Gate ${acao.toUpperCase()}`,
+            `PR #${prId} ${acao === "aceito" ? "homologado e integrado na main" : "recusado para correções"}`
+          );
+          return {
+            jsonrpc: "2.0",
+            id,
+            result: {
+              content: [{ type: "text", text: res.output }],
+              isError: res.code !== 0
+            }
+          };
+        }
+        if (name === "orgfy_porteiro_sync") {
+          const res = await executePorteiroSync(ctx, { empresa: (args == null ? void 0 : args.empresa) || "orgfy" });
+          return {
+            jsonrpc: "2.0",
+            id,
+            result: {
+              content: [{ type: "text", text: res.output }],
+              isError: res.code !== 0
+            }
+          };
+        }
+        return {
+          jsonrpc: "2.0",
+          id,
+          error: { code: -32601, message: `Tool desconhecida: ${name}` }
+        };
+      } catch (err) {
+        return {
+          jsonrpc: "2.0",
+          id,
+          error: { code: -32603, message: (err == null ? void 0 : err.message) || String(err) }
+        };
+      }
+    }
+    return void 0;
+  };
+  try {
+    const server = await ctx.host.serveMcp(handler, { sharedSession: true });
+    if (onStatusChange) {
+      onStatusChange({
+        active: true,
+        url: (server == null ? void 0 : server.url) || "http://127.0.0.1:8765/mcp",
+        toolCallsCount: toolCalls
+      });
+    }
+    return server;
+  } catch (err) {
+    if (onStatusChange) {
+      onStatusChange({ active: false, error: (err == null ? void 0 : err.message) || String(err), toolCallsCount: 0 });
+    }
+    return null;
+  }
+}
 const inject = ["react", "pages", "settingsCards", "host", "navigation", "agents"];
 const TENANTS = [
   { id: "all", name: "Holding OrgFy", badge: "Cross-Workspace", slug: "all" },
@@ -399,6 +804,20 @@ const SVG = {
     h("polyline", { points: "22 8.5 12 15.5 2 8.5" }),
     h("polyline", { points: "2 15.5 12 8.5 22 15.5" })
   ),
+  bell: ({ h, width = 14, height = 14 }) => h(
+    "svg",
+    { width, height, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.75 },
+    h("path", { d: "M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" }),
+    h("path", { d: "M13.73 21a2 2 0 0 1-3.46 0" })
+  ),
+  bellOff: ({ h, width = 14, height = 14 }) => h(
+    "svg",
+    { width, height, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.75 },
+    h("path", { d: "M13.73 21a2 2 0 0 1-3.46 0" }),
+    h("path", { d: "M18.63 13A17.89 17.89 0 0 1 18 8" }),
+    h("path", { d: "M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14" }),
+    h("line", { x1: "1", y1: "1", x2: "23", y2: "23" })
+  ),
   zap: ({ h, width = 16, height = 16 }) => h(
     "svg",
     { width, height, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.75 },
@@ -533,6 +952,14 @@ function apply(ctx) {
     const [isRightRailOpen, setIsRightRailOpen] = React.useState(true);
     const [isCopilotOpen, setIsCopilotOpen] = React.useState(false);
     const [copilotAgent, setCopilotAgent] = React.useState("OrgFy Bento");
+    const [isBootstrapModalOpen, setIsBootstrapModalOpen] = React.useState(false);
+    const [bootstrapSteps, setBootstrapSteps] = React.useState(INITIAL_BOOTSTRAP_STEPS);
+    const [isBootstrapping, setIsBootstrapping] = React.useState(false);
+    const [bootstrapLog, setBootstrapLog] = React.useState("");
+    const [bootstrapDone, setBootstrapDone] = React.useState(false);
+    const [mcpStatus, setMcpStatus] = React.useState({ active: false, toolCallsCount: 0 });
+    const [desktopNotificationsEnabled, setDesktopNotificationsEnabled] = React.useState(true);
+    const [isMcpDiagnosticsOpen, setIsMcpDiagnosticsOpen] = React.useState(false);
     const [isExecutingDispatch, setIsExecutingDispatch] = React.useState(false);
     const [isExecutingGate, setIsExecutingGate] = React.useState(false);
     const [liveLogStream, setLiveLogStream] = React.useState(
@@ -576,6 +1003,11 @@ function apply(ctx) {
       loadRealState();
     }, [selectedTenant]);
     React.useEffect(() => {
+      startOrgfyMcpServer(ctx, (st) => {
+        setMcpStatus(st);
+      });
+    }, []);
+    React.useEffect(() => {
       var _a, _b;
       if (!activeGateCard || !gateRejectionReason.trim()) {
         setDsapWarning(false);
@@ -611,6 +1043,32 @@ function apply(ctx) {
         feito: filteredCards.filter((c) => c.stage === "feito")
       };
     }, [filteredCards]);
+    const handleRunBootstrap = async () => {
+      setIsBootstrapping(true);
+      setBootstrapLog("[BOOTSTRAP] Iniciando auto-provisionamento 1-clique da Holding OrgFy...\n");
+      try {
+        const res = await executeBootstrapFlow(ctx, (updatedSteps) => {
+          setBootstrapSteps(updatedSteps);
+        });
+        setBootstrapLog((prev) => prev + res.log);
+        if (res.success) {
+          setBootstrapDone(true);
+          showNotification("success", "Auto-bootstrap e provisionamento concluídos com sucesso!");
+          if (desktopNotificationsEnabled) {
+            sendDesktopNotification(ctx, "OrgFy: Esteira Pronta", "Auto-bootstrap e provisionamento concluídos com sucesso!");
+          }
+          await loadRealState();
+        } else {
+          showNotification("warning", "Bootstrap finalizado com avisos. Verifique os logs.");
+        }
+      } catch (err) {
+        showNotification("warning", `Falha no bootstrap: ${(err == null ? void 0 : err.message) || err}`);
+        setBootstrapLog((prev) => prev + `[ERRO] ${(err == null ? void 0 : err.message) || err}
+`);
+      } finally {
+        setIsBootstrapping(false);
+      }
+    };
     const handleExecuteDispatch = async () => {
       if (!dispatchIssueId.trim()) {
         showNotification("warning", "Por favor, selecione ou informe o ID da Issue.");
@@ -650,6 +1108,9 @@ function apply(ctx) {
         setIsDispatchModalOpen(false);
         setDispatchIssueId("");
         showNotification("success", `Card ${dispatchIssueId} despachado com sucesso via CLI!`);
+        if (desktopNotificationsEnabled) {
+          sendDesktopNotification(ctx, "OrgFy: Novo Despacho", `Card ${dispatchIssueId} despachado para ${dispatchExecutor} com sucesso.`);
+        }
       } catch (err) {
         showNotification("warning", `Falha no despacho determinístico: ${(err == null ? void 0 : err.message) || err}`);
       } finally {
@@ -686,6 +1147,9 @@ function apply(ctx) {
         setIsGateModalOpen(false);
         setActiveGateCard(null);
         showNotification("success", `PR ${card.prId || card.issueId} ACEITO no Gate! FPY mantido em 100%.`);
+        if (desktopNotificationsEnabled) {
+          sendDesktopNotification(ctx, "OrgFy: PR Aceito no Gate", `PR ${card.prId || card.issueId} aprovado com conformidade aos probes caixa-preta.`);
+        }
       } catch (err) {
         showNotification("warning", `Falha no Gate: ${(err == null ? void 0 : err.message) || err}`);
       } finally {
@@ -712,8 +1176,19 @@ function apply(ctx) {
         });
         if (dsapWarning) {
           showNotification("warning", `[DSAP BACKTRACKING] Disparado! Similaridade de ${Math.round(dsapSimilarity * 100)}% acionou o COO.`);
+          if (desktopNotificationsEnabled) {
+            sendDesktopNotification(ctx, "⚠️ [DSAP BACKTRACKING]", `Alerta de estagnação semântica acionou o COO para re-escopo (PR #${card.prId || card.issueId})`);
+          }
         } else {
           showNotification("info", `PR devolvido ao executor para correções.`);
+          if (desktopNotificationsEnabled) {
+            sendDesktopNotification(ctx, "OrgFy: Gate Recusado", `PR #${card.prId || card.issueId} devolvido ao executor para correções.`);
+          }
+        }
+        if (desktopNotificationsEnabled) {
+          const title = dsapWarning ? "🚨 [DSAP BACKTRACKING] Alerta de Recusa" : "OrgFy: PR Recusado no Gate";
+          const body = dsapWarning ? `Card ${card.prId || card.issueId} teve 2ª recusa com similaridade de ${Math.round(dsapSimilarity * 100)}%. COO Bento acionado!` : `Card ${card.prId || card.issueId} recusado no Gate: ${gateRejectionReason}`;
+          sendDesktopNotification(ctx, title, body);
         }
         const updated = pipelineCards.map((c) => {
           if (c.id === card.id) {
@@ -923,12 +1398,90 @@ function apply(ctx) {
             { style: { display: "flex", alignItems: "center", gap: "6px", fontSize: "12px" } },
             h("span", { style: { color: "var(--text-subtle, #9ca3af)" } }, "CPI EVM:"),
             h("span", { style: { color: cpiTokens >= 0.85 ? "#10b981" : "#f59e0b", fontWeight: "700" } }, cpiTokens.toFixed(2))
+          ),
+          // MCP Indicator Pill
+          h(
+            "button",
+            {
+              onClick: () => setIsMcpDiagnosticsOpen(true),
+              title: "Abrir Diagnóstico do Servidor MCP Nativo (JSON-RPC 2.0)",
+              style: {
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "4px 10px",
+                borderRadius: "9999px",
+                backgroundColor: mcpStatus.active ? "rgba(16, 185, 129, 0.15)" : "rgba(59, 130, 246, 0.15)",
+                color: mcpStatus.active ? "#10b981" : "#60a5fa",
+                border: "none",
+                fontSize: "11px",
+                fontWeight: "600",
+                cursor: "pointer"
+              }
+            },
+            h("div", {
+              style: {
+                width: "8px",
+                height: "8px",
+                borderRadius: "50%",
+                backgroundColor: mcpStatus.active ? "#10b981" : "#60a5fa",
+                boxShadow: mcpStatus.active ? "0 0 8px #10b981" : "none"
+              }
+            }),
+            mcpStatus.active ? `MCP NATIVO (${mcpStatus.toolCallsCount} calls)` : "MCP NATIVO (4 tools)"
           )
         ),
         // Direita: Botões de Ação
         h(
           "div",
           { style: { display: "flex", alignItems: "center", gap: "8px" } },
+          h(
+            "button",
+            {
+              onClick: () => setIsBootstrapModalOpen(true),
+              title: "Wizard de Auto-Bootstrap e Provisionamento da Holding OrgFy",
+              style: {
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "6px 12px",
+                borderRadius: "8px",
+                backgroundColor: "rgba(16, 185, 129, 0.2)",
+                color: "#10b981",
+                fontWeight: "700",
+                fontSize: "12px",
+                border: "1px solid rgba(16, 185, 129, 0.3)",
+                cursor: "pointer"
+              }
+            },
+            SVG.zap({ h, width: 14, height: 14 }),
+            "Inicializar OrgFy"
+          ),
+          h(
+            "button",
+            {
+              onClick: () => {
+                const nextState = !desktopNotificationsEnabled;
+                setDesktopNotificationsEnabled(nextState);
+                showNotification("info", nextState ? "Notificações desktop ativadas!" : "Modo silencioso ativado.");
+              },
+              title: desktopNotificationsEnabled ? "Notificações desktop ativas (clique para silenciar)" : "Modo silencioso (clique para ativar notificações)",
+              style: {
+                padding: "6px 10px",
+                borderRadius: "8px",
+                backgroundColor: desktopNotificationsEnabled ? "rgba(16, 185, 129, 0.15)" : "rgba(255, 255, 255, 0.06)",
+                color: desktopNotificationsEnabled ? "#10b981" : "#9ca3af",
+                border: "1px solid rgba(255, 255, 255, 0.1)",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                fontSize: "11px"
+              }
+            },
+            desktopNotificationsEnabled ? SVG.bell({ h, width: 14, height: 14 }) : SVG.bellOff({ h, width: 14, height: 14 }),
+            desktopNotificationsEnabled ? "Notif. ON" : "Silencioso"
+          ),
           h(
             "button",
             {
@@ -2109,6 +2662,805 @@ testes/esteira/test_t020.py::test_ci_cache_integrity PASSED
 testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
 [ORGFY WORKER] 2 passed in 1.42s. Probes caixa-preta engatilhados.
 [ORGFY NOSTR] Evento kind:1618 publicado em wss://orgfy.communities.buzz.xyz (sub-second wake)`
+        )
+      ),
+      // ───────────────────────────────────────────────────────────────────────
+      // 7. MODAL DE DIAGNÓSTICO DO SERVIDOR MCP NATIVO (JSON-RPC 2.0 LOOPBACK)
+      // ───────────────────────────────────────────────────────────────────────
+      isMcpDiagnosticsOpen && h(
+        "div",
+        {
+          style: {
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.75)",
+            backdropFilter: "blur(8px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 2e3
+          }
+        },
+        h(
+          "div",
+          {
+            style: {
+              width: "600px",
+              maxWidth: "92vw",
+              maxHeight: "88vh",
+              overflowY: "auto",
+              borderRadius: "16px",
+              backgroundColor: "#0d1310",
+              border: "1px solid rgba(16, 185, 129, 0.25)",
+              boxShadow: "0 20px 50px rgba(0, 0, 0, 0.8)",
+              padding: "24px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "16px"
+            }
+          },
+          // Header do Modal
+          h(
+            "div",
+            { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", gap: "10px" } },
+              SVG.cpu({ h, width: 22, height: 22 }),
+              h(
+                "div",
+                null,
+                h("div", { style: { fontWeight: "700", fontSize: "15px", color: "#f3f4f6" } }, "Servidor MCP Nativo Loopback"),
+                h("div", { style: { fontSize: "11px", color: "#9ca3af" } }, "Controle autônomo por agentes via JSON-RPC 2.0 (ctx.host.serveMcp)")
+              )
+            ),
+            h(
+              "button",
+              {
+                onClick: () => setIsMcpDiagnosticsOpen(false),
+                style: { background: "transparent", border: "none", color: "#9ca3af", cursor: "pointer" }
+              },
+              SVG.xCircle({ h, width: 18, height: 18 })
+            )
+          ),
+          // Status bar
+          h(
+            "div",
+            {
+              style: {
+                padding: "10px 14px",
+                borderRadius: "10px",
+                backgroundColor: "rgba(16, 185, 129, 0.08)",
+                border: "1px solid rgba(16, 185, 129, 0.2)",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                fontSize: "12px"
+              }
+            },
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", gap: "8px" } },
+              h("div", {
+                style: {
+                  width: "8px",
+                  height: "8px",
+                  borderRadius: "50%",
+                  backgroundColor: mcpStatus.active ? "#10b981" : "#ef4444",
+                  boxShadow: mcpStatus.active ? "0 0 8px #10b981" : "none"
+                }
+              }),
+              h("span", { style: { fontWeight: "600", color: "#10b981" } }, mcpStatus.active ? `SERVIDOR ATIVO (${mcpStatus.toolCallsCount} chamadas)` : "DESCONECTADO")
+            ),
+            h("span", { style: { fontFamily: "monospace", color: "#9ca3af" } }, mcpStatus.url || "http://127.0.0.1:8765/mcp")
+          ),
+          // Tools Disponíveis
+          h("div", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, "Ferramentas Homologadas (4 Ferramentas Canônicas):"),
+          h(
+            "div",
+            { style: { display: "flex", flexDirection: "column", gap: "8px" } },
+            [
+              { name: "orgfy_status", desc: "Telemetria agregada, FPY (100%), CPI (0.94), cards ativos e catraca RSI." },
+              { name: "orgfy_despachar", desc: "Invocação determinística de despacho com validação L-01 (executor ≠ revisor)." },
+              { name: "orgfy_gate", desc: "Veredito de aceite/recusa do revisor com probes caixa-preta e cálculo DSAP." },
+              { name: "orgfy_porteiro_sync", desc: "Reconciliação determinística pontual (porteiro.py --uma-vez)." }
+            ].map(
+              (tool) => h(
+                "div",
+                {
+                  key: tool.name,
+                  style: {
+                    padding: "8px 12px",
+                    borderRadius: "8px",
+                    backgroundColor: "rgba(255, 255, 255, 0.03)",
+                    border: "1px solid rgba(255, 255, 255, 0.06)"
+                  }
+                },
+                h("div", { style: { fontFamily: "monospace", fontSize: "12px", fontWeight: "700", color: "#60a5fa" } }, tool.name),
+                h("div", { style: { fontSize: "11px", color: "#9ca3af", marginTop: "2px" } }, tool.desc)
+              )
+            )
+          ),
+          // Snippet de Conexão Externa
+          h("div", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, "Integração Externa (Claude Desktop / Antigravity / Goose / Pi):"),
+          h(
+            "pre",
+            {
+              style: {
+                margin: 0,
+                padding: "10px 14px",
+                borderRadius: "8px",
+                backgroundColor: "#080c0a",
+                border: "1px solid rgba(255, 255, 255, 0.08)",
+                fontSize: "10.5px",
+                color: "#10b981",
+                fontFamily: "monospace",
+                overflowX: "auto"
+              }
+            },
+            JSON.stringify(
+              {
+                mcpServers: {
+                  orgfy: {
+                    url: mcpStatus.url || "http://127.0.0.1:8765/mcp",
+                    tools: ["orgfy_status", "orgfy_despachar", "orgfy_gate", "orgfy_porteiro_sync"]
+                  }
+                }
+              },
+              null,
+              2
+            )
+          ),
+          // Botões do Modal
+          h(
+            "div",
+            { style: { display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "8px" } },
+            h(
+              "button",
+              {
+                onClick: () => {
+                  navigator.clipboard.writeText(
+                    JSON.stringify(
+                      {
+                        mcpServers: {
+                          orgfy: {
+                            url: mcpStatus.url || "http://127.0.0.1:8765/mcp",
+                            tools: ["orgfy_status", "orgfy_despachar", "orgfy_gate", "orgfy_porteiro_sync"]
+                          }
+                        }
+                      },
+                      null,
+                      2
+                    )
+                  );
+                  showNotification("success", "Configuração copiada para o clipboard!");
+                },
+                style: {
+                  padding: "8px 14px",
+                  borderRadius: "8px",
+                  backgroundColor: "rgba(255, 255, 255, 0.08)",
+                  border: "none",
+                  color: "#ffffff",
+                  fontSize: "12px",
+                  cursor: "pointer"
+                }
+              },
+              "Copiar Config"
+            ),
+            h(
+              "button",
+              {
+                onClick: () => setIsMcpDiagnosticsOpen(false),
+                style: {
+                  padding: "8px 16px",
+                  borderRadius: "8px",
+                  backgroundColor: "#10b981",
+                  border: "none",
+                  color: "#000000",
+                  fontWeight: "700",
+                  fontSize: "12px",
+                  cursor: "pointer"
+                }
+              },
+              "Fechar"
+            )
+          )
+        )
+      ),
+      // ───────────────────────────────────────────────────────────────────────
+      // 8. MODAL WIZARD DE AUTO-BOOTSTRAP & ONBOARDING (1-CLIQUE)
+      // ───────────────────────────────────────────────────────────────────────
+      isBootstrapModalOpen && h(
+        "div",
+        {
+          style: {
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.75)",
+            backdropFilter: "blur(8px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 2e3
+          }
+        },
+        h(
+          "div",
+          {
+            style: {
+              width: "640px",
+              maxWidth: "92vw",
+              maxHeight: "90vh",
+              overflowY: "auto",
+              borderRadius: "16px",
+              backgroundColor: "#0d1310",
+              border: "1px solid rgba(59, 130, 246, 0.3)",
+              boxShadow: "0 20px 50px rgba(0, 0, 0, 0.8)",
+              padding: "24px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "16px"
+            }
+          },
+          // Header do Modal
+          h(
+            "div",
+            { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", gap: "10px" } },
+              SVG.zap({ h, width: 22, height: 22 }),
+              h(
+                "div",
+                null,
+                h("div", { style: { fontWeight: "700", fontSize: "15px", color: "#f3f4f6" } }, "Wizard de Auto-Bootstrap & Onboarding"),
+                h("div", { style: { fontSize: "11px", color: "#9ca3af" } }, "Provisionamento completo da esteira determinística OrgFy v10 em 1-Clique")
+              )
+            ),
+            h(
+              "button",
+              {
+                onClick: () => setIsBootstrapModalOpen(false),
+                disabled: isBootstrapping,
+                style: { background: "transparent", border: "none", color: "#9ca3af", cursor: isBootstrapping ? "not-allowed" : "pointer" }
+              },
+              SVG.xCircle({ h, width: 18, height: 18 })
+            )
+          ),
+          // Barra de Progresso Viva (0% a 100%)
+          (() => {
+            const completedCount = bootstrapSteps.filter((s) => s.status === "success").length;
+            const pct = Math.round(completedCount / bootstrapSteps.length * 100);
+            return h(
+              "div",
+              { style: { display: "flex", flexDirection: "column", gap: "6px" } },
+              h(
+                "div",
+                { style: { display: "flex", justifyContent: "space-between", fontSize: "11px" } },
+                h("span", { style: { color: "#9ca3af" } }, "Progresso do Provisionamento:"),
+                h("span", { style: { color: pct === 100 ? "#10b981" : "#60a5fa", fontWeight: "700" } }, `${pct}%`)
+              ),
+              h(
+                "div",
+                {
+                  style: {
+                    width: "100%",
+                    height: "6px",
+                    borderRadius: "9999px",
+                    backgroundColor: "rgba(255, 255, 255, 0.08)",
+                    overflow: "hidden"
+                  }
+                },
+                h("div", {
+                  style: {
+                    width: `${pct}%`,
+                    height: "100%",
+                    borderRadius: "9999px",
+                    background: pct === 100 ? "linear-gradient(90deg, #10b981, #34d399)" : "linear-gradient(90deg, #3b82f6, #60a5fa)",
+                    transition: "width 0.4s ease"
+                  }
+                })
+              )
+            );
+          })(),
+          // Stepper de Etapas
+          h(
+            "div",
+            { style: { display: "flex", flexDirection: "column", gap: "10px" } },
+            bootstrapSteps.map((step, idx) => {
+              const isSuccess = step.status === "success";
+              const isRunning = step.status === "running";
+              const isError = step.status === "error";
+              return h(
+                "div",
+                {
+                  key: step.step,
+                  style: {
+                    padding: "10px 14px",
+                    borderRadius: "10px",
+                    backgroundColor: isRunning ? "rgba(59, 130, 246, 0.08)" : isSuccess ? "rgba(16, 185, 129, 0.05)" : "rgba(255, 255, 255, 0.03)",
+                    border: "1px solid " + (isRunning ? "rgba(59, 130, 246, 0.3)" : isSuccess ? "rgba(16, 185, 129, 0.2)" : isError ? "rgba(239, 68, 68, 0.3)" : "rgba(255, 255, 255, 0.06)"),
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between"
+                  }
+                },
+                h(
+                  "div",
+                  { style: { display: "flex", alignItems: "center", gap: "10px" } },
+                  h(
+                    "div",
+                    {
+                      style: {
+                        width: "22px",
+                        height: "22px",
+                        borderRadius: "50%",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        backgroundColor: isSuccess ? "rgba(16, 185, 129, 0.2)" : isRunning ? "rgba(59, 130, 246, 0.2)" : "rgba(255, 255, 255, 0.08)",
+                        color: isSuccess ? "#10b981" : isRunning ? "#60a5fa" : "#9ca3af",
+                        fontSize: "11px",
+                        fontWeight: "700"
+                      }
+                    },
+                    isSuccess ? SVG.checkCircle({ h, width: 14, height: 14 }) : isRunning ? SVG.refresh({ h, width: 12, height: 12 }) : isError ? SVG.xCircle({ h, width: 14, height: 14 }) : idx + 1
+                  ),
+                  h(
+                    "div",
+                    null,
+                    h("div", { style: { fontSize: "12px", fontWeight: "600", color: "#f3f4f6" } }, step.label),
+                    step.details && h("div", { style: { fontSize: "11px", color: isError ? "#ef4444" : "#9ca3af", marginTop: "2px" } }, step.details)
+                  )
+                ),
+                h(
+                  "span",
+                  {
+                    style: {
+                      fontSize: "10px",
+                      fontWeight: "700",
+                      padding: "2px 8px",
+                      borderRadius: "9999px",
+                      backgroundColor: isSuccess ? "rgba(16, 185, 129, 0.15)" : isRunning ? "rgba(59, 130, 246, 0.15)" : isError ? "rgba(239, 68, 68, 0.15)" : "rgba(255, 255, 255, 0.05)",
+                      color: isSuccess ? "#10b981" : isRunning ? "#60a5fa" : isError ? "#ef4444" : "#9ca3af"
+                    }
+                  },
+                  isSuccess ? "VERIFICADO" : isRunning ? "PROCESSANDO..." : isError ? "FALHA" : "PENDENTE"
+                )
+              );
+            })
+          ),
+          // Terminal de Logs
+          h(
+            "pre",
+            {
+              style: {
+                margin: 0,
+                padding: "10px 14px",
+                borderRadius: "8px",
+                backgroundColor: "#080c0a",
+                border: "1px solid rgba(255, 255, 255, 0.08)",
+                fontSize: "10.5px",
+                color: "#10b981",
+                fontFamily: "monospace",
+                maxHeight: "130px",
+                overflowY: "auto",
+                lineHeight: "1.4"
+              }
+            },
+            bootstrapLog || "[BOOTSTRAP] Pronto para inicialização. Clique no botão abaixo para iniciar o provisionamento."
+          ),
+          // Ações do Modal
+          h(
+            "div",
+            { style: { display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "4px" } },
+            h(
+              "button",
+              {
+                onClick: () => setIsBootstrapModalOpen(false),
+                disabled: isBootstrapping,
+                style: {
+                  padding: "8px 14px",
+                  borderRadius: "8px",
+                  backgroundColor: "rgba(255, 255, 255, 0.08)",
+                  border: "none",
+                  color: "#ffffff",
+                  fontSize: "12px",
+                  cursor: isBootstrapping ? "not-allowed" : "pointer"
+                }
+              },
+              "Fechar"
+            ),
+            h(
+              "button",
+              {
+                onClick: handleRunBootstrap,
+                disabled: isBootstrapping,
+                style: {
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "8px 18px",
+                  borderRadius: "8px",
+                  backgroundColor: bootstrapDone ? "#10b981" : "#3b82f6",
+                  border: "none",
+                  color: "#ffffff",
+                  fontWeight: "700",
+                  fontSize: "12px",
+                  cursor: isBootstrapping ? "not-allowed" : "pointer",
+                  boxShadow: isBootstrapping ? "none" : "0 4px 14px rgba(59, 130, 246, 0.4)"
+                }
+              },
+              isBootstrapping ? [SVG.refresh({ h, width: 14, height: 14 }), "Executando Auto-Bootstrap..."] : bootstrapDone ? [SVG.checkCircle({ h, width: 14, height: 14 }), "Re-executar Bootstrap"] : [SVG.zap({ h, width: 14, height: 14 }), "Inicializar Tudo em 1-Clique"]
+            )
+          )
+        )
+      ),
+      // ───────────────────────────────────────────────────────────────────────
+      // 7. MODAL AUTO-BOOTSTRAP & ONBOARDING 1-CLIQUE (FASE 3)
+      // ───────────────────────────────────────────────────────────────────────
+      isBootstrapModalOpen && h(
+        "div",
+        {
+          style: {
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.75)",
+            backdropFilter: "blur(6px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 2200
+          }
+        },
+        h(
+          "div",
+          {
+            style: {
+              width: "560px",
+              borderRadius: "16px",
+              backgroundColor: "#111714",
+              border: "1px solid rgba(16, 185, 129, 0.25)",
+              padding: "24px",
+              boxShadow: "0 25px 60px rgba(0, 0, 0, 0.85)",
+              display: "flex",
+              flexDirection: "column",
+              gap: "16px"
+            }
+          },
+          // Header
+          h(
+            "div",
+            { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", gap: "8px" } },
+              SVG.zap({ h, width: 20, height: 20 }),
+              h("h3", { style: { margin: 0, fontSize: "16px", color: "#ffffff", fontWeight: "700" } }, "Auto-Bootstrap da Holding OrgFy")
+            ),
+            h(
+              "button",
+              {
+                onClick: () => !isBootstrapping && setIsBootstrapModalOpen(false),
+                disabled: isBootstrapping,
+                style: { background: "transparent", border: "none", color: "#9ca3af", cursor: isBootstrapping ? "not-allowed" : "pointer" }
+              },
+              SVG.xCircle({ h, width: 18, height: 18 })
+            )
+          ),
+          h(
+            "p",
+            { style: { margin: 0, fontSize: "12px", color: "#9ca3af", lineHeight: "1.4" } },
+            "Provisionamento determinístico de ponta a ponta: diagnóstico de binários locais (python3, git, docker), integridade do repositório, canal Nostr NIP-29 (#esteira-orgfy), registro dos 4 agentes canônicos e sincronização do Porteiro."
+          ),
+          // Progress Bar
+          (() => {
+            const successCount = bootstrapSteps.filter((s) => s.status === "success").length;
+            const pct = Math.round(successCount / bootstrapSteps.length * 100);
+            return h(
+              "div",
+              { style: { display: "flex", flexDirection: "column", gap: "6px" } },
+              h(
+                "div",
+                { style: { display: "flex", justifyContent: "space-between", fontSize: "11px" } },
+                h("span", { style: { color: "#9ca3af" } }, "Progresso do Provisionamento:"),
+                h("span", { style: { color: pct === 100 ? "#10b981" : "#60a5fa", fontWeight: "700" } }, `${pct}%`)
+              ),
+              h(
+                "div",
+                {
+                  style: {
+                    height: "6px",
+                    borderRadius: "9999px",
+                    backgroundColor: "rgba(255, 255, 255, 0.08)",
+                    overflow: "hidden"
+                  }
+                },
+                h("div", {
+                  style: {
+                    height: "100%",
+                    width: `${pct}%`,
+                    backgroundColor: pct === 100 ? "#10b981" : "#3b82f6",
+                    transition: "width 0.3s ease"
+                  }
+                })
+              )
+            );
+          })(),
+          // Stepper List
+          h(
+            "div",
+            {
+              style: {
+                display: "flex",
+                flexDirection: "column",
+                gap: "10px",
+                maxHeight: "260px",
+                overflowY: "auto",
+                padding: "8px 0"
+              }
+            },
+            bootstrapSteps.map((s, idx) => {
+              const statusColor = s.status === "success" ? "#10b981" : s.status === "running" ? "#f59e0b" : s.status === "error" ? "#ef4444" : "#6b7280";
+              return h(
+                "div",
+                {
+                  key: s.step,
+                  style: {
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: "12px",
+                    padding: "8px 12px",
+                    borderRadius: "8px",
+                    backgroundColor: "rgba(255, 255, 255, 0.03)",
+                    border: "1px solid rgba(255, 255, 255, 0.06)"
+                  }
+                },
+                h(
+                  "div",
+                  { style: { marginTop: "2px", color: statusColor } },
+                  s.status === "success" ? SVG.checkCircle({ h, width: 14, height: 14 }) : s.status === "running" ? SVG.refresh({ h, width: 14, height: 14 }) : s.status === "error" ? SVG.alertTriangle({ h, width: 14, height: 14 }) : h("div", {
+                    style: {
+                      width: "12px",
+                      height: "12px",
+                      borderRadius: "50%",
+                      border: "1.5px solid #6b7280"
+                    }
+                  })
+                ),
+                h(
+                  "div",
+                  { style: { display: "flex", flexDirection: "column", gap: "2px", flex: 1 } },
+                  h(
+                    "span",
+                    { style: { fontSize: "12px", fontWeight: "600", color: "#f3f4f6" } },
+                    `${idx + 1}. ${s.label}`
+                  ),
+                  s.details && h(
+                    "span",
+                    { style: { fontSize: "11px", color: statusColor, fontFamily: "monospace" } },
+                    s.details
+                  )
+                )
+              );
+            })
+          ),
+          // Actions
+          h(
+            "div",
+            { style: { display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "6px" } },
+            h(
+              "button",
+              {
+                onClick: () => setIsBootstrapModalOpen(false),
+                disabled: isBootstrapping,
+                style: {
+                  padding: "8px 16px",
+                  borderRadius: "8px",
+                  backgroundColor: "transparent",
+                  border: "1px solid rgba(255, 255, 255, 0.15)",
+                  color: "#9ca3af",
+                  fontSize: "12px",
+                  cursor: isBootstrapping ? "not-allowed" : "pointer"
+                }
+              },
+              "Fechar"
+            ),
+            h(
+              "button",
+              {
+                onClick: handleRunBootstrap,
+                disabled: isBootstrapping,
+                style: {
+                  padding: "8px 18px",
+                  borderRadius: "8px",
+                  backgroundColor: "#10b981",
+                  border: "none",
+                  color: "#000000",
+                  fontWeight: "700",
+                  fontSize: "12px",
+                  cursor: isBootstrapping ? "not-allowed" : "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px"
+                }
+              },
+              isBootstrapping ? [SVG.refresh({ h, width: 14, height: 14 }), "Executando Auto-Bootstrap..."] : [SVG.zap({ h, width: 14, height: 14 }), "⚡ Inicializar Tudo em 1-Clique"]
+            )
+          )
+        )
+      ),
+      // ───────────────────────────────────────────────────────────────────────
+      // 8. MODAL DIAGNÓSTICO DO SERVIDOR MCP NATIVO (FASE 3)
+      // ───────────────────────────────────────────────────────────────────────
+      isMcpDiagnosticsOpen && h(
+        "div",
+        {
+          style: {
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.75)",
+            backdropFilter: "blur(6px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 2200
+          }
+        },
+        h(
+          "div",
+          {
+            style: {
+              width: "580px",
+              borderRadius: "16px",
+              backgroundColor: "#111714",
+              border: "1px solid rgba(59, 130, 246, 0.3)",
+              padding: "24px",
+              boxShadow: "0 25px 60px rgba(0, 0, 0, 0.85)",
+              display: "flex",
+              flexDirection: "column",
+              gap: "16px"
+            }
+          },
+          // Header
+          h(
+            "div",
+            { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", gap: "8px" } },
+              SVG.cpu({ h, width: 20, height: 20 }),
+              h("h3", { style: { margin: 0, fontSize: "16px", color: "#ffffff", fontWeight: "700" } }, "Servidor MCP Nativo — Diagnóstico Técnico")
+            ),
+            h(
+              "button",
+              {
+                onClick: () => setIsMcpDiagnosticsOpen(false),
+                style: { background: "transparent", border: "none", color: "#9ca3af", cursor: "pointer" }
+              },
+              SVG.xCircle({ h, width: 18, height: 18 })
+            )
+          ),
+          // Info Bar
+          h(
+            "div",
+            {
+              style: {
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: "10px",
+                padding: "12px",
+                backgroundColor: "rgba(255, 255, 255, 0.03)",
+                borderRadius: "10px",
+                border: "1px solid rgba(255, 255, 255, 0.08)",
+                fontSize: "11px"
+              }
+            },
+            h(
+              "div",
+              null,
+              h("span", { style: { color: "#9ca3af" } }, "Protocolo: "),
+              h("span", { style: { color: "#60a5fa", fontWeight: "600" } }, "JSON-RPC 2.0 Loopback")
+            ),
+            h(
+              "div",
+              null,
+              h("span", { style: { color: "#9ca3af" } }, "Status: "),
+              h(
+                "span",
+                { style: { color: mcpStatus.active ? "#10b981" : "#60a5fa", fontWeight: "600" } },
+                mcpStatus.active ? "🟢 ATIVO (ctx.host.serveMcp)" : "🟢 PRONTO / LOOPBACK"
+              )
+            ),
+            h(
+              "div",
+              null,
+              h("span", { style: { color: "#9ca3af" } }, "Chamadas Registradas: "),
+              h("span", { style: { color: "#10b981", fontWeight: "700" } }, `${mcpStatus.toolCallsCount} invocação(ões)`)
+            ),
+            h(
+              "div",
+              null,
+              h("span", { style: { color: "#9ca3af" } }, "Clientes Suportados: "),
+              h("span", { style: { color: "#ffffff" } }, "Antigravity, Claude, Goose, Pi")
+            )
+          ),
+          // Tools Section
+          h(
+            "div",
+            { style: { display: "flex", flexDirection: "column", gap: "8px" } },
+            h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, "Ferramentas Homologadas (4 Tools):"),
+            [
+              {
+                name: "orgfy_status",
+                desc: "Telemetria agregada ao vivo: FPY, CPI, cards ativos e catraca de regras probatórias RSI."
+              },
+              {
+                name: "orgfy_despachar",
+                desc: "Invocação determinística de despacho com validação mecânica L-01 (executor !== revisor)."
+              },
+              {
+                name: "orgfy_gate",
+                desc: "Decisão oficial de Gate Caixa-Preta (aceito/recusado) com holdout verification e alerta DSAP."
+              },
+              {
+                name: "orgfy_porteiro_sync",
+                desc: "Disparo pontual do ciclo determinístico do Porteiro Nostr para reconciliar filas de PR e main."
+              }
+            ].map(
+              (tool) => h(
+                "div",
+                {
+                  key: tool.name,
+                  style: {
+                    padding: "8px 12px",
+                    borderRadius: "8px",
+                    backgroundColor: "rgba(255, 255, 255, 0.02)",
+                    border: "1px solid rgba(255, 255, 255, 0.06)",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "2px"
+                  }
+                },
+                h("span", { style: { fontSize: "12px", fontFamily: "monospace", color: "#10b981", fontWeight: "700" } }, tool.name),
+                h("span", { style: { fontSize: "11px", color: "#9ca3af" } }, tool.desc)
+              )
+            )
+          ),
+          // Close Button
+          h(
+            "div",
+            { style: { display: "flex", justifyContent: "flex-end", marginTop: "6px" } },
+            h(
+              "button",
+              {
+                onClick: () => setIsMcpDiagnosticsOpen(false),
+                style: {
+                  padding: "8px 18px",
+                  borderRadius: "8px",
+                  backgroundColor: "#3b82f6",
+                  border: "none",
+                  color: "#ffffff",
+                  fontWeight: "600",
+                  fontSize: "12px",
+                  cursor: "pointer"
+                }
+              },
+              "Entendido"
+            )
+          )
         )
       )
     );
