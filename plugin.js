@@ -1404,6 +1404,21 @@ async function recordKpiSnapshotHistory(ctx, kpis) {
   }
   return next;
 }
+function decodeHostFile(raw) {
+  if (typeof raw === "string") return raw;
+  if (raw instanceof Uint8Array) return new TextDecoder("utf-8").decode(raw);
+  if (raw instanceof ArrayBuffer) return new TextDecoder("utf-8").decode(new Uint8Array(raw));
+  if (raw && typeof raw === "object") {
+    const obj = raw;
+    if (typeof obj.content === "string") return obj.content;
+    if (typeof obj.text === "string") return obj.text;
+    if (obj.bytes instanceof Uint8Array) return new TextDecoder("utf-8").decode(obj.bytes);
+    if (ArrayBuffer.isView(raw)) {
+      return new TextDecoder("utf-8").decode(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength));
+    }
+  }
+  return String(raw ?? "");
+}
 async function fetchKpisEsteira(ctx) {
   const host = ctx.host;
   const history = await readHistory(ctx);
@@ -1418,7 +1433,8 @@ async function fetchKpisEsteira(ctx) {
   }
   try {
     const raw = await host.readFile(KPI_SNAPSHOT_PATH);
-    const parsed = JSON.parse(raw);
+    const text = decodeHostFile(raw);
+    const parsed = JSON.parse(text);
     if (!parsed || typeof parsed !== "object" || !parsed.fluxo || !parsed.economia) {
       return {
         disponivel: false,
@@ -1451,10 +1467,13 @@ async function recalculateKpisNow(ctx) {
   let output = "";
   try {
     if (host == null ? void 0 : host.exec) {
-      const res = await host.exec("python", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
+      let res = await host.exec("python3", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
+      if ((res == null ? void 0 : res.exitCode) && res.exitCode !== 0) {
+        res = await host.exec("python", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
+      }
       output = [res == null ? void 0 : res.stdout, res == null ? void 0 : res.stderr].filter(Boolean).join("\n").trim();
     } else if (host == null ? void 0 : host.spawn) {
-      const proc = await host.spawn("python", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
+      const proc = await host.spawn("python3", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
       if (proc == null ? void 0 : proc.exited) {
         await proc.exited;
       }
@@ -2132,7 +2151,8 @@ async function syncLocksFromDisk(ctx) {
   if (!(host == null ? void 0 : host.readFile)) return;
   try {
     const raw = await host.readFile(LOCKS_FILE_PATH);
-    const parsed = JSON.parse(raw);
+    const text = typeof raw === "string" ? raw : raw instanceof Uint8Array ? new TextDecoder("utf-8").decode(raw) : raw instanceof ArrayBuffer ? new TextDecoder("utf-8").decode(new Uint8Array(raw)) : ArrayBuffer.isView(raw) ? new TextDecoder("utf-8").decode(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength)) : String(raw ?? "");
+    const parsed = JSON.parse(text);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       const now = Date.now();
       for (const [k, v] of Object.entries(parsed)) {

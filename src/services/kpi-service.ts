@@ -184,6 +184,22 @@ export async function recordKpiSnapshotHistory(
   return next;
 }
 
+function decodeHostFile(raw: unknown): string {
+  if (typeof raw === "string") return raw;
+  if (raw instanceof Uint8Array) return new TextDecoder("utf-8").decode(raw);
+  if (raw instanceof ArrayBuffer) return new TextDecoder("utf-8").decode(new Uint8Array(raw));
+  if (raw && typeof raw === "object") {
+    const obj = raw as Record<string, unknown>;
+    if (typeof obj.content === "string") return obj.content;
+    if (typeof obj.text === "string") return obj.text;
+    if (obj.bytes instanceof Uint8Array) return new TextDecoder("utf-8").decode(obj.bytes);
+    if (ArrayBuffer.isView(raw)) {
+      return new TextDecoder("utf-8").decode(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength));
+    }
+  }
+  return String(raw ?? "");
+}
+
 export async function fetchKpisEsteira(ctx: Context): Promise<KpiReadResult> {
   const host = (ctx as any).host;
   const history = await readHistory(ctx);
@@ -200,7 +216,8 @@ export async function fetchKpisEsteira(ctx: Context): Promise<KpiReadResult> {
 
   try {
     const raw = await host.readFile(KPI_SNAPSHOT_PATH);
-    const parsed = JSON.parse(raw) as KpisEsteiraPayload;
+    const text = decodeHostFile(raw);
+    const parsed = JSON.parse(text) as KpisEsteiraPayload;
     if (!parsed || typeof parsed !== "object" || !parsed.fluxo || !parsed.economia) {
       return {
         disponivel: false,
@@ -239,10 +256,13 @@ export async function recalculateKpisNow(ctx: Context): Promise<{
 
   try {
     if (host?.exec) {
-      const res = await host.exec("python", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
+      let res = await host.exec("python3", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
+      if (res?.exitCode && res.exitCode !== 0) {
+        res = await host.exec("python", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
+      }
       output = [res?.stdout, res?.stderr].filter(Boolean).join("\n").trim();
     } else if (host?.spawn) {
-      const proc = await host.spawn("python", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
+      const proc = await host.spawn("python3", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
       if (proc?.exited) {
         await proc.exited;
       }

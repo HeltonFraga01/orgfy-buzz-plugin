@@ -49,7 +49,8 @@ function makeHarness(failReads = false) {
     host: {
       readFile: async (filePath) => {
         if (failReads) throw new Error("ENOENT simulated");
-        return fs.readFileSync(filePath, "utf8");
+        // Simula o retorno real do Buzz Desktop (Uint8Array)
+        return new Uint8Array(fs.readFileSync(filePath));
       },
       writeFile: async (filePath, content) => {
         if (failReads) throw new Error("EACCES simulated");

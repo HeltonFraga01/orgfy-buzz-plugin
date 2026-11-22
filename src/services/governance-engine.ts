@@ -69,7 +69,17 @@ async function syncLocksFromDisk(ctx: Context): Promise<void> {
   if (!host?.readFile) return;
   try {
     const raw = await host.readFile(LOCKS_FILE_PATH);
-    const parsed = JSON.parse(raw);
+    const text =
+      typeof raw === "string"
+        ? raw
+        : raw instanceof Uint8Array
+        ? new TextDecoder("utf-8").decode(raw)
+        : raw instanceof ArrayBuffer
+        ? new TextDecoder("utf-8").decode(new Uint8Array(raw))
+        : ArrayBuffer.isView(raw)
+        ? new TextDecoder("utf-8").decode(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength))
+        : String(raw ?? "");
+    const parsed = JSON.parse(text);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       const now = Date.now();
       for (const [k, v] of Object.entries(parsed as Record<string, any>)) {
