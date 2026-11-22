@@ -2433,6 +2433,65 @@ async function lintCardForDispatch(ctx, input) {
     recommendation: approved ? "Card aprovado no pré-voo L-01/L-22 e pronto para despacho atômico." : "Corrija as pendências acima antes de despachar para evitar retrabalho no Gate."
   };
 }
+async function bindConversationContextForCard(ctx, input) {
+  var _a;
+  const agentsApi = ctx.agents;
+  const notes = [];
+  let folderAssigned = false;
+  let sectionsInjected = false;
+  const worktreePath = ((_a = input.worktreePath) == null ? void 0 : _a.trim()) || null;
+  if (worktreePath && (agentsApi == null ? void 0 : agentsApi.assignConversationFolder)) {
+    try {
+      await agentsApi.assignConversationFolder(input.conversationId, worktreePath);
+      folderAssigned = true;
+    } catch (err) {
+      notes.push(`Falha em assignConversationFolder: ${(err == null ? void 0 : err.message) || err}`);
+    }
+  } else if (worktreePath) {
+    notes.push("API ctx.agents.assignConversationFolder indisponível neste host.");
+  }
+  const sections = [
+    {
+      id: `orgfy-card-${input.issueId}`,
+      title: `Contexto OrgFy — Card #${input.issueId}`,
+      content: [
+        input.titulo ? `Título: ${input.titulo}` : null,
+        input.executor ? `Executor (L-01): ${input.executor}` : null,
+        input.revisor ? `Revisor (L-01): ${input.revisor}` : null,
+        worktreePath ? `Worktree Isolado: ${worktreePath}` : null
+      ].filter(Boolean).join("\n")
+    },
+    {
+      id: `orgfy-rules-${input.issueId}`,
+      title: "Regras Vivas L-22 / L-90 (Injetadas Automaticamente)",
+      content: [
+        `Regra L-22 (Comando de Aceite Imutável): ${input.acceptanceCommand || "Não informado"}`,
+        input.acceptanceHash ? `Hash SHA-256 L-22: ${input.acceptanceHash}` : null,
+        "Regra L-01: Executor e revisor devem ser estritamente segregados.",
+        "Regra L-90: Nunca afrouxe testes, critérios de aceite ou gates caixa-preta."
+      ].filter(Boolean).join("\n")
+    }
+  ];
+  if (agentsApi == null ? void 0 : agentsApi.setConversationSections) {
+    try {
+      await agentsApi.setConversationSections(input.conversationId, sections);
+      sectionsInjected = true;
+    } catch (err) {
+      notes.push(`Falha em setConversationSections: ${(err == null ? void 0 : err.message) || err}`);
+    }
+  } else {
+    notes.push("API ctx.agents.setConversationSections indisponível neste host.");
+  }
+  return {
+    ok: folderAssigned || sectionsInjected,
+    conversationId: input.conversationId,
+    folderAssigned,
+    worktreePath,
+    sectionsInjected,
+    sectionsCount: sectionsInjected ? sections.length : 0,
+    notes
+  };
+}
 function registerGovernanceAgentHooks(ctx) {
   const agentsApi = ctx.agents;
   if (!(agentsApi == null ? void 0 : agentsApi.registerHook)) return false;
@@ -2968,6 +3027,7 @@ function apply(ctx) {
   const React = ctx.react;
   const h = React.createElement;
   function OrgFyCockpit() {
+    var _a2, _b2;
     const [selectedTenant, setSelectedTenant] = React.useState("all");
     const [porteiroActive, setPorteiroActive] = React.useState(true);
     const [isSyncingPorteiro, setIsSyncingPorteiro] = React.useState(false);
@@ -3154,16 +3214,16 @@ function apply(ctx) {
       }
     };
     const handleCopyDeepLink = (e, c) => {
-      var _a2;
+      var _a3;
       e.stopPropagation();
       const uri = buildIssueDeepLink(c);
-      if (typeof navigator !== "undefined" && ((_a2 = navigator == null ? void 0 : navigator.clipboard) == null ? void 0 : _a2.writeText)) {
+      if (typeof navigator !== "undefined" && ((_a3 = navigator == null ? void 0 : navigator.clipboard) == null ? void 0 : _a3.writeText)) {
         navigator.clipboard.writeText(uri);
       }
       showNotification("success", `Deep link copiado: buzz://issue?id=${(c.fullIssueId || c.issueId).slice(0, 8)}...`);
     };
     const loadRealState = async () => {
-      var _a2, _b2, _c2, _d;
+      var _a3, _b3, _c2, _d;
       try {
         const [live, status, liveCards] = await Promise.all([
           fetchLiveEsteiraState(ctx),
@@ -3172,12 +3232,12 @@ function apply(ctx) {
         ]);
         if (typeof (status == null ? void 0 : status.fpy_percent) === "number") {
           setFpyRate(status.fpy_percent);
-        } else if (((_a2 = live.placarState) == null ? void 0 : _a2.pct_aceito_primeira_revisao) !== void 0) {
+        } else if (((_a3 = live.placarState) == null ? void 0 : _a3.pct_aceito_primeira_revisao) !== void 0) {
           setFpyRate(live.placarState.pct_aceito_primeira_revisao);
         }
         if (typeof (status == null ? void 0 : status.cpi_tokens) === "number") {
           setCpiTokens(status.cpi_tokens);
-        } else if (((_c2 = (_b2 = live.metricasTurnos) == null ? void 0 : _b2.governanca_orcamento) == null ? void 0 : _c2.cpi_tokens) !== void 0) {
+        } else if (((_c2 = (_b3 = live.metricasTurnos) == null ? void 0 : _b3.governanca_orcamento) == null ? void 0 : _c2.cpi_tokens) !== void 0) {
           setCpiTokens(live.metricasTurnos.governanca_orcamento.cpi_tokens);
         }
         if (typeof (status == null ? void 0 : status.porteiro_online) === "boolean") {
@@ -3208,14 +3268,14 @@ function apply(ctx) {
       setMcpStatus({ active: true, toolCallsCount: 0 });
     }, []);
     React.useEffect(() => {
-      var _a2, _b2;
+      var _a3, _b3;
       if (!activeGateCard || !gateRejectionReason.trim()) {
         setDsapWarning(false);
         setDsapSimilarity(0);
         setDsapMatchedTokens([]);
         return;
       }
-      const prev = ((_b2 = (_a2 = activeGateCard.rejectionHistory) == null ? void 0 : _a2[0]) == null ? void 0 : _b2.reason) || "";
+      const prev = ((_b3 = (_a3 = activeGateCard.rejectionHistory) == null ? void 0 : _a3[0]) == null ? void 0 : _b3.reason) || "";
       const result = calculateDsapSimilarity(gateRejectionReason, prev);
       setDsapSimilarity(result.similarity);
       setDsapWarning(result.isBacktracking);
@@ -5605,9 +5665,9 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
                       "button",
                       {
                         onClick: () => {
-                          var _a2;
+                          var _a3;
                           const cmd = activeIssueDetailCard.acceptanceCommand || "python3 ferramentas/esteira/lint_card.py";
-                          if (typeof navigator !== "undefined" && ((_a2 = navigator == null ? void 0 : navigator.clipboard) == null ? void 0 : _a2.writeText)) {
+                          if (typeof navigator !== "undefined" && ((_a3 = navigator == null ? void 0 : navigator.clipboard) == null ? void 0 : _a3.writeText)) {
                             navigator.clipboard.writeText(cmd);
                             showNotification("success", "Comando de aceite L-22 copiado!");
                           }
@@ -5861,6 +5921,30 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
                     h("span", {}, "• Playwright Zero Console Err:"),
                     h("span", { style: { color: "#10b981", fontWeight: "700" } }, "PASS")
                   )
+                )
+              ),
+              // Box E: Transcript & Diffs Nativos do Agente (ctx.agents.ui.Transcript)
+              h(
+                "div",
+                {
+                  style: {
+                    borderRadius: "8px",
+                    backgroundColor: "rgba(255, 255, 255, 0.02)",
+                    border: "1px solid rgba(255, 255, 255, 0.08)",
+                    padding: "12px 14px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "6px"
+                  }
+                },
+                h("span", { style: { fontSize: "10px", fontWeight: "700", color: "#38bdf8", textTransform: "uppercase" } }, "Transcript & Diffs do Agente (Nativo)"),
+                ((_b2 = (_a2 = ctx.agents) == null ? void 0 : _a2.ui) == null ? void 0 : _b2.Transcript) && (activeIssueDetailCard == null ? void 0 : activeIssueDetailCard.conversationId) ? h(ctx.agents.ui.Transcript, {
+                  conversationId: activeIssueDetailCard.conversationId,
+                  compact: true
+                }) : h(
+                  "div",
+                  { style: { fontSize: "10px", color: "#9ca3af", lineHeight: "1.4" } },
+                  "Nenhuma sessão ativa vinculada a este card ainda. Ao despachar com conversation_id (ou via orgfy_bind_context), o transcript e os diffs nativos do Buzz aparecem aqui."
                 )
               )
             )
@@ -6838,8 +6922,8 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
                 "button",
                 {
                   onClick: () => {
-                    var _a2;
-                    if (typeof navigator !== "undefined" && ((_a2 = navigator == null ? void 0 : navigator.clipboard) == null ? void 0 : _a2.writeText)) {
+                    var _a3;
+                    if (typeof navigator !== "undefined" && ((_a3 = navigator == null ? void 0 : navigator.clipboard) == null ? void 0 : _a3.writeText)) {
                       navigator.clipboard.writeText(tmpl.path);
                     }
                     showNotification("success", `Caminho copiado: ${tmpl.path}`);
@@ -7449,6 +7533,7 @@ Ferramentas nativas disponíveis neste plugin:
 7. orgfy_checkout_lock({ action, issue_id?, agent_id?, ttl_minutes? }): Gerencia lock atômico de checkout (acquire, release, list) para evitar trabalho duplicado.
 8. orgfy_governanca_avaliar({ dry_run?, auto_wake? }): Avalia orçamento, fila de revisão, WIP órfão e estagnação nível 3, disparando alertas/wakes com cooldown anti-spam.
 9. orgfy_lint_card({ title, objective?, done_when?, acceptance_command?, executor?, revisor? }): Audita qualidade semântica e regras L-01/L-22 antes do despacho.
+10. orgfy_bind_context({ conversation_id, issue_id, worktree_path?, title?, acceptance_command?, acceptance_hash?, executor?, revisor? }): Vincula o worktree e injeta regras vivas L-22/L-90 direto na conversa do agente.
 Consulte sempre orgfy_status, orgfy_kpis ou orgfy_kanban_read para inspecionar métricas reais antes de agir.`
       });
       console.log("[ORGFY] ctx.agents.addInstructions registrado com sucesso.");
@@ -7717,7 +7802,38 @@ Consulte sempre orgfy_status, orgfy_kpis ou orgfy_kanban_read para inspecionar m
           return JSON.stringify(lintRes, null, 2);
         }
       });
-      console.log("[ORGFY] 9 agentTools registradas com sucesso no harness do Buzz (Ondas 1, 2 e 3).");
+      ctx.agents.addTool({
+        name: "orgfy_bind_context",
+        description: "Vincula a pasta do worktree isolado (assignConversationFolder) e injeta as regras vivas L-22/L-90 e metadados do card (setConversationSections) diretamente na conversa do agente.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            conversation_id: { type: "string", description: "ID da conversa do agente no Buzz" },
+            issue_id: { type: "string", description: "ID do card/issue da esteira" },
+            worktree_path: { type: "string", description: "Caminho absoluto do worktree isolado" },
+            title: { type: "string", description: "Título do card" },
+            acceptance_command: { type: "string", description: "Comando determinístico de aceite (L-22)" },
+            acceptance_hash: { type: "string", description: "Hash SHA-256 do comando de aceite" },
+            executor: { type: "string", description: "Agente executor" },
+            revisor: { type: "string", description: "Agente revisor" }
+          },
+          required: ["conversation_id", "issue_id"]
+        },
+        call: async (_client, _context, args) => {
+          const bindRes = await bindConversationContextForCard(ctx, {
+            conversationId: args.conversation_id,
+            issueId: args.issue_id,
+            worktreePath: args.worktree_path,
+            titulo: args.title,
+            acceptanceCommand: args.acceptance_command,
+            acceptanceHash: args.acceptance_hash,
+            executor: args.executor,
+            revisor: args.revisor
+          });
+          return JSON.stringify(bindRes, null, 2);
+        }
+      });
+      console.log("[ORGFY] 10 agentTools registradas com sucesso no harness do Buzz (Ondas 1, 2 e 3 completas).");
     } catch (err) {
       console.warn("[ORGFY] Falha ao registrar agentTools:", err);
     }

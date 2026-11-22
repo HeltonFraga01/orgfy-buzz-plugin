@@ -16,6 +16,8 @@ function makeHarness(failReads = false) {
   const hooks = [];
   const notifications = [];
   const wakes = [];
+  const assignedFolders = [];
+  const injectedSections = [];
   const artifacts = new Map();
   let mcpHandler = null;
 
@@ -45,6 +47,15 @@ function makeHarness(failReads = false) {
       wake: async (w) => {
         wakes.push(w);
       },
+      assignConversationFolder: async (convId, folder) => {
+        assignedFolders.push({ convId, folder });
+      },
+      setConversationSections: async (convId, sections) => {
+        injectedSections.push({ convId, sections });
+      },
+      ui: {
+        Transcript: () => null,
+      },
     },
     host: {
       readFile: async (filePath) => {
@@ -65,12 +76,12 @@ function makeHarness(failReads = false) {
   };
 
   orgfyMod.apply(ctx);
-  return { tools, panels, hooks, notifications, wakes, artifacts, getMcp: () => mcpHandler };
+  return { tools, panels, hooks, notifications, wakes, assignedFolders, injectedSections, artifacts, getMcp: () => mcpHandler };
 }
 
 // 1. Testes Originais (Kanban & Status Positivo/Negativo + MCP)
 const h1 = makeHarness(false);
-assert.equal(h1.tools.size, 9, "devem existir exatamente 9 agentTools registradas");
+assert.equal(h1.tools.size, 10, "devem existir exatamente 10 agentTools registradas");
 assert.ok(h1.panels.has("orgfy-channel-pulse"), "sidebar panel orgfy-channel-pulse deve ser registrado");
 assert.ok(h1.hooks.length >= 1, "hooks de governança devem ser registrados");
 
@@ -195,3 +206,23 @@ const lintGood = JSON.parse(await lintTool.call({}, {}, {
 assert.equal(lintGood.approved, true);
 assert.equal(lintGood.issues.length, 0);
 console.log("[ONDA 3 LINT CARD OK]", JSON.stringify({ bad_issues: lintBad.issues.length, good_score: lintGood.score }));
+
+// 6. Onda 3+: orgfy_bind_context (assignConversationFolder + setConversationSections)
+const bindTool = h1.tools.get("orgfy_bind_context");
+const bindRes = JSON.parse(await bindTool.call({}, {}, {
+  conversation_id: "conv-test-001",
+  issue_id: "5c569a9e",
+  worktree_path: "/Users/heltonfraga/.buzz/REPOS/orgfy/.worktrees/5c569a9e",
+  title: "Validar contexto injetado na sessão",
+  acceptance_command: "pytest tests/test_ok.py",
+  acceptance_hash: "abc123def456",
+  executor: "OrgFy Atlas",
+  revisor: "OrgFy Bento",
+}));
+assert.equal(bindRes.ok, true);
+assert.equal(bindRes.folderAssigned, true);
+assert.equal(bindRes.sectionsInjected, true);
+assert.equal(bindRes.sectionsCount, 2);
+assert.equal(h1.assignedFolders.length, 1);
+assert.equal(h1.injectedSections.length, 1);
+console.log("[ONDA 3+ BIND CONTEXT OK]", JSON.stringify({ folderAssigned: bindRes.folderAssigned, sectionsCount: bindRes.sectionsCount }));

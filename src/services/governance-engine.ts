@@ -434,6 +434,95 @@ export async function lintCardForDispatch(
   };
 }
 
+export interface ConversationContextBindResult {
+  ok: boolean;
+  conversationId: string;
+  folderAssigned: boolean;
+  worktreePath: string | null;
+  sectionsInjected: boolean;
+  sectionsCount: number;
+  notes: string[];
+}
+
+export async function bindConversationContextForCard(
+  ctx: Context,
+  input: {
+    conversationId: string;
+    issueId: string;
+    worktreePath?: string;
+    titulo?: string;
+    acceptanceCommand?: string;
+    acceptanceHash?: string;
+    executor?: string;
+    revisor?: string;
+  }
+): Promise<ConversationContextBindResult> {
+  const agentsApi = (ctx as any).agents;
+  const notes: string[] = [];
+  let folderAssigned = false;
+  let sectionsInjected = false;
+  const worktreePath = input.worktreePath?.trim() || null;
+
+  if (worktreePath && agentsApi?.assignConversationFolder) {
+    try {
+      await agentsApi.assignConversationFolder(input.conversationId, worktreePath);
+      folderAssigned = true;
+    } catch (err: any) {
+      notes.push(`Falha em assignConversationFolder: ${err?.message || err}`);
+    }
+  } else if (worktreePath) {
+    notes.push("API ctx.agents.assignConversationFolder indisponível neste host.");
+  }
+
+  const sections = [
+    {
+      id: `orgfy-card-${input.issueId}`,
+      title: `Contexto OrgFy — Card #${input.issueId}`,
+      content: [
+        input.titulo ? `Título: ${input.titulo}` : null,
+        input.executor ? `Executor (L-01): ${input.executor}` : null,
+        input.revisor ? `Revisor (L-01): ${input.revisor}` : null,
+        worktreePath ? `Worktree Isolado: ${worktreePath}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    },
+    {
+      id: `orgfy-rules-${input.issueId}`,
+      title: "Regras Vivas L-22 / L-90 (Injetadas Automaticamente)",
+      content: [
+        `Regra L-22 (Comando de Aceite Imutável): ${input.acceptanceCommand || "Não informado"}`,
+        input.acceptanceHash ? `Hash SHA-256 L-22: ${input.acceptanceHash}` : null,
+        "Regra L-01: Executor e revisor devem ser estritamente segregados.",
+        "Regra L-90: Nunca afrouxe testes, critérios de aceite ou gates caixa-preta.",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+    },
+  ];
+
+  if (agentsApi?.setConversationSections) {
+    try {
+      await agentsApi.setConversationSections(input.conversationId, sections);
+      sectionsInjected = true;
+    } catch (err: any) {
+      notes.push(`Falha em setConversationSections: ${err?.message || err}`);
+    }
+  } else {
+    notes.push("API ctx.agents.setConversationSections indisponível neste host.");
+  }
+
+  return {
+    ok: folderAssigned || sectionsInjected,
+    conversationId: input.conversationId,
+    folderAssigned,
+    worktreePath,
+    sectionsInjected,
+    sectionsCount: sectionsInjected ? sections.length : 0,
+    notes,
+  };
+}
+
 export function registerGovernanceAgentHooks(ctx: Context): boolean {
   const agentsApi = (ctx as any).agents;
   if (!agentsApi?.registerHook) return false;

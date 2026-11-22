@@ -61,6 +61,7 @@ import {
   evaluateBudgetGate,
   evaluateGovernanceAndReact,
   lintCardForDispatch,
+  bindConversationContextForCard,
   registerGovernanceAgentHooks,
 } from "./services/governance-engine";
 
@@ -3697,6 +3698,33 @@ export function apply(ctx: Context) {
                       h("span", { style: { color: "#10b981", fontWeight: "700" } }, "PASS")
                     )
                   )
+                ),
+
+                // Box E: Transcript & Diffs Nativos do Agente (ctx.agents.ui.Transcript)
+                h(
+                  "div",
+                  {
+                    style: {
+                      borderRadius: "8px",
+                      backgroundColor: "rgba(255, 255, 255, 0.02)",
+                      border: "1px solid rgba(255, 255, 255, 0.08)",
+                      padding: "12px 14px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "6px",
+                    },
+                  },
+                  h("span", { style: { fontSize: "10px", fontWeight: "700", color: "#38bdf8", textTransform: "uppercase" } }, "Transcript & Diffs do Agente (Nativo)"),
+                  (ctx.agents as any)?.ui?.Transcript && (activeIssueDetailCard as any)?.conversationId
+                    ? h((ctx.agents as any).ui.Transcript, {
+                        conversationId: (activeIssueDetailCard as any).conversationId,
+                        compact: true,
+                      })
+                    : h(
+                        "div",
+                        { style: { fontSize: "10px", color: "#9ca3af", lineHeight: "1.4" } },
+                        "Nenhuma sessão ativa vinculada a este card ainda. Ao despachar com conversation_id (ou via orgfy_bind_context), o transcript e os diffs nativos do Buzz aparecem aqui."
+                      )
                 )
               )
             ),
@@ -5382,6 +5410,7 @@ Ferramentas nativas disponíveis neste plugin:
 7. orgfy_checkout_lock({ action, issue_id?, agent_id?, ttl_minutes? }): Gerencia lock atômico de checkout (acquire, release, list) para evitar trabalho duplicado.
 8. orgfy_governanca_avaliar({ dry_run?, auto_wake? }): Avalia orçamento, fila de revisão, WIP órfão e estagnação nível 3, disparando alertas/wakes com cooldown anti-spam.
 9. orgfy_lint_card({ title, objective?, done_when?, acceptance_command?, executor?, revisor? }): Audita qualidade semântica e regras L-01/L-22 antes do despacho.
+10. orgfy_bind_context({ conversation_id, issue_id, worktree_path?, title?, acceptance_command?, acceptance_hash?, executor?, revisor? }): Vincula o worktree e injeta regras vivas L-22/L-90 direto na conversa do agente.
 Consulte sempre orgfy_status, orgfy_kpis ou orgfy_kanban_read para inspecionar métricas reais antes de agir.`
       });
       console.log("[ORGFY] ctx.agents.addInstructions registrado com sucesso.");
@@ -5667,7 +5696,40 @@ Consulte sempre orgfy_status, orgfy_kpis ou orgfy_kanban_read para inspecionar m
         },
       });
 
-      console.log("[ORGFY] 9 agentTools registradas com sucesso no harness do Buzz (Ondas 1, 2 e 3).");
+      // ── ONDA 3+: INJEÇÃO DINÂMICA DE WORKTREE & REGRAS L-22/L-90 NA CONVERSA ──
+      (ctx.agents as any).addTool({
+        name: "orgfy_bind_context",
+        description: "Vincula a pasta do worktree isolado (assignConversationFolder) e injeta as regras vivas L-22/L-90 e metadados do card (setConversationSections) diretamente na conversa do agente.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            conversation_id: { type: "string", description: "ID da conversa do agente no Buzz" },
+            issue_id: { type: "string", description: "ID do card/issue da esteira" },
+            worktree_path: { type: "string", description: "Caminho absoluto do worktree isolado" },
+            title: { type: "string", description: "Título do card" },
+            acceptance_command: { type: "string", description: "Comando determinístico de aceite (L-22)" },
+            acceptance_hash: { type: "string", description: "Hash SHA-256 do comando de aceite" },
+            executor: { type: "string", description: "Agente executor" },
+            revisor: { type: "string", description: "Agente revisor" },
+          },
+          required: ["conversation_id", "issue_id"],
+        },
+        call: async (_client: any, _context: any, args: any) => {
+          const bindRes = await bindConversationContextForCard(ctx, {
+            conversationId: args.conversation_id,
+            issueId: args.issue_id,
+            worktreePath: args.worktree_path,
+            titulo: args.title,
+            acceptanceCommand: args.acceptance_command,
+            acceptanceHash: args.acceptance_hash,
+            executor: args.executor,
+            revisor: args.revisor,
+          });
+          return JSON.stringify(bindRes, null, 2);
+        },
+      });
+
+      console.log("[ORGFY] 10 agentTools registradas com sucesso no harness do Buzz (Ondas 1, 2 e 3 completas).");
     } catch (err) {
       console.warn("[ORGFY] Falha ao registrar agentTools:", err);
     }
