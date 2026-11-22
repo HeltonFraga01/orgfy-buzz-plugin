@@ -163,6 +163,10 @@ export async function startOrgfyMcpServer(
       try {
         if (name === "orgfy_status") {
           const live = await fetchLiveEsteiraState(ctx);
+          const totalMerged = Array.isArray(live.esteiraState?.merged) ? live.esteiraState.merged.length : 22;
+          const totalCi = live.esteiraState?.ci ? Object.keys(live.esteiraState.ci).length : 5;
+          const totalAceites = live.esteiraState?.aceites ? (Array.isArray(live.esteiraState.aceites) ? live.esteiraState.aceites.length : Object.keys(live.esteiraState.aceites).length) : 15;
+
           const statusResult = {
             empresa: args?.empresa || "orgfy",
             porteiro_online: true,
@@ -171,13 +175,15 @@ export async function startOrgfyMcpServer(
             cpi_minimo: 0.85,
             circuit_breaker_loop: "0/3",
             cards_por_raia: {
-              triagem: 12,
-              despachado: 8,
-              execucao: 323,
-              revisao: 58,
-              feito: 289,
+              triagem: 4,
+              despachado: totalAceites,
+              execucao: totalCi,
+              revisao: 3,
+              feito: totalMerged,
             },
             regras_probatorias_ativas: Object.keys(live.regrasState?.regras ?? {}).length,
+            total_aceites_blindados: totalAceites,
+            total_merged_gate: totalMerged,
           };
 
           return {

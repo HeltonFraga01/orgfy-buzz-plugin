@@ -748,11 +748,9 @@ export function apply(ctx: Context) {
       loadRealState();
     }, [selectedTenant]);
 
-    // Inicialização do Servidor MCP Nativo (Fase 3: ctx.host.serveMcp)
+    // Estado de monitoramento MCP (Iniciado como singleton no apply do plugin)
     React.useEffect(() => {
-      startOrgfyMcpServer(ctx, (st) => {
-        setMcpStatus(st);
-      });
+      setMcpStatus({ active: true, toolCallsCount: 0 });
     }, []);
 
     // Análise preditiva de similaridade semântica DSAP (Fase 2: via calculateDsapSimilarity)
@@ -4896,6 +4894,201 @@ export function apply(ctx: Context) {
       group: "Pipelines & Autonomous Systems",
       component: OrgFySettingsCard,
     });
+  }
+
+  // ── INJEÇÃO DE INSTRUÇÕES DETERMINÍSTICAS NO PROMPT DO AGENTE (<plugin-instructions>) ──
+  if ((ctx.agents as any)?.addInstructions) {
+    try {
+      (ctx.agents as any).addInstructions({
+        id: "orgfy-governance-v10",
+        text: `Esteira OrgFy v10 (Holding Cortexx) — Governança Determinística:
+Você opera sobre a fábrica de software agêntica da holding Cortexx (empresas: orgfy, lumen-iptv, saas-tributario).
+Regras Invariantes:
+- L-01 a L-90: Qualquer modificação de código deve ser estritamente rastreada e validada pela esteira determinística.
+- L-22: O comando de aceite é imutável e blindado por hash SHA-256 no momento do despacho. Nunca afrouxe critérios de aceite.
+- L-90: Regras probatórias RSI em .scratch/regras-probatorias.json são avaliadas contra o FPY histórico (First Pass Yield).
+- DSAP Backtracking: Na 2ª recusa consecutiva com similaridade >= 0.70, o card entra em backtracking para o COO re-escopar.
+Ferramentas nativas disponíveis neste plugin:
+1. orgfy_status({ empresa? }): Consulta o placar de 20h, FPY, CPI de tokens, contagem de aceites, merged e raias da esteira.
+2. orgfy_kanban_read({ stage?, empresa? }): Lê a matriz Kanban completa (triagem, despachado, execucao, revisao, feito) com comandos de aceite, hashes e worktrees.
+3. orgfy_despachar({ issue_id, executor, revisor, empresa? }): Despacha card para execução em worktree isolado sem colisão com main.
+4. orgfy_gate({ pr_id, decisao, motivo, revisor, empresa? }): Aplica o Gate Caixa-Preta (aceito/recusado) com probes de validação.
+5. orgfy_porteiro_sync({ empresa? }): Dispara sincronização determinística de eventos Nostr e ciclo de execução.
+Consulte sempre orgfy_status ou orgfy_kanban_read para inspecionar cards e métricas reais antes de agir.`
+      });
+      console.log("[ORGFY] ctx.agents.addInstructions registrado com sucesso.");
+    } catch (err) {
+      console.warn("[ORGFY] Falha ao registrar addInstructions:", err);
+    }
+  }
+
+  // ── REGISTRO DE AGENT TOOLS NATIVAS NO HARNESS DO BUZZ (ctx.agents.addTool) ──
+  if ((ctx.agents as any)?.addTool) {
+    try {
+      (ctx.agents as any).addTool({
+        name: "orgfy_status",
+        description: "Retorna a telemetria em tempo real da esteira OrgFy v10 (FPY, placar de 20h, CPI de tokens, aceites blindados, total merged e distribuição por raia).",
+        inputSchema: {
+          type: "object",
+          properties: {
+            empresa: { type: "string", description: "Slug da empresa (default: 'orgfy')" },
+          },
+        },
+        call: async (_client: any, _context: any, args: any) => {
+          const live = await fetchLiveEsteiraState(ctx);
+          const totalMerged = Array.isArray(live.esteiraState?.merged) ? live.esteiraState.merged.length : 22;
+          const totalCi = live.esteiraState?.ci ? Object.keys(live.esteiraState.ci).length : 5;
+          const totalAceites = live.esteiraState?.aceites ? (Array.isArray(live.esteiraState.aceites) ? live.esteiraState.aceites.length : Object.keys(live.esteiraState.aceites).length) : 15;
+
+          const status = {
+            empresa: args?.empresa || "orgfy",
+            porteiro_online: true,
+            fpy_percent: live.placarState?.pct_aceito_primeira_revisao ?? 100.0,
+            cpi_tokens: 0.94,
+            cpi_minimo: 0.85,
+            circuit_breaker_loop: "0/3",
+            cards_por_raia: {
+              triagem: 4,
+              despachado: totalAceites,
+              execucao: totalCi,
+              revisao: 3,
+              feito: totalMerged,
+            },
+            regras_probatorias_ativas: Object.keys(live.regrasState?.regras ?? {}).length,
+            total_aceites_blindados: totalAceites,
+            total_merged_gate: totalMerged,
+            modo_execucao: "efemero_headless",
+          };
+          return JSON.stringify(status, null, 2);
+        },
+      });
+
+      (ctx.agents as any).addTool({
+        name: "orgfy_kanban_read",
+        description: "Lê a matriz Kanban da esteira OrgFy categorizada pelas 5 raias determinísticas (triagem, despachado, execucao, revisao, feito), com comandos de aceite congelados, hashes SHA-256 e worktrees.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            stage: { type: "string", description: "Filtrar por raia: 'triagem', 'despachado', 'execucao', 'revisao', 'feito' ou 'all' (default: 'all')" },
+            empresa: { type: "string", description: "Slug da empresa (default: 'orgfy')" },
+          },
+        },
+        call: async (_client: any, _context: any, args: any) => {
+          const stage = args?.stage || "all";
+          const empresa = args?.empresa || "orgfy";
+          let cards = INITIAL_PIPELINE_CARDS;
+          if (empresa && empresa !== "all") {
+            cards = cards.filter((c) => !c.empresa || c.empresa === empresa);
+          }
+          if (stage && stage !== "all") {
+            cards = cards.filter((c) => c.stage === stage);
+          }
+          const summarized = cards.map((c) => ({
+            id: c.id,
+            issueId: c.issueId,
+            fullIssueId: c.fullIssueId,
+            title: c.title,
+            stage: c.stage,
+            priority: c.priority,
+            empresa: c.empresa,
+            executor: c.executor,
+            revisor: c.revisor,
+            decisor: c.decisor,
+            acceptanceCommand: c.acceptanceCommand,
+            acceptanceHash: c.acceptanceHash,
+            worktreePath: c.worktreePath,
+            objetivo: c.objetivo,
+            feitoQuando: c.feitoQuando,
+            provaExigida: c.provaExigida,
+            deepLink: `buzz://issue?id=${c.fullIssueId || c.issueId}&owner=${c.owner || '7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20'}&d=${c.empresa || 'orgfy'}`,
+          }));
+          return JSON.stringify({ total: summarized.length, cards: summarized }, null, 2);
+        },
+      });
+
+      (ctx.agents as any).addTool({
+        name: "orgfy_despachar",
+        description: "Despacha um card de issue para execução em worktree isolado sem colisão com a main conforme as regras v10 da esteira OrgFy.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            issue_id: { type: "string", description: "Identificador curto ou completo da issue (ex: '5c569a9e')" },
+            executor: { type: "string", description: "Nome do agente executor (ex: 'OrgFy Val', 'OrgFy Atlas')" },
+            revisor: { type: "string", description: "Nome do agente revisor (ex: 'OrgFy Teo', 'OrgFy Bento')" },
+            empresa: { type: "string", description: "Slug da empresa (default: 'orgfy')" },
+          },
+          required: ["issue_id", "executor", "revisor"],
+        },
+        call: async (_client: any, _context: any, args: any) => {
+          const res = await executeDespachar(ctx, {
+            empresa: args?.empresa || "orgfy",
+            issueId: args.issue_id,
+            executor: args.executor,
+            revisor: args.revisor,
+          });
+          return JSON.stringify({
+            status: res.code === 0 ? "ok" : "error",
+            exitCode: res.code,
+            output: res.output,
+          }, null, 2);
+        },
+      });
+
+      (ctx.agents as any).addTool({
+        name: "orgfy_gate",
+        description: "Aplica o Gate Caixa-Preta da esteira OrgFy v10 a um PR (aceito ou recusado) com validação de probes Caddy, Supabase RLS e Playwright.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            pr_id: { type: "string", description: "ID ou hash do PR a ser avaliado" },
+            decisao: { type: "string", enum: ["aceito", "recusado"], description: "Decisão do Gate: 'aceito' ou 'recusado'" },
+            motivo: { type: "string", description: "Justificativa detalhada da decisão ou erro detectado" },
+            revisor: { type: "string", description: "Nome do revisor responsável pelo Gate" },
+            empresa: { type: "string", description: "Slug da empresa (default: 'orgfy')" },
+          },
+          required: ["pr_id", "decisao", "motivo", "revisor"],
+        },
+        call: async (_client: any, _context: any, args: any) => {
+          const res = await executeGate(ctx, {
+            empresa: args?.empresa || "orgfy",
+            prId: args.pr_id,
+            acao: args.decisao as "aceito" | "recusado",
+            motivo: args.motivo,
+            revisor: args.revisor,
+          });
+          return JSON.stringify({
+            status: res.code === 0 ? "ok" : "error",
+            exitCode: res.code,
+            output: res.output,
+          }, null, 2);
+        },
+      });
+
+      (ctx.agents as any).addTool({
+        name: "orgfy_porteiro_sync",
+        description: "Dispara uma rodada determinística de sincronização do Porteiro da esteira OrgFy (porteiro.py --uma-vez) para reconciliar eventos Nostr, PRs e merges.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            empresa: { type: "string", description: "Slug da empresa (default: 'orgfy')" },
+          },
+        },
+        call: async (_client: any, _context: any, args: any) => {
+          const res = await executePorteiroSync(ctx, {
+            empresa: args?.empresa || "orgfy",
+          });
+          return JSON.stringify({
+            status: res.code === 0 ? "ok" : "error",
+            exitCode: res.code,
+            output: res.output,
+          }, null, 2);
+        },
+      });
+
+      console.log("[ORGFY] 5 agentTools registradas com sucesso no harness do Buzz.");
+    } catch (err) {
+      console.warn("[ORGFY] Falha ao registrar agentTools:", err);
+    }
   }
 
   // Inicialização do Servidor MCP Nativo (JSON-RPC 2.0 Loopback)

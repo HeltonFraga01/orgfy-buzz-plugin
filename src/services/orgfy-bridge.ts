@@ -356,29 +356,28 @@ export function calculateDsapSimilarity(
 export async function openSystemUri(ctx: any, uri: string): Promise<boolean> {
   let opened = false;
 
-  // 1. Prioridade 1: Spawn nativo 'open' do macOS através do host Cordis
+  // 1. Prioridade 1: Spawn nativo via 'bash -c' do host Cordis
   if (ctx?.host?.spawn) {
     try {
-      const proc = await ctx.host.spawn("open", { args: [uri] });
+      const proc = await ctx.host.spawn("bash", { args: [`open "${uri}"`] });
       const code = await proc.exited;
       if (code === 0) opened = true;
     } catch (e) {
-      console.warn("[OrgFy Bridge] spawn direct open falhou:", e);
+      console.warn("[OrgFy Bridge] spawn bash open falhou:", e);
     }
 
     if (!opened) {
-      // 2. Fallback via 'bash' (com manifest args: ["-c"])
       try {
-        const proc = await ctx.host.spawn("bash", { args: [`open "${uri}"`] });
+        const proc = await ctx.host.spawn("open", { args: [uri] });
         const code = await proc.exited;
         if (code === 0) opened = true;
       } catch (e) {
-        console.warn("[OrgFy Bridge] spawn bash open falhou:", e);
+        console.warn("[OrgFy Bridge] spawn direct open falhou:", e);
       }
     }
   }
 
-  // 3. Fallback Webview DOM (dispara o manipulador de protocolo do sistema)
+  // 2. Fallback Webview DOM (dispara o manipulador de protocolo do sistema)
   if (!opened && typeof window !== "undefined" && typeof document !== "undefined") {
     try {
       const a = document.createElement("a");
@@ -395,7 +394,7 @@ export async function openSystemUri(ctx: any, uri: string): Promise<boolean> {
     } catch (_e) {}
   }
 
-  // 4. Fallback via window.location somente se outros métodos falharem
+  // 3. Fallback via window.location somente se outros métodos falharem
   if (!opened && typeof window !== "undefined") {
     try {
       window.location.assign(uri);
@@ -407,8 +406,8 @@ export async function openSystemUri(ctx: any, uri: string): Promise<boolean> {
 }
 
 /**
- * Abre a tela nativa de uma Issue diretamente no Buzz Desktop via `ctx.navigation.open`.
- * Rota canônica: kind: "page", pluginId: "buzz.repos", pageId: "repos", route: { version: 1, params: { type: "issue", owner, dtag, id } }
+ * Abre a tela nativa de uma Issue diretamente no Buzz Desktop.
+ * Dispara via protocolo buzz://issue? e também notifica o roteador de páginas do Buzz.
  */
 export async function openIssueInBuzz(
   ctx: any,
@@ -439,7 +438,7 @@ export async function openIssueInBuzz(
     // Hexadecimal curto (ex: 8 chars), normaliza via padEnd
     targetId = targetId.padEnd(64, "0");
   } else {
-    // String não-hexadecimal (ex: slugs como BUZZ-106-WORKTREE-COMPAT): deriva hash determinístico de 64 hex
+    // String não-hexadecimal: deriva hash determinístico de 64 hex
     let hash = "";
     for (let i = 0; i < 64; i++) {
       const code = ((rawId.charCodeAt(i % (rawId.length || 1)) + i * 37) * 31) % 16;
@@ -448,10 +447,15 @@ export async function openIssueInBuzz(
     targetId = hash;
   }
 
-  // 1. Tenta navegação interna nativa de páginas do Buzz Desktop (Cordis navigation service)
+  const uri = `buzz://issue?id=${targetId}&owner=${owner}&d=${dtag}`;
+
+  // 1. Disparo direto do deep-link buzz://issue via spawn (garante transição imediata para a tela de Repos do Buzz)
+  const openedViaSystem = await openSystemUri(ctx, uri);
+
+  // 2. Também tenta navegação interna nativa se disponível
   if (ctx?.navigation?.open) {
     try {
-      const res = await ctx.navigation.open({
+      await ctx.navigation.open({
         version: 1,
         kind: "page",
         pluginId: "buzz.repos",
@@ -466,18 +470,12 @@ export async function openIssueInBuzz(
           },
         },
       });
-      if (!res || res.status === "opened") {
-        return true;
-      }
-      console.warn("[OrgFy Bridge] ctx.navigation.open retornou status não aberto:", res);
     } catch (err) {
-      console.warn("[OrgFy Bridge] ctx.navigation.open para buzz.repos/repos falhou:", err);
+      console.warn("[OrgFy Bridge] ctx.navigation.open falhou:", err);
     }
   }
 
-  // 2. Fallback gracioso: URI canônica buzz://issue?...
-  const uri = `buzz://issue?id=${targetId}&owner=${owner}&d=${dtag}`;
-  return openSystemUri(ctx, uri);
+  return openedViaSystem;
 }
 
 /**
