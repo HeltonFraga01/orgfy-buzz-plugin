@@ -424,6 +424,7 @@ def analyze_economy(
 
 
 def _collect_resolved_and_closed_ids(scratch_dir: Path) -> set[str]:
+    import re
     closed: set[str] = set()
     archive = safe_load_json(scratch_dir / "resolved-issues-archive.json")
     if isinstance(archive, dict):
