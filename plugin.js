@@ -1821,6 +1821,16 @@ const SVG = {
     h("line", { x1: "16", y1: "13", x2: "8", y2: "13" }),
     h("line", { x1: "16", y1: "17", x2: "8", y2: "17" }),
     h("polyline", { points: "10 9 9 9 8 9" })
+  ),
+  list: ({ h, width = 14, height = 14 }) => h(
+    "svg",
+    { width, height, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.75 },
+    h("line", { x1: "8", y1: "6", x2: "21", y2: "6" }),
+    h("line", { x1: "8", y1: "12", x2: "21", y2: "12" }),
+    h("line", { x1: "8", y1: "18", x2: "21", y2: "18" }),
+    h("line", { x1: "3", y1: "6", x2: "3.01", y2: "6" }),
+    h("line", { x1: "3", y1: "12", x2: "3.01", y2: "12" }),
+    h("line", { x1: "3", y1: "18", x2: "3.01", y2: "18" })
   )
 };
 const THEME = {
@@ -1848,8 +1858,12 @@ function apply(ctx) {
     const [selectedTenant, setSelectedTenant] = React.useState("all");
     const [porteiroActive, setPorteiroActive] = React.useState(true);
     const [isSyncingPorteiro, setIsSyncingPorteiro] = React.useState(false);
-    const [fpyRate, setFpyRate] = React.useState(100);
-    const [cpiTokens, setCpiTokens] = React.useState(0.94);
+    const [fpyRate, setFpyRate] = React.useState(null);
+    const [cpiTokens, setCpiTokens] = React.useState(null);
+    const [totalMergedGate, setTotalMergedGate] = React.useState(null);
+    const [circuitBreakerLoop, setCircuitBreakerLoop] = React.useState(null);
+    const [totalAceitesBlindados, setTotalAceitesBlindados] = React.useState(null);
+    const [viewMode, setViewMode] = React.useState("kanban");
     const [pipelineCards, setPipelineCards] = React.useState(() => {
       try {
         const stored = localStorage.getItem("orgfy_pipeline_cards_v11");
@@ -2003,26 +2017,42 @@ function apply(ctx) {
       showNotification("success", `Deep link copiado: buzz://issue?id=${(c.fullIssueId || c.issueId).slice(0, 8)}...`);
     };
     const loadRealState = async () => {
-      var _a2, _b2, _c, _d, _e;
+      var _a2, _b2, _c, _d;
       try {
-        const live = await fetchLiveEsteiraState(ctx);
-        if (((_a2 = live.placarState) == null ? void 0 : _a2.pct_aceito_primeira_revisao) !== void 0) {
+        const [live, status, liveCards] = await Promise.all([
+          fetchLiveEsteiraState(ctx),
+          buildOrgfyStatus(ctx, selectedTenant === "all" ? "orgfy" : selectedTenant),
+          fetchLiveKanbanCards(ctx, { empresa: selectedTenant })
+        ]);
+        if (typeof (status == null ? void 0 : status.fpy_percent) === "number") {
+          setFpyRate(status.fpy_percent);
+        } else if (((_a2 = live.placarState) == null ? void 0 : _a2.pct_aceito_primeira_revisao) !== void 0) {
           setFpyRate(live.placarState.pct_aceito_primeira_revisao);
         }
-        if (((_c = (_b2 = live.metricasTurnos) == null ? void 0 : _b2.governanca_orcamento) == null ? void 0 : _c.cpi_tokens) !== void 0) {
+        if (typeof (status == null ? void 0 : status.cpi_tokens) === "number") {
+          setCpiTokens(status.cpi_tokens);
+        } else if (((_c = (_b2 = live.metricasTurnos) == null ? void 0 : _b2.governanca_orcamento) == null ? void 0 : _c.cpi_tokens) !== void 0) {
           setCpiTokens(live.metricasTurnos.governanca_orcamento.cpi_tokens);
         }
-        if (((_d = live.esteiraState) == null ? void 0 : _d.ci_cache) && Object.keys(live.esteiraState.ci_cache).length > 0) {
-          setPorteiroActive(true);
+        if (typeof (status == null ? void 0 : status.porteiro_online) === "boolean") {
+          setPorteiroActive(status.porteiro_online);
         }
-        if ((_e = live.regrasState) == null ? void 0 : _e.regras) {
+        if (typeof (status == null ? void 0 : status.total_merged_gate) === "number") {
+          setTotalMergedGate(status.total_merged_gate);
+        }
+        if (status == null ? void 0 : status.circuit_breaker_loop) {
+          setCircuitBreakerLoop(status.circuit_breaker_loop);
+        }
+        if (typeof (status == null ? void 0 : status.total_aceites_blindados) === "number") {
+          setTotalAceitesBlindados(status.total_aceites_blindados);
+        }
+        if ((_d = live.regrasState) == null ? void 0 : _d.regras) {
           setRegrasProbatorias(Object.values(live.regrasState.regras));
         }
-        const liveCards = await fetchLiveKanbanCards(ctx, { empresa: selectedTenant });
         setPipelineCards(liveCards);
         localStorage.setItem("orgfy_pipeline_cards_v11", JSON.stringify(liveCards));
       } catch (err) {
-        console.warn("Leitura de fallback ativa:", err);
+        console.warn("Erro ao carregar estado real da esteira:", err);
       }
     };
     React.useEffect(() => {
@@ -2277,13 +2307,14 @@ function apply(ctx) {
           display: "flex",
           flexDirection: "column",
           width: "100%",
-          minHeight: "100vh",
+          height: "100vh",
+          maxHeight: "100vh",
           backgroundColor: THEME.canvas,
           color: THEME.textPrimary,
           fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
           padding: "12px",
           boxSizing: "border-box",
-          overflowX: "hidden"
+          overflow: "hidden"
         }
       },
       // TOAST DE NOTIFICAÇÃO
@@ -2394,21 +2425,21 @@ function apply(ctx) {
           },
           h(
             "span",
-            { style: { display: "flex", alignItems: "center", gap: "5px", color: "#10b981" } },
+            { style: { display: "flex", alignItems: "center", gap: "5px", color: isSyncingPorteiro ? "#f59e0b" : porteiroActive ? "#10b981" : "#ef4444" } },
             h("span", {
               style: {
                 width: "6px",
                 height: "6px",
                 borderRadius: "50%",
-                backgroundColor: isSyncingPorteiro ? "#f59e0b" : "#10b981"
+                backgroundColor: isSyncingPorteiro ? "#f59e0b" : porteiroActive ? "#10b981" : "#ef4444"
               }
             }),
-            isSyncingPorteiro ? "SINCRONIZANDO..." : "PORTEIRO ATIVO (120ms)"
+            isSyncingPorteiro ? "SINCRONIZANDO..." : porteiroActive ? "PORTEIRO ATIVO" : "PORTEIRO OFFLINE"
           ),
           h("span", { style: { color: "rgba(255,255,255,0.15)" } }, "·"),
-          h("span", null, `FPY: ${fpyRate.toFixed(1)}%`),
+          h("span", null, `FPY: ${fpyRate !== null ? `${fpyRate.toFixed(1)}%` : "--"}`),
           h("span", { style: { color: "rgba(255,255,255,0.15)" } }, "·"),
-          h("span", null, `CPI: ${cpiTokens.toFixed(2)}`),
+          h("span", null, `CPI: ${cpiTokens !== null ? cpiTokens.toFixed(2) : "--"}`),
           h("span", { style: { color: "rgba(255,255,255,0.15)" } }, "·"),
           h(
             "button",
@@ -2800,15 +2831,255 @@ function apply(ctx) {
                 )
               ),
               h(
-                "span",
-                { style: { fontSize: "12px", color: "var(--text-subtle, #9ca3af)" } },
-                `Exibindo ${filteredCards.length} de ${pipelineCards.length} cards`
+                "div",
+                { style: { display: "flex", alignItems: "center", gap: "10px" } },
+                h(
+                  "span",
+                  { style: { fontSize: "12px", color: "var(--text-subtle, #9ca3af)" } },
+                  `Exibindo ${filteredCards.length} de ${pipelineCards.length} cards`
+                ),
+                h(
+                  "div",
+                  {
+                    style: {
+                      display: "flex",
+                      backgroundColor: "rgba(0, 0, 0, 0.35)",
+                      borderRadius: "8px",
+                      padding: "2px",
+                      border: `1px solid ${THEME.hairline}`
+                    }
+                  },
+                  h(
+                    "button",
+                    {
+                      onClick: () => setViewMode("kanban"),
+                      style: {
+                        padding: "4px 10px",
+                        borderRadius: "6px",
+                        border: "none",
+                        cursor: "pointer",
+                        fontSize: "11px",
+                        fontWeight: viewMode === "kanban" ? "600" : "400",
+                        backgroundColor: viewMode === "kanban" ? "#282a36" : "transparent",
+                        color: viewMode === "kanban" ? "#ffffff" : THEME.textSecondary,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "5px"
+                      }
+                    },
+                    SVG.columns({ h, width: 12, height: 12 }),
+                    "Kanban"
+                  ),
+                  h(
+                    "button",
+                    {
+                      onClick: () => setViewMode("list"),
+                      style: {
+                        padding: "4px 10px",
+                        borderRadius: "6px",
+                        border: "none",
+                        cursor: "pointer",
+                        fontSize: "11px",
+                        fontWeight: viewMode === "list" ? "600" : "400",
+                        backgroundColor: viewMode === "list" ? "#282a36" : "transparent",
+                        color: viewMode === "list" ? "#ffffff" : THEME.textSecondary,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "5px"
+                      }
+                    },
+                    SVG.list({ h, width: 12, height: 12 }),
+                    "Lista"
+                  )
+                )
               )
             ),
             // ───────────────────────────────────────────────────────────────────
-            // AS 5 RAIAS DETERMINÍSTICAS (KANBAN MATRIX)
+            // AS 5 RAIAS DETERMINÍSTICAS (KANBAN MATRIX) OU VISÃO EM LISTA
             // ───────────────────────────────────────────────────────────────────
-            h(
+            viewMode === "list" ? h(
+              "div",
+              {
+                style: {
+                  flex: 1,
+                  minHeight: 0,
+                  overflowY: "auto",
+                  borderRadius: "10px",
+                  backgroundColor: "rgba(0, 0, 0, 0.25)",
+                  border: `1px solid ${THEME.hairline}`
+                }
+              },
+              h(
+                "div",
+                {
+                  style: {
+                    display: "grid",
+                    gridTemplateColumns: "95px 1.8fr 110px 60px 1.1fr 90px 120px",
+                    gap: "10px",
+                    padding: "10px 14px",
+                    fontSize: "10px",
+                    fontWeight: "700",
+                    color: THEME.textSecondary,
+                    textTransform: "uppercase",
+                    borderBottom: `1px solid ${THEME.hairline}`,
+                    position: "sticky",
+                    top: 0,
+                    backgroundColor: "#14161a",
+                    zIndex: 2
+                  }
+                },
+                h("span", null, "Issue"),
+                h("span", null, "Título & Aceite L-22"),
+                h("span", null, "Raia"),
+                h("span", null, "Prio"),
+                h("span", null, "Responsáveis"),
+                h("span", null, "Tempo"),
+                h("span", { style: { textAlign: "right" } }, "Ação")
+              ),
+              filteredCards.length === 0 ? h(
+                "div",
+                { style: { padding: "32px", textAlign: "center", color: THEME.textMuted, fontSize: "12px" } },
+                "Nenhum card encontrado com os filtros atuais."
+              ) : filteredCards.map((c) => {
+                const stageLabel = c.stage === "triagem" ? "Triagem" : c.stage === "despachado" ? "Despachado" : c.stage === "execucao" ? "Execução" : c.stage === "revisao" ? "Revisão" : "Concluído";
+                const stageColor = c.stage === "triagem" ? "#60a5fa" : c.stage === "despachado" ? "#c084fc" : c.stage === "execucao" ? "#f59e0b" : c.stage === "revisao" ? "#10b981" : "#e5e7eb";
+                return h(
+                  "div",
+                  {
+                    key: c.id,
+                    onClick: () => setActiveIssueDetailCard(c),
+                    style: {
+                      display: "grid",
+                      gridTemplateColumns: "95px 1.8fr 110px 60px 1.1fr 90px 120px",
+                      gap: "10px",
+                      padding: "10px 14px",
+                      alignItems: "center",
+                      borderBottom: `1px solid ${THEME.hairline}`,
+                      cursor: "pointer",
+                      fontSize: "12px",
+                      transition: "background 0.12s ease"
+                    },
+                    onMouseEnter: (e) => e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.03)",
+                    onMouseLeave: (e) => e.currentTarget.style.backgroundColor = "transparent"
+                  },
+                  h(
+                    "span",
+                    {
+                      onClick: (e) => {
+                        e.stopPropagation();
+                        handleOpenIssueDeepLink(c);
+                      },
+                      style: { fontFamily: "monospace", fontSize: "11px", color: "#58a6ff", fontWeight: "700", textDecoration: "underline" }
+                    },
+                    `#${(c.issueId || c.id).slice(0, 8)}`
+                  ),
+                  h(
+                    "div",
+                    { style: { minWidth: 0, display: "flex", flexDirection: "column", gap: "3px" } },
+                    h("span", { style: { fontWeight: "600", color: THEME.textPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, c.title),
+                    c.acceptanceCommand && h("span", { style: { fontFamily: "monospace", fontSize: "10px", color: "#34d399", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, c.acceptanceCommand)
+                  ),
+                  h(
+                    "span",
+                    {
+                      style: {
+                        fontSize: "10px",
+                        fontWeight: "700",
+                        padding: "2px 8px",
+                        borderRadius: "9999px",
+                        backgroundColor: `${stageColor}22`,
+                        color: stageColor,
+                        width: "fit-content"
+                      }
+                    },
+                    stageLabel
+                  ),
+                  h(
+                    "span",
+                    {
+                      style: {
+                        fontSize: "10px",
+                        fontWeight: "700",
+                        color: c.priority === "P0" ? "#f87171" : c.priority === "P1" ? "#fbbf24" : "#60a5fa"
+                      }
+                    },
+                    c.priority
+                  ),
+                  h(
+                    "span",
+                    { style: { fontSize: "11px", color: THEME.textSecondary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
+                    `${c.executor || "Não atribuído"}${c.revisor ? ` → ${c.revisor}` : ""}`
+                  ),
+                  h(
+                    "span",
+                    { style: { fontFamily: "monospace", fontSize: "10px", color: "#34d399" } },
+                    formatRelativeTime(c.createdAt || c.elapsedTime)
+                  ),
+                  h(
+                    "div",
+                    { style: { display: "flex", justifyContent: "flex-end" }, onClick: (e) => e.stopPropagation() },
+                    c.stage === "triagem" ? h(
+                      "button",
+                      {
+                        onClick: () => {
+                          setDispatchIssueId(c.issueId);
+                          setIsDispatchModalOpen(true);
+                        },
+                        style: {
+                          padding: "4px 10px",
+                          borderRadius: "6px",
+                          backgroundColor: "rgba(16, 185, 129, 0.15)",
+                          color: "#10b981",
+                          border: "none",
+                          fontSize: "11px",
+                          fontWeight: "600",
+                          cursor: "pointer"
+                        }
+                      },
+                      "Despachar"
+                    ) : c.stage === "revisao" ? h(
+                      "button",
+                      {
+                        onClick: () => {
+                          setActiveGateCard(c);
+                          setIsGateModalOpen(true);
+                        },
+                        style: {
+                          padding: "4px 10px",
+                          borderRadius: "6px",
+                          backgroundColor: "#10b981",
+                          color: "#000000",
+                          border: "none",
+                          fontSize: "11px",
+                          fontWeight: "700",
+                          cursor: "pointer"
+                        }
+                      },
+                      "Decidir Gate"
+                    ) : c.stage === "execucao" ? h(
+                      "button",
+                      {
+                        onClick: () => {
+                          setActiveLogsCard(c);
+                          setIsLogsDrawerOpen(true);
+                        },
+                        style: {
+                          padding: "4px 10px",
+                          borderRadius: "6px",
+                          backgroundColor: "rgba(245, 158, 11, 0.15)",
+                          color: "#f59e0b",
+                          border: "none",
+                          fontSize: "11px",
+                          fontWeight: "600",
+                          cursor: "pointer"
+                        }
+                      },
+                      "Ver Logs"
+                    ) : h("span", { style: { fontSize: "10px", color: THEME.textMuted } }, "Detalhes")
+                  )
+                );
+              })
+            ) : h(
               "div",
               {
                 style: {
@@ -2816,9 +3087,12 @@ function apply(ctx) {
                   gridTemplateColumns: "repeat(5, minmax(260px, 1fr))",
                   gap: "12px",
                   flex: 1,
+                  minHeight: 0,
+                  height: "100%",
+                  alignItems: "stretch",
                   overflowX: "auto",
-                  overflowY: "auto",
-                  paddingBottom: "8px"
+                  overflowY: "hidden",
+                  paddingBottom: "4px"
                 }
               },
               // Raia 1: Triagem & Backlog
@@ -2826,35 +3100,147 @@ function apply(ctx) {
                 "1. Triagem & Backlog",
                 cardsByStage.triagem,
                 "rgba(59, 130, 246, 0.15)",
-                "#60a5fa"
+                "#60a5fa",
+                (card) => h(
+                  "button",
+                  {
+                    onClick: () => {
+                      setDispatchIssueId(card.issueId);
+                      setIsDispatchModalOpen(true);
+                    },
+                    style: {
+                      marginTop: "8px",
+                      width: "100%",
+                      padding: "4px 8px",
+                      borderRadius: "6px",
+                      backgroundColor: "rgba(16, 185, 129, 0.15)",
+                      color: "#10b981",
+                      border: "none",
+                      fontSize: "11px",
+                      fontWeight: "600",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "4px"
+                    }
+                  },
+                  SVG.zap({ h, width: 12, height: 12 }),
+                  "Despachar"
+                )
               ),
               // Raia 2: Despachados & Alocados
               renderColumn(
                 "2. Despachados",
                 cardsByStage.despachado,
                 "rgba(168, 85, 247, 0.15)",
-                "#c084fc"
+                "#c084fc",
+                (card) => h(
+                  "div",
+                  {
+                    style: {
+                      marginTop: "6px",
+                      fontSize: "10px",
+                      color: "#9ca3af",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "4px"
+                    }
+                  },
+                  SVG.clock({ h, width: 10, height: 10 }),
+                  `Aguardando sub-second wake`
+                )
               ),
               // Raia 3: Em Execução (Headless Workers)
               renderColumn(
                 "3. Em Execução",
                 cardsByStage.execucao,
                 "rgba(245, 158, 11, 0.15)",
-                "#f59e0b"
+                "#f59e0b",
+                (card) => h(
+                  "button",
+                  {
+                    onClick: () => {
+                      setActiveLogsCard(card);
+                      setIsLogsDrawerOpen(true);
+                    },
+                    style: {
+                      marginTop: "8px",
+                      width: "100%",
+                      padding: "4px 8px",
+                      borderRadius: "6px",
+                      backgroundColor: "rgba(245, 158, 11, 0.15)",
+                      color: "#f59e0b",
+                      border: "none",
+                      fontSize: "11px",
+                      fontWeight: "600",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "4px"
+                    }
+                  },
+                  SVG.terminal({ h, width: 12, height: 12 }),
+                  "Ver Logs Live"
+                )
               ),
               // Raia 4: Em Revisão (Gate Caixa-Preta)
               renderColumn(
                 "4. Em Revisão (Gate)",
                 cardsByStage.revisao,
                 "rgba(16, 185, 129, 0.15)",
-                "#10b981"
+                "#10b981",
+                (card) => h(
+                  "button",
+                  {
+                    onClick: () => {
+                      setActiveGateCard(card);
+                      setIsGateModalOpen(true);
+                    },
+                    style: {
+                      marginTop: "8px",
+                      width: "100%",
+                      padding: "5px 8px",
+                      borderRadius: "6px",
+                      backgroundColor: "#10b981",
+                      color: "#000000",
+                      border: "none",
+                      fontSize: "11px",
+                      fontWeight: "700",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "4px"
+                    }
+                  },
+                  SVG.shield({ h, width: 12, height: 12 }),
+                  "Decidir Gate"
+                )
               ),
               // Raia 5: Concluído / FPY
               renderColumn(
                 "5. Concluído / FPY",
                 cardsByStage.feito,
                 "rgba(255, 255, 255, 0.1)",
-                "#ffffff"
+                "#ffffff",
+                (card) => h(
+                  "div",
+                  {
+                    style: {
+                      marginTop: "6px",
+                      fontSize: "10px",
+                      color: "#10b981",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "4px",
+                      fontWeight: "600"
+                    }
+                  },
+                  SVG.checkCircle({ h, width: 10, height: 10 }),
+                  "MERGED na main (FPY 100%)"
+                )
               )
             )
           ) : renderTemplatesRsiView()
@@ -2964,23 +3350,23 @@ function apply(ctx) {
               h("span", { style: { fontSize: "12px", color: THEME.textPrimary } }, "CPI Acumulado"),
               h(
                 "span",
-                { style: { fontSize: "13px", fontWeight: "700", color: cpiTokens >= 0.85 ? THEME.accentPrimary : "#f59e0b" } },
-                `${cpiTokens.toFixed(2)} (Min: 0.85)`
+                { style: { fontSize: "13px", fontWeight: "700", color: (cpiTokens ?? 1) >= 0.85 ? THEME.accentPrimary : "#f59e0b" } },
+                cpiTokens !== null ? `${cpiTokens.toFixed(2)} (Min: 0.85)` : "--"
               )
             ),
             h(
               "div",
               { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
               h("span", { style: { fontSize: "12px", color: THEME.textPrimary } }, "Circuit Breaker Loops"),
-              h("span", { style: { fontSize: "12px", fontWeight: "600", color: THEME.accentPrimary } }, "0 / 3 turnos (OK)")
+              h("span", { style: { fontSize: "12px", fontWeight: "600", color: THEME.accentPrimary } }, circuitBreakerLoop ? `${circuitBreakerLoop} turnos` : "--")
             ),
             h(
               "div",
               { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
               h("span", { style: { fontSize: "12px", color: THEME.textPrimary } }, "PRs Integrados"),
-              h("span", { style: { fontSize: "12px", fontWeight: "600", color: "#ffffff" } }, "21 na main")
+              h("span", { style: { fontSize: "12px", fontWeight: "600", color: "#ffffff" } }, totalMergedGate !== null ? `${totalMergedGate} na main` : "--")
             ),
-            // Linha de Economia CoEvo-RSI (Crucial para auditoria)
+            // Linha de Aceites Blindados L-22
             h(
               "div",
               {
@@ -2996,8 +3382,8 @@ function apply(ctx) {
                   alignItems: "center"
                 }
               },
-              h("span", { style: { color: "#10b981", fontWeight: "600" } }, "Economia EVM (CoEvo-RSI):"),
-              h("span", { style: { color: "#ffffff", fontFamily: "monospace", fontWeight: "700" } }, "~$4.82 vs ~$16.94 (-71.5% economia)")
+              h("span", { style: { color: "#10b981", fontWeight: "600" } }, "Aceites Blindados (L-22):"),
+              h("span", { style: { color: "#ffffff", fontFamily: "monospace", fontWeight: "700" } }, totalAceitesBlindados !== null ? `${totalAceitesBlindados} verificados` : "--")
             )
           ),
           // Seção Catraca Probatória RSI
@@ -3209,7 +3595,7 @@ function apply(ctx) {
               }
             },
             h("strong", { style: { color: "#10b981" } }, `${copilotAgent}: `),
-            "Olá, Helton. A esteira determinística v10 está operando com FPY de 100% e CPI de tokens em 0.94. Use /despachar para novos cards ou /gate para veredito."
+            `Olá, Helton. A esteira determinística v10 está com ${pipelineCards.length} cards no Kanban, FPY em ${fpyRate !== null ? `${fpyRate.toFixed(1)}%` : "--"} e CPI em ${cpiTokens !== null ? cpiTokens.toFixed(2) : "--"}. Use /despachar para novos cards ou /gate para veredito.`
           )
         ),
         // Chat Input
@@ -5448,7 +5834,7 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
         )
       );
     }
-    function renderColumn(title, cards, badgeBg, badgeColor, _renderAction) {
+    function renderColumn(title, cards, badgeBg, badgeColor, renderAction) {
       return h(
         "div",
         {
@@ -5459,7 +5845,11 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
             backgroundColor: "rgba(0, 0, 0, 0.25)",
             border: `1px solid ${THEME.hairline}`,
             padding: "10px",
-            minHeight: "420px"
+            minHeight: 0,
+            height: "100%",
+            maxHeight: "100%",
+            overflow: "hidden",
+            boxSizing: "border-box"
           }
         },
         // Column Header
@@ -5472,7 +5862,8 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
               justifyContent: "space-between",
               paddingBottom: "8px",
               borderBottom: `1px solid ${THEME.hairline}`,
-              marginBottom: "10px"
+              marginBottom: "10px",
+              flexShrink: 0
             }
           },
           h("span", { style: { fontWeight: "600", fontSize: "12px", color: THEME.textPrimary } }, title),
@@ -5491,10 +5882,10 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
             cards.length
           )
         ),
-        // Cards List (Face Limpa e Escaneável)
+        // Cards List (Face Limpa e Escaneável com Scroll Vertical Independente)
         h(
           "div",
-          { style: { display: "flex", flexDirection: "column", gap: "8px", flex: 1, overflowY: "auto" } },
+          { style: { display: "flex", flexDirection: "column", gap: "8px", flex: 1, minHeight: 0, overflowY: "auto", paddingRight: "4px" } },
           cards.length === 0 ? h(
             "div",
             {
@@ -5660,7 +6051,12 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
                       },
                       title: `Worktree Isolada: ${c.worktreePath || `.worktrees/${c.issueId}`}`
                     },
-                    `📁 ${(c.worktreePath || `.worktrees/${c.issueId}`).replace(".worktrees/", "")}`
+                    h(
+                      "span",
+                      { style: { display: "inline-flex", alignItems: "center", gap: "4px" } },
+                      SVG.folder({ h, width: 10, height: 10 }),
+                      (c.worktreePath || `.worktrees/${c.issueId}`).replace(".worktrees/", "")
+                    )
                   ),
                   h(
                     "span",
@@ -5721,12 +6117,19 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
                       fontWeight: "600",
                       display: "flex",
                       alignItems: "center",
-                      gap: "3px"
+                      gap: "4px"
                     },
                     title: c.createdAt ? formatFullDateTime(c.createdAt) : void 0
                   },
-                  `🕒 ${formatRelativeTime(c.createdAt || c.elapsedTime)}`
+                  SVG.clock({ h, width: 10, height: 10 }),
+                  formatRelativeTime(c.createdAt || c.elapsedTime)
                 )
+              ),
+              // Ação Rápida da Raia (Despachar / Ver Logs / Decidir Gate)
+              renderAction && h(
+                "div",
+                { onClick: (e) => e.stopPropagation() },
+                renderAction(c)
               )
             )
           )
