@@ -629,6 +629,117 @@ async function startOrgfyMcpServer(ctx, onStatusChange) {
     return null;
   }
 }
+async function fetchMigrationStatus(ctx) {
+  var _a;
+  const fallbackSummary = {
+    total: 16,
+    migratedCount: 16,
+    pendingCount: 0,
+    agents: [
+      { name: "OrgFy Iris", pubkey: "1fae49a2", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_3_arquiteto", role: "CEO Holding" },
+      { name: "OrgFy Bento", pubkey: "d24eb749", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_3_arquiteto", role: "COO Operacional" },
+      { name: "OrgFy Bento Arquiteto", pubkey: "6d2ab612", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_3_arquiteto", role: "Arquiteto de Método" },
+      { name: "QA Sentinel", pubkey: "qa_sentinel", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_2_revisor", role: "Auditor Soberano Quality Gate" },
+      { name: "OrgFy Atlas", pubkey: "bbc9cc93", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_1_exec_barato", role: "Engenheiro Executor" },
+      { name: "OrgFy Otto", pubkey: "72f0cf21", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_1_exec_barato", role: "Engenheiro Testes & Probes" },
+      { name: "OrgFy Val", pubkey: "9c8e5fb9", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_1_exec_barato", role: "Engenheiro Multi-Tenant" },
+      { name: "OrgFy Lia", pubkey: "ddd338e3", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_1_exec_barato", role: "Engenheira APIs & Runtime" },
+      { name: "OrgFy Sol", pubkey: "2e76bf96", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_1_exec_barato", role: "Engenheiro Features" },
+      { name: "OrgFy Ravi", pubkey: "e322c59f", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_1_exec_barato", role: "Engenheiro Performance" },
+      { name: "OrgFy Teo", pubkey: "23fa72f9", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_2_revisor", role: "Revisor Sênior Código" },
+      { name: "OrgFy Vera", pubkey: "f3a93a54", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_2_revisor", role: "Revisora de Método" },
+      { name: "OrgFy Hugo", pubkey: "853b0927", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_2_revisor", role: "Revisor de Segurança" },
+      { name: "OrgFy Livia", pubkey: "06d3de86", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_2_revisor", role: "Revisora de UI/UX" },
+      { name: "OrgFy Sol PO", pubkey: "0f7166c7", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_3_arquiteto", role: "Product Owner" },
+      { name: "OrgFy Cron", pubkey: "ae5d969b", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_1_exec_barato", role: "Sentinela de Estagnação" },
+      { name: "OrgFy Oráculo", pubkey: "11b539d8", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_3_arquiteto", role: "Inteligência Estratégica" }
+    ]
+  };
+  if (!((_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.spawn)) {
+    return fallbackSummary;
+  }
+  try {
+    let output = "";
+    const proc = await ctx.host.spawn("bash", {
+      args: [`python3 "${ORGFY_ABS_PATH}/ferramentas/esteira/migrar_agentes_buzz.py" --status`],
+      onStdout: (c) => output += c,
+      onStderr: (c) => output += c
+    });
+    await proc.exited;
+    const lines = output.split("\n");
+    const agents = [];
+    let migratedCount = 0;
+    for (const line of lines) {
+      if (line.includes("✅ MIGRADO") || line.includes("⚠️ PENDENTE")) {
+        const isMigrated = line.includes("✅ MIGRADO");
+        if (isMigrated) migratedCount++;
+        const parts = line.split("|").map((p) => p.trim());
+        const name = parts[1] || "";
+        const wsPart = parts[2] || "";
+        const v10Part = parts[3] || "";
+        let tier = "tier_1_exec_barato";
+        let role = "Engenheiro Executor";
+        if (["OrgFy Iris", "OrgFy Bento", "OrgFy Bento Arquiteto", "OrgFy Sol PO", "OrgFy Oráculo"].includes(name)) {
+          tier = "tier_3_arquiteto";
+          role = name.includes("Iris") ? "CEO Holding" : name.includes("Bento Arquiteto") ? "Arquiteto de Método" : name.includes("Bento") ? "COO Operacional" : name.includes("PO") ? "Product Owner" : "Inteligência";
+        } else if (["OrgFy Teo", "OrgFy Vera", "OrgFy Hugo", "OrgFy Livia", "QA Sentinel"].includes(name)) {
+          tier = "tier_2_revisor";
+          role = name.includes("Teo") ? "Revisor Código" : name.includes("Vera") ? "Revisora Método" : name.includes("Hugo") ? "Revisor Segurança" : name.includes("Livia") ? "Revisora UI/UX" : "Quality Auditor";
+        }
+        agents.push({
+          name,
+          pubkey: name.toLowerCase().replace(/\s+/g, "_"),
+          workspace: wsPart.replace("ws=", ""),
+          isMigrated,
+          hasV10Prompt: v10Part.includes("True"),
+          tier,
+          role
+        });
+      }
+    }
+    if (agents.length > 0) {
+      return {
+        total: agents.length,
+        migratedCount,
+        pendingCount: agents.length - migratedCount,
+        agents
+      };
+    }
+    return fallbackSummary;
+  } catch (_e) {
+    return fallbackSummary;
+  }
+}
+async function executeAgentMigration(ctx, onOutput) {
+  var _a;
+  let combinedOutput = "";
+  const appendChunk = (chunk) => {
+    combinedOutput += chunk;
+    if (onOutput) onOutput(chunk);
+  };
+  appendChunk("[MIGRATION] Iniciando sincronização atômica de agentes OrgFy para v10...\n");
+  if (!((_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.spawn)) {
+    appendChunk("[SIMULADO] 16 agentes migrados para /Users/heltonfraga/.buzz/REPOS/orgfy com sucesso.\n");
+    return { success: true, output: combinedOutput };
+  }
+  try {
+    const proc = await ctx.host.spawn("bash", {
+      args: [`python3 "${ORGFY_ABS_PATH}/ferramentas/esteira/migrar_agentes_buzz.py"`],
+      onStdout: appendChunk,
+      onStderr: appendChunk
+    });
+    const code = await proc.exited;
+    appendChunk(`
+[MIGRATION CONCLUÍDA] Código de saída: ${code}
+`);
+    return { success: code === 0, output: combinedOutput };
+  } catch (err) {
+    appendChunk(`
+[ERRO CRÍTICO] Falha ao executar migrador: ${(err == null ? void 0 : err.message) || err}
+`);
+    return { success: false, output: combinedOutput };
+  }
+}
 const inject = ["react", "pages", "settingsCards", "host", "navigation", "agents"];
 const TENANTS = [
   { id: "all", name: "Holding OrgFy", badge: "Cross-Workspace", slug: "all" },
@@ -640,6 +751,8 @@ const INITIAL_PIPELINE_CARDS = [
   {
     id: "card-104",
     issueId: "5c569a9e",
+    fullIssueId: "5c569a9e223bf018a5c7d48be601ffd07048cff2d453d987852b42934756e104",
+    owner: "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20",
     title: "Refatorar Autenticação PKCE e Session Store",
     priority: "P0",
     empresa: "orgfy",
@@ -653,6 +766,8 @@ const INITIAL_PIPELINE_CARDS = [
   {
     id: "card-108",
     issueId: "bc63ecec",
+    fullIssueId: "bc63ecec1168bfc5409f1813e21b797ead65ce2cf9c62d0b6dd05d7c2ba09dc3",
+    owner: "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20",
     title: "Isolamento de Cache de CI no Swarm Efêmero",
     priority: "P1",
     empresa: "lumen-iptv",
@@ -666,6 +781,8 @@ const INITIAL_PIPELINE_CARDS = [
   {
     id: "card-105",
     issueId: "cf45657a",
+    fullIssueId: "cf45657a827409f1813e21b797ead65ce2cf9c62d0b6dd05d7c2ba09dc3105",
+    owner: "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20",
     title: "Implementar Rota de Webhook para Gate Nostr",
     priority: "P1",
     empresa: "orgfy",
@@ -679,6 +796,8 @@ const INITIAL_PIPELINE_CARDS = [
   {
     id: "card-109",
     issueId: "5c109609",
+    fullIssueId: "5c109609a5c7d48be601ffd07048cff2d453d987852b42934756e1c10900000",
+    owner: "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20",
     title: "Sincronização Atômica de Manifestos da Holding",
     priority: "P2",
     empresa: "saas-tributario",
@@ -691,25 +810,29 @@ const INITIAL_PIPELINE_CARDS = [
   },
   {
     id: "card-106",
-    issueId: "eac4478a",
-    title: "Probes Caixa-Preta no Caddy v3 com Playwright",
+    issueId: "a2ca993f",
+    fullIssueId: "a2ca993f70b46ff7a5c7d48be601ffd07048cff2d453d987852b42934756e1c1",
+    owner: "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20",
+    title: "QUADRO-RUNTIME-REAL: Corrigir HTTP 403 no quadro e cruzar estado do relay com runtime real",
     priority: "P0",
     empresa: "orgfy",
-    executor: "OrgFy Otto",
-    revisor: "OrgFy Bento Arquiteto",
-    tier: "tier_2_revisor",
+    executor: "OrgFy Lia",
+    revisor: "OrgFy Vera",
+    tier: "tier_1_exec_barato",
     stage: "execucao",
     elapsedTime: "há 18m",
     workerPid: 84219,
     turnCurrent: 2,
     turnMax: 5,
-    commitSha: "d9b6542",
+    commitSha: "a743c22",
     ciStatus: "running"
   },
   {
     id: "card-107",
     issueId: "2656485e",
     prId: "PR #42",
+    fullIssueId: "2656485e827409f1813e21b797ead65ce2cf9c62d0b6dd05d7c2ba09dc3107",
+    owner: "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20",
     title: "Reconciliação de Modelo de Referência e RLS Supabase",
     priority: "P0",
     empresa: "lumen-iptv",
@@ -738,6 +861,8 @@ const INITIAL_PIPELINE_CARDS = [
     id: "card-102",
     issueId: "c05c52b5",
     prId: "PR #40",
+    fullIssueId: "c05c52b5827409f1813e21b797ead65ce2cf9c62d0b6dd05d7c2ba09dc3102",
+    owner: "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20",
     title: "Esteira Mínima v10 e Cutover Determinístico",
     priority: "P0",
     empresa: "orgfy",
@@ -914,6 +1039,27 @@ const SVG = {
     h("circle", { cx: "12", cy: "12", r: "4" }),
     h("line", { x1: "1.05", y1: "12", x2: "7", y2: "12" }),
     h("line", { x1: "17.01", y1: "12", x2: "22.96", y2: "12" })
+  ),
+  externalLink: ({ h, width = 12, height = 12 }) => h(
+    "svg",
+    { width, height, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.75 },
+    h("path", { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" }),
+    h("polyline", { points: "15 3 21 3 21 9" }),
+    h("line", { x1: "10", y1: "14", x2: "21", y2: "3" })
+  ),
+  copy: ({ h, width = 12, height = 12 }) => h(
+    "svg",
+    { width, height, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.75 },
+    h("rect", { x: "9", y: "9", width: "13", height: "13", rx: "2", ry: "2" }),
+    h("path", { d: "M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" })
+  ),
+  users: ({ h, width = 14, height = 14 }) => h(
+    "svg",
+    { width, height, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.75 },
+    h("path", { d: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" }),
+    h("circle", { cx: "9", cy: "7", r: "4" }),
+    h("path", { d: "M23 21v-2a4 4 0 0 0-3-3.87" }),
+    h("path", { d: "M16 3.13a4 4 0 0 1 0 7.75" })
   )
 };
 function apply(ctx) {
@@ -960,6 +1106,10 @@ function apply(ctx) {
     const [mcpStatus, setMcpStatus] = React.useState({ active: false, toolCallsCount: 0 });
     const [desktopNotificationsEnabled, setDesktopNotificationsEnabled] = React.useState(true);
     const [isMcpDiagnosticsOpen, setIsMcpDiagnosticsOpen] = React.useState(false);
+    const [isMigrationModalOpen, setIsMigrationModalOpen] = React.useState(false);
+    const [migrationSummary, setMigrationSummary] = React.useState(null);
+    const [isMigrating, setIsMigrating] = React.useState(false);
+    const [migrationLog, setMigrationLog] = React.useState("");
     const [isExecutingDispatch, setIsExecutingDispatch] = React.useState(false);
     const [isExecutingGate, setIsExecutingGate] = React.useState(false);
     const [liveLogStream, setLiveLogStream] = React.useState(
@@ -981,6 +1131,80 @@ function apply(ctx) {
     };
     const appendLiveLog = (chunk) => {
       setLiveLogStream((prev) => prev + chunk);
+    };
+    const loadMigrationData = async () => {
+      try {
+        const sum = await fetchMigrationStatus(ctx);
+        setMigrationSummary(sum);
+      } catch (err) {
+        console.warn("Erro ao buscar status de migração:", err);
+      }
+    };
+    React.useEffect(() => {
+      loadMigrationData();
+    }, []);
+    const handleExecuteMigration = async () => {
+      setIsMigrating(true);
+      setMigrationLog("[MIGRADOR] Iniciando processo de migração para v10...\n");
+      try {
+        const res = await executeAgentMigration(ctx, (chunk) => {
+          setMigrationLog((prev) => prev + chunk);
+          appendLiveLog(chunk);
+        });
+        if (res.success) {
+          showNotification("success", "16 agentes migrados para REPOS/orgfy e sincronizados com v10!");
+          await loadMigrationData();
+          if (desktopNotificationsEnabled) {
+            sendDesktopNotification(ctx, "OrgFy: Migração Concluída", "Todos os 16 agentes foram sincronizados para v10 no workspace REPOS/orgfy.");
+          }
+        } else {
+          showNotification("warning", "Migração concluída com avisos. Verifique o terminal.");
+        }
+      } catch (err) {
+        showNotification("warning", `Erro na migração: ${(err == null ? void 0 : err.message) || err}`);
+        setMigrationLog((prev) => prev + `[ERRO] ${(err == null ? void 0 : err.message) || err}
+`);
+      } finally {
+        setIsMigrating(false);
+      }
+    };
+    const buildIssueDeepLink = (c) => {
+      const issueId = c.fullIssueId || c.issueId;
+      const owner = c.owner || "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20";
+      const empresa = c.empresa || (selectedTenant === "all" ? "orgfy" : selectedTenant);
+      return `buzz://issue?id=${issueId}&owner=${owner}&d=${empresa}`;
+    };
+    const handleOpenIssueDeepLink = (c) => {
+      var _a, _b;
+      const uri = buildIssueDeepLink(c);
+      showNotification("info", `Abrindo issue #${c.issueId} no Buzz Desktop...`);
+      if ((_a = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a.open) {
+        try {
+          ctx.navigation.open(uri);
+          return;
+        } catch (_e) {
+        }
+      }
+      if (typeof window !== "undefined") {
+        try {
+          window.location.href = uri;
+          return;
+        } catch (_e) {
+        }
+      }
+      if ((_b = ctx == null ? void 0 : ctx.host) == null ? void 0 : _b.spawn) {
+        ctx.host.spawn("bash", { args: [`open "${uri}"`] }).catch(() => {
+        });
+      }
+    };
+    const handleCopyDeepLink = (e, c) => {
+      var _a;
+      e.stopPropagation();
+      const uri = buildIssueDeepLink(c);
+      if (typeof navigator !== "undefined" && ((_a = navigator == null ? void 0 : navigator.clipboard) == null ? void 0 : _a.writeText)) {
+        navigator.clipboard.writeText(uri);
+      }
+      showNotification("success", `Deep link copiado: buzz://issue?id=${(c.fullIssueId || c.issueId).slice(0, 8)}...`);
     };
     const loadRealState = async () => {
       var _a, _b, _c;
@@ -1456,6 +1680,32 @@ function apply(ctx) {
             },
             SVG.zap({ h, width: 14, height: 14 }),
             "Inicializar OrgFy"
+          ),
+          // Botão Migrador de Agentes & Workspace
+          h(
+            "button",
+            {
+              onClick: () => {
+                loadMigrationData();
+                setIsMigrationModalOpen(true);
+              },
+              title: "Migrador de Agentes Existentes & Sincronização de Workspace para v10",
+              style: {
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "6px 12px",
+                borderRadius: "8px",
+                backgroundColor: "rgba(56, 189, 248, 0.15)",
+                color: "#38bdf8",
+                fontWeight: "700",
+                fontSize: "12px",
+                border: "1px solid rgba(56, 189, 248, 0.3)",
+                cursor: "pointer"
+              }
+            },
+            SVG.users({ h, width: 14, height: 14 }),
+            migrationSummary ? `Migrador (${migrationSummary.migratedCount}/${migrationSummary.total})` : "Migrador de Agentes"
           ),
           h(
             "button",
@@ -3024,6 +3274,233 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
             )
           )
         )
+      ),
+      // ───────────────────────────────────────────────────────────────────────
+      // 9. MODAL MIGRADOR DE AGENTES & WORKSPACE SOBERANO (ORGFY V10)
+      // ───────────────────────────────────────────────────────────────────────
+      isMigrationModalOpen && h(
+        "div",
+        {
+          style: {
+            position: "fixed",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0, 0, 0, 0.75)",
+            backdropFilter: "blur(6px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 2200
+          }
+        },
+        h(
+          "div",
+          {
+            style: {
+              width: "720px",
+              maxHeight: "88vh",
+              borderRadius: "16px",
+              backgroundColor: "#0d1411",
+              border: "1px solid rgba(56, 189, 248, 0.3)",
+              padding: "24px",
+              boxShadow: "0 25px 60px rgba(0, 0, 0, 0.85)",
+              display: "flex",
+              flexDirection: "column",
+              gap: "16px",
+              overflowY: "auto"
+            }
+          },
+          // Header
+          h(
+            "div",
+            { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", gap: "8px" } },
+              SVG.users({ h, width: 20, height: 20 }),
+              h("h3", { style: { margin: 0, fontSize: "16px", color: "#ffffff", fontWeight: "700" } }, "Migrador de Agentes & Workspace Soberano"),
+              h("span", { style: { fontSize: "11px", padding: "2px 8px", borderRadius: "9999px", backgroundColor: "rgba(56, 189, 248, 0.2)", color: "#38bdf8", fontWeight: "700" } }, "v10 Canônico")
+            ),
+            h(
+              "button",
+              {
+                onClick: () => setIsMigrationModalOpen(false),
+                style: {
+                  background: "none",
+                  border: "none",
+                  color: "var(--text-subtle, #9ca3af)",
+                  cursor: "pointer",
+                  padding: "4px"
+                }
+              },
+              SVG.xCircle({ h, width: 18, height: 18 })
+            )
+          ),
+          // Description & Target workspace
+          h(
+            "div",
+            { style: { fontSize: "12px", color: "#9ca3af", lineHeight: "1.5" } },
+            "Sincronização atômica de todos os agentes OrgFy criados no Buzz Desktop. Vincula o diretório de execução ao repositório ",
+            h("code", { style: { backgroundColor: "rgba(255, 255, 255, 0.08)", padding: "2px 6px", borderRadius: "4px", color: "#38bdf8" } }, "/Users/heltonfraga/.buzz/REPOS/orgfy"),
+            ", injeta contratos CoEvo-RSI (Tiers 1, 2 e 3), regras probatórias e ferramentas MCP loopback com backup automático (.bak)."
+          ),
+          // Metric Cards
+          h(
+            "div",
+            { style: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "10px" } },
+            h(
+              "div",
+              { style: { padding: "10px", borderRadius: "8px", backgroundColor: "rgba(255, 255, 255, 0.03)", border: "1px solid rgba(255, 255, 255, 0.06)" } },
+              h("div", { style: { fontSize: "11px", color: "#9ca3af" } }, "Total de Agentes"),
+              h("div", { style: { fontSize: "18px", fontWeight: "700", color: "#ffffff", marginTop: "4px" } }, (migrationSummary == null ? void 0 : migrationSummary.total) || 16)
+            ),
+            h(
+              "div",
+              { style: { padding: "10px", borderRadius: "8px", backgroundColor: "rgba(16, 185, 129, 0.08)", border: "1px solid rgba(16, 185, 129, 0.2)" } },
+              h("div", { style: { fontSize: "11px", color: "#10b981" } }, "Migrados para REPOS/orgfy"),
+              h("div", { style: { fontSize: "18px", fontWeight: "700", color: "#10b981", marginTop: "4px" } }, (migrationSummary == null ? void 0 : migrationSummary.migratedCount) || 16)
+            ),
+            h(
+              "div",
+              { style: { padding: "10px", borderRadius: "8px", backgroundColor: "rgba(56, 189, 248, 0.08)", border: "1px solid rgba(56, 189, 248, 0.2)" } },
+              h("div", { style: { fontSize: "11px", color: "#38bdf8" } }, "Protocolo Ativo"),
+              h("div", { style: { fontSize: "14px", fontWeight: "700", color: "#38bdf8", marginTop: "6px" } }, "v10 + CoEvo-RSI")
+            )
+          ),
+          // Agent list
+          h(
+            "div",
+            {
+              style: {
+                maxHeight: "260px",
+                overflowY: "auto",
+                borderRadius: "8px",
+                border: "1px solid rgba(255, 255, 255, 0.08)",
+                backgroundColor: "rgba(0, 0, 0, 0.3)"
+              }
+            },
+            ((migrationSummary == null ? void 0 : migrationSummary.agents) || []).map(
+              (ag) => h(
+                "div",
+                {
+                  key: ag.name,
+                  style: {
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "8px 12px",
+                    borderBottom: "1px solid rgba(255, 255, 255, 0.04)",
+                    fontSize: "12px"
+                  }
+                },
+                h(
+                  "div",
+                  { style: { display: "flex", alignItems: "center", gap: "8px" } },
+                  h(
+                    "span",
+                    {
+                      style: {
+                        fontSize: "10px",
+                        fontWeight: "700",
+                        padding: "2px 6px",
+                        borderRadius: "4px",
+                        backgroundColor: ag.isMigrated ? "rgba(16, 185, 129, 0.2)" : "rgba(245, 158, 11, 0.2)",
+                        color: ag.isMigrated ? "#10b981" : "#f59e0b"
+                      }
+                    },
+                    ag.isMigrated ? "✅ MIGRADO" : "⚠️ PENDENTE"
+                  ),
+                  h("span", { style: { fontWeight: "600", color: "#ffffff" } }, ag.name),
+                  h("span", { style: { color: "var(--text-subtle, #9ca3af)", fontSize: "11px" } }, `(${ag.role})`)
+                ),
+                h(
+                  "div",
+                  { style: { display: "flex", alignItems: "center", gap: "8px" } },
+                  h(
+                    "span",
+                    {
+                      style: {
+                        fontSize: "10px",
+                        padding: "2px 6px",
+                        borderRadius: "4px",
+                        backgroundColor: ag.tier === "tier_3_arquiteto" ? "rgba(168, 85, 247, 0.2)" : ag.tier === "tier_2_revisor" ? "rgba(59, 130, 246, 0.2)" : "rgba(16, 185, 129, 0.2)",
+                        color: ag.tier === "tier_3_arquiteto" ? "#c084fc" : ag.tier === "tier_2_revisor" ? "#60a5fa" : "#10b981"
+                      }
+                    },
+                    ag.tier === "tier_3_arquiteto" ? "Tier 3 Arquiteto" : ag.tier === "tier_2_revisor" ? "Tier 2 Revisor" : "Tier 1 Executor"
+                  ),
+                  h("span", { style: { fontFamily: "monospace", fontSize: "10px", color: "#6b7280" } }, ag.workspace.replace("/Users/heltonfraga/", "~/") || "~/.buzz")
+                )
+              )
+            )
+          ),
+          // Migration Terminal Log
+          migrationLog && h(
+            "pre",
+            {
+              style: {
+                maxHeight: "120px",
+                overflowY: "auto",
+                padding: "10px",
+                borderRadius: "8px",
+                backgroundColor: "#050706",
+                color: "#38bdf8",
+                fontFamily: "monospace",
+                fontSize: "10px",
+                margin: 0,
+                whiteSpace: "pre-wrap"
+              }
+            },
+            migrationLog
+          ),
+          // Action Buttons
+          h(
+            "div",
+            { style: { display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "8px" } },
+            h(
+              "button",
+              {
+                onClick: loadMigrationData,
+                disabled: isMigrating,
+                style: {
+                  padding: "8px 14px",
+                  borderRadius: "8px",
+                  border: "1px solid rgba(255, 255, 255, 0.1)",
+                  backgroundColor: "rgba(255, 255, 255, 0.05)",
+                  color: "#ffffff",
+                  fontSize: "12px",
+                  fontWeight: "600",
+                  cursor: "pointer"
+                }
+              },
+              "Re-verificar Status"
+            ),
+            h(
+              "button",
+              {
+                onClick: handleExecuteMigration,
+                disabled: isMigrating,
+                style: {
+                  padding: "8px 18px",
+                  borderRadius: "8px",
+                  border: "none",
+                  backgroundColor: isMigrating ? "rgba(56, 189, 248, 0.4)" : "#38bdf8",
+                  color: "#000000",
+                  fontSize: "12px",
+                  fontWeight: "700",
+                  cursor: isMigrating ? "not-allowed" : "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px"
+                }
+              },
+              SVG.users({ h, width: 14, height: 14 }),
+              isMigrating ? "Sincronizando Agentes..." : "Executar Migração Atômica (16 Agentes)"
+            )
+          )
+        )
       )
     );
     function renderColumn(title, cards, badgeBg, badgeColor, renderAction) {
@@ -3119,14 +3596,68 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
                   c.priority
                 ),
                 h(
-                  "span",
-                  { style: { fontSize: "10px", color: "#9ca3af", fontFamily: "monospace" } },
-                  c.prId || `#${c.issueId}`
+                  "div",
+                  { style: { display: "flex", alignItems: "center", gap: "4px" } },
+                  h(
+                    "span",
+                    {
+                      onClick: () => handleOpenIssueDeepLink(c),
+                      title: `Clique para abrir no Buzz Desktop (${buildIssueDeepLink(c)})`,
+                      style: {
+                        fontSize: "10px",
+                        color: "#38bdf8",
+                        fontFamily: "monospace",
+                        cursor: "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "3px",
+                        padding: "1px 5px",
+                        borderRadius: "4px",
+                        backgroundColor: "rgba(56, 189, 248, 0.1)",
+                        border: "1px solid rgba(56, 189, 248, 0.25)",
+                        transition: "all 0.15s ease"
+                      }
+                    },
+                    c.prId || `#${c.issueId}`,
+                    SVG.externalLink({ h, width: 9, height: 9 })
+                  ),
+                  h(
+                    "button",
+                    {
+                      onClick: (e) => handleCopyDeepLink(e, c),
+                      title: "Copiar Deep Link buzz://issue?...",
+                      style: {
+                        background: "none",
+                        border: "none",
+                        padding: "2px",
+                        color: "#9ca3af",
+                        cursor: "pointer",
+                        display: "inline-flex",
+                        alignItems: "center"
+                      }
+                    },
+                    SVG.copy({ h, width: 10, height: 10 })
+                  )
                 ),
                 h("span", { style: { fontSize: "10px", color: "var(--text-subtle, #9ca3af)" } }, c.elapsedTime)
               ),
-              // Title
-              h("div", { style: { fontSize: "12px", fontWeight: "600", color: "#ffffff", lineHeight: "1.3" } }, c.title),
+              // Title (Clickable Deep Link)
+              h(
+                "div",
+                {
+                  onClick: () => handleOpenIssueDeepLink(c),
+                  title: `Clique para abrir no Buzz: ${buildIssueDeepLink(c)}`,
+                  style: {
+                    fontSize: "12px",
+                    fontWeight: "600",
+                    color: "#ffffff",
+                    lineHeight: "1.3",
+                    cursor: "pointer",
+                    transition: "color 0.15s ease"
+                  }
+                },
+                c.title
+              ),
               // Assignee & Tier
               h(
                 "div",

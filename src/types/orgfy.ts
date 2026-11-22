@@ -149,6 +149,8 @@ export interface RegrasProbatoriasState {
 export interface PipelineCard {
   id: string;
   issueId: string;
+  fullIssueId?: string;
+  owner?: string;
   prId?: string;
   title: string;
   priority: "P0" | "P1" | "P2";
