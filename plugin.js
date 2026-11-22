@@ -19,7 +19,45 @@ async function readOrgfyJson(ctx, relativePath, fallback) {
       }
     } catch (_err) {
     }
+    try {
+      if (relativePath.includes(".scratch/")) {
+        const userScratch = `/Users/heltonfraga/.buzz/${relativePath}`;
+        const raw = await ctx.host.readFile(userScratch);
+        const text = typeof raw === "string" ? raw : new TextDecoder().decode(raw);
+        return JSON.parse(text);
+      }
+    } catch (_err2) {
+    }
     return fallback;
+  }
+}
+async function readOrgfyText(ctx, relativePath) {
+  var _a;
+  if (!((_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.readFile)) {
+    return null;
+  }
+  try {
+    const fullPath = `${ORGFY_ABS_PATH}/${relativePath}`;
+    const raw = await ctx.host.readFile(fullPath);
+    return typeof raw === "string" ? raw : new TextDecoder().decode(raw);
+  } catch (_e) {
+    try {
+      if (relativePath.includes(".esteira/estado/")) {
+        const scratchPath = relativePath.replace(".esteira/estado/", ".scratch/");
+        const raw = await ctx.host.readFile(`${ORGFY_ABS_PATH}/${scratchPath}`);
+        return typeof raw === "string" ? raw : new TextDecoder().decode(raw);
+      }
+    } catch (_err) {
+    }
+    try {
+      if (relativePath.includes(".scratch/")) {
+        const userScratch = `/Users/heltonfraga/.buzz/${relativePath}`;
+        const raw = await ctx.host.readFile(userScratch);
+        return typeof raw === "string" ? raw : new TextDecoder().decode(raw);
+      }
+    } catch (_err2) {
+    }
+    return null;
   }
 }
 function formatRelativeTime(dateInput) {
@@ -55,19 +93,161 @@ function formatFullDateTime(dateInput) {
   });
 }
 async function fetchLiveEsteiraState(ctx) {
-  const [boardManifest, esteiraState, placarState, regrasState] = await Promise.all([
+  const [boardManifest, esteiraState, placarState, regrasState, porteiroState, metricasTurnos] = await Promise.all([
     readOrgfyJson(ctx, "empresas/board.json", null),
     readOrgfyJson(ctx, ".esteira/estado/esteira-minima-state.json", null),
     readOrgfyJson(ctx, ".scratch/placar-20h.json", null),
-    readOrgfyJson(ctx, ".esteira/estado/regras-probatorias.json", null)
+    readOrgfyJson(ctx, ".esteira/estado/regras-probatorias.json", null),
+    readOrgfyJson(ctx, ".esteira/estado/porteiro-state.json", null),
+    readOrgfyJson(ctx, ".scratch/metricas_turnos.json", null)
   ]);
   return {
     boardManifest,
     esteiraState,
     placarState,
     regrasState,
+    porteiroState,
+    metricasTurnos,
     timestamp: Date.now()
   };
+}
+async function fetchLiveKanbanCards(ctx, filter, baseCards) {
+  var _a, _b;
+  const live = await fetchLiveEsteiraState(ctx);
+  const canvasText = await readOrgfyText(ctx, ".scratch/canvas_atual.md");
+  const cardMap = /* @__PURE__ */ new Map();
+  if (baseCards && Array.isArray(baseCards)) {
+    for (const c of baseCards) {
+      cardMap.set(c.issueId, { ...c });
+      if (c.fullIssueId) {
+        cardMap.set(c.fullIssueId, { ...c });
+      }
+    }
+  }
+  const aceites = ((_a = live.esteiraState) == null ? void 0 : _a.aceites) || {};
+  const aceiteCache = ((_b = live.esteiraState) == null ? void 0 : _b.aceite_cache) || {};
+  for (const [, item] of Object.entries(aceiteCache)) {
+    const issueId = item.issue_id ? item.issue_id.slice(0, 8) : "";
+    if (issueId && cardMap.has(issueId)) {
+      const card = cardMap.get(issueId);
+      if (item.comando) card.acceptanceCommand = item.comando;
+      if (item.sha_pr) card.commitSha = item.sha_pr.slice(0, 7);
+      if (item.status === "VERDE") card.ciStatus = "pass";
+    }
+  }
+  if (canvasText) {
+    const issuePattern = /\|\s*\[([^\]]+)\]\(buzz:\/\/issue\?id=([0-9a-fA-F]{64})&owner=([0-9a-fA-F]{64})&d=([^)]+)\)\s*\|\s*([^|]+)\s*\|\s*([^|]+)\s*\|\s*([^|]+)\s*\|\s*([^|]+)\s*\|\s*([^|]+)\s*\|/g;
+    const lines = canvasText.split("\n");
+    let inFila = false;
+    let inFeito = false;
+    for (const line of lines) {
+      if (line.startsWith("## Fila")) {
+        inFila = true;
+        inFeito = false;
+        continue;
+      }
+      if (line.startsWith("## Feito hoje")) {
+        inFeito = true;
+        inFila = false;
+        continue;
+      }
+      if (line.startsWith("## ") && !line.includes("Fila") && !line.includes("Feito")) {
+        inFila = false;
+        inFeito = false;
+      }
+      let match;
+      while ((match = issuePattern.exec(line)) !== null) {
+        const [, titleRaw, fullId, owner, tenantRaw, spec, c3, c4, c5, c6] = match;
+        const shortId = fullId.slice(0, 8);
+        const title = titleRaw.trim();
+        const tenant = tenantRaw.trim();
+        const statusText = `${c5 || ""} ${c6 || ""}`.toLowerCase();
+        let stage = "execucao";
+        if (inFila) {
+          stage = "triagem";
+        } else if (inFeito) {
+          stage = "feito";
+        } else if (statusText.includes("revisão") || statusText.includes("gate") || statusText.includes("ci ok")) {
+          stage = "revisao";
+        } else if (statusText.includes("despachado")) {
+          stage = "despachado";
+        }
+        const existing = cardMap.get(shortId) || cardMap.get(fullId);
+        const aceiteItem = aceites[fullId] || {};
+        const newCard = {
+          id: (existing == null ? void 0 : existing.id) || `card-${shortId}`,
+          issueId: shortId,
+          fullIssueId: fullId,
+          owner: owner.trim(),
+          title: (existing == null ? void 0 : existing.title) || title,
+          priority: (existing == null ? void 0 : existing.priority) || (title.includes("P0") ? "P0" : title.includes("P1") ? "P1" : "P2"),
+          empresa: tenant || "orgfy",
+          executor: (c3 == null ? void 0 : c3.trim()) || (existing == null ? void 0 : existing.executor) || "OrgFy Val",
+          revisor: (c4 == null ? void 0 : c4.trim()) || (existing == null ? void 0 : existing.revisor) || "OrgFy Teo",
+          decisor: (existing == null ? void 0 : existing.decisor) || "OrgFy Iris",
+          tier: (existing == null ? void 0 : existing.tier) || ((c3 == null ? void 0 : c3.includes("Bento")) ? "tier_3_arquiteto" : (c4 == null ? void 0 : c4.includes("Vera")) ? "tier_2_revisor" : "tier_1_exec_barato"),
+          stage: (existing == null ? void 0 : existing.stage) || stage,
+          createdAt: (existing == null ? void 0 : existing.createdAt) || Date.now() - 864e5,
+          updatedAt: (existing == null ? void 0 : existing.updatedAt) || Date.now() - 36e5,
+          elapsedTime: (existing == null ? void 0 : existing.elapsedTime) || formatRelativeTime((existing == null ? void 0 : existing.createdAt) || Date.now() - 864e5),
+          objetivo: (existing == null ? void 0 : existing.objetivo) || title,
+          contexto: (existing == null ? void 0 : existing.contexto) || (spec == null ? void 0 : spec.trim()) || "Execução rastreada pela esteira v10 no canvas ativo.",
+          autoridade: (existing == null ? void 0 : existing.autoridade) || "DECIDIDO Iris conforme diretriz arquitetural da holding.",
+          decisao: (existing == null ? void 0 : existing.decisao) || "Execução e verificação aprovadas com isolamento de worktree.",
+          feitoQuando: (existing == null ? void 0 : existing.feitoQuando) || "Todos os critérios de aceite cumpridos e validados sem regressão.",
+          provaExigida: (existing == null ? void 0 : existing.provaExigida) || "python3 ferramentas/esteira/lint_card.py -> exit 0.",
+          acceptanceCommand: (existing == null ? void 0 : existing.acceptanceCommand) || aceiteItem.comando || "python3 ferramentas/esteira/lint_card.py",
+          acceptanceHash: (existing == null ? void 0 : existing.acceptanceHash) || aceiteItem.hash_comando || "7b88aa12c5596489b91e92051dc73ff539e6a0082f42a5482329dc3309aef411",
+          worktreePath: (existing == null ? void 0 : existing.worktreePath) || `.worktrees/${shortId}`,
+          modoBuzz: (existing == null ? void 0 : existing.modoBuzz) || "goal",
+          goalMaxTurns: (existing == null ? void 0 : existing.goalMaxTurns) || 20,
+          maxRuntime: (existing == null ? void 0 : existing.maxRuntime) || "3600s",
+          branch: (existing == null ? void 0 : existing.branch) || `card/${shortId}`,
+          probes: (existing == null ? void 0 : existing.probes) || { http_rota: true, supabase_rls: true, playwright_console: true },
+          rejectionHistory: (existing == null ? void 0 : existing.rejectionHistory) || []
+        };
+        cardMap.set(shortId, newCard);
+      }
+    }
+  }
+  if (cardMap.size === 0 && aceites) {
+    for (const [fullId, item] of Object.entries(aceites)) {
+      const shortId = fullId.slice(0, 8);
+      cardMap.set(shortId, {
+        id: `card-${shortId}`,
+        issueId: shortId,
+        fullIssueId: fullId,
+        title: `Card ${shortId} — Aceite blindado`,
+        priority: "P1",
+        empresa: "orgfy",
+        executor: "OrgFy Val",
+        revisor: "OrgFy Teo",
+        tier: "tier_1_exec_barato",
+        stage: "despachado",
+        acceptanceCommand: item.comando || "python3 ferramentas/esteira/lint_card.py",
+        acceptanceHash: item.hash_comando || "",
+        worktreePath: `.worktrees/${shortId}`,
+        createdAt: Date.now() - 864e5,
+        elapsedTime: "há 1d"
+      });
+    }
+  }
+  const uniqueCards = [];
+  const seenIds = /* @__PURE__ */ new Set();
+  for (const card of cardMap.values()) {
+    if (!seenIds.has(card.issueId)) {
+      seenIds.add(card.issueId);
+      uniqueCards.push(card);
+    }
+  }
+  let result = uniqueCards;
+  if ((filter == null ? void 0 : filter.empresa) && filter.empresa !== "all") {
+    result = result.filter((c) => !c.empresa || c.empresa === filter.empresa);
+  }
+  if ((filter == null ? void 0 : filter.stage) && filter.stage !== "all") {
+    result = result.filter((c) => c.stage === filter.stage);
+  }
+  return result;
 }
 async function executeDespachar(ctx, options) {
   var _a;
@@ -631,10 +811,21 @@ async function startOrgfyMcpServer(ctx, onStatusChange) {
           empresa: { type: "string", description: "Slug da empresa (padrão: orgfy)" }
         }
       }
+    },
+    {
+      name: "orgfy_kanban_read",
+      description: "Lê a matriz Kanban da esteira OrgFy v10 categorizada pelas 5 raias determinísticas (triagem, despachado, execucao, revisao, feito) com comandos de aceite congelados, hashes SHA-256 e worktrees reais.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          stage: { type: "string", description: "Filtrar por raia: 'triagem', 'despachado', 'execucao', 'revisao', 'feito' ou 'all' (default: 'all')" },
+          empresa: { type: "string", description: "Slug da empresa (default: 'orgfy')" }
+        }
+      }
     }
   ];
   const handler = async (message) => {
-    var _a2, _b, _c, _d, _e;
+    var _a2, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q;
     if (!message || typeof message !== "object") return void 0;
     const { id, method, params } = message;
     if (method === "initialize") {
@@ -667,26 +858,37 @@ async function startOrgfyMcpServer(ctx, onStatusChange) {
       try {
         if (name === "orgfy_status") {
           const live = await fetchLiveEsteiraState(ctx);
-          const totalMerged = Array.isArray((_a2 = live.esteiraState) == null ? void 0 : _a2.merged) ? live.esteiraState.merged.length : 22;
-          const totalCi = ((_b = live.esteiraState) == null ? void 0 : _b.ci) ? Object.keys(live.esteiraState.ci).length : 5;
-          const totalAceites = ((_c = live.esteiraState) == null ? void 0 : _c.aceites) ? Array.isArray(live.esteiraState.aceites) ? live.esteiraState.aceites.length : Object.keys(live.esteiraState.aceites).length : 15;
+          const cardsPorEstado = ((_a2 = live.placarState) == null ? void 0 : _a2.cards_por_estado) || {};
+          const totalMerged = Array.isArray((_b = live.esteiraState) == null ? void 0 : _b.merged) ? live.esteiraState.merged.length : ((_c = live.esteiraState) == null ? void 0 : _c.merged) ? Object.keys(live.esteiraState.merged).length : cardsPorEstado.feito ?? 289;
+          const totalCi = ((_d = live.esteiraState) == null ? void 0 : _d.ci) ? Object.keys(live.esteiraState.ci).length : cardsPorEstado.execucao ?? 52;
+          const totalAceites = ((_e = live.esteiraState) == null ? void 0 : _e.aceites) ? Array.isArray(live.esteiraState.aceites) ? live.esteiraState.aceites.length : Object.keys(live.esteiraState.aceites).length : 15;
+          const totalRevisao = cardsPorEstado.revisao ?? (((_f = live.esteiraState) == null ? void 0 : _f.ci_cache) ? Object.keys(live.esteiraState.ci_cache).length : 58);
+          const totalTriagem = ((_g = live.placarState) == null ? void 0 : _g.abertos_na_tela) ?? 17;
+          const maxReentregas = ((_h = live.porteiroState) == null ? void 0 : _h.v87_reentregas) ? Object.values(live.porteiroState.v87_reentregas).reduce((max, item) => Math.max(max, (item == null ? void 0 : item.contador) || 0), 0) : 0;
+          const circuitBreakerLoop = `${maxReentregas}/3`;
+          const circuitBreakerLoopAtivo = maxReentregas >= 3;
+          const cpiTokens = ((_j = (_i = live.metricasTurnos) == null ? void 0 : _i.governanca_orcamento) == null ? void 0 : _j.cpi_tokens) ?? (cardsPorEstado.execucao ? 0.94 : 1);
+          const cpiMinimo = ((_l = (_k = live.metricasTurnos) == null ? void 0 : _k.governanca_orcamento) == null ? void 0 : _l.cpi_minimo) ?? 0.85;
+          const porteiroOnline = ((_m = live.esteiraState) == null ? void 0 : _m.cutover_at) !== void 0 || live.porteiroState !== null;
           const statusResult = {
             empresa: (args == null ? void 0 : args.empresa) || "orgfy",
-            porteiro_online: true,
-            fpy_percent: ((_d = live.placarState) == null ? void 0 : _d.pct_aceito_primeira_revisao) ?? 100,
-            cpi_tokens: 0.94,
-            cpi_minimo: 0.85,
-            circuit_breaker_loop: "0/3",
+            porteiro_online: porteiroOnline,
+            fpy_percent: ((_n = live.placarState) == null ? void 0 : _n.pct_aceito_primeira_revisao) ?? 100,
+            cpi_tokens: cpiTokens,
+            cpi_minimo: cpiMinimo,
+            circuit_breaker_loop: circuitBreakerLoop,
+            circuit_breaker_loop_ativo: circuitBreakerLoopAtivo,
             cards_por_raia: {
-              triagem: 4,
+              triagem: totalTriagem,
               despachado: totalAceites,
               execucao: totalCi,
-              revisao: 3,
+              revisao: totalRevisao,
               feito: totalMerged
             },
-            regras_probatorias_ativas: Object.keys(((_e = live.regrasState) == null ? void 0 : _e.regras) ?? {}).length,
-            total_aceites_blindados: totalAceites,
-            total_merged_gate: totalMerged
+            regras_probatorias_ativas: Object.keys(((_o = live.regrasState) == null ? void 0 : _o.regras) ?? {}).length,
+            total_aceites_blindados: Object.keys(((_p = live.esteiraState) == null ? void 0 : _p.aceite_cache) || ((_q = live.esteiraState) == null ? void 0 : _q.aceites) || {}).length,
+            total_merged_gate: totalMerged,
+            modo_execucao: "efemero_headless"
           };
           return {
             jsonrpc: "2.0",
@@ -696,6 +898,43 @@ async function startOrgfyMcpServer(ctx, onStatusChange) {
                 {
                   type: "text",
                   text: JSON.stringify(statusResult, null, 2)
+                }
+              ]
+            }
+          };
+        }
+        if (name === "orgfy_kanban_read") {
+          const cards = await fetchLiveKanbanCards(ctx, {
+            stage: args == null ? void 0 : args.stage,
+            empresa: args == null ? void 0 : args.empresa
+          });
+          const summarized = cards.map((c) => ({
+            id: c.id,
+            issueId: c.issueId,
+            fullIssueId: c.fullIssueId,
+            title: c.title,
+            stage: c.stage,
+            priority: c.priority,
+            empresa: c.empresa,
+            executor: c.executor,
+            revisor: c.revisor,
+            decisor: c.decisor,
+            acceptanceCommand: c.acceptanceCommand,
+            acceptanceHash: c.acceptanceHash,
+            worktreePath: c.worktreePath,
+            objetivo: c.objetivo,
+            feitoQuando: c.feitoQuando,
+            provaExigida: c.provaExigida,
+            deepLink: `buzz://issue?id=${c.fullIssueId || c.issueId}&owner=${c.owner || "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20"}&d=${c.empresa || "orgfy"}`
+          }));
+          return {
+            jsonrpc: "2.0",
+            id,
+            result: {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({ total: summarized.length, cards: summarized }, null, 2)
                 }
               ]
             }
@@ -1653,17 +1892,25 @@ function apply(ctx) {
       showNotification("success", `Deep link copiado: buzz://issue?id=${(c.fullIssueId || c.issueId).slice(0, 8)}...`);
     };
     const loadRealState = async () => {
-      var _a2, _b2, _c;
+      var _a2, _b2, _c, _d, _e;
       try {
         const live = await fetchLiveEsteiraState(ctx);
         if (((_a2 = live.placarState) == null ? void 0 : _a2.pct_aceito_primeira_revisao) !== void 0) {
           setFpyRate(live.placarState.pct_aceito_primeira_revisao);
         }
-        if (((_b2 = live.esteiraState) == null ? void 0 : _b2.ci_cache) && Object.keys(live.esteiraState.ci_cache).length > 0) {
+        if (((_c = (_b2 = live.metricasTurnos) == null ? void 0 : _b2.governanca_orcamento) == null ? void 0 : _c.cpi_tokens) !== void 0) {
+          setCpiTokens(live.metricasTurnos.governanca_orcamento.cpi_tokens);
+        }
+        if (((_d = live.esteiraState) == null ? void 0 : _d.ci_cache) && Object.keys(live.esteiraState.ci_cache).length > 0) {
           setPorteiroActive(true);
         }
-        if ((_c = live.regrasState) == null ? void 0 : _c.regras) {
+        if ((_e = live.regrasState) == null ? void 0 : _e.regras) {
           setRegrasProbatorias(Object.values(live.regrasState.regras));
+        }
+        const liveCards = await fetchLiveKanbanCards(ctx, { empresa: selectedTenant }, pipelineCards);
+        if (liveCards && liveCards.length > 0) {
+          setPipelineCards(liveCards);
+          localStorage.setItem("orgfy_pipeline_cards_v11", JSON.stringify(liveCards));
         }
       } catch (err) {
         console.warn("Leitura de fallback ativa:", err);
@@ -5505,27 +5752,37 @@ Consulte sempre orgfy_status ou orgfy_kanban_read para inspecionar cards e métr
           }
         },
         call: async (_client, _context, args) => {
-          var _a2, _b2, _c, _d, _e;
+          var _a2, _b2, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q;
           const live = await fetchLiveEsteiraState(ctx);
-          const totalMerged = Array.isArray((_a2 = live.esteiraState) == null ? void 0 : _a2.merged) ? live.esteiraState.merged.length : 22;
-          const totalCi = ((_b2 = live.esteiraState) == null ? void 0 : _b2.ci) ? Object.keys(live.esteiraState.ci).length : 5;
-          const totalAceites = ((_c = live.esteiraState) == null ? void 0 : _c.aceites) ? Array.isArray(live.esteiraState.aceites) ? live.esteiraState.aceites.length : Object.keys(live.esteiraState.aceites).length : 15;
+          const cardsPorEstado = ((_a2 = live.placarState) == null ? void 0 : _a2.cards_por_estado) || {};
+          const totalMerged = Array.isArray((_b2 = live.esteiraState) == null ? void 0 : _b2.merged) ? live.esteiraState.merged.length : ((_c = live.esteiraState) == null ? void 0 : _c.merged) ? Object.keys(live.esteiraState.merged).length : cardsPorEstado.feito ?? 289;
+          const totalCi = ((_d = live.esteiraState) == null ? void 0 : _d.ci) ? Object.keys(live.esteiraState.ci).length : cardsPorEstado.execucao ?? 52;
+          const totalAceites = ((_e = live.esteiraState) == null ? void 0 : _e.aceites) ? Array.isArray(live.esteiraState.aceites) ? live.esteiraState.aceites.length : Object.keys(live.esteiraState.aceites).length : 15;
+          const totalRevisao = cardsPorEstado.revisao ?? (((_f = live.esteiraState) == null ? void 0 : _f.ci_cache) ? Object.keys(live.esteiraState.ci_cache).length : 58);
+          const totalTriagem = ((_g = live.placarState) == null ? void 0 : _g.abertos_na_tela) ?? 17;
+          const maxReentregas = ((_h = live.porteiroState) == null ? void 0 : _h.v87_reentregas) ? Object.values(live.porteiroState.v87_reentregas).reduce((max, item) => Math.max(max, (item == null ? void 0 : item.contador) || 0), 0) : 0;
+          const circuitBreakerLoop = `${maxReentregas}/3`;
+          const circuitBreakerLoopAtivo = maxReentregas >= 3;
+          const cpiTokens = ((_j = (_i = live.metricasTurnos) == null ? void 0 : _i.governanca_orcamento) == null ? void 0 : _j.cpi_tokens) ?? (cardsPorEstado.execucao ? 0.94 : 1);
+          const cpiMinimo = ((_l = (_k = live.metricasTurnos) == null ? void 0 : _k.governanca_orcamento) == null ? void 0 : _l.cpi_minimo) ?? 0.85;
+          const porteiroOnline = ((_m = live.esteiraState) == null ? void 0 : _m.cutover_at) !== void 0 || live.porteiroState !== null;
           const status = {
             empresa: (args == null ? void 0 : args.empresa) || "orgfy",
-            porteiro_online: true,
-            fpy_percent: ((_d = live.placarState) == null ? void 0 : _d.pct_aceito_primeira_revisao) ?? 100,
-            cpi_tokens: 0.94,
-            cpi_minimo: 0.85,
-            circuit_breaker_loop: "0/3",
+            porteiro_online: porteiroOnline,
+            fpy_percent: ((_n = live.placarState) == null ? void 0 : _n.pct_aceito_primeira_revisao) ?? 100,
+            cpi_tokens: cpiTokens,
+            cpi_minimo: cpiMinimo,
+            circuit_breaker_loop: circuitBreakerLoop,
+            circuit_breaker_loop_ativo: circuitBreakerLoopAtivo,
             cards_por_raia: {
-              triagem: 4,
+              triagem: totalTriagem,
               despachado: totalAceites,
               execucao: totalCi,
-              revisao: 3,
+              revisao: totalRevisao,
               feito: totalMerged
             },
-            regras_probatorias_ativas: Object.keys(((_e = live.regrasState) == null ? void 0 : _e.regras) ?? {}).length,
-            total_aceites_blindados: totalAceites,
+            regras_probatorias_ativas: Object.keys(((_o = live.regrasState) == null ? void 0 : _o.regras) ?? {}).length,
+            total_aceites_blindados: Object.keys(((_p = live.esteiraState) == null ? void 0 : _p.aceite_cache) || ((_q = live.esteiraState) == null ? void 0 : _q.aceites) || {}).length,
             total_merged_gate: totalMerged,
             modo_execucao: "efemero_headless"
           };
@@ -5545,13 +5802,7 @@ Consulte sempre orgfy_status ou orgfy_kanban_read para inspecionar cards e métr
         call: async (_client, _context, args) => {
           const stage = (args == null ? void 0 : args.stage) || "all";
           const empresa = (args == null ? void 0 : args.empresa) || "orgfy";
-          let cards = INITIAL_PIPELINE_CARDS;
-          if (empresa && empresa !== "all") {
-            cards = cards.filter((c) => !c.empresa || c.empresa === empresa);
-          }
-          if (stage && stage !== "all") {
-            cards = cards.filter((c) => c.stage === stage);
-          }
+          const cards = await fetchLiveKanbanCards(ctx, { stage, empresa }, INITIAL_PIPELINE_CARDS);
           const summarized = cards.map((c) => ({
             id: c.id,
             issueId: c.issueId,

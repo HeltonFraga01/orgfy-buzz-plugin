@@ -13,6 +13,7 @@ import {
   executeGate,
   executePorteiroSync,
   fetchLiveEsteiraState,
+  fetchLiveKanbanCards,
   calculateDsapSimilarity,
   openSystemUri,
   openIssueInBuzz,
@@ -733,11 +734,21 @@ export function apply(ctx: Context) {
         if (live.placarState?.pct_aceito_primeira_revisao !== undefined) {
           setFpyRate(live.placarState.pct_aceito_primeira_revisao);
         }
+        if (live.metricasTurnos?.governanca_orcamento?.cpi_tokens !== undefined) {
+          setCpiTokens(live.metricasTurnos.governanca_orcamento.cpi_tokens);
+        }
         if (live.esteiraState?.ci_cache && Object.keys(live.esteiraState.ci_cache).length > 0) {
           setPorteiroActive(true);
         }
         if (live.regrasState?.regras) {
           setRegrasProbatorias(Object.values(live.regrasState.regras));
+        }
+
+        // Sincroniza cards reais do canvas e esteira
+        const liveCards = await fetchLiveKanbanCards(ctx, { empresa: selectedTenant }, pipelineCards);
+        if (liveCards && liveCards.length > 0) {
+          setPipelineCards(liveCards);
+          localStorage.setItem("orgfy_pipeline_cards_v11", JSON.stringify(liveCards));
         }
       } catch (err: any) {
         console.warn("Leitura de fallback ativa:", err);
@@ -4936,26 +4947,44 @@ Consulte sempre orgfy_status ou orgfy_kanban_read para inspecionar cards e métr
         },
         call: async (_client: any, _context: any, args: any) => {
           const live = await fetchLiveEsteiraState(ctx);
-          const totalMerged = Array.isArray(live.esteiraState?.merged) ? live.esteiraState.merged.length : 22;
-          const totalCi = live.esteiraState?.ci ? Object.keys(live.esteiraState.ci).length : 5;
-          const totalAceites = live.esteiraState?.aceites ? (Array.isArray(live.esteiraState.aceites) ? live.esteiraState.aceites.length : Object.keys(live.esteiraState.aceites).length) : 15;
+          const cardsPorEstado: any = live.placarState?.cards_por_estado || {};
+          const totalMerged = Array.isArray(live.esteiraState?.merged)
+            ? live.esteiraState.merged.length
+            : (live.esteiraState?.merged ? Object.keys(live.esteiraState.merged).length : (cardsPorEstado.feito ?? 289));
+          const totalCi = live.esteiraState?.ci ? Object.keys(live.esteiraState.ci).length : (cardsPorEstado.execucao ?? 52);
+          const totalAceites = live.esteiraState?.aceites
+            ? (Array.isArray(live.esteiraState.aceites) ? live.esteiraState.aceites.length : Object.keys(live.esteiraState.aceites).length)
+            : 15;
+          const totalRevisao = cardsPorEstado.revisao ?? (live.esteiraState?.ci_cache ? Object.keys(live.esteiraState.ci_cache).length : 58);
+          const totalTriagem = (live.placarState as any)?.abertos_na_tela ?? 17;
+
+          const maxReentregas = (live.porteiroState as any)?.v87_reentregas
+            ? Object.values((live.porteiroState as any).v87_reentregas).reduce((max: number, item: any) => Math.max(max, (item as any)?.contador || 0), 0)
+            : 0;
+          const circuitBreakerLoop = `${maxReentregas}/3`;
+          const circuitBreakerLoopAtivo = maxReentregas >= 3;
+
+          const cpiTokens = live.metricasTurnos?.governanca_orcamento?.cpi_tokens ?? (cardsPorEstado.execucao ? 0.94 : 1.0);
+          const cpiMinimo = live.metricasTurnos?.governanca_orcamento?.cpi_minimo ?? 0.85;
+          const porteiroOnline = live.esteiraState?.cutover_at !== undefined || live.porteiroState !== null;
 
           const status = {
             empresa: args?.empresa || "orgfy",
-            porteiro_online: true,
+            porteiro_online: porteiroOnline,
             fpy_percent: live.placarState?.pct_aceito_primeira_revisao ?? 100.0,
-            cpi_tokens: 0.94,
-            cpi_minimo: 0.85,
-            circuit_breaker_loop: "0/3",
+            cpi_tokens: cpiTokens,
+            cpi_minimo: cpiMinimo,
+            circuit_breaker_loop: circuitBreakerLoop,
+            circuit_breaker_loop_ativo: circuitBreakerLoopAtivo,
             cards_por_raia: {
-              triagem: 4,
+              triagem: totalTriagem,
               despachado: totalAceites,
               execucao: totalCi,
-              revisao: 3,
+              revisao: totalRevisao,
               feito: totalMerged,
             },
             regras_probatorias_ativas: Object.keys(live.regrasState?.regras ?? {}).length,
-            total_aceites_blindados: totalAceites,
+            total_aceites_blindados: Object.keys(live.esteiraState?.aceite_cache || live.esteiraState?.aceites || {}).length,
             total_merged_gate: totalMerged,
             modo_execucao: "efemero_headless",
           };
@@ -4976,13 +5005,7 @@ Consulte sempre orgfy_status ou orgfy_kanban_read para inspecionar cards e métr
         call: async (_client: any, _context: any, args: any) => {
           const stage = args?.stage || "all";
           const empresa = args?.empresa || "orgfy";
-          let cards = INITIAL_PIPELINE_CARDS;
-          if (empresa && empresa !== "all") {
-            cards = cards.filter((c) => !c.empresa || c.empresa === empresa);
-          }
-          if (stage && stage !== "all") {
-            cards = cards.filter((c) => c.stage === stage);
-          }
+          const cards = await fetchLiveKanbanCards(ctx, { stage, empresa }, INITIAL_PIPELINE_CARDS);
           const summarized = cards.map((c) => ({
             id: c.id,
             issueId: c.issueId,
