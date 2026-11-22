@@ -92,15 +92,18 @@ function formatFullDateTime(dateInput) {
     second: "2-digit"
   });
 }
-async function fetchLiveEsteiraState(ctx) {
-  const [boardManifest, esteiraState, placarState, regrasState, porteiroState, metricasTurnos] = await Promise.all([
+async function fetchLiveEsteiraState(ctx, empresa) {
+  const slug = empresa && empresa !== "all" ? empresa : "orgfy";
+  const tenantEsteiraPath = slug !== "orgfy" ? `.esteira/estado/esteira-minima-${slug}-state.json` : ".esteira/estado/esteira-minima-state.json";
+  const [boardManifest, esteiraStateTenant, placarState, regrasState, porteiroState, metricasTurnos] = await Promise.all([
     readOrgfyJson(ctx, "empresas/board.json", null),
-    readOrgfyJson(ctx, ".esteira/estado/esteira-minima-state.json", null),
+    readOrgfyJson(ctx, tenantEsteiraPath, null),
     readOrgfyJson(ctx, ".scratch/placar-20h.json", null),
     readOrgfyJson(ctx, ".esteira/estado/regras-probatorias.json", null),
     readOrgfyJson(ctx, ".esteira/estado/porteiro-state.json", null),
     readOrgfyJson(ctx, ".scratch/metricas_turnos.json", null)
   ]);
+  const esteiraState = esteiraStateTenant ?? (slug !== "orgfy" ? await readOrgfyJson(ctx, ".esteira/estado/esteira-minima-state.json", null) : null);
   return {
     boardManifest,
     esteiraState,
@@ -111,143 +114,253 @@ async function fetchLiveEsteiraState(ctx) {
     timestamp: Date.now()
   };
 }
-async function fetchLiveKanbanCards(ctx, filter, baseCards) {
-  var _a, _b;
-  const live = await fetchLiveEsteiraState(ctx);
-  const canvasText = await readOrgfyText(ctx, ".scratch/canvas_atual.md");
-  const cardMap = /* @__PURE__ */ new Map();
-  if (baseCards && Array.isArray(baseCards)) {
-    for (const c of baseCards) {
-      cardMap.set(c.issueId, { ...c });
-      if (c.fullIssueId) {
-        cardMap.set(c.fullIssueId, { ...c });
-      }
-    }
+async function fetchLiveKanbanSnapshot(ctx, filter) {
+  var _a, _b, _c, _d, _e;
+  const [live, canvasText] = await Promise.all([
+    fetchLiveEsteiraState(ctx, filter == null ? void 0 : filter.empresa),
+    readOrgfyText(ctx, ".scratch/canvas_atual.md")
+  ]);
+  const hasCanvas = typeof canvasText === "string" && canvasText.trim().length > 0;
+  const hasEsteiraState = live.esteiraState !== null;
+  if (!hasCanvas && !hasEsteiraState) {
+    return {
+      ok: false,
+      error: "Não foi possível ler .scratch/canvas_atual.md nem .esteira/estado/esteira-minima-state.json.",
+      sources: { canvas_atual: false, esteira_minima_state: false },
+      cards: []
+    };
   }
+  const cardMap = /* @__PURE__ */ new Map();
   const aceites = ((_a = live.esteiraState) == null ? void 0 : _a.aceites) || {};
   const aceiteCache = ((_b = live.esteiraState) == null ? void 0 : _b.aceite_cache) || {};
+  const mergedSet = new Set(
+    Array.isArray((_c = live.esteiraState) == null ? void 0 : _c.merged) ? live.esteiraState.merged : Object.keys(((_d = live.esteiraState) == null ? void 0 : _d.merged) || {})
+  );
+  const aceiteCacheByIssue = /* @__PURE__ */ new Map();
   for (const [, item] of Object.entries(aceiteCache)) {
-    const issueId = item.issue_id ? item.issue_id.slice(0, 8) : "";
-    if (issueId && cardMap.has(issueId)) {
-      const card = cardMap.get(issueId);
-      if (item.comando) card.acceptanceCommand = item.comando;
-      if (item.sha_pr) card.commitSha = item.sha_pr.slice(0, 7);
-      if (item.status === "VERDE") card.ciStatus = "pass";
+    if (item == null ? void 0 : item.issue_id) {
+      aceiteCacheByIssue.set(item.issue_id, item);
+      aceiteCacheByIssue.set(item.issue_id.slice(0, 8), item);
     }
   }
-  if (canvasText) {
-    const issuePattern = /\|\s*\[([^\]]+)\]\(buzz:\/\/issue\?id=([0-9a-fA-F]{64})&owner=([0-9a-fA-F]{64})&d=([^)]+)\)\s*\|\s*([^|]+)\s*\|\s*([^|]+)\s*\|\s*([^|]+)\s*\|\s*([^|]+)\s*\|\s*([^|]+)\s*\|/g;
+  if (hasCanvas && canvasText) {
+    const linkPattern = /\[([^\]]+)\]\(buzz:\/\/issue\?id=([0-9a-fA-F]{64})&owner=([0-9a-fA-F]{64})&d=([^)]+)\)/;
     const lines = canvasText.split("\n");
-    let inFila = false;
-    let inFeito = false;
-    for (const line of lines) {
-      if (line.startsWith("## Fila")) {
-        inFila = true;
-        inFeito = false;
-        continue;
-      }
-      if (line.startsWith("## Feito hoje")) {
-        inFeito = true;
-        inFila = false;
-        continue;
-      }
-      if (line.startsWith("## ") && !line.includes("Fila") && !line.includes("Feito")) {
-        inFila = false;
-        inFeito = false;
-      }
-      let match;
-      while ((match = issuePattern.exec(line)) !== null) {
-        const [, titleRaw, fullId, owner, tenantRaw, spec, c3, c4, c5, c6] = match;
-        const shortId = fullId.slice(0, 8);
-        const title = titleRaw.trim();
-        const tenant = tenantRaw.trim();
-        const statusText = `${c5 || ""} ${c6 || ""}`.toLowerCase();
-        let stage = "execucao";
-        if (inFila) {
-          stage = "triagem";
-        } else if (inFeito) {
-          stage = "feito";
-        } else if (statusText.includes("revisão") || statusText.includes("gate") || statusText.includes("ci ok")) {
-          stage = "revisao";
-        } else if (statusText.includes("despachado")) {
-          stage = "despachado";
+    let section = "other";
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (line.startsWith("## ")) {
+        const lowerHeader = line.toLowerCase();
+        if (lowerHeader.includes("fila")) {
+          section = "fila";
+        } else if (lowerHeader.includes("feito") || lowerHeader.includes("conclu")) {
+          section = "feito";
+        } else if (lowerHeader.includes("execu") || lowerHeader.includes("andamento")) {
+          section = "execucao";
+        } else {
+          section = "other";
         }
-        const existing = cardMap.get(shortId) || cardMap.get(fullId);
-        const aceiteItem = aceites[fullId] || {};
-        const newCard = {
-          id: (existing == null ? void 0 : existing.id) || `card-${shortId}`,
-          issueId: shortId,
-          fullIssueId: fullId,
-          owner: owner.trim(),
-          title: (existing == null ? void 0 : existing.title) || title,
-          priority: (existing == null ? void 0 : existing.priority) || (title.includes("P0") ? "P0" : title.includes("P1") ? "P1" : "P2"),
-          empresa: tenant || "orgfy",
-          executor: (c3 == null ? void 0 : c3.trim()) || (existing == null ? void 0 : existing.executor) || "OrgFy Val",
-          revisor: (c4 == null ? void 0 : c4.trim()) || (existing == null ? void 0 : existing.revisor) || "OrgFy Teo",
-          decisor: (existing == null ? void 0 : existing.decisor) || "OrgFy Iris",
-          tier: (existing == null ? void 0 : existing.tier) || ((c3 == null ? void 0 : c3.includes("Bento")) ? "tier_3_arquiteto" : (c4 == null ? void 0 : c4.includes("Vera")) ? "tier_2_revisor" : "tier_1_exec_barato"),
-          stage: (existing == null ? void 0 : existing.stage) || stage,
-          createdAt: (existing == null ? void 0 : existing.createdAt) || Date.now() - 864e5,
-          updatedAt: (existing == null ? void 0 : existing.updatedAt) || Date.now() - 36e5,
-          elapsedTime: (existing == null ? void 0 : existing.elapsedTime) || formatRelativeTime((existing == null ? void 0 : existing.createdAt) || Date.now() - 864e5),
-          objetivo: (existing == null ? void 0 : existing.objetivo) || title,
-          contexto: (existing == null ? void 0 : existing.contexto) || (spec == null ? void 0 : spec.trim()) || "Execução rastreada pela esteira v10 no canvas ativo.",
-          autoridade: (existing == null ? void 0 : existing.autoridade) || "DECIDIDO Iris conforme diretriz arquitetural da holding.",
-          decisao: (existing == null ? void 0 : existing.decisao) || "Execução e verificação aprovadas com isolamento de worktree.",
-          feitoQuando: (existing == null ? void 0 : existing.feitoQuando) || "Todos os critérios de aceite cumpridos e validados sem regressão.",
-          provaExigida: (existing == null ? void 0 : existing.provaExigida) || "python3 ferramentas/esteira/lint_card.py -> exit 0.",
-          acceptanceCommand: (existing == null ? void 0 : existing.acceptanceCommand) || aceiteItem.comando || "python3 ferramentas/esteira/lint_card.py",
-          acceptanceHash: (existing == null ? void 0 : existing.acceptanceHash) || aceiteItem.hash_comando || "7b88aa12c5596489b91e92051dc73ff539e6a0082f42a5482329dc3309aef411",
-          worktreePath: (existing == null ? void 0 : existing.worktreePath) || `.worktrees/${shortId}`,
-          modoBuzz: (existing == null ? void 0 : existing.modoBuzz) || "goal",
-          goalMaxTurns: (existing == null ? void 0 : existing.goalMaxTurns) || 20,
-          maxRuntime: (existing == null ? void 0 : existing.maxRuntime) || "3600s",
-          branch: (existing == null ? void 0 : existing.branch) || `card/${shortId}`,
-          probes: (existing == null ? void 0 : existing.probes) || { http_rota: true, supabase_rls: true, playwright_console: true },
-          rejectionHistory: (existing == null ? void 0 : existing.rejectionHistory) || []
-        };
-        cardMap.set(shortId, newCard);
+        continue;
       }
+      if (!line.startsWith("|")) continue;
+      const linkMatch = linkPattern.exec(line);
+      if (!linkMatch) continue;
+      const [, titleRaw, fullId, owner, tenantRaw] = linkMatch;
+      const cells = line.replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+      const shortId = fullId.slice(0, 8);
+      const title = titleRaw.trim();
+      const tenant = tenantRaw.trim() || "orgfy";
+      let spec = "";
+      let executor = "";
+      let revisor = "";
+      let statusText = "";
+      let branchCell = "";
+      let tableAcceptanceCmd = "";
+      if (section === "fila" && cells.length <= 4) {
+        spec = cells[1] || "";
+        tableAcceptanceCmd = (cells[2] || "").replace(/^`|`$/g, "").trim();
+        statusText = cells[3] || "";
+      } else {
+        spec = cells[1] || "";
+        executor = cells[2] || "";
+        revisor = cells[3] || "";
+        statusText = cells[4] || "";
+        branchCell = cells[5] || "";
+      }
+      const lowerStatus = `${statusText} ${branchCell}`.toLowerCase();
+      let stage = "execucao";
+      if (section === "fila") {
+        stage = "triagem";
+      } else if (section === "feito" || mergedSet.has(fullId) || mergedSet.has(shortId) || lowerStatus.includes("integrado em origin/main") || lowerStatus.includes("merged")) {
+        stage = "feito";
+      } else if (lowerStatus.includes("revisão") || lowerStatus.includes("revisao") || lowerStatus.includes("gate") || lowerStatus.includes("ci ok") || lowerStatus.includes("aguardando ci")) {
+        stage = "revisao";
+      } else if (lowerStatus.includes("aguardando reatrib") || lowerStatus.includes("aguardando despacho")) {
+        stage = "triagem";
+      } else if (lowerStatus.includes("despachado") && !lowerStatus.includes("em andamento")) {
+        stage = "despachado";
+      }
+      const aceiteRecord = aceites[fullId] || aceites[shortId] || null;
+      const cachedAceite = aceiteCacheByIssue.get(fullId) || aceiteCacheByIssue.get(shortId) || null;
+      const acceptanceCommand = typeof aceiteRecord === "object" && (aceiteRecord == null ? void 0 : aceiteRecord.comando) || (cachedAceite == null ? void 0 : cachedAceite.comando) || tableAcceptanceCmd || void 0;
+      const acceptanceHash = typeof aceiteRecord === "object" && (aceiteRecord == null ? void 0 : aceiteRecord.hash_comando) || (cachedAceite == null ? void 0 : cachedAceite.hash_comando) || void 0;
+      const branchMatch = branchCell.match(/`([^`]+)`/);
+      const branch = branchMatch ? branchMatch[1] : void 0;
+      const prMatch = `${statusText} ${branchCell}`.match(/PR\s+`?([0-9a-fA-F]{7,64})`?/i);
+      const prId = prMatch ? prMatch[1] : void 0;
+      const shaMatch = (cachedAceite == null ? void 0 : cachedAceite.sha_pr) || ((_e = `${statusText} ${branchCell}`.match(/SHA\s+`?([0-9a-fA-F]{7,40})`?/i)) == null ? void 0 : _e[1]);
+      const card = {
+        id: `card-${shortId}`,
+        issueId: shortId,
+        fullIssueId: fullId,
+        owner: owner.trim(),
+        title,
+        priority: title.includes("P0") ? "P0" : title.includes("P1") ? "P1" : "P2",
+        empresa: tenant,
+        executor: executor || "A definir",
+        revisor: revisor || "A definir",
+        decisor: "OrgFy Iris",
+        tier: executor.includes("Bento") ? "tier_3_arquiteto" : revisor.includes("Vera") || revisor.includes("Teo") ? "tier_2_revisor" : "tier_1_exec_barato",
+        stage,
+        prId,
+        commitSha: shaMatch ? String(shaMatch).slice(0, 7) : void 0,
+        ciStatus: (cachedAceite == null ? void 0 : cachedAceite.status) === "VERDE" ? "pass" : void 0,
+        objetivo: title,
+        contexto: statusText || spec || void 0,
+        acceptanceCommand,
+        acceptanceHash,
+        worktreePath: `.worktrees/${shortId}`,
+        branch
+      };
+      cardMap.set(shortId, card);
     }
   }
-  if (cardMap.size === 0 && aceites) {
+  if (cardMap.size === 0 && hasEsteiraState && aceites) {
     for (const [fullId, item] of Object.entries(aceites)) {
+      if (!item || typeof item !== "object") continue;
       const shortId = fullId.slice(0, 8);
+      const cachedAceite = aceiteCacheByIssue.get(fullId) || aceiteCacheByIssue.get(shortId) || null;
+      const isMerged = mergedSet.has(fullId) || mergedSet.has(shortId);
       cardMap.set(shortId, {
         id: `card-${shortId}`,
         issueId: shortId,
         fullIssueId: fullId,
-        title: `Card ${shortId} — Aceite blindado`,
+        title: `Card ${shortId} — Aceite congelado`,
         priority: "P1",
-        empresa: "orgfy",
-        executor: "OrgFy Val",
-        revisor: "OrgFy Teo",
+        empresa: (filter == null ? void 0 : filter.empresa) && filter.empresa !== "all" ? filter.empresa : "orgfy",
+        executor: "A definir",
+        revisor: "A definir",
         tier: "tier_1_exec_barato",
-        stage: "despachado",
-        acceptanceCommand: item.comando || "python3 ferramentas/esteira/lint_card.py",
-        acceptanceHash: item.hash_comando || "",
-        worktreePath: `.worktrees/${shortId}`,
-        createdAt: Date.now() - 864e5,
-        elapsedTime: "há 1d"
+        stage: isMerged ? "feito" : "despachado",
+        commitSha: (cachedAceite == null ? void 0 : cachedAceite.sha_pr) ? String(cachedAceite.sha_pr).slice(0, 7) : void 0,
+        ciStatus: (cachedAceite == null ? void 0 : cachedAceite.status) === "VERDE" ? "pass" : void 0,
+        acceptanceCommand: item.comando || (cachedAceite == null ? void 0 : cachedAceite.comando) || void 0,
+        acceptanceHash: item.hash_comando || void 0,
+        worktreePath: `.worktrees/${shortId}`
       });
     }
   }
-  const uniqueCards = [];
-  const seenIds = /* @__PURE__ */ new Set();
-  for (const card of cardMap.values()) {
-    if (!seenIds.has(card.issueId)) {
-      seenIds.add(card.issueId);
-      uniqueCards.push(card);
-    }
-  }
-  let result = uniqueCards;
+  let result = Array.from(cardMap.values());
   if ((filter == null ? void 0 : filter.empresa) && filter.empresa !== "all") {
     result = result.filter((c) => !c.empresa || c.empresa === filter.empresa);
   }
   if ((filter == null ? void 0 : filter.stage) && filter.stage !== "all") {
     result = result.filter((c) => c.stage === filter.stage);
   }
-  return result;
+  return {
+    ok: true,
+    error: null,
+    sources: {
+      canvas_atual: hasCanvas,
+      esteira_minima_state: hasEsteiraState
+    },
+    cards: result
+  };
+}
+async function fetchLiveKanbanCards(ctx, filter) {
+  const snapshot = await fetchLiveKanbanSnapshot(ctx, filter);
+  return snapshot.cards;
+}
+async function buildOrgfyStatus(ctx, empresa) {
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k;
+  const slug = empresa || "orgfy";
+  const [live, kanban] = await Promise.all([
+    fetchLiveEsteiraState(ctx, slug),
+    fetchLiveKanbanSnapshot(ctx, { empresa: slug })
+  ]);
+  const cardsPorRaia = {
+    triagem: 0,
+    despachado: 0,
+    execucao: 0,
+    revisao: 0,
+    feito: 0
+  };
+  for (const c of kanban.cards) {
+    if (c.stage in cardsPorRaia) {
+      cardsPorRaia[c.stage] += 1;
+    }
+  }
+  const countEntries = (val) => {
+    if (val === null || val === void 0) return null;
+    if (Array.isArray(val)) return val.length;
+    if (typeof val === "object") return Object.keys(val).length;
+    return null;
+  };
+  const reentregasObj = (_a = live.porteiroState) == null ? void 0 : _a.v87_reentregas;
+  const maxReentregas = reentregasObj && typeof reentregasObj === "object" ? Object.values(reentregasObj).reduce(
+    (max, item) => Math.max(max, Number(item == null ? void 0 : item.contador) || 0),
+    0
+  ) : null;
+  const porteiroOnline = ((_b = live.esteiraState) == null ? void 0 : _b.cutover_at) !== void 0 || live.porteiroState !== null;
+  const regrasObj = (_c = live.regrasState) == null ? void 0 : _c.regras;
+  const regrasAtivas = regrasObj && typeof regrasObj === "object" ? Object.keys(regrasObj).length : null;
+  const totalAceitesBlindados = countEntries((_d = live.esteiraState) == null ? void 0 : _d.aceite_cache) ?? countEntries((_e = live.esteiraState) == null ? void 0 : _e.aceites);
+  const totalMergedGate = countEntries((_f = live.esteiraState) == null ? void 0 : _f.merged);
+  const cpiTokens = typeof ((_h = (_g = live.metricasTurnos) == null ? void 0 : _g.governanca_orcamento) == null ? void 0 : _h.cpi_tokens) === "number" ? live.metricasTurnos.governanca_orcamento.cpi_tokens : null;
+  const cpiMinimo = typeof ((_j = (_i = live.metricasTurnos) == null ? void 0 : _i.governanca_orcamento) == null ? void 0 : _j.cpi_minimo) === "number" ? live.metricasTurnos.governanca_orcamento.cpi_minimo : null;
+  const fpyPercent = typeof ((_k = live.placarState) == null ? void 0 : _k.pct_aceito_primeira_revisao) === "number" ? live.placarState.pct_aceito_primeira_revisao : null;
+  return {
+    empresa: slug,
+    measured_at: (/* @__PURE__ */ new Date()).toISOString(),
+    porteiro_online: porteiroOnline,
+    fpy_percent: fpyPercent,
+    cpi_tokens: cpiTokens,
+    cpi_minimo: cpiMinimo,
+    circuit_breaker_loop: maxReentregas !== null ? `${maxReentregas}/3` : null,
+    circuit_breaker_loop_ativo: maxReentregas !== null ? maxReentregas >= 3 : null,
+    total_cards_kanban: kanban.cards.length,
+    cards_por_raia: cardsPorRaia,
+    regras_probatorias_ativas: regrasAtivas,
+    total_aceites_blindados: totalAceitesBlindados,
+    total_merged_gate: totalMergedGate,
+    placar_20h: live.placarState ? {
+      disponivel: true,
+      abertos_na_tela: live.placarState.abertos_na_tela ?? null,
+      divergencia_relay_tela: live.placarState.divergencia_relay_tela ?? null,
+      voltas_revisao: live.placarState.voltas_revisao ?? null,
+      cards_por_estado_historico: live.placarState.cards_por_estado ?? null
+    } : { disponivel: false },
+    esteira_runtime: live.esteiraState ? {
+      disponivel: true,
+      cutover_at: live.esteiraState.cutover_at ?? null,
+      aceites_ativos: countEntries(live.esteiraState.aceites),
+      aceites_blindados_cache: countEntries(live.esteiraState.aceite_cache),
+      ci_registros: countEntries(live.esteiraState.ci),
+      ci_cache: countEntries(live.esteiraState.ci_cache),
+      merged_gate: totalMergedGate
+    } : { disponivel: false },
+    fontes_lidas: {
+      canvas_atual: kanban.sources.canvas_atual,
+      esteira_minima_state: live.esteiraState !== null,
+      placar_20h: live.placarState !== null,
+      porteiro_state: live.porteiroState !== null,
+      metricas_turnos: live.metricasTurnos !== null,
+      regras_probatorias: live.regrasState !== null,
+      board_manifest: live.boardManifest !== null
+    },
+    kanban_error: kanban.error,
+    modo_execucao: "efemero_headless"
+  };
 }
 async function executeDespachar(ctx, options) {
   var _a;
@@ -763,7 +876,7 @@ async function startOrgfyMcpServer(ctx, onStatusChange) {
   const mcpTools = [
     {
       name: "orgfy_status",
-      description: "Retorna a telemetria ao vivo da esteira determinística OrgFy (FPY, CPI, cards ativos e regras probatórias).",
+      description: "Retorna a telemetria ao vivo da esteira determinística OrgFy (FPY, CPI, cards por raia alinhados ao Kanban e regras probatórias, sem fallbacks hardcoded).",
       inputSchema: {
         type: "object",
         properties: {
@@ -783,7 +896,7 @@ async function startOrgfyMcpServer(ctx, onStatusChange) {
           executor: { type: "string", description: "Nome do agente executor (ex: OrgFy Atlas)" },
           revisor: { type: "string", description: "Nome do agente revisor (ex: OrgFy Bento)" }
         },
-        required: ["executor"]
+        required: ["issue_id", "executor", "revisor"]
       }
     },
     {
@@ -799,7 +912,8 @@ async function startOrgfyMcpServer(ctx, onStatusChange) {
           acao: { type: "string", enum: ["aceito", "recusado"], description: "Alias para decisao" },
           motivo: { type: "string", description: "Justificativa técnica detalhada no caso de recusa" },
           revisor: { type: "string", description: "Nome do revisor independente (padrão: QA Sentinel)" }
-        }
+        },
+        required: ["pr_id", "decisao"]
       }
     },
     {
@@ -814,7 +928,7 @@ async function startOrgfyMcpServer(ctx, onStatusChange) {
     },
     {
       name: "orgfy_kanban_read",
-      description: "Lê a matriz Kanban da esteira OrgFy v10 categorizada pelas 5 raias determinísticas (triagem, despachado, execucao, revisao, feito) com comandos de aceite congelados, hashes SHA-256 e worktrees reais.",
+      description: "Lê a matriz Kanban real da esteira OrgFy v10 categorizada pelas 5 raias determinísticas (triagem, despachado, execucao, revisao, feito) sem fallback mockado.",
       inputSchema: {
         type: "object",
         properties: {
@@ -825,7 +939,6 @@ async function startOrgfyMcpServer(ctx, onStatusChange) {
     }
   ];
   const handler = async (message) => {
-    var _a2, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q;
     if (!message || typeof message !== "object") return void 0;
     const { id, method, params } = message;
     if (method === "initialize") {
@@ -837,7 +950,7 @@ async function startOrgfyMcpServer(ctx, onStatusChange) {
           capabilities: { tools: {} },
           serverInfo: {
             name: "orgfy-control-room-mcp",
-            version: "1.0.0"
+            version: "1.1.0"
           }
         }
       };
@@ -857,39 +970,7 @@ async function startOrgfyMcpServer(ctx, onStatusChange) {
       const { name, arguments: args } = params || {};
       try {
         if (name === "orgfy_status") {
-          const live = await fetchLiveEsteiraState(ctx);
-          const cardsPorEstado = ((_a2 = live.placarState) == null ? void 0 : _a2.cards_por_estado) || {};
-          const totalMerged = Array.isArray((_b = live.esteiraState) == null ? void 0 : _b.merged) ? live.esteiraState.merged.length : ((_c = live.esteiraState) == null ? void 0 : _c.merged) ? Object.keys(live.esteiraState.merged).length : cardsPorEstado.feito ?? 289;
-          const totalCi = ((_d = live.esteiraState) == null ? void 0 : _d.ci) ? Object.keys(live.esteiraState.ci).length : cardsPorEstado.execucao ?? 52;
-          const totalAceites = ((_e = live.esteiraState) == null ? void 0 : _e.aceites) ? Array.isArray(live.esteiraState.aceites) ? live.esteiraState.aceites.length : Object.keys(live.esteiraState.aceites).length : 15;
-          const totalRevisao = cardsPorEstado.revisao ?? (((_f = live.esteiraState) == null ? void 0 : _f.ci_cache) ? Object.keys(live.esteiraState.ci_cache).length : 58);
-          const totalTriagem = ((_g = live.placarState) == null ? void 0 : _g.abertos_na_tela) ?? 17;
-          const maxReentregas = ((_h = live.porteiroState) == null ? void 0 : _h.v87_reentregas) ? Object.values(live.porteiroState.v87_reentregas).reduce((max, item) => Math.max(max, (item == null ? void 0 : item.contador) || 0), 0) : 0;
-          const circuitBreakerLoop = `${maxReentregas}/3`;
-          const circuitBreakerLoopAtivo = maxReentregas >= 3;
-          const cpiTokens = ((_j = (_i = live.metricasTurnos) == null ? void 0 : _i.governanca_orcamento) == null ? void 0 : _j.cpi_tokens) ?? (cardsPorEstado.execucao ? 0.94 : 1);
-          const cpiMinimo = ((_l = (_k = live.metricasTurnos) == null ? void 0 : _k.governanca_orcamento) == null ? void 0 : _l.cpi_minimo) ?? 0.85;
-          const porteiroOnline = ((_m = live.esteiraState) == null ? void 0 : _m.cutover_at) !== void 0 || live.porteiroState !== null;
-          const statusResult = {
-            empresa: (args == null ? void 0 : args.empresa) || "orgfy",
-            porteiro_online: porteiroOnline,
-            fpy_percent: ((_n = live.placarState) == null ? void 0 : _n.pct_aceito_primeira_revisao) ?? 100,
-            cpi_tokens: cpiTokens,
-            cpi_minimo: cpiMinimo,
-            circuit_breaker_loop: circuitBreakerLoop,
-            circuit_breaker_loop_ativo: circuitBreakerLoopAtivo,
-            cards_por_raia: {
-              triagem: totalTriagem,
-              despachado: totalAceites,
-              execucao: totalCi,
-              revisao: totalRevisao,
-              feito: totalMerged
-            },
-            regras_probatorias_ativas: Object.keys(((_o = live.regrasState) == null ? void 0 : _o.regras) ?? {}).length,
-            total_aceites_blindados: Object.keys(((_p = live.esteiraState) == null ? void 0 : _p.aceite_cache) || ((_q = live.esteiraState) == null ? void 0 : _q.aceites) || {}).length,
-            total_merged_gate: totalMerged,
-            modo_execucao: "efemero_headless"
-          };
+          const statusResult = await buildOrgfyStatus(ctx, args == null ? void 0 : args.empresa);
           return {
             jsonrpc: "2.0",
             id,
@@ -904,11 +985,11 @@ async function startOrgfyMcpServer(ctx, onStatusChange) {
           };
         }
         if (name === "orgfy_kanban_read") {
-          const cards = await fetchLiveKanbanCards(ctx, {
+          const snapshot = await fetchLiveKanbanSnapshot(ctx, {
             stage: args == null ? void 0 : args.stage,
             empresa: args == null ? void 0 : args.empresa
           });
-          const summarized = cards.map((c) => ({
+          const summarized = snapshot.cards.map((c) => ({
             id: c.id,
             issueId: c.issueId,
             fullIssueId: c.fullIssueId,
@@ -917,14 +998,14 @@ async function startOrgfyMcpServer(ctx, onStatusChange) {
             priority: c.priority,
             empresa: c.empresa,
             executor: c.executor,
-            revisor: c.revisor,
-            decisor: c.decisor,
-            acceptanceCommand: c.acceptanceCommand,
-            acceptanceHash: c.acceptanceHash,
-            worktreePath: c.worktreePath,
-            objetivo: c.objetivo,
-            feitoQuando: c.feitoQuando,
-            provaExigida: c.provaExigida,
+            revisor: c.revisor ?? null,
+            decisor: c.decisor ?? null,
+            acceptanceCommand: c.acceptanceCommand ?? null,
+            acceptanceHash: c.acceptanceHash ?? null,
+            worktreePath: c.worktreePath ?? null,
+            objetivo: c.objetivo ?? null,
+            feitoQuando: c.feitoQuando ?? null,
+            provaExigida: c.provaExigida ?? null,
             deepLink: `buzz://issue?id=${c.fullIssueId || c.issueId}&owner=${c.owner || "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20"}&d=${c.empresa || "orgfy"}`
           }));
           return {
@@ -934,17 +1015,38 @@ async function startOrgfyMcpServer(ctx, onStatusChange) {
               content: [
                 {
                   type: "text",
-                  text: JSON.stringify({ total: summarized.length, cards: summarized }, null, 2)
+                  text: JSON.stringify(
+                    {
+                      ok: snapshot.ok,
+                      error: snapshot.error,
+                      sources: snapshot.sources,
+                      total: summarized.length,
+                      cards: summarized
+                    },
+                    null,
+                    2
+                  )
                 }
-              ]
+              ],
+              isError: !snapshot.ok
             }
           };
         }
         if (name === "orgfy_despachar") {
-          const issueId = (args == null ? void 0 : args.issue_id) || (args == null ? void 0 : args.issueId) || "5c569a9e";
+          const issueId = ((args == null ? void 0 : args.issue_id) || (args == null ? void 0 : args.issueId) || "").trim();
+          const executor = ((args == null ? void 0 : args.executor) || "").trim();
+          const revisor = ((args == null ? void 0 : args.revisor) || "").trim();
+          if (!issueId || !executor || !revisor) {
+            return {
+              jsonrpc: "2.0",
+              id,
+              result: {
+                content: [{ type: "text", text: "Erro: issue_id, executor e revisor são obrigatórios." }],
+                isError: true
+              }
+            };
+          }
           const empresa = (args == null ? void 0 : args.empresa) || "orgfy";
-          const executor = (args == null ? void 0 : args.executor) || "OrgFy Atlas";
-          const revisor = (args == null ? void 0 : args.revisor) || "OrgFy Bento";
           const res = await executeDespachar(ctx, {
             empresa,
             issueId,
@@ -966,8 +1068,18 @@ async function startOrgfyMcpServer(ctx, onStatusChange) {
           };
         }
         if (name === "orgfy_gate") {
-          const prId = (args == null ? void 0 : args.pr_id) || (args == null ? void 0 : args.prId) || "42";
-          const acao = (args == null ? void 0 : args.decisao) || (args == null ? void 0 : args.acao) || "aceito";
+          const prId = ((args == null ? void 0 : args.pr_id) || (args == null ? void 0 : args.prId) || "").trim();
+          const acao = ((args == null ? void 0 : args.decisao) || (args == null ? void 0 : args.acao) || "").trim();
+          if (!prId || acao !== "aceito" && acao !== "recusado") {
+            return {
+              jsonrpc: "2.0",
+              id,
+              result: {
+                content: [{ type: "text", text: "Erro: pr_id e decisao ('aceito' | 'recusado') são obrigatórios." }],
+                isError: true
+              }
+            };
+          }
           const empresa = (args == null ? void 0 : args.empresa) || "orgfy";
           const revisor = (args == null ? void 0 : args.revisor) || "QA Sentinel";
           const motivo = (args == null ? void 0 : args.motivo) || "Decisão emitida via MCP Server";
@@ -1739,18 +1851,17 @@ function apply(ctx) {
     const [fpyRate, setFpyRate] = React.useState(100);
     const [cpiTokens, setCpiTokens] = React.useState(0.94);
     const [pipelineCards, setPipelineCards] = React.useState(() => {
-      var _a2;
       try {
         const stored = localStorage.getItem("orgfy_pipeline_cards_v11");
         if (stored) {
           const parsed = JSON.parse(stored);
-          if (Array.isArray(parsed) && parsed.length > 0 && ((_a2 = parsed[0]) == null ? void 0 : _a2.createdAt)) {
+          if (Array.isArray(parsed)) {
             return parsed;
           }
         }
-        return INITIAL_PIPELINE_CARDS;
+        return [];
       } catch {
-        return INITIAL_PIPELINE_CARDS;
+        return [];
       }
     });
     const [regrasProbatorias, setRegrasProbatorias] = React.useState(() => {
@@ -1907,11 +2018,9 @@ function apply(ctx) {
         if ((_e = live.regrasState) == null ? void 0 : _e.regras) {
           setRegrasProbatorias(Object.values(live.regrasState.regras));
         }
-        const liveCards = await fetchLiveKanbanCards(ctx, { empresa: selectedTenant }, pipelineCards);
-        if (liveCards && liveCards.length > 0) {
-          setPipelineCards(liveCards);
-          localStorage.setItem("orgfy_pipeline_cards_v11", JSON.stringify(liveCards));
-        }
+        const liveCards = await fetchLiveKanbanCards(ctx, { empresa: selectedTenant });
+        setPipelineCards(liveCards);
+        localStorage.setItem("orgfy_pipeline_cards_v11", JSON.stringify(liveCards));
       } catch (err) {
         console.warn("Leitura de fallback ativa:", err);
       }
@@ -5744,7 +5853,7 @@ Consulte sempre orgfy_status ou orgfy_kanban_read para inspecionar cards e métr
     try {
       ctx.agents.addTool({
         name: "orgfy_status",
-        description: "Retorna a telemetria em tempo real da esteira OrgFy v10 (FPY, placar de 20h, CPI de tokens, aceites blindados, total merged e distribuição por raia).",
+        description: "Retorna a telemetria em tempo real da esteira OrgFy v10 com cards_por_raia derivados diretamente do Kanban real e métricas de runtime/placar separadas (sem fallbacks hardcoded).",
         inputSchema: {
           type: "object",
           properties: {
@@ -5752,46 +5861,13 @@ Consulte sempre orgfy_status ou orgfy_kanban_read para inspecionar cards e métr
           }
         },
         call: async (_client, _context, args) => {
-          var _a2, _b2, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q;
-          const live = await fetchLiveEsteiraState(ctx);
-          const cardsPorEstado = ((_a2 = live.placarState) == null ? void 0 : _a2.cards_por_estado) || {};
-          const totalMerged = Array.isArray((_b2 = live.esteiraState) == null ? void 0 : _b2.merged) ? live.esteiraState.merged.length : ((_c = live.esteiraState) == null ? void 0 : _c.merged) ? Object.keys(live.esteiraState.merged).length : cardsPorEstado.feito ?? 289;
-          const totalCi = ((_d = live.esteiraState) == null ? void 0 : _d.ci) ? Object.keys(live.esteiraState.ci).length : cardsPorEstado.execucao ?? 52;
-          const totalAceites = ((_e = live.esteiraState) == null ? void 0 : _e.aceites) ? Array.isArray(live.esteiraState.aceites) ? live.esteiraState.aceites.length : Object.keys(live.esteiraState.aceites).length : 15;
-          const totalRevisao = cardsPorEstado.revisao ?? (((_f = live.esteiraState) == null ? void 0 : _f.ci_cache) ? Object.keys(live.esteiraState.ci_cache).length : 58);
-          const totalTriagem = ((_g = live.placarState) == null ? void 0 : _g.abertos_na_tela) ?? 17;
-          const maxReentregas = ((_h = live.porteiroState) == null ? void 0 : _h.v87_reentregas) ? Object.values(live.porteiroState.v87_reentregas).reduce((max, item) => Math.max(max, (item == null ? void 0 : item.contador) || 0), 0) : 0;
-          const circuitBreakerLoop = `${maxReentregas}/3`;
-          const circuitBreakerLoopAtivo = maxReentregas >= 3;
-          const cpiTokens = ((_j = (_i = live.metricasTurnos) == null ? void 0 : _i.governanca_orcamento) == null ? void 0 : _j.cpi_tokens) ?? (cardsPorEstado.execucao ? 0.94 : 1);
-          const cpiMinimo = ((_l = (_k = live.metricasTurnos) == null ? void 0 : _k.governanca_orcamento) == null ? void 0 : _l.cpi_minimo) ?? 0.85;
-          const porteiroOnline = ((_m = live.esteiraState) == null ? void 0 : _m.cutover_at) !== void 0 || live.porteiroState !== null;
-          const status = {
-            empresa: (args == null ? void 0 : args.empresa) || "orgfy",
-            porteiro_online: porteiroOnline,
-            fpy_percent: ((_n = live.placarState) == null ? void 0 : _n.pct_aceito_primeira_revisao) ?? 100,
-            cpi_tokens: cpiTokens,
-            cpi_minimo: cpiMinimo,
-            circuit_breaker_loop: circuitBreakerLoop,
-            circuit_breaker_loop_ativo: circuitBreakerLoopAtivo,
-            cards_por_raia: {
-              triagem: totalTriagem,
-              despachado: totalAceites,
-              execucao: totalCi,
-              revisao: totalRevisao,
-              feito: totalMerged
-            },
-            regras_probatorias_ativas: Object.keys(((_o = live.regrasState) == null ? void 0 : _o.regras) ?? {}).length,
-            total_aceites_blindados: Object.keys(((_p = live.esteiraState) == null ? void 0 : _p.aceite_cache) || ((_q = live.esteiraState) == null ? void 0 : _q.aceites) || {}).length,
-            total_merged_gate: totalMerged,
-            modo_execucao: "efemero_headless"
-          };
+          const status = await buildOrgfyStatus(ctx, (args == null ? void 0 : args.empresa) || "orgfy");
           return JSON.stringify(status, null, 2);
         }
       });
       ctx.agents.addTool({
         name: "orgfy_kanban_read",
-        description: "Lê a matriz Kanban da esteira OrgFy categorizada pelas 5 raias determinísticas (triagem, despachado, execucao, revisao, feito), com comandos de aceite congelados, hashes SHA-256 e worktrees.",
+        description: "Lê a matriz Kanban real da esteira OrgFy categorizada pelas 5 raias determinísticas (triagem, despachado, execucao, revisao, feito), sem fallback para cards mockados.",
         inputSchema: {
           type: "object",
           properties: {
@@ -5802,8 +5878,8 @@ Consulte sempre orgfy_status ou orgfy_kanban_read para inspecionar cards e métr
         call: async (_client, _context, args) => {
           const stage = (args == null ? void 0 : args.stage) || "all";
           const empresa = (args == null ? void 0 : args.empresa) || "orgfy";
-          const cards = await fetchLiveKanbanCards(ctx, { stage, empresa }, INITIAL_PIPELINE_CARDS);
-          const summarized = cards.map((c) => ({
+          const snapshot = await fetchLiveKanbanSnapshot(ctx, { stage, empresa });
+          const summarized = snapshot.cards.map((c) => ({
             id: c.id,
             issueId: c.issueId,
             fullIssueId: c.fullIssueId,
@@ -5812,17 +5888,23 @@ Consulte sempre orgfy_status ou orgfy_kanban_read para inspecionar cards e métr
             priority: c.priority,
             empresa: c.empresa,
             executor: c.executor,
-            revisor: c.revisor,
-            decisor: c.decisor,
-            acceptanceCommand: c.acceptanceCommand,
-            acceptanceHash: c.acceptanceHash,
-            worktreePath: c.worktreePath,
-            objetivo: c.objetivo,
-            feitoQuando: c.feitoQuando,
-            provaExigida: c.provaExigida,
+            revisor: c.revisor ?? null,
+            decisor: c.decisor ?? null,
+            acceptanceCommand: c.acceptanceCommand ?? null,
+            acceptanceHash: c.acceptanceHash ?? null,
+            worktreePath: c.worktreePath ?? null,
+            objetivo: c.objetivo ?? null,
+            feitoQuando: c.feitoQuando ?? null,
+            provaExigida: c.provaExigida ?? null,
             deepLink: `buzz://issue?id=${c.fullIssueId || c.issueId}&owner=${c.owner || "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20"}&d=${c.empresa || "orgfy"}`
           }));
-          return JSON.stringify({ total: summarized.length, cards: summarized }, null, 2);
+          return JSON.stringify({
+            ok: snapshot.ok,
+            error: snapshot.error,
+            sources: snapshot.sources,
+            total: summarized.length,
+            cards: summarized
+          }, null, 2);
         }
       });
       ctx.agents.addTool({

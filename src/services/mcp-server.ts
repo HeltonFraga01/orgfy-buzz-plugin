@@ -7,8 +7,8 @@ import {
   executeDespachar,
   executeGate,
   executePorteiroSync,
-  fetchLiveEsteiraState,
-  fetchLiveKanbanCards,
+  buildOrgfyStatus,
+  fetchLiveKanbanSnapshot,
 } from "./orgfy-bridge";
 
 export interface McpServerStatus {
@@ -73,7 +73,7 @@ export async function startOrgfyMcpServer(
   const mcpTools = [
     {
       name: "orgfy_status",
-      description: "Retorna a telemetria ao vivo da esteira determinística OrgFy (FPY, CPI, cards ativos e regras probatórias).",
+      description: "Retorna a telemetria ao vivo da esteira determinística OrgFy (FPY, CPI, cards por raia alinhados ao Kanban e regras probatórias, sem fallbacks hardcoded).",
       inputSchema: {
         type: "object",
         properties: {
@@ -93,7 +93,7 @@ export async function startOrgfyMcpServer(
           executor: { type: "string", description: "Nome do agente executor (ex: OrgFy Atlas)" },
           revisor: { type: "string", description: "Nome do agente revisor (ex: OrgFy Bento)" },
         },
-        required: ["executor"],
+        required: ["issue_id", "executor", "revisor"],
       },
     },
     {
@@ -110,6 +110,7 @@ export async function startOrgfyMcpServer(
           motivo: { type: "string", description: "Justificativa técnica detalhada no caso de recusa" },
           revisor: { type: "string", description: "Nome do revisor independente (padrão: QA Sentinel)" },
         },
+        required: ["pr_id", "decisao"],
       },
     },
     {
@@ -124,7 +125,7 @@ export async function startOrgfyMcpServer(
     },
     {
       name: "orgfy_kanban_read",
-      description: "Lê a matriz Kanban da esteira OrgFy v10 categorizada pelas 5 raias determinísticas (triagem, despachado, execucao, revisao, feito) com comandos de aceite congelados, hashes SHA-256 e worktrees reais.",
+      description: "Lê a matriz Kanban real da esteira OrgFy v10 categorizada pelas 5 raias determinísticas (triagem, despachado, execucao, revisao, feito) sem fallback mockado.",
       inputSchema: {
         type: "object",
         properties: {
@@ -138,7 +139,6 @@ export async function startOrgfyMcpServer(
   const handler = async (message: any) => {
     if (!message || typeof message !== "object") return undefined;
 
-    // JSON-RPC 2.0 Request
     const { id, method, params } = message;
 
     if (method === "initialize") {
@@ -150,7 +150,7 @@ export async function startOrgfyMcpServer(
           capabilities: { tools: {} },
           serverInfo: {
             name: "orgfy-control-room-mcp",
-            version: "1.0.0",
+            version: "1.1.0",
           },
         },
       };
@@ -174,49 +174,7 @@ export async function startOrgfyMcpServer(
 
       try {
         if (name === "orgfy_status") {
-          const live = await fetchLiveEsteiraState(ctx);
-          const cardsPorEstado: any = live.placarState?.cards_por_estado || {};
-          const totalMerged = Array.isArray(live.esteiraState?.merged)
-            ? live.esteiraState.merged.length
-            : (live.esteiraState?.merged ? Object.keys(live.esteiraState.merged).length : (cardsPorEstado.feito ?? 289));
-          const totalCi = live.esteiraState?.ci ? Object.keys(live.esteiraState.ci).length : (cardsPorEstado.execucao ?? 52);
-          const totalAceites = live.esteiraState?.aceites
-            ? (Array.isArray(live.esteiraState.aceites) ? live.esteiraState.aceites.length : Object.keys(live.esteiraState.aceites).length)
-            : 15;
-          const totalRevisao = cardsPorEstado.revisao ?? (live.esteiraState?.ci_cache ? Object.keys(live.esteiraState.ci_cache).length : 58);
-          const totalTriagem = (live.placarState as any)?.abertos_na_tela ?? 17;
-
-          const maxReentregas = (live.porteiroState as any)?.v87_reentregas
-            ? Object.values((live.porteiroState as any).v87_reentregas).reduce((max: number, item: any) => Math.max(max, (item as any)?.contador || 0), 0)
-            : 0;
-          const circuitBreakerLoop = `${maxReentregas}/3`;
-          const circuitBreakerLoopAtivo = maxReentregas >= 3;
-
-          const cpiTokens = live.metricasTurnos?.governanca_orcamento?.cpi_tokens ?? (cardsPorEstado.execucao ? 0.94 : 1.0);
-          const cpiMinimo = live.metricasTurnos?.governanca_orcamento?.cpi_minimo ?? 0.85;
-          const porteiroOnline = live.esteiraState?.cutover_at !== undefined || live.porteiroState !== null;
-
-          const statusResult = {
-            empresa: args?.empresa || "orgfy",
-            porteiro_online: porteiroOnline,
-            fpy_percent: live.placarState?.pct_aceito_primeira_revisao ?? 100.0,
-            cpi_tokens: cpiTokens,
-            cpi_minimo: cpiMinimo,
-            circuit_breaker_loop: circuitBreakerLoop,
-            circuit_breaker_loop_ativo: circuitBreakerLoopAtivo,
-            cards_por_raia: {
-              triagem: totalTriagem,
-              despachado: totalAceites,
-              execucao: totalCi,
-              revisao: totalRevisao,
-              feito: totalMerged,
-            },
-            regras_probatorias_ativas: Object.keys(live.regrasState?.regras ?? {}).length,
-            total_aceites_blindados: Object.keys(live.esteiraState?.aceite_cache || live.esteiraState?.aceites || {}).length,
-            total_merged_gate: totalMerged,
-            modo_execucao: "efemero_headless",
-          };
-
+          const statusResult = await buildOrgfyStatus(ctx, args?.empresa);
           return {
             jsonrpc: "2.0",
             id,
@@ -232,11 +190,11 @@ export async function startOrgfyMcpServer(
         }
 
         if (name === "orgfy_kanban_read") {
-          const cards = await fetchLiveKanbanCards(ctx, {
+          const snapshot = await fetchLiveKanbanSnapshot(ctx, {
             stage: args?.stage,
             empresa: args?.empresa,
           });
-          const summarized = cards.map((c) => ({
+          const summarized = snapshot.cards.map((c) => ({
             id: c.id,
             issueId: c.issueId,
             fullIssueId: c.fullIssueId,
@@ -245,15 +203,15 @@ export async function startOrgfyMcpServer(
             priority: c.priority,
             empresa: c.empresa,
             executor: c.executor,
-            revisor: c.revisor,
-            decisor: c.decisor,
-            acceptanceCommand: c.acceptanceCommand,
-            acceptanceHash: c.acceptanceHash,
-            worktreePath: c.worktreePath,
-            objetivo: c.objetivo,
-            feitoQuando: c.feitoQuando,
-            provaExigida: c.provaExigida,
-            deepLink: `buzz://issue?id=${c.fullIssueId || c.issueId}&owner=${c.owner || '7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20'}&d=${c.empresa || 'orgfy'}`,
+            revisor: c.revisor ?? null,
+            decisor: c.decisor ?? null,
+            acceptanceCommand: c.acceptanceCommand ?? null,
+            acceptanceHash: c.acceptanceHash ?? null,
+            worktreePath: c.worktreePath ?? null,
+            objetivo: c.objetivo ?? null,
+            feitoQuando: c.feitoQuando ?? null,
+            provaExigida: c.provaExigida ?? null,
+            deepLink: `buzz://issue?id=${c.fullIssueId || c.issueId}&owner=${c.owner || "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20"}&d=${c.empresa || "orgfy"}`,
           }));
           return {
             jsonrpc: "2.0",
@@ -262,18 +220,39 @@ export async function startOrgfyMcpServer(
               content: [
                 {
                   type: "text",
-                  text: JSON.stringify({ total: summarized.length, cards: summarized }, null, 2),
+                  text: JSON.stringify(
+                    {
+                      ok: snapshot.ok,
+                      error: snapshot.error,
+                      sources: snapshot.sources,
+                      total: summarized.length,
+                      cards: summarized,
+                    },
+                    null,
+                    2
+                  ),
                 },
               ],
+              isError: !snapshot.ok,
             },
           };
         }
 
         if (name === "orgfy_despachar") {
-          const issueId = args?.issue_id || args?.issueId || "5c569a9e";
+          const issueId = (args?.issue_id || args?.issueId || "").trim();
+          const executor = (args?.executor || "").trim();
+          const revisor = (args?.revisor || "").trim();
+          if (!issueId || !executor || !revisor) {
+            return {
+              jsonrpc: "2.0",
+              id,
+              result: {
+                content: [{ type: "text", text: "Erro: issue_id, executor e revisor são obrigatórios." }],
+                isError: true,
+              },
+            };
+          }
           const empresa = args?.empresa || "orgfy";
-          const executor = args?.executor || "OrgFy Atlas";
-          const revisor = args?.revisor || "OrgFy Bento";
 
           const res = await executeDespachar(ctx, {
             empresa,
@@ -299,8 +278,18 @@ export async function startOrgfyMcpServer(
         }
 
         if (name === "orgfy_gate") {
-          const prId = args?.pr_id || args?.prId || "42";
-          const acao = args?.decisao || args?.acao || "aceito";
+          const prId = (args?.pr_id || args?.prId || "").trim();
+          const acao = (args?.decisao || args?.acao || "").trim();
+          if (!prId || (acao !== "aceito" && acao !== "recusado")) {
+            return {
+              jsonrpc: "2.0",
+              id,
+              result: {
+                content: [{ type: "text", text: "Erro: pr_id e decisao ('aceito' | 'recusado') são obrigatórios." }],
+                isError: true,
+              },
+            };
+          }
           const empresa = args?.empresa || "orgfy";
           const revisor = args?.revisor || "QA Sentinel";
           const motivo = args?.motivo || "Decisão emitida via MCP Server";
@@ -308,7 +297,7 @@ export async function startOrgfyMcpServer(
           const res = await executeGate(ctx, {
             empresa,
             prId,
-            acao,
+            acao: acao as "aceito" | "recusado",
             motivo,
             revisor,
           });

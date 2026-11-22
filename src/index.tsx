@@ -14,6 +14,8 @@ import {
   executePorteiroSync,
   fetchLiveEsteiraState,
   fetchLiveKanbanCards,
+  fetchLiveKanbanSnapshot,
+  buildOrgfyStatus,
   calculateDsapSimilarity,
   openSystemUri,
   openIssueInBuzz,
@@ -540,19 +542,19 @@ export function apply(ctx: Context) {
     const [fpyRate, setFpyRate] = React.useState<number>(100.0);
     const [cpiTokens, setCpiTokens] = React.useState<number>(0.94);
 
-    // Estado da Matrix de Pipeline (5 Raias Determinísticas)
+    // Estado da Matrix de Pipeline (5 Raias Determinísticas — sem fallback mockado)
     const [pipelineCards, setPipelineCards] = React.useState<PipelineCard[]>(() => {
       try {
         const stored = localStorage.getItem("orgfy_pipeline_cards_v11");
         if (stored) {
           const parsed = JSON.parse(stored);
-          if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.createdAt) {
+          if (Array.isArray(parsed)) {
             return parsed;
           }
         }
-        return INITIAL_PIPELINE_CARDS;
+        return [];
       } catch {
-        return INITIAL_PIPELINE_CARDS;
+        return [];
       }
     });
 
@@ -744,12 +746,10 @@ export function apply(ctx: Context) {
           setRegrasProbatorias(Object.values(live.regrasState.regras));
         }
 
-        // Sincroniza cards reais do canvas e esteira
-        const liveCards = await fetchLiveKanbanCards(ctx, { empresa: selectedTenant }, pipelineCards);
-        if (liveCards && liveCards.length > 0) {
-          setPipelineCards(liveCards);
-          localStorage.setItem("orgfy_pipeline_cards_v11", JSON.stringify(liveCards));
-        }
+        // Sincroniza cards reais do canvas e esteira (sem fallback mockado)
+        const liveCards = await fetchLiveKanbanCards(ctx, { empresa: selectedTenant });
+        setPipelineCards(liveCards);
+        localStorage.setItem("orgfy_pipeline_cards_v11", JSON.stringify(liveCards));
       } catch (err: any) {
         console.warn("Leitura de fallback ativa:", err);
       }
@@ -4938,7 +4938,7 @@ Consulte sempre orgfy_status ou orgfy_kanban_read para inspecionar cards e métr
     try {
       (ctx.agents as any).addTool({
         name: "orgfy_status",
-        description: "Retorna a telemetria em tempo real da esteira OrgFy v10 (FPY, placar de 20h, CPI de tokens, aceites blindados, total merged e distribuição por raia).",
+        description: "Retorna a telemetria em tempo real da esteira OrgFy v10 com cards_por_raia derivados diretamente do Kanban real e métricas de runtime/placar separadas (sem fallbacks hardcoded).",
         inputSchema: {
           type: "object",
           properties: {
@@ -4946,55 +4946,14 @@ Consulte sempre orgfy_status ou orgfy_kanban_read para inspecionar cards e métr
           },
         },
         call: async (_client: any, _context: any, args: any) => {
-          const live = await fetchLiveEsteiraState(ctx);
-          const cardsPorEstado: any = live.placarState?.cards_por_estado || {};
-          const totalMerged = Array.isArray(live.esteiraState?.merged)
-            ? live.esteiraState.merged.length
-            : (live.esteiraState?.merged ? Object.keys(live.esteiraState.merged).length : (cardsPorEstado.feito ?? 289));
-          const totalCi = live.esteiraState?.ci ? Object.keys(live.esteiraState.ci).length : (cardsPorEstado.execucao ?? 52);
-          const totalAceites = live.esteiraState?.aceites
-            ? (Array.isArray(live.esteiraState.aceites) ? live.esteiraState.aceites.length : Object.keys(live.esteiraState.aceites).length)
-            : 15;
-          const totalRevisao = cardsPorEstado.revisao ?? (live.esteiraState?.ci_cache ? Object.keys(live.esteiraState.ci_cache).length : 58);
-          const totalTriagem = (live.placarState as any)?.abertos_na_tela ?? 17;
-
-          const maxReentregas = (live.porteiroState as any)?.v87_reentregas
-            ? Object.values((live.porteiroState as any).v87_reentregas).reduce((max: number, item: any) => Math.max(max, (item as any)?.contador || 0), 0)
-            : 0;
-          const circuitBreakerLoop = `${maxReentregas}/3`;
-          const circuitBreakerLoopAtivo = maxReentregas >= 3;
-
-          const cpiTokens = live.metricasTurnos?.governanca_orcamento?.cpi_tokens ?? (cardsPorEstado.execucao ? 0.94 : 1.0);
-          const cpiMinimo = live.metricasTurnos?.governanca_orcamento?.cpi_minimo ?? 0.85;
-          const porteiroOnline = live.esteiraState?.cutover_at !== undefined || live.porteiroState !== null;
-
-          const status = {
-            empresa: args?.empresa || "orgfy",
-            porteiro_online: porteiroOnline,
-            fpy_percent: live.placarState?.pct_aceito_primeira_revisao ?? 100.0,
-            cpi_tokens: cpiTokens,
-            cpi_minimo: cpiMinimo,
-            circuit_breaker_loop: circuitBreakerLoop,
-            circuit_breaker_loop_ativo: circuitBreakerLoopAtivo,
-            cards_por_raia: {
-              triagem: totalTriagem,
-              despachado: totalAceites,
-              execucao: totalCi,
-              revisao: totalRevisao,
-              feito: totalMerged,
-            },
-            regras_probatorias_ativas: Object.keys(live.regrasState?.regras ?? {}).length,
-            total_aceites_blindados: Object.keys(live.esteiraState?.aceite_cache || live.esteiraState?.aceites || {}).length,
-            total_merged_gate: totalMerged,
-            modo_execucao: "efemero_headless",
-          };
+          const status = await buildOrgfyStatus(ctx, args?.empresa || "orgfy");
           return JSON.stringify(status, null, 2);
         },
       });
 
       (ctx.agents as any).addTool({
         name: "orgfy_kanban_read",
-        description: "Lê a matriz Kanban da esteira OrgFy categorizada pelas 5 raias determinísticas (triagem, despachado, execucao, revisao, feito), com comandos de aceite congelados, hashes SHA-256 e worktrees.",
+        description: "Lê a matriz Kanban real da esteira OrgFy categorizada pelas 5 raias determinísticas (triagem, despachado, execucao, revisao, feito), sem fallback para cards mockados.",
         inputSchema: {
           type: "object",
           properties: {
@@ -5005,8 +4964,8 @@ Consulte sempre orgfy_status ou orgfy_kanban_read para inspecionar cards e métr
         call: async (_client: any, _context: any, args: any) => {
           const stage = args?.stage || "all";
           const empresa = args?.empresa || "orgfy";
-          const cards = await fetchLiveKanbanCards(ctx, { stage, empresa }, INITIAL_PIPELINE_CARDS);
-          const summarized = cards.map((c) => ({
+          const snapshot = await fetchLiveKanbanSnapshot(ctx, { stage, empresa });
+          const summarized = snapshot.cards.map((c) => ({
             id: c.id,
             issueId: c.issueId,
             fullIssueId: c.fullIssueId,
@@ -5015,17 +4974,23 @@ Consulte sempre orgfy_status ou orgfy_kanban_read para inspecionar cards e métr
             priority: c.priority,
             empresa: c.empresa,
             executor: c.executor,
-            revisor: c.revisor,
-            decisor: c.decisor,
-            acceptanceCommand: c.acceptanceCommand,
-            acceptanceHash: c.acceptanceHash,
-            worktreePath: c.worktreePath,
-            objetivo: c.objetivo,
-            feitoQuando: c.feitoQuando,
-            provaExigida: c.provaExigida,
-            deepLink: `buzz://issue?id=${c.fullIssueId || c.issueId}&owner=${c.owner || '7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20'}&d=${c.empresa || 'orgfy'}`,
+            revisor: c.revisor ?? null,
+            decisor: c.decisor ?? null,
+            acceptanceCommand: c.acceptanceCommand ?? null,
+            acceptanceHash: c.acceptanceHash ?? null,
+            worktreePath: c.worktreePath ?? null,
+            objetivo: c.objetivo ?? null,
+            feitoQuando: c.feitoQuando ?? null,
+            provaExigida: c.provaExigida ?? null,
+            deepLink: `buzz://issue?id=${c.fullIssueId || c.issueId}&owner=${c.owner || "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20"}&d=${c.empresa || "orgfy"}`,
           }));
-          return JSON.stringify({ total: summarized.length, cards: summarized }, null, 2);
+          return JSON.stringify({
+            ok: snapshot.ok,
+            error: snapshot.error,
+            sources: snapshot.sources,
+            total: summarized.length,
+            cards: summarized,
+          }, null, 2);
         },
       });
 

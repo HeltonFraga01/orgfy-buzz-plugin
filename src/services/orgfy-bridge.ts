@@ -137,18 +137,30 @@ export function formatFullDateTime(dateInput: number | string | Date | undefined
 
 /**
  * Snapshot completo dos arquivos de estado da esteira determinística.
- * Lê dados reais de board.json, esteira-minima-state.json, placar-20h.json,
- * regras-probatorias.json, porteiro-state.json e metricas_turnos.json.
+ * Lê dados reais de board.json, esteira-minima-state.json (ou por tenant),
+ * placar-20h.json, regras-probatorias.json, porteiro-state.json e metricas_turnos.json.
  */
-export async function fetchLiveEsteiraState(ctx: any) {
-  const [boardManifest, esteiraState, placarState, regrasState, porteiroState, metricasTurnos] = await Promise.all([
+export async function fetchLiveEsteiraState(ctx: any, empresa?: string) {
+  const slug = empresa && empresa !== "all" ? empresa : "orgfy";
+  const tenantEsteiraPath =
+    slug !== "orgfy"
+      ? `.esteira/estado/esteira-minima-${slug}-state.json`
+      : ".esteira/estado/esteira-minima-state.json";
+
+  const [boardManifest, esteiraStateTenant, placarState, regrasState, porteiroState, metricasTurnos] = await Promise.all([
     readOrgfyJson<BoardManifest | null>(ctx, "empresas/board.json", null),
-    readOrgfyJson<EsteiraMinimaState | null>(ctx, ".esteira/estado/esteira-minima-state.json", null),
+    readOrgfyJson<EsteiraMinimaState | null>(ctx, tenantEsteiraPath, null),
     readOrgfyJson<PlacarState | null>(ctx, ".scratch/placar-20h.json", null),
     readOrgfyJson<RegrasProbatoriasState | null>(ctx, ".esteira/estado/regras-probatorias.json", null),
     readOrgfyJson<any>(ctx, ".esteira/estado/porteiro-state.json", null),
     readOrgfyJson<any>(ctx, ".scratch/metricas_turnos.json", null),
   ]);
+
+  const esteiraState =
+    esteiraStateTenant ??
+    (slug !== "orgfy"
+      ? await readOrgfyJson<EsteiraMinimaState | null>(ctx, ".esteira/estado/esteira-minima-state.json", null)
+      : null);
 
   return {
     boardManifest,
@@ -161,166 +173,222 @@ export async function fetchLiveEsteiraState(ctx: any) {
   };
 }
 
+export interface LiveKanbanSnapshot {
+  ok: boolean;
+  error: string | null;
+  sources: {
+    canvas_atual: boolean;
+    esteira_minima_state: boolean;
+  };
+  cards: PipelineCard[];
+}
+
 /**
- * Extrai os cards reais da esteira v10 combinando:
- * 1. .scratch/canvas_atual.md (tarefas ativas e na fila)
- * 2. .esteira/estado/esteira-minima-state.json (aceites congelados, hashes, CI e merged)
- * 3. .scratch/placar-20h.json (detalhes de cards ativos e distribuição)
- * 4. baseCards (metadados enriquecidos para cards canônicos)
+ * Extrai os cards reais da esteira v10 sem qualquer fallback mockado:
+ * 1. .scratch/canvas_atual.md (tabelas de 4 colunas em ## Fila e 6 colunas em ## Em execução / ## Feito hoje)
+ * 2. .esteira/estado/esteira-minima-state.json (aceites congelados, aceite_cache, CI e merged)
  */
-export async function fetchLiveKanbanCards(
+export async function fetchLiveKanbanSnapshot(
   ctx: any,
-  filter?: { stage?: string; empresa?: string },
-  baseCards?: PipelineCard[]
-): Promise<PipelineCard[]> {
-  const live = await fetchLiveEsteiraState(ctx);
-  const canvasText = await readOrgfyText(ctx, ".scratch/canvas_atual.md");
+  filter?: { stage?: string; empresa?: string }
+): Promise<LiveKanbanSnapshot> {
+  const [live, canvasText] = await Promise.all([
+    fetchLiveEsteiraState(ctx, filter?.empresa),
+    readOrgfyText(ctx, ".scratch/canvas_atual.md"),
+  ]);
+
+  const hasCanvas = typeof canvasText === "string" && canvasText.trim().length > 0;
+  const hasEsteiraState = live.esteiraState !== null;
+
+  if (!hasCanvas && !hasEsteiraState) {
+    return {
+      ok: false,
+      error: "Não foi possível ler .scratch/canvas_atual.md nem .esteira/estado/esteira-minima-state.json.",
+      sources: { canvas_atual: false, esteira_minima_state: false },
+      cards: [],
+    };
+  }
 
   const cardMap = new Map<string, PipelineCard>();
-
-  // 1. Semeia com baseCards se fornecido
-  if (baseCards && Array.isArray(baseCards)) {
-    for (const c of baseCards) {
-      cardMap.set(c.issueId, { ...c });
-      if (c.fullIssueId) {
-        cardMap.set(c.fullIssueId, { ...c });
-      }
-    }
-  }
-
-  // 2. Sincroniza com aceites e aceite_cache de esteira-minima-state.json
   const aceites = (live.esteiraState?.aceites || {}) as Record<string, any>;
   const aceiteCache = (live.esteiraState?.aceite_cache || {}) as Record<string, any>;
+  const mergedSet = new Set<string>(
+    Array.isArray(live.esteiraState?.merged)
+      ? (live.esteiraState.merged as string[])
+      : Object.keys((live.esteiraState?.merged as Record<string, any>) || {})
+  );
 
+  // Indexa aceite_cache por prefixo curto (8 chars) e por issue_id completo
+  const aceiteCacheByIssue = new Map<string, any>();
   for (const [, item] of Object.entries(aceiteCache)) {
-    const issueId = item.issue_id ? item.issue_id.slice(0, 8) : "";
-    if (issueId && cardMap.has(issueId)) {
-      const card = cardMap.get(issueId)!;
-      if (item.comando) card.acceptanceCommand = item.comando;
-      if (item.sha_pr) card.commitSha = item.sha_pr.slice(0, 7);
-      if (item.status === "VERDE") card.ciStatus = "pass";
+    if (item?.issue_id) {
+      aceiteCacheByIssue.set(item.issue_id, item);
+      aceiteCacheByIssue.set(item.issue_id.slice(0, 8), item);
     }
   }
 
-  // 3. Extrai cards reais do canvas_atual.md
-  if (canvasText) {
-    const issuePattern = /\|\s*\[([^\]]+)\]\(buzz:\/\/issue\?id=([0-9a-fA-F]{64})&owner=([0-9a-fA-F]{64})&d=([^)]+)\)\s*\|\s*([^|]+)\s*\|\s*([^|]+)\s*\|\s*([^|]+)\s*\|\s*([^|]+)\s*\|\s*([^|]+)\s*\|/g;
-
+  // 1. Extrai cards reais do canvas_atual.md (suporta tabelas de 4, 5 ou 6+ colunas)
+  if (hasCanvas && canvasText) {
+    const linkPattern = /\[([^\]]+)\]\(buzz:\/\/issue\?id=([0-9a-fA-F]{64})&owner=([0-9a-fA-F]{64})&d=([^)]+)\)/;
     const lines = canvasText.split("\n");
-    let inFila = false;
-    let inFeito = false;
+    let section: "execucao" | "fila" | "feito" | "other" = "other";
 
-    for (const line of lines) {
-      if (line.startsWith("## Fila")) {
-        inFila = true;
-        inFeito = false;
-        continue;
-      }
-      if (line.startsWith("## Feito hoje")) {
-        inFeito = true;
-        inFila = false;
-        continue;
-      }
-      if (line.startsWith("## ") && !line.includes("Fila") && !line.includes("Feito")) {
-        inFila = false;
-        inFeito = false;
-      }
-
-      let match: RegExpExecArray | null;
-      while ((match = issuePattern.exec(line)) !== null) {
-        const [, titleRaw, fullId, owner, tenantRaw, spec, c3, c4, c5, c6] = match;
-        const shortId = fullId.slice(0, 8);
-        const title = titleRaw.trim();
-        const tenant = tenantRaw.trim();
-        const statusText = `${c5 || ""} ${c6 || ""}`.toLowerCase();
-
-        let stage: PipelineCard["stage"] = "execucao";
-        if (inFila) {
-          stage = "triagem";
-        } else if (inFeito) {
-          stage = "feito";
-        } else if (statusText.includes("revisão") || statusText.includes("gate") || statusText.includes("ci ok")) {
-          stage = "revisao";
-        } else if (statusText.includes("despachado")) {
-          stage = "despachado";
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (line.startsWith("## ")) {
+        const lowerHeader = line.toLowerCase();
+        if (lowerHeader.includes("fila")) {
+          section = "fila";
+        } else if (lowerHeader.includes("feito") || lowerHeader.includes("conclu")) {
+          section = "feito";
+        } else if (lowerHeader.includes("execu") || lowerHeader.includes("andamento")) {
+          section = "execucao";
+        } else {
+          section = "other";
         }
-
-        const existing = cardMap.get(shortId) || cardMap.get(fullId);
-        const aceiteItem = aceites[fullId] || {};
-
-        const newCard: PipelineCard = {
-          id: existing?.id || `card-${shortId}`,
-          issueId: shortId,
-          fullIssueId: fullId,
-          owner: owner.trim(),
-          title: existing?.title || title,
-          priority: existing?.priority || (title.includes("P0") ? "P0" : title.includes("P1") ? "P1" : "P2"),
-          empresa: tenant || "orgfy",
-          executor: c3?.trim() || existing?.executor || "OrgFy Val",
-          revisor: c4?.trim() || existing?.revisor || "OrgFy Teo",
-          decisor: existing?.decisor || "OrgFy Iris",
-          tier: existing?.tier || (c3?.includes("Bento") ? "tier_3_arquiteto" : c4?.includes("Vera") ? "tier_2_revisor" : "tier_1_exec_barato"),
-          stage: existing?.stage || stage,
-          createdAt: existing?.createdAt || (Date.now() - 86400000),
-          updatedAt: existing?.updatedAt || (Date.now() - 3600000),
-          elapsedTime: existing?.elapsedTime || formatRelativeTime(existing?.createdAt || Date.now() - 86400000),
-          objetivo: existing?.objetivo || title,
-          contexto: existing?.contexto || spec?.trim() || "Execução rastreada pela esteira v10 no canvas ativo.",
-          autoridade: existing?.autoridade || "DECIDIDO Iris conforme diretriz arquitetural da holding.",
-          decisao: existing?.decisao || "Execução e verificação aprovadas com isolamento de worktree.",
-          feitoQuando: existing?.feitoQuando || "Todos os critérios de aceite cumpridos e validados sem regressão.",
-          provaExigida: existing?.provaExigida || "python3 ferramentas/esteira/lint_card.py -> exit 0.",
-          acceptanceCommand: existing?.acceptanceCommand || aceiteItem.comando || "python3 ferramentas/esteira/lint_card.py",
-          acceptanceHash: existing?.acceptanceHash || aceiteItem.hash_comando || "7b88aa12c5596489b91e92051dc73ff539e6a0082f42a5482329dc3309aef411",
-          worktreePath: existing?.worktreePath || `.worktrees/${shortId}`,
-          modoBuzz: existing?.modoBuzz || "goal",
-          goalMaxTurns: existing?.goalMaxTurns || 20,
-          maxRuntime: existing?.maxRuntime || "3600s",
-          branch: existing?.branch || `card/${shortId}`,
-          probes: existing?.probes || { http_rota: true, supabase_rls: true, playwright_console: true },
-          rejectionHistory: existing?.rejectionHistory || [],
-        };
-
-        cardMap.set(shortId, newCard);
+        continue;
       }
+
+      if (!line.startsWith("|")) continue;
+      const linkMatch = linkPattern.exec(line);
+      if (!linkMatch) continue;
+
+      const [, titleRaw, fullId, owner, tenantRaw] = linkMatch;
+      const cells = line
+        .replace(/^\|/, "")
+        .replace(/\|$/, "")
+        .split("|")
+        .map((c) => c.trim());
+
+      const shortId = fullId.slice(0, 8);
+      const title = titleRaw.trim();
+      const tenant = tenantRaw.trim() || "orgfy";
+
+      let spec = "";
+      let executor = "";
+      let revisor = "";
+      let statusText = "";
+      let branchCell = "";
+      let tableAcceptanceCmd = "";
+
+      if (section === "fila" && cells.length <= 4) {
+        // | Card | Spec | Aceite | Dono |
+        spec = cells[1] || "";
+        tableAcceptanceCmd = (cells[2] || "").replace(/^`|`$/g, "").trim();
+        statusText = cells[3] || "";
+      } else {
+        // | Card | Spec | Executor | Revisor | Estado | Branch / PR |
+        spec = cells[1] || "";
+        executor = cells[2] || "";
+        revisor = cells[3] || "";
+        statusText = cells[4] || "";
+        branchCell = cells[5] || "";
+      }
+
+      const lowerStatus = `${statusText} ${branchCell}`.toLowerCase();
+      let stage: PipelineCard["stage"] = "execucao";
+      if (section === "fila") {
+        stage = "triagem";
+      } else if (
+        section === "feito" ||
+        mergedSet.has(fullId) ||
+        mergedSet.has(shortId) ||
+        lowerStatus.includes("integrado em origin/main") ||
+        lowerStatus.includes("merged")
+      ) {
+        stage = "feito";
+      } else if (
+        lowerStatus.includes("revisão") ||
+        lowerStatus.includes("revisao") ||
+        lowerStatus.includes("gate") ||
+        lowerStatus.includes("ci ok") ||
+        lowerStatus.includes("aguardando ci")
+      ) {
+        stage = "revisao";
+      } else if (lowerStatus.includes("aguardando reatrib") || lowerStatus.includes("aguardando despacho")) {
+        stage = "triagem";
+      } else if (lowerStatus.includes("despachado") && !lowerStatus.includes("em andamento")) {
+        stage = "despachado";
+      }
+
+      const aceiteRecord = aceites[fullId] || aceites[shortId] || null;
+      const cachedAceite = aceiteCacheByIssue.get(fullId) || aceiteCacheByIssue.get(shortId) || null;
+      const acceptanceCommand =
+        (typeof aceiteRecord === "object" && aceiteRecord?.comando) ||
+        cachedAceite?.comando ||
+        tableAcceptanceCmd ||
+        undefined;
+      const acceptanceHash =
+        (typeof aceiteRecord === "object" && aceiteRecord?.hash_comando) ||
+        cachedAceite?.hash_comando ||
+        undefined;
+
+      const branchMatch = branchCell.match(/`([^`]+)`/);
+      const branch = branchMatch ? branchMatch[1] : undefined;
+      const prMatch = `${statusText} ${branchCell}`.match(/PR\s+`?([0-9a-fA-F]{7,64})`?/i);
+      const prId = prMatch ? prMatch[1] : undefined;
+      const shaMatch = cachedAceite?.sha_pr || `${statusText} ${branchCell}`.match(/SHA\s+`?([0-9a-fA-F]{7,40})`?/i)?.[1];
+
+      const card: PipelineCard = {
+        id: `card-${shortId}`,
+        issueId: shortId,
+        fullIssueId: fullId,
+        owner: owner.trim(),
+        title,
+        priority: title.includes("P0") ? "P0" : title.includes("P1") ? "P1" : "P2",
+        empresa: tenant,
+        executor: executor || "A definir",
+        revisor: revisor || "A definir",
+        decisor: "OrgFy Iris",
+        tier: executor.includes("Bento")
+          ? "tier_3_arquiteto"
+          : revisor.includes("Vera") || revisor.includes("Teo")
+          ? "tier_2_revisor"
+          : "tier_1_exec_barato",
+        stage,
+        prId,
+        commitSha: shaMatch ? String(shaMatch).slice(0, 7) : undefined,
+        ciStatus: cachedAceite?.status === "VERDE" ? "pass" : undefined,
+        objetivo: title,
+        contexto: statusText || spec || undefined,
+        acceptanceCommand,
+        acceptanceHash,
+        worktreePath: `.worktrees/${shortId}`,
+        branch,
+      };
+
+      cardMap.set(shortId, card);
     }
   }
 
-  // 4. Se não havia baseCards nem canvasText, cria cards a partir dos aceites reais em esteiraState
-  if (cardMap.size === 0 && aceites) {
+  // 2. Se o canvas não trouxe cards, deriva diretamente dos aceites reais de esteira-minima-state.json
+  if (cardMap.size === 0 && hasEsteiraState && aceites) {
     for (const [fullId, item] of Object.entries(aceites)) {
+      if (!item || typeof item !== "object") continue;
       const shortId = fullId.slice(0, 8);
+      const cachedAceite = aceiteCacheByIssue.get(fullId) || aceiteCacheByIssue.get(shortId) || null;
+      const isMerged = mergedSet.has(fullId) || mergedSet.has(shortId);
       cardMap.set(shortId, {
         id: `card-${shortId}`,
         issueId: shortId,
         fullIssueId: fullId,
-        title: `Card ${shortId} — Aceite blindado`,
+        title: `Card ${shortId} — Aceite congelado`,
         priority: "P1",
-        empresa: "orgfy",
-        executor: "OrgFy Val",
-        revisor: "OrgFy Teo",
+        empresa: filter?.empresa && filter.empresa !== "all" ? filter.empresa : "orgfy",
+        executor: "A definir",
+        revisor: "A definir",
         tier: "tier_1_exec_barato",
-        stage: "despachado",
-        acceptanceCommand: (item as any).comando || "python3 ferramentas/esteira/lint_card.py",
-        acceptanceHash: (item as any).hash_comando || "",
+        stage: isMerged ? "feito" : "despachado",
+        commitSha: cachedAceite?.sha_pr ? String(cachedAceite.sha_pr).slice(0, 7) : undefined,
+        ciStatus: cachedAceite?.status === "VERDE" ? "pass" : undefined,
+        acceptanceCommand: (item as any).comando || cachedAceite?.comando || undefined,
+        acceptanceHash: (item as any).hash_comando || undefined,
         worktreePath: `.worktrees/${shortId}`,
-        createdAt: Date.now() - 86400000,
-        elapsedTime: "há 1d",
       });
     }
   }
 
-  // Agrupa cards únicos por issueId
-  const uniqueCards: PipelineCard[] = [];
-  const seenIds = new Set<string>();
-  for (const card of cardMap.values()) {
-    if (!seenIds.has(card.issueId)) {
-      seenIds.add(card.issueId);
-      uniqueCards.push(card);
-    }
-  }
-
-  let result = uniqueCards;
+  let result = Array.from(cardMap.values());
   if (filter?.empresa && filter.empresa !== "all") {
     result = result.filter((c) => !c.empresa || c.empresa === filter.empresa);
   }
@@ -328,7 +396,139 @@ export async function fetchLiveKanbanCards(
     result = result.filter((c) => c.stage === filter.stage);
   }
 
-  return result;
+  return {
+    ok: true,
+    error: null,
+    sources: {
+      canvas_atual: hasCanvas,
+      esteira_minima_state: hasEsteiraState,
+    },
+    cards: result,
+  };
+}
+
+/**
+ * Wrapper compatível para componentes UI: retorna a lista real de cards (sem fallback mockado).
+ */
+export async function fetchLiveKanbanCards(
+  ctx: any,
+  filter?: { stage?: string; empresa?: string }
+): Promise<PipelineCard[]> {
+  const snapshot = await fetchLiveKanbanSnapshot(ctx, filter);
+  return snapshot.cards;
+}
+
+/**
+ * Fonte única de verdade para orgfy_status (usada tanto pela agentTool quanto pelo servidor MCP).
+ * Zero mistura de fontes em cards_por_raia e zero números hardcoded de fallback.
+ */
+export async function buildOrgfyStatus(ctx: any, empresa?: string) {
+  const slug = empresa || "orgfy";
+  const [live, kanban] = await Promise.all([
+    fetchLiveEsteiraState(ctx, slug),
+    fetchLiveKanbanSnapshot(ctx, { empresa: slug }),
+  ]);
+
+  // Contagem das 5 raias derivada 100% da mesma fonte do orgfy_kanban_read
+  const cardsPorRaia = {
+    triagem: 0,
+    despachado: 0,
+    execucao: 0,
+    revisao: 0,
+    feito: 0,
+  };
+  for (const c of kanban.cards) {
+    if (c.stage in cardsPorRaia) {
+      cardsPorRaia[c.stage as keyof typeof cardsPorRaia] += 1;
+    }
+  }
+
+  const countEntries = (val: any): number | null => {
+    if (val === null || val === undefined) return null;
+    if (Array.isArray(val)) return val.length;
+    if (typeof val === "object") return Object.keys(val).length;
+    return null;
+  };
+
+  const reentregasObj = (live.porteiroState as any)?.v87_reentregas;
+  const maxReentregas =
+    reentregasObj && typeof reentregasObj === "object"
+      ? Object.values(reentregasObj).reduce(
+          (max: number, item: any) => Math.max(max, Number((item as any)?.contador) || 0),
+          0
+        )
+      : null;
+
+  const porteiroOnline =
+    live.esteiraState?.cutover_at !== undefined || live.porteiroState !== null;
+
+  const regrasObj = live.regrasState?.regras;
+  const regrasAtivas =
+    regrasObj && typeof regrasObj === "object" ? Object.keys(regrasObj).length : null;
+
+  const totalAceitesBlindados =
+    countEntries(live.esteiraState?.aceite_cache) ?? countEntries(live.esteiraState?.aceites);
+
+  const totalMergedGate = countEntries(live.esteiraState?.merged);
+  const cpiTokens =
+    typeof live.metricasTurnos?.governanca_orcamento?.cpi_tokens === "number"
+      ? live.metricasTurnos.governanca_orcamento.cpi_tokens
+      : null;
+  const cpiMinimo =
+    typeof live.metricasTurnos?.governanca_orcamento?.cpi_minimo === "number"
+      ? live.metricasTurnos.governanca_orcamento.cpi_minimo
+      : null;
+  const fpyPercent =
+    typeof live.placarState?.pct_aceito_primeira_revisao === "number"
+      ? live.placarState.pct_aceito_primeira_revisao
+      : null;
+
+  return {
+    empresa: slug,
+    measured_at: new Date().toISOString(),
+    porteiro_online: porteiroOnline,
+    fpy_percent: fpyPercent,
+    cpi_tokens: cpiTokens,
+    cpi_minimo: cpiMinimo,
+    circuit_breaker_loop: maxReentregas !== null ? `${maxReentregas}/3` : null,
+    circuit_breaker_loop_ativo: maxReentregas !== null ? maxReentregas >= 3 : null,
+    total_cards_kanban: kanban.cards.length,
+    cards_por_raia: cardsPorRaia,
+    regras_probatorias_ativas: regrasAtivas,
+    total_aceites_blindados: totalAceitesBlindados,
+    total_merged_gate: totalMergedGate,
+    placar_20h: live.placarState
+      ? {
+          disponivel: true,
+          abertos_na_tela: (live.placarState as any).abertos_na_tela ?? null,
+          divergencia_relay_tela: (live.placarState as any).divergencia_relay_tela ?? null,
+          voltas_revisao: (live.placarState as any).voltas_revisao ?? null,
+          cards_por_estado_historico: live.placarState.cards_por_estado ?? null,
+        }
+      : { disponivel: false },
+    esteira_runtime: live.esteiraState
+      ? {
+          disponivel: true,
+          cutover_at: live.esteiraState.cutover_at ?? null,
+          aceites_ativos: countEntries(live.esteiraState.aceites),
+          aceites_blindados_cache: countEntries(live.esteiraState.aceite_cache),
+          ci_registros: countEntries(live.esteiraState.ci),
+          ci_cache: countEntries(live.esteiraState.ci_cache),
+          merged_gate: totalMergedGate,
+        }
+      : { disponivel: false },
+    fontes_lidas: {
+      canvas_atual: kanban.sources.canvas_atual,
+      esteira_minima_state: live.esteiraState !== null,
+      placar_20h: live.placarState !== null,
+      porteiro_state: live.porteiroState !== null,
+      metricas_turnos: live.metricasTurnos !== null,
+      regras_probatorias: live.regrasState !== null,
+      board_manifest: live.boardManifest !== null,
+    },
+    kanban_error: kanban.error,
+    modo_execucao: "efemero_headless",
+  };
 }
 
 /**

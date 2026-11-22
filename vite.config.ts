@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   publicDir: false,
+  css: { postcss: { plugins: [] } },
   oxc: { jsx: { runtime: "classic" } },
   build: {
     outDir: ".",
