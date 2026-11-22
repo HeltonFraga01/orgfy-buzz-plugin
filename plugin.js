@@ -2401,6 +2401,52 @@ async function evaluateGovernanceAndReact(ctx, options = {}) {
     skippedByCooldown
   };
 }
+function normalizeTextForFallback(text) {
+  return String(text || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
+}
+function classifyFallbackRiskAndSurface(titulo, descricao) {
+  const blob = normalizeTextForFallback(`${titulo} ${descricao}`);
+  const z6Terms = [
+    "faturamento",
+    "pagamento",
+    "pix",
+    "stripe",
+    "billing",
+    "sats",
+    "secret",
+    "segredo",
+    "token",
+    "oauth",
+    "chmod",
+    "credencial",
+    "nsec",
+    "rls",
+    "auth",
+    "deploy",
+    "producao",
+    "production",
+    "swarm",
+    "portainer",
+    "stack",
+    "migration",
+    "migracao",
+    "drop table"
+  ];
+  const isZ6 = z6Terms.some((t) => blob.includes(t));
+  let surface = "codigo";
+  if (["seguranca", "secret", "auth", "oauth", "token", "rls", "chmod"].some((t) => blob.includes(t))) {
+    surface = "seguranca";
+  } else if (["ui", "ux", "css", "tsx", "react", "kanban", "modal", "layout"].some((t) => blob.includes(t))) {
+    surface = "ui";
+  } else if (["docker", "swarm", "portainer", "deploy", "cron", "worktree"].some((t) => blob.includes(t))) {
+    surface = "infra";
+  } else if (["spec", "licao", "playbook", "governanca", "manifesto"].some((t) => blob.includes(t))) {
+    surface = "metodo";
+  }
+  if (isZ6) return { riskLevel: "Z6", requiresHumanApproval: true, surface };
+  if (surface === "seguranca" || surface === "infra") return { riskLevel: "Z4", requiresHumanApproval: false, surface };
+  return { riskLevel: "Z2", requiresHumanApproval: false, surface };
+}
 async function lintCardForDispatch(ctx, input) {
   var _a;
   const issues = [];
@@ -2412,23 +2458,27 @@ async function lintCardForDispatch(ctx, input) {
   }
   if (!cmd) {
     issues.push("Regra L-22 violada: comando de aceite executável (acceptanceCommand) ausente.");
-  } else if (/^(todo|tbd|none|n\/a)$/i.test(cmd)) {
-    issues.push("Regra L-22 violada: acceptanceCommand contém placeholder não executável.");
+  } else if (/^(todo|tbd|none|n\/a|true|:|exit\s+0)$/i.test(cmd) || /^echo\b/i.test(cmd) && !/(pytest|node |npm |pnpm |cargo |shasum|python|curl |git )/i.test(cmd)) {
+    issues.push("Regra L-22 violada: acceptanceCommand é placeholder ou comando inócuo (carimbo).");
   }
   if (input.executor && input.revisor && input.executor.trim() === input.revisor.trim()) {
     issues.push("Regra L-01 violada: executor e revisor não podem ser o mesmo agente.");
   }
+  const fallbackCls = classifyFallbackRiskAndSurface(titulo, desc);
   let usedDecisionsApi = false;
+  let decisionSource = "deterministic_fallback";
+  let fallbackReason = "decisions_api_not_available";
   let score = issues.length === 0 ? 1 : Math.max(0.2, 1 - issues.length * 0.3);
-  try {
-    const decisionsApi = ctx.decisions;
-    if ((decisionsApi == null ? void 0 : decisionsApi.decide) && issues.length === 0 && (titulo || desc)) {
+  const decisionsApi = ctx.decisions;
+  if ((decisionsApi == null ? void 0 : decisionsApi.decide) && issues.length === 0 && (titulo || desc)) {
+    try {
       const decisionRes = await decisionsApi.decide({
         state: {
           issueId: input.issueId || "draft",
           titulo,
           acceptanceCommand: cmd,
-          descricao: desc
+          descricao: desc,
+          fallbackRisk: fallbackCls.riskLevel
         },
         questions: [
           {
@@ -2439,21 +2489,30 @@ async function lintCardForDispatch(ctx, input) {
         ]
       });
       usedDecisionsApi = true;
+      decisionSource = "decisions_api";
+      fallbackReason = null;
       const ans = ((_a = decisionRes == null ? void 0 : decisionRes.answers) == null ? void 0 : _a.atomic_scope) ?? (decisionRes == null ? void 0 : decisionRes.atomic_scope);
       if (ans === false || ans === "no") {
         issues.push("Avaliação semântica (ctx.decisions): escopo amplo demais ou pouco verificável.");
         score = 0.55;
       }
+    } catch (err) {
+      const msg = String((err == null ? void 0 : err.message) || err || "unknown_error");
+      fallbackReason = /(402|429|quota|balance|credit|saldo|timeout)/i.test(msg) ? `decisions_api_quota_or_timeout:${msg.slice(0, 80)}` : `decisions_api_error:${msg.slice(0, 80)}`;
     }
-  } catch {
   }
   const approved = issues.length === 0;
   return {
     approved,
     score: Number(score.toFixed(2)),
     usedDecisionsApi,
+    decisionSource,
+    fallbackReason,
+    riskLevel: fallbackCls.riskLevel,
+    requiresHumanApproval: fallbackCls.requiresHumanApproval,
+    surface: fallbackCls.surface,
     issues,
-    recommendation: approved ? "Card aprovado no pré-voo L-01/L-22 e pronto para despacho atômico." : "Corrija as pendências acima antes de despachar para evitar retrabalho no Gate."
+    recommendation: approved ? usedDecisionsApi ? "Card aprovado via Decisions API + invariantes L-01/L-22." : "Card aprovado via fallback determinístico offline (L-01/L-22/Z6 preservados)." : "Corrija as pendências acima antes de despachar para evitar retrabalho no Gate."
   };
 }
 async function bindConversationContextForCard(ctx, input) {

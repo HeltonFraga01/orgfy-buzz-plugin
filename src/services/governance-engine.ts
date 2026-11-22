@@ -39,8 +39,22 @@ export interface CardLintResult {
   approved: boolean;
   score: number;
   usedDecisionsApi: boolean;
+  decisionSource: "decisions_api" | "deterministic_fallback";
+  fallbackReason: string | null;
+  riskLevel: "Z2" | "Z3" | "Z4" | "Z6";
+  requiresHumanApproval: boolean;
+  surface: string;
   issues: string[];
   recommendation: string;
+}
+
+export interface DsapHybridResult {
+  decisionSource: "decisions_api" | "deterministic_fallback";
+  fallbackReason: string | null;
+  similarity: number;
+  threshold: number;
+  backtrackRequired: boolean;
+  action: string;
 }
 
 export const LOCKS_FILE_PATH = "/Users/heltonfraga/.buzz/.scratch/orgfy-locks.json";
@@ -362,6 +376,42 @@ export async function evaluateGovernanceAndReact(
   };
 }
 
+function normalizeTextForFallback(text: string): string {
+  return String(text || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function classifyFallbackRiskAndSurface(titulo: string, descricao: string): {
+  riskLevel: "Z2" | "Z3" | "Z4" | "Z6";
+  requiresHumanApproval: boolean;
+  surface: string;
+} {
+  const blob = normalizeTextForFallback(`${titulo} ${descricao}`);
+  const z6Terms = [
+    "faturamento", "pagamento", "pix", "stripe", "billing", "sats",
+    "secret", "segredo", "token", "oauth", "chmod", "credencial", "nsec", "rls", "auth",
+    "deploy", "producao", "production", "swarm", "portainer", "stack", "migration", "migracao", "drop table",
+  ];
+  const isZ6 = z6Terms.some((t) => blob.includes(t));
+  let surface = "codigo";
+  if (["seguranca", "secret", "auth", "oauth", "token", "rls", "chmod"].some((t) => blob.includes(t))) {
+    surface = "seguranca";
+  } else if (["ui", "ux", "css", "tsx", "react", "kanban", "modal", "layout"].some((t) => blob.includes(t))) {
+    surface = "ui";
+  } else if (["docker", "swarm", "portainer", "deploy", "cron", "worktree"].some((t) => blob.includes(t))) {
+    surface = "infra";
+  } else if (["spec", "licao", "playbook", "governanca", "manifesto"].some((t) => blob.includes(t))) {
+    surface = "metodo";
+  }
+  if (isZ6) return { riskLevel: "Z6", requiresHumanApproval: true, surface };
+  if (surface === "seguranca" || surface === "infra") return { riskLevel: "Z4", requiresHumanApproval: false, surface };
+  return { riskLevel: "Z2", requiresHumanApproval: false, surface };
+}
+
 export async function lintCardForDispatch(
   ctx: Context,
   input: {
@@ -383,25 +433,32 @@ export async function lintCardForDispatch(
   }
   if (!cmd) {
     issues.push("Regra L-22 violada: comando de aceite executável (acceptanceCommand) ausente.");
-  } else if (/^(todo|tbd|none|n\/a)$/i.test(cmd)) {
-    issues.push("Regra L-22 violada: acceptanceCommand contém placeholder não executável.");
+  } else if (
+    /^(todo|tbd|none|n\/a|true|:|exit\s+0)$/i.test(cmd) ||
+    (/^echo\b/i.test(cmd) && !/(pytest|node |npm |pnpm |cargo |shasum|python|curl |git )/i.test(cmd))
+  ) {
+    issues.push("Regra L-22 violada: acceptanceCommand é placeholder ou comando inócuo (carimbo).");
   }
   if (input.executor && input.revisor && input.executor.trim() === input.revisor.trim()) {
     issues.push("Regra L-01 violada: executor e revisor não podem ser o mesmo agente.");
   }
 
+  const fallbackCls = classifyFallbackRiskAndSurface(titulo, desc);
   let usedDecisionsApi = false;
+  let decisionSource: "decisions_api" | "deterministic_fallback" = "deterministic_fallback";
+  let fallbackReason: string | null = "decisions_api_not_available";
   let score = issues.length === 0 ? 1.0 : Math.max(0.2, 1.0 - issues.length * 0.3);
 
-  try {
-    const decisionsApi = (ctx as any).decisions;
-    if (decisionsApi?.decide && issues.length === 0 && (titulo || desc)) {
+  const decisionsApi = (ctx as any).decisions;
+  if (decisionsApi?.decide && issues.length === 0 && (titulo || desc)) {
+    try {
       const decisionRes = await decisionsApi.decide({
         state: {
           issueId: input.issueId || "draft",
           titulo,
           acceptanceCommand: cmd,
           descricao: desc,
+          fallbackRisk: fallbackCls.riskLevel,
         },
         questions: [
           {
@@ -412,14 +469,19 @@ export async function lintCardForDispatch(
         ],
       });
       usedDecisionsApi = true;
+      decisionSource = "decisions_api";
+      fallbackReason = null;
       const ans = decisionRes?.answers?.atomic_scope ?? decisionRes?.atomic_scope;
       if (ans === false || ans === "no") {
         issues.push("Avaliação semântica (ctx.decisions): escopo amplo demais ou pouco verificável.");
         score = 0.55;
       }
+    } catch (err: any) {
+      const msg = String(err?.message || err || "unknown_error");
+      fallbackReason = /(402|429|quota|balance|credit|saldo|timeout)/i.test(msg)
+        ? `decisions_api_quota_or_timeout:${msg.slice(0, 80)}`
+        : `decisions_api_error:${msg.slice(0, 80)}`;
     }
-  } catch {
-    // Fallback determinístico já aplicado
   }
 
   const approved = issues.length === 0;
@@ -427,10 +489,74 @@ export async function lintCardForDispatch(
     approved,
     score: Number(score.toFixed(2)),
     usedDecisionsApi,
+    decisionSource,
+    fallbackReason,
+    riskLevel: fallbackCls.riskLevel,
+    requiresHumanApproval: fallbackCls.requiresHumanApproval,
+    surface: fallbackCls.surface,
     issues,
     recommendation: approved
-      ? "Card aprovado no pré-voo L-01/L-22 e pronto para despacho atômico."
+      ? usedDecisionsApi
+        ? "Card aprovado via Decisions API + invariantes L-01/L-22."
+        : "Card aprovado via fallback determinístico offline (L-01/L-22/Z6 preservados)."
       : "Corrija as pendências acima antes de despachar para evitar retrabalho no Gate.",
+  };
+}
+
+export async function evaluateDsapWithFallback(
+  ctx: Context,
+  motivoR1: string,
+  motivoR2: string,
+  threshold: number = 0.7
+): Promise<DsapHybridResult> {
+  const t1 = new Set(normalizeTextForFallback(motivoR1).split(/[^a-z0-9_]+/).filter((w) => w.length >= 3));
+  const t2 = new Set(normalizeTextForFallback(motivoR2).split(/[^a-z0-9_]+/).filter((w) => w.length >= 3));
+  const union = new Set([...t1, ...t2]);
+  let inter = 0;
+  for (const w of t1) if (t2.has(w)) inter++;
+  const lexicalSim = union.size > 0 ? Number((inter / union.size).toFixed(4)) : 0;
+
+  let fallbackReason: string | null = "decisions_api_not_available";
+  const decisionsApi = (ctx as any).decisions;
+  if (decisionsApi?.decide) {
+    try {
+      const res = await decisionsApi.decide({
+        state: { motivoR1, motivoR2, lexicalSim },
+        questions: [
+          {
+            id: "same_root_cause",
+            type: "yes_no",
+            prompt: "A 2a recusa repete a mesma causa raiz da 1a e exige DSAP Backtracking para o COO re-escopar?",
+          },
+        ],
+      });
+      const same = res?.answers?.same_root_cause ?? res?.same_root_cause;
+      const backtrack = same === true || same === "yes";
+      return {
+        decisionSource: "decisions_api",
+        fallbackReason: null,
+        similarity: lexicalSim,
+        threshold,
+        backtrackRequired: backtrack,
+        action: backtrack
+          ? "[DSAP BACKTRACKING] Recusa repetida (Decisions API) — devolver ao COO."
+          : "Recusa distinta (Decisions API) — permitido seguir.",
+      };
+    } catch (err: any) {
+      fallbackReason = `decisions_api_fallback:${String(err?.message || err).slice(0, 80)}`;
+    }
+  }
+
+  const backtrack = lexicalSim >= threshold;
+  return {
+    decisionSource: "deterministic_fallback",
+    fallbackReason,
+    similarity: lexicalSim,
+    threshold,
+    backtrackRequired: backtrack,
+    action: backtrack
+      ? "[DSAP BACKTRACKING] Recusa repetida (fallback determinístico) — devolver ao COO."
+      : "Recusa distinta (fallback determinístico) — permitido seguir.",
   };
 }
 
