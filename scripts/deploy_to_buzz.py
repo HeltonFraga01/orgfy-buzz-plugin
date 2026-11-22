@@ -65,19 +65,36 @@ def main():
 
     prev_sha = existing.get("current")
 
+    # Obter URL do repositório remoto git (GitHub) em vez do caminho local
+    repo_url = "https://github.com/HeltonFraga01/orgfy-buzz-plugin"
+    try:
+        import subprocess
+        remote_out = subprocess.check_output(
+            ["git", "-C", PLUGIN_DIR, "remote", "get-url", "origin"],
+            text=True, stderr=subprocess.DEVNULL
+        ).strip()
+        if remote_out:
+            if remote_out.endswith(".git"):
+                remote_out = remote_out[:-4]
+            if remote_out.startswith("git@github.com:"):
+                remote_out = "https://github.com/" + remote_out[len("git@github.com:"):]
+            repo_url = remote_out
+    except Exception:
+        pass
+
     installed["digital.cortexx.orgfy"] = {
         "manifest": manifest,
         "current": artifact_sha,
         "currentSignature": None,
         "currentSource": {
-            "repository": "/Users/heltonfraga/.buzz/REPOS/orgfy-buzz-plugin",
+            "repository": repo_url,
             "reference": "",
             "path": "."
         },
         "previous": prev_sha,
         "previousSignature": None,
         "previousSource": {
-            "repository": "/Users/heltonfraga/.buzz/REPOS/orgfy-buzz-plugin",
+            "repository": repo_url,
             "reference": "",
             "path": "."
         } if prev_sha else None,
