@@ -40,6 +40,86 @@ export async function readOrgfyJson<T>(ctx: any, relativePath: string, fallback:
   }
 }
 
+export async function readOrgfyText(ctx: any, relativePath: string): Promise<string | null> {
+  if (!ctx?.host?.readFile) {
+    return null;
+  }
+  try {
+    const fullPath = `${ORGFY_ABS_PATH}/${relativePath}`;
+    const raw = await ctx.host.readFile(fullPath);
+    return typeof raw === "string" ? raw : new TextDecoder().decode(raw);
+  } catch (_e) {
+    try {
+      if (relativePath.includes(".esteira/estado/")) {
+        const scratchPath = relativePath.replace(".esteira/estado/", ".scratch/");
+        const raw = await ctx.host.readFile(`${ORGFY_ABS_PATH}/${scratchPath}`);
+        return typeof raw === "string" ? raw : new TextDecoder().decode(raw);
+      }
+    } catch (_err) {}
+    return null;
+  }
+}
+
+export interface CardAceiteFile {
+  comando: string;
+  hash_comando: string;
+  arquivos?: Record<string, string>;
+}
+
+export async function fetchCardAceite(ctx: any, issueId: string): Promise<CardAceiteFile | null> {
+  const cleanId = issueId.replace(/^#/, "").trim();
+  const fullId = cleanId.length === 64 ? cleanId : cleanId.padEnd(64, "0");
+  return readOrgfyJson<CardAceiteFile | null>(ctx, `.esteira/estado/aceites/${fullId}.json`, null);
+}
+
+/**
+ * Formata um timestamp de forma precisa e determinística:
+ * "há 1d 14h", "há 3h 25m", "há 14m", "há 45s", etc.
+ */
+export function formatRelativeTime(dateInput: number | string | Date | undefined): string {
+  if (!dateInput) return "recente";
+  const ts = typeof dateInput === "number" ? dateInput : new Date(dateInput).getTime();
+  if (isNaN(ts) || ts <= 0) return "recente";
+
+  const diffMs = Date.now() - ts;
+  if (diffMs < 0) return "agora";
+
+  const diffSecs = Math.floor(diffMs / 1000);
+  if (diffSecs < 60) return `há ${diffSecs}s`;
+
+  const diffMins = Math.floor(diffSecs / 60);
+  if (diffMins < 60) return `há ${diffMins}m`;
+
+  const diffHours = Math.floor(diffMins / 60);
+  const remMins = diffMins % 60;
+  if (diffHours < 24) {
+    return remMins > 0 ? `há ${diffHours}h ${remMins}m` : `há ${diffHours}h`;
+  }
+
+  const diffDays = Math.floor(diffHours / 24);
+  const remHours = diffHours % 24;
+  return remHours > 0 ? `há ${diffDays}d ${remHours}h` : `há ${diffDays}d`;
+}
+
+/**
+ * Formata a data completa com precisão brasileira:
+ * "20/11/2026, 20:52:31"
+ */
+export function formatFullDateTime(dateInput: number | string | Date | undefined): string {
+  if (!dateInput) return "Data não informada";
+  const d = typeof dateInput === "number" ? new Date(dateInput) : new Date(dateInput);
+  if (isNaN(d.getTime())) return String(dateInput);
+
+  return d.toLocaleString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
 /**
  * Snapshot completo dos arquivos de estado da esteira determinística.
  */

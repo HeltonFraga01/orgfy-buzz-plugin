@@ -16,6 +16,8 @@ import {
   calculateDsapSimilarity,
   openSystemUri,
   openIssueInBuzz,
+  formatRelativeTime,
+  formatFullDateTime,
 } from "./services/orgfy-bridge";
 import {
   executeBootstrapFlow,
@@ -64,16 +66,28 @@ export const INITIAL_PIPELINE_CARDS: PipelineCard[] = [
     empresa: "orgfy",
     executor: "OrgFy Val",
     revisor: "OrgFy Teo",
+    decisor: "OrgFy Iris",
     tier: "tier_1_exec_barato",
     stage: "triagem",
-    elapsedTime: "há 14m",
+    createdAt: 1795233060000,
+    objetivo: "Atualizar fixture laudo_bin_com_decidido em test_protocolo_alvo_evidencia.py para conformidade com tipo_alvo binary_closed.",
+    contexto: "Sucessor de 5c109609. Commit f14cb69 passou a exigir plano_isolamento e id_autorizacao para tipo_alvo binary_closed em ferramentas/descoberta_lint_mod.py, mas fixture laudo_bin_com_decidido não foi atualizada.",
+    autoridade: "DECIDIDO Iris a8b30263 (21/11 01:46 BRT) — reemitir FIX-TEST-0006-AC003 com papéis explícitos",
+    decisao: "Reemitir FIX-TEST-0006-AC003 com Executor: OrgFy Val e Revisor: OrgFy Teo explícitos, vincular PR ace8a624 e acionar Gate para merge.",
+    feitoQuando: "pytest testes/0006/test_protocolo_alvo_evidencia.py sai com exit 0 sem erros de fixture em modo hermético.",
+    provaExigida: "pytest testes/0006/test_protocolo_alvo_evidencia.py -v -> exit 0; 8 passed.",
     dsapScore: 0.12,
     tokens: 24,
     estimatedCost: "0.002",
     recommendedModel: "Gemini 3.8 Flash",
-    acceptanceCommand: "pytest testes/esteira -v -k test_auth",
-    acceptanceHash: "4cccbe0288e0",
+    acceptanceCommand: "pytest testes/0006/test_protocolo_alvo_evidencia.py -v",
+    acceptanceHash: "4cccbe0288e0a3b2b467ec21a590740a1b918e97f4c54965efea87d12f105bb9",
     worktreePath: ".worktrees/5c569a9e",
+    modoBuzz: "goal",
+    goalMaxTurns: 20,
+    maxRuntime: "3600s",
+    idempotencyKey: "fix-test-0006-ac003-r2",
+    branch: "card/fix-test-0006-ac003",
   },
   {
     id: "card-108",
@@ -85,16 +99,28 @@ export const INITIAL_PIPELINE_CARDS: PipelineCard[] = [
     empresa: "orgfy",
     executor: "OrgFy Otto",
     revisor: "OrgFy Bento Arquiteto",
+    decisor: "OrgFy Iris",
     tier: "tier_1_exec_barato",
     stage: "triagem",
-    elapsedTime: "há 32m",
+    createdAt: 1795209360000,
+    objetivo: "Implementar ciclo autônomo fechado na esteira v10 acionado automaticamente após merge de PR aprovado.",
+    contexto: "Após a fusão de um PR pelo Gate, os próximos cards na fila de triagem dependiam de intervenção manual no terminal para disparo.",
+    autoridade: "DECIDIDO Iris b27192ca e Bento Arquiteto",
+    decisao: "Gatilho pós-merge notifica o porteiro.py via evento Nostr kind:1618 para despacho automático do próximo item elegível.",
+    feitoQuando: "Testes comprovam que porteiro.py despacha automaticamente o próximo card após merge sem bloqueios.",
+    provaExigida: "pytest testes/esteira -v -k test_ci_cache -> exit 0.",
     dsapScore: 0.08,
     tokens: 18,
     estimatedCost: "0.002",
     recommendedModel: "Gemini 3.8 Flash",
     acceptanceCommand: "pytest testes/esteira -v -k test_ci_cache",
-    acceptanceHash: "9a2f77c0b112",
+    acceptanceHash: "9a2f77c0b112d7c5e884021a8f90372bcde8913bcae6740b28489fba75390c12",
     worktreePath: ".worktrees/62e83956",
+    modoBuzz: "goal",
+    goalMaxTurns: 20,
+    maxRuntime: "3600s",
+    idempotencyKey: "esteira-0008-ciclo-fechado",
+    branch: "feat/esteira-0008",
   },
   {
     id: "card-105",
@@ -106,16 +132,28 @@ export const INITIAL_PIPELINE_CARDS: PipelineCard[] = [
     empresa: "orgfy",
     executor: "OrgFy Atlas",
     revisor: "OrgFy Bento",
+    decisor: "OrgFy Iris",
     tier: "tier_1_exec_barato",
     stage: "despachado",
-    elapsedTime: "há 45m",
+    createdAt: 1795110900000,
+    objetivo: "Conciliar integridade do aceite e caminhos protegidos com escrita autorizada na issue.",
+    contexto: "O mecanismo verificar_integridade_aceite congela hashes de arquivos citados no comando de aceite contra origin/main. Quando o card autoriza ampliação de testes em Escrita exclusiva, o gate recusava por 'aceite adulterado'.",
+    autoridade: "DECIDIDO Iris 19/11 (evento 3448ee826cdbbedaab283be3d25fec1ede1b4b6a0c9f439bd6b9ee1d0104be67)",
+    decisao: "Arquivo de aceite só pode mudar se constar em Escrita exclusiva de issue válida assinada. Fora disso, permanece fail-closed.",
+    feitoQuando: "verificar_integridade_aceite permite alteração apenas se o arquivo constar em Escrita exclusiva do card assinado.",
+    provaExigida: "pytest testes/esteira -v -k test_webhook_nostr -> exit 0.",
     commitSha: "8bbb5e9",
     tokens: 32,
     estimatedCost: "0.003",
     recommendedModel: "Gemini 3.8 Flash",
     acceptanceCommand: "pytest testes/esteira -v -k test_webhook_nostr",
-    acceptanceHash: "ef8231bb44a1",
+    acceptanceHash: "ef8231bb44a199857d9b78297b47c6183dca0187652e98745bcae71049987c2b",
     worktreePath: ".worktrees/6b631f8e",
+    modoBuzz: "goal",
+    goalMaxTurns: 20,
+    maxRuntime: "3600s",
+    idempotencyKey: "gate-aceite-escrita-autorizada",
+    branch: "fix/gate-aceite-escrita-autorizada",
   },
   {
     id: "card-109",
@@ -127,30 +165,49 @@ export const INITIAL_PIPELINE_CARDS: PipelineCard[] = [
     empresa: "orgfy",
     executor: "OrgFy Val",
     revisor: "QA Sentinel",
+    decisor: "OrgFy Iris",
     tier: "tier_1_exec_barato",
     stage: "despachado",
-    elapsedTime: "há 1h",
+    createdAt: 1795215151000,
+    objetivo: "Compatibilizar ferramentas/esteira/entregar e ferramentas/esteira/gate para detectar a raiz do worktree ativo via git rev-parse --show-toplevel, respeitando worktrees nativos do Buzz 1.0.6.",
+    contexto: "No Workspace do Buzz 1.0.6 o agente já inicia em um worktree nativo isolado. Hoje ferramentas/esteira/entregar e ferramentas/esteira/gate usavam REPO_ROOT_DEFAULT fixo via Path(__file__) sem detectar git rev-parse --show-toplevel.",
+    autoridade: "DECIDIDO Iris 20/11 20:45 BRT (Diretriz do Fundador, frente 3) e PLANS/MIGRACAO_WORKSPACE_BUZZ_106.md",
+    decisao: "Atualizar ferramentas/esteira/entregar e ferramentas/esteira/gate para detectar a raiz do worktree ativo via git rev-parse --show-toplevel, respeitando worktrees nativos do Buzz 1.0.6 e validando o fluxo ponta a ponta.",
+    feitoQuando: "entregar e gate executam com exit 0 dentro de um worktree nativo do Buzz sem depender do caminho absoluto do host.",
+    provaExigida: "python3 ferramentas/esteira/lint_card.py -> exit 0; git rev-parse --show-toplevel detectado com sucesso no CI local.",
     commitSha: "de39843",
     tokens: 20,
     estimatedCost: "0.002",
     recommendedModel: "Gemini 3.8 Flash",
     acceptanceCommand: "python3 ferramentas/esteira/lint_card.py",
-    acceptanceHash: "7b88aa12c559",
+    acceptanceHash: "7b88aa12c5596489b91e92051dc73ff539e6a0082f42a5482329dc3309aef411",
     worktreePath: ".worktrees/fef9b85e",
+    modoBuzz: "goal",
+    goalMaxTurns: 20,
+    maxRuntime: "3600s",
+    idempotencyKey: "buzz-106-worktree-compat",
+    branch: "feat/buzz-106-worktree-compat",
   },
   {
     id: "card-106",
     issueId: "a2ca993f",
     fullIssueId: "a2ca993f70b46ff7a5c7d48be601ffd07048cff2d453d987852b42934756e1c1",
     owner: "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20",
-    title: "QUADRO-RUNTIME-REAL: Corrigir HTTP 403 no quadro e cruzar estado do relay com runtime real",
+    title: "QUADRO-RUNTIME-REAL — Corrigir HTTP 403 no quadro e cruzar estado do relay com runtime real",
     priority: "P0",
     empresa: "orgfy",
     executor: "OrgFy Lia",
     revisor: "OrgFy Vera",
+    decisor: "OrgFy Iris",
     tier: "tier_1_exec_barato",
     stage: "execucao",
-    elapsedTime: "há 18m",
+    createdAt: 1795206960000,
+    objetivo: "Resolver falhas de autorização HTTP 403 no quadro e consolidar sincronização bidirecional entre relay Nostr e subprocessos.",
+    contexto: "A auditoria identificou divergência entre o status exibido no quadro e a ocupação real dos runners de subprocesso.",
+    autoridade: "DECIDIDO Iris c9a4b87e e Bento Arquiteto",
+    decisao: "Implementar autenticação por chave local nos endpoints de leitura do quadro e cruzar pids ativos via psutil.",
+    feitoQuando: "python3 -m pytest testes/esteira/test_quadro.py passa com exit 0 sem nenhum erro 403.",
+    provaExigida: "python3 -m pytest testes/esteira/test_quadro.py -> exit 0; quadro sincronizado.",
     workerPid: 84219,
     turnCurrent: 2,
     turnMax: 5,
@@ -160,8 +217,13 @@ export const INITIAL_PIPELINE_CARDS: PipelineCard[] = [
     estimatedCost: "0.004",
     recommendedModel: "Gemini 3.8 Flash",
     acceptanceCommand: "python3 -m pytest testes/esteira/test_quadro.py",
-    acceptanceHash: "d192f8832ea4",
+    acceptanceHash: "d192f8832ea489b417c80036ab788c697851dbe5986c7104dbe8a97c23405b67",
     worktreePath: ".worktrees/a2ca993f",
+    modoBuzz: "goal",
+    goalMaxTurns: 20,
+    maxRuntime: "3600s",
+    idempotencyKey: "quadro-runtime-real",
+    branch: "feat/quadro-runtime-real",
   },
   {
     id: "card-107",
@@ -174,17 +236,29 @@ export const INITIAL_PIPELINE_CARDS: PipelineCard[] = [
     empresa: "orgfy",
     executor: "OrgFy Atlas",
     revisor: "OrgFy Bento",
+    decisor: "OrgFy Iris",
     tier: "tier_1_exec_barato",
     stage: "revisao",
-    elapsedTime: "há 6m",
+    createdAt: 1795111080000,
+    objetivo: "Garantir validação hermética das regras probatórias e blindagem de aceite contra bypass no Gate.",
+    contexto: "Submissão do PR #42 para homologação do novo linter de aceites congelados com verificação de invariante L-22.",
+    autoridade: "DECIDIDO Iris e QA Sentinel",
+    decisao: "Verificar conformidade com testes de regressão L-90 e probes caixa-preta antes da emissão de GATE: aceito.",
+    feitoQuando: "Probes Caixa-Preta (Caddy, Supabase RLS e Playwright) retornam PASS e CI Swarm exit 0.",
+    provaExigida: "pytest testes/esteira -v -k test_rls_supabase -> exit 0.",
     commitSha: "c05c52b",
     ciStatus: "pass",
     tokens: 38,
     estimatedCost: "0.02",
     recommendedModel: "Claude 3.5 Sonnet",
     acceptanceCommand: "pytest testes/esteira -v -k test_rls_supabase",
-    acceptanceHash: "c05c52b881ef",
+    acceptanceHash: "c05c52b881eff4803920c7849e7bda380128cb59a7201bce47530cba2456e790",
     worktreePath: ".worktrees/f46e22fd",
+    modoBuzz: "goal",
+    goalMaxTurns: 20,
+    maxRuntime: "3600s",
+    idempotencyKey: "esteira-0015-reconciliar",
+    branch: "feat/esteira-0015",
     probes: {
       http_rota: true,
       supabase_rls: true,
@@ -193,7 +267,7 @@ export const INITIAL_PIPELINE_CARDS: PipelineCard[] = [
     rejectionHistory: [
       {
         author: "OrgFy Bento",
-        timestamp: Date.now() - 3600000,
+        timestamp: 1795111080000 - 3600000,
         reason: "Falta validação de RLS na tabela de perfis de usuário",
         similarityToFirst: 0.15,
       },
@@ -210,11 +284,29 @@ export const INITIAL_PIPELINE_CARDS: PipelineCard[] = [
     empresa: "orgfy",
     executor: "OrgFy Bento Arquiteto",
     revisor: "QA Sentinel",
+    decisor: "OrgFy Iris",
     tier: "tier_3_arquiteto",
     stage: "feito",
-    elapsedTime: "concluído",
+    createdAt: 1795041000000,
+    objetivo: "Permitir despacho concorrente respeitando limite máximo de 3 workers ativos por tenant e auto-recuperação.",
+    contexto: "A esteira ficava restrita a 1 worker sequencial, gerando gargalo na entrega dos pacotes de tarefas.",
+    autoridade: "DECIDIDO Iris e Bento Arquiteto",
+    decisao: "Orquestração de runners paralelos no Swarm com isolamento absoluto de worktrees.",
+    feitoQuando: "3 workers rodam em paralelo sem colisão de branches ou arquivos compartilhados.",
+    provaExigida: "pytest testes/esteira -v -k test_concorrencia_swarm -> exit 0.",
     commitSha: "c05c52b",
     ciStatus: "pass",
+    tokens: 64,
+    estimatedCost: "0.05",
+    recommendedModel: "Claude 3.5 Sonnet",
+    acceptanceCommand: "pytest testes/esteira -v -k test_concorrencia_swarm",
+    acceptanceHash: "889cb012a5e982104576bcd45873918237ba5e801235678aebc912048560914a",
+    worktreePath: ".worktrees/3c0b1dae",
+    modoBuzz: "goal",
+    goalMaxTurns: 20,
+    maxRuntime: "3600s",
+    idempotencyKey: "esteira-0013-paralelo",
+    branch: "feat/esteira-0013",
   },
 ];
 
@@ -450,8 +542,14 @@ export function apply(ctx: Context) {
     // Estado da Matrix de Pipeline (5 Raias Determinísticas)
     const [pipelineCards, setPipelineCards] = React.useState<PipelineCard[]>(() => {
       try {
-        const stored = localStorage.getItem("orgfy_pipeline_cards");
-        return stored ? JSON.parse(stored) : INITIAL_PIPELINE_CARDS;
+        const stored = localStorage.getItem("orgfy_pipeline_cards_v11");
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.createdAt) {
+            return parsed;
+          }
+        }
+        return INITIAL_PIPELINE_CARDS;
       } catch {
         return INITIAL_PIPELINE_CARDS;
       }
@@ -772,7 +870,7 @@ export function apply(ctx: Context) {
 
         const updated = [newCard, ...pipelineCards];
         setPipelineCards(updated);
-        localStorage.setItem("orgfy_pipeline_cards", JSON.stringify(updated));
+        localStorage.setItem("orgfy_pipeline_cards_v11", JSON.stringify(updated));
         setIsDispatchModalOpen(false);
         setDispatchIssueId("");
         showNotification("success", `Card ${dispatchIssueId} despachado com sucesso via CLI!`);
@@ -813,7 +911,7 @@ export function apply(ctx: Context) {
           return c;
         });
         setPipelineCards(updated);
-        localStorage.setItem("orgfy_pipeline_cards", JSON.stringify(updated));
+        localStorage.setItem("orgfy_pipeline_cards_v11", JSON.stringify(updated));
         setIsGateModalOpen(false);
         setActiveGateCard(null);
         showNotification("success", `PR ${card.prId || card.issueId} ACEITO no Gate! FPY mantido em 100%.`);
@@ -889,7 +987,7 @@ export function apply(ctx: Context) {
         });
 
         setPipelineCards(updated);
-        localStorage.setItem("orgfy_pipeline_cards", JSON.stringify(updated));
+        localStorage.setItem("orgfy_pipeline_cards_v11", JSON.stringify(updated));
         setIsGateModalOpen(false);
         setActiveGateCard(null);
         setGateRejectionReason("");
@@ -2603,8 +2701,8 @@ export function apply(ctx: Context) {
               left: 0,
               right: 0,
               bottom: 0,
-              backgroundColor: "rgba(0, 0, 0, 0.75)",
-              backdropFilter: "blur(6px)",
+              backgroundColor: "rgba(0, 0, 0, 0.8)",
+              backdropFilter: "blur(8px)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -2616,46 +2714,66 @@ export function apply(ctx: Context) {
             "div",
             {
               style: {
-                width: "680px",
+                width: "920px",
+                maxWidth: "94vw",
                 maxHeight: "88vh",
-                overflowY: "auto",
-                borderRadius: "16px",
-                backgroundColor: "#111714",
-                border: "1px solid rgba(56, 189, 248, 0.35)",
-                padding: "24px",
-                boxShadow: "0 25px 60px rgba(0, 0, 0, 0.85)",
+                borderRadius: "14px",
+                backgroundColor: "#0d1117",
+                border: "1px solid rgba(255, 255, 255, 0.12)",
+                boxShadow: "0 25px 60px rgba(0, 0, 0, 0.95), 0 0 0 1px rgba(255, 255, 255, 0.05)",
                 display: "flex",
                 flexDirection: "column",
-                gap: "16px",
+                overflow: "hidden",
               },
               onClick: (e: any) => e.stopPropagation(),
             },
-            // Header do Modal
+            // ── HEADER DO MODAL (ESTILO HERMES / LINEAR) ──
             h(
               "div",
-              { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start" } },
+              {
+                style: {
+                  padding: "18px 24px 14px 24px",
+                  borderBottom: "1px solid rgba(255, 255, 255, 0.08)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "6px",
+                  backgroundColor: "rgba(255, 255, 255, 0.015)",
+                },
+              },
+              // Breadcrumbs + Badges + Fechar
               h(
                 "div",
-                { style: { display: "flex", flexDirection: "column", gap: "6px" } },
+                { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+                h(
+                  "div",
+                  { style: { display: "flex", alignItems: "center", gap: "6px", fontSize: "11px", color: "#9ca3af" } },
+                  h("span", { style: { fontWeight: "600", color: "#cbd5e1" } }, "Holding OrgFy"),
+                  h("span", { style: { color: "#4b5563" } }, "/"),
+                  h("span", {}, "Repositório orgfy"),
+                  h("span", { style: { color: "#4b5563" } }, "/"),
+                  h("span", {}, "Issues"),
+                  h("span", { style: { color: "#4b5563" } }, "/"),
+                  h(
+                    "code",
+                    {
+                      style: {
+                        fontFamily: "monospace",
+                        color: "#38bdf8",
+                        backgroundColor: "rgba(56, 189, 248, 0.1)",
+                        padding: "1px 6px",
+                        borderRadius: "4px",
+                        border: "1px solid rgba(56, 189, 248, 0.25)",
+                        fontWeight: "700",
+                      },
+                      title: activeIssueDetailCard.fullIssueId || activeIssueDetailCard.issueId,
+                    },
+                    `#${(activeIssueDetailCard.fullIssueId || activeIssueDetailCard.issueId).slice(0, 10)}...`
+                  )
+                ),
                 h(
                   "div",
                   { style: { display: "flex", alignItems: "center", gap: "8px" } },
-                  h(
-                    "span",
-                    {
-                      style: {
-                        fontSize: "12px",
-                        fontFamily: "monospace",
-                        color: "#38bdf8",
-                        backgroundColor: "rgba(56, 189, 248, 0.15)",
-                        padding: "2px 8px",
-                        borderRadius: "6px",
-                        fontWeight: "700",
-                        border: "1px solid rgba(56, 189, 248, 0.3)",
-                      },
-                    },
-                    `#${activeIssueDetailCard.fullIssueId || activeIssueDetailCard.issueId}`
-                  ),
+                  // Badge Prioridade
                   h(
                     "span",
                     {
@@ -2680,6 +2798,7 @@ export function apply(ctx: Context) {
                     },
                     activeIssueDetailCard.priority
                   ),
+                  // Badge Stage
                   h(
                     "span",
                     {
@@ -2688,234 +2807,494 @@ export function apply(ctx: Context) {
                         padding: "2px 8px",
                         borderRadius: "6px",
                         fontWeight: "700",
-                        backgroundColor: "rgba(16, 185, 129, 0.15)",
-                        color: "#10b981",
+                        backgroundColor:
+                          activeIssueDetailCard.stage === "feito"
+                            ? "rgba(16, 185, 129, 0.2)"
+                            : activeIssueDetailCard.stage === "revisao"
+                            ? "rgba(249, 115, 22, 0.2)"
+                            : activeIssueDetailCard.stage === "execucao"
+                            ? "rgba(168, 85, 247, 0.2)"
+                            : "rgba(56, 189, 248, 0.2)",
+                        color:
+                          activeIssueDetailCard.stage === "feito"
+                            ? "#10b981"
+                            : activeIssueDetailCard.stage === "revisao"
+                            ? "#f97316"
+                            : activeIssueDetailCard.stage === "execucao"
+                            ? "#c084fc"
+                            : "#38bdf8",
                         textTransform: "uppercase",
                       },
                     },
                     activeIssueDetailCard.stage
+                  ),
+                  // Botão Fechar
+                  h(
+                    "button",
+                    {
+                      onClick: () => setActiveIssueDetailCard(null),
+                      style: {
+                        background: "transparent",
+                        border: "none",
+                        color: "#9ca3af",
+                        cursor: "pointer",
+                        padding: "4px",
+                        display: "flex",
+                        alignItems: "center",
+                      },
+                      title: "Fechar (Esc)",
+                    },
+                    SVG.xCircle({ h, width: 18, height: 18 })
                   )
-                ),
-                h(
-                  "h2",
-                  { style: { margin: 0, fontSize: "16px", color: "#ffffff", fontWeight: "700" } },
-                  activeIssueDetailCard.title
                 )
               ),
+              // Título Principal
               h(
-                "button",
-                {
-                  onClick: () => setActiveIssueDetailCard(null),
-                  style: { background: "transparent", border: "none", color: "#9ca3af", cursor: "pointer", padding: "4px" },
-                },
-                SVG.xCircle({ h, width: 20, height: 20 })
-              )
-            ),
-
-            // Invariante L-22: Comando de Aceite Congelado
-            h(
-              "div",
-              {
-                style: {
-                  borderRadius: "10px",
-                  backgroundColor: "rgba(0, 0, 0, 0.35)",
-                  border: "1px solid rgba(16, 185, 129, 0.25)",
-                  padding: "12px",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "6px",
-                },
-              },
-              h(
-                "div",
-                { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
-                h(
-                  "span",
-                  { style: { fontSize: "11px", fontWeight: "700", color: "#10b981", textTransform: "uppercase", letterSpacing: "0.5px" } },
-                  "Comando de Aceite Congelado (Invariante L-22)"
-                ),
-                h(
-                  "span",
-                  { style: { fontSize: "10px", color: "#6b7280", fontFamily: "monospace" } },
-                  "Blindagem SHA-256"
-                )
-              ),
-              h(
-                "code",
+                "h2",
                 {
                   style: {
+                    margin: "4px 0 2px 0",
+                    fontSize: "16px",
+                    fontWeight: "700",
+                    color: "#ffffff",
+                    lineHeight: "1.4",
+                  },
+                },
+                activeIssueDetailCard.title
+              ),
+              // Sublinha: Datas Reais e Autoridade (FIM DE TIMESTAMPS FALSOS)
+              h(
+                "div",
+                {
+                  style: {
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "10px",
                     fontSize: "11px",
-                    fontFamily: "monospace",
-                    backgroundColor: "#050706",
-                    padding: "8px 10px",
-                    borderRadius: "6px",
-                    color: "#34d399",
-                    display: "block",
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-all",
+                    color: "#9ca3af",
+                    flexWrap: "wrap",
                   },
                 },
-                activeIssueDetailCard.acceptanceCommand || "python3 -m pytest -q testes/esteira -v --tb=short"
-              ),
-              h(
-                "div",
-                { style: { fontSize: "10px", color: "#9ca3af", fontFamily: "monospace", display: "flex", justifyContent: "space-between" } },
-                h("span", {}, `Hash de Aceite: ${(activeIssueDetailCard.acceptanceHash || "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855").slice(0, 24)}...`),
-                h("span", { style: { color: "#10b981" } }, "✓ Congelamento Válido (Anti-Bypass)")
+                h(
+                  "span",
+                  { style: { display: "flex", alignItems: "center", gap: "4px" } },
+                  SVG.clock({ h, width: 12, height: 12 }),
+                  `Criado em: ${formatFullDateTime(activeIssueDetailCard.createdAt)}`
+                ),
+                h(
+                  "span",
+                  {
+                    style: {
+                      fontFamily: "monospace",
+                      color: "#34d399",
+                      backgroundColor: "rgba(52, 211, 153, 0.12)",
+                      padding: "1px 6px",
+                      borderRadius: "4px",
+                      fontSize: "10px",
+                      fontWeight: "600",
+                    },
+                  },
+                  formatRelativeTime(activeIssueDetailCard.createdAt || activeIssueDetailCard.elapsedTime)
+                ),
+                h("span", { style: { color: "#4b5563" } }, "•"),
+                h("span", { style: { color: "#cbd5e1" } }, `Autoridade: ${activeIssueDetailCard.decisor || "OrgFy Iris"}`),
+                h("span", { style: { color: "#4b5563" } }, "•"),
+                h("span", { style: { color: "#9ca3af" } }, `Branch: ${activeIssueDetailCard.branch || "main"}`)
               )
             ),
 
-            // Worktree Isolada & Governança de Arquivos
+            // ── CORPO BI-PARTIDO DO MODAL (ESQUERDA: SPEC / DIREITA: ATRIBUTOS & PROBES) ──
             h(
               "div",
               {
                 style: {
-                  borderRadius: "10px",
-                  backgroundColor: "rgba(0, 0, 0, 0.25)",
-                  border: "1px solid rgba(255, 255, 255, 0.08)",
-                  padding: "12px",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "6px",
+                  padding: "18px 24px",
+                  overflowY: "auto",
+                  flex: 1,
+                  display: "grid",
+                  gridTemplateColumns: "1.55fr 1fr",
+                  gap: "18px",
                 },
               },
-              h("span", { style: { fontSize: "11px", fontWeight: "700", color: "#f3f4f6" } }, "Worktree Isolada do Card"),
+              // ── COLUNA ESQUERDA: ESPECIFICAÇÃO TÉCNICA E GOVERNANÇA (CARD HERMES V3) ──
               h(
                 "div",
-                { style: { display: "flex", alignItems: "center", gap: "8px", fontSize: "11px", color: "#9ca3af" } },
-                SVG.folder({ h, width: 14, height: 14 }),
+                { style: { display: "flex", flexDirection: "column", gap: "12px" } },
+                // 1. Objetivo do Card
                 h(
-                  "span",
-                  { style: { fontFamily: "monospace", color: "#38bdf8" } },
-                  activeIssueDetailCard.worktreePath || `.worktrees/${activeIssueDetailCard.issueId}`
-                ),
-                h("span", { style: { color: "#6b7280" } }, "•"),
-                h("span", { style: { color: "#10b981", fontSize: "10px" } }, "✓ Isolamento Concorrência Zero (sem colisão com main)")
-              )
-            ),
-
-            // Grid de 2 Colunas: CoEvo-RSI Roteamento de Modelo + Probes Caixa-Preta
-            h(
-              "div",
-              { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" } },
-              // Coluna 1: CoEvo-RSI & Custos
-              h(
-                "div",
-                {
-                  style: {
-                    borderRadius: "10px",
-                    backgroundColor: "rgba(0, 0, 0, 0.25)",
-                    border: "1px solid rgba(255, 255, 255, 0.08)",
-                    padding: "12px",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "6px",
+                  "div",
+                  {
+                    style: {
+                      borderRadius: "8px",
+                      backgroundColor: "rgba(255, 255, 255, 0.025)",
+                      border: "1px solid rgba(255, 255, 255, 0.08)",
+                      borderLeft: "3px solid #38bdf8",
+                      padding: "12px 14px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "4px",
+                    },
                   },
-                },
-                h("span", { style: { fontSize: "11px", fontWeight: "700", color: "#c084fc" } }, "Roteamento CoEvo-RSI"),
-                h(
-                  "div",
-                  { style: { fontSize: "11px", color: "#ffffff", fontWeight: "600" } },
-                  `Modelo: ${activeIssueDetailCard.recommendedModel || (activeIssueDetailCard.tier === "tier_1_exec_barato" ? "Gemini 3.8 Flash" : "Claude 3.5 Sonnet")}`
+                  h(
+                    "span",
+                    { style: { fontSize: "10px", fontWeight: "700", color: "#38bdf8", textTransform: "uppercase", letterSpacing: "0.5px" } },
+                    "Objetivo do Card"
+                  ),
+                  h(
+                    "div",
+                    { style: { fontSize: "12px", color: "#f1f5f9", lineHeight: "1.5" } },
+                    activeIssueDetailCard.objetivo || activeIssueDetailCard.title
+                  )
                 ),
+
+                // 2. Estado & Autoridade Decisória
                 h(
                   "div",
-                  { style: { fontSize: "10px", color: "#9ca3af" } },
-                  `Tier: ${activeIssueDetailCard.tier === "tier_1_exec_barato" ? "Tier 1: Barato (Enxuto)" : activeIssueDetailCard.tier === "tier_2_revisor" ? "Tier 2: Revisor (Gate)" : "Tier 3: Arquiteto (Governança)"}`
+                  {
+                    style: {
+                      borderRadius: "8px",
+                      backgroundColor: "rgba(255, 255, 255, 0.02)",
+                      border: "1px solid rgba(255, 255, 255, 0.08)",
+                      padding: "12px 14px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "6px",
+                    },
+                  },
+                  h(
+                    "span",
+                    { style: { fontSize: "10px", fontWeight: "700", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.5px" } },
+                    "Estado & Autoridade Decisória"
+                  ),
+                  h(
+                    "div",
+                    { style: { fontSize: "11px", color: "#cbd5e1", lineHeight: "1.5" } },
+                    h("strong", { style: { color: "#ffffff" } }, "Contexto: "),
+                    activeIssueDetailCard.contexto || "Execução rastreada e orquestrada pela esteira determinística v10."
+                  ),
+                  h(
+                    "div",
+                    { style: { fontSize: "11px", color: "#cbd5e1", lineHeight: "1.5" } },
+                    h("strong", { style: { color: "#ffffff" } }, "Decisão: "),
+                    activeIssueDetailCard.decisao || activeIssueDetailCard.autoridade || "DECIDIDO Iris conforme diretriz arquitetural da holding."
+                  )
                 ),
+
+                // 3. Invariante L-22: Comando de Aceite Congelado
                 h(
                   "div",
-                  { style: { fontSize: "10px", color: "#10b981", fontFamily: "monospace", marginTop: "2px" } },
-                  `Custo Estimado: ~$${activeIssueDetailCard.estimatedCost || (activeIssueDetailCard.tier === "tier_1_exec_barato" ? "0.002" : "0.02")} | ${activeIssueDetailCard.tokens || 18}k tokens`
+                  {
+                    style: {
+                      borderRadius: "8px",
+                      backgroundColor: "#060907",
+                      border: "1px solid rgba(16, 185, 129, 0.35)",
+                      padding: "12px 14px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "6px",
+                    },
+                  },
+                  h(
+                    "div",
+                    { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+                    h(
+                      "span",
+                      { style: { fontSize: "10px", fontWeight: "700", color: "#10b981", textTransform: "uppercase", letterSpacing: "0.5px" } },
+                      "Comando de Aceite Congelado (Invariante L-22)"
+                    ),
+                    h(
+                      "div",
+                      { style: { display: "flex", alignItems: "center", gap: "8px" } },
+                      h(
+                        "span",
+                        { style: { fontSize: "10px", color: "#6b7280", fontFamily: "monospace" } },
+                        "Blindagem SHA-256"
+                      ),
+                      h(
+                        "button",
+                        {
+                          onClick: () => {
+                            const cmd = activeIssueDetailCard.acceptanceCommand || "python3 ferramentas/esteira/lint_card.py";
+                            if (typeof navigator !== "undefined" && navigator?.clipboard?.writeText) {
+                              navigator.clipboard.writeText(cmd);
+                              showNotification("success", "Comando de aceite L-22 copiado!");
+                            }
+                          },
+                          style: {
+                            padding: "2px 6px",
+                            borderRadius: "4px",
+                            border: "1px solid rgba(16, 185, 129, 0.3)",
+                            backgroundColor: "rgba(16, 185, 129, 0.12)",
+                            color: "#10b981",
+                            fontSize: "10px",
+                            fontWeight: "600",
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "4px",
+                          },
+                          title: "Copiar comando de aceite congelado",
+                        },
+                        SVG.copy({ h, width: 10, height: 10 }),
+                        "Copiar"
+                      )
+                    )
+                  ),
+                  h(
+                    "code",
+                    {
+                      style: {
+                        fontSize: "11px",
+                        fontFamily: "monospace",
+                        backgroundColor: "#020403",
+                        padding: "8px 10px",
+                        borderRadius: "6px",
+                        color: "#34d399",
+                        display: "block",
+                        whiteSpace: "pre-wrap",
+                        wordBreak: "break-all",
+                        border: "1px solid rgba(16, 185, 129, 0.15)",
+                      },
+                    },
+                    activeIssueDetailCard.acceptanceCommand || "python3 ferramentas/esteira/lint_card.py"
+                  ),
+                  h(
+                    "div",
+                    { style: { fontSize: "10px", color: "#9ca3af", fontFamily: "monospace", display: "flex", justifyContent: "space-between" } },
+                    h("span", {}, `Hash de Aceite: ${(activeIssueDetailCard.acceptanceHash || "7b88aa12c5596489b91e92051dc73ff539e6a0082f42a5482329dc3309aef411").slice(0, 28)}...`),
+                    h("span", { style: { color: "#10b981", fontWeight: "600" } }, "✓ Congelamento Válido (Anti-Bypass)")
+                  )
                 ),
+
+                // 4. Critérios de Feito & Provas Exigidas
                 h(
                   "div",
-                  { style: { fontSize: "10px", color: "#6b7280" } },
-                  `Executor: ${activeIssueDetailCard.executor} | Revisor: ${activeIssueDetailCard.revisor || "OrgFy Otto"}`
+                  {
+                    style: {
+                      borderRadius: "8px",
+                      backgroundColor: "rgba(255, 255, 255, 0.02)",
+                      border: "1px solid rgba(255, 255, 255, 0.08)",
+                      padding: "12px 14px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "6px",
+                    },
+                  },
+                  h(
+                    "span",
+                    { style: { fontSize: "10px", fontWeight: "700", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.5px" } },
+                    "Critérios de Feito & Provas Exigidas"
+                  ),
+                  h(
+                    "div",
+                    { style: { fontSize: "11px", color: "#cbd5e1", lineHeight: "1.5" } },
+                    h("strong", { style: { color: "#ffffff" } }, "Feito quando: "),
+                    activeIssueDetailCard.feitoQuando || "Execução com exit 0 no CI e lint do card aprovado sem exceção."
+                  ),
+                  h(
+                    "div",
+                    { style: { fontSize: "11px", color: "#cbd5e1", lineHeight: "1.5" } },
+                    h("strong", { style: { color: "#ffffff" } }, "Prova exigida: "),
+                    activeIssueDetailCard.provaExigida || "Evidência verificável de saída limpa no runner oficial do Swarm."
+                  )
+                ),
+
+                // 5. Histórico de Ciclos & DSAP Backtracking
+                h(
+                  "div",
+                  {
+                    style: {
+                      borderRadius: "8px",
+                      backgroundColor: "rgba(255, 255, 255, 0.02)",
+                      border: "1px solid rgba(255, 255, 255, 0.08)",
+                      padding: "12px 14px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "4px",
+                    },
+                  },
+                  h(
+                    "div",
+                    { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+                    h("span", { style: { fontSize: "10px", fontWeight: "700", color: "#f59e0b", textTransform: "uppercase" } }, "Histórico de Ciclos & DSAP Backtracking"),
+                    h("span", { style: { fontSize: "10px", color: "#6b7280" } }, "Threshold: similaridade >= 0.70")
+                  ),
+                  h(
+                    "div",
+                    { style: { fontSize: "11px", color: "#9ca3af" } },
+                    activeIssueDetailCard.rejectionHistory && activeIssueDetailCard.rejectionHistory.length > 0
+                      ? `Recusa recente: ${activeIssueDetailCard.rejectionHistory[0].reason} (${Math.round((activeIssueDetailCard.rejectionHistory[0].similarityToFirst || 0) * 100)}% similaridade)`
+                      : "Nenhuma recusa registrada nesta issue (FPY 100% no primeiro ciclo de execução)."
+                  )
                 )
               ),
 
-              // Coluna 2: Probes Caixa-Preta (Quality Gate)
+              // ── COLUNA DIREITA: SIDEBAR DE ATRIBUTOS, RUNTIME BUZZ & PROBES ──
               h(
                 "div",
-                {
-                  style: {
-                    borderRadius: "10px",
-                    backgroundColor: "rgba(0, 0, 0, 0.25)",
-                    border: "1px solid rgba(255, 255, 255, 0.08)",
-                    padding: "12px",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "6px",
-                  },
-                },
-                h("span", { style: { fontSize: "11px", fontWeight: "700", color: "#38bdf8" } }, "Probes Caixa-Preta do Gate"),
+                { style: { display: "flex", flexDirection: "column", gap: "12px" } },
+                // Box A: Papéis & Atribuição
                 h(
                   "div",
-                  { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "10px" } },
+                  {
+                    style: {
+                      borderRadius: "8px",
+                      backgroundColor: "rgba(255, 255, 255, 0.02)",
+                      border: "1px solid rgba(255, 255, 255, 0.08)",
+                      padding: "12px 14px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "8px",
+                    },
+                  },
+                  h("span", { style: { fontSize: "10px", fontWeight: "700", color: "#c084fc", textTransform: "uppercase" } }, "Papéis & Atribuição"),
                   h(
                     "div",
-                    { style: { display: "flex", justifyContent: "space-between", color: "#d1d5db" } },
-                    h("span", {}, "• Rota HTTP (Caddy 200 OK):"),
-                    h("span", { style: { color: "#10b981", fontWeight: "700" } }, "PASS")
+                    { style: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "11px" } },
+                    h("span", { style: { color: "#9ca3af" } }, "Decisor"),
+                    h("span", { style: { color: "#ffffff", fontWeight: "600", backgroundColor: "rgba(192, 132, 252, 0.15)", padding: "2px 8px", borderRadius: "4px" } }, activeIssueDetailCard.decisor || "OrgFy Iris")
                   ),
                   h(
                     "div",
-                    { style: { display: "flex", justifyContent: "space-between", color: "#d1d5db" } },
-                    h("span", {}, "• Supabase RLS & Auth:"),
-                    h("span", { style: { color: "#10b981", fontWeight: "700" } }, "PASS")
+                    { style: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "11px" } },
+                    h("span", { style: { color: "#9ca3af" } }, "Revisor"),
+                    h("span", { style: { color: "#ffffff", fontWeight: "600", backgroundColor: "rgba(56, 189, 248, 0.15)", padding: "2px 8px", borderRadius: "4px" } }, activeIssueDetailCard.revisor || "QA Sentinel")
                   ),
                   h(
                     "div",
-                    { style: { display: "flex", justifyContent: "space-between", color: "#d1d5db" } },
-                    h("span", {}, "• Playwright Zero Console Err:"),
-                    h("span", { style: { color: "#10b981", fontWeight: "700" } }, "PASS")
+                    { style: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "11px" } },
+                    h("span", { style: { color: "#9ca3af" } }, "Executor"),
+                    h("span", { style: { color: "#ffffff", fontWeight: "600", backgroundColor: "rgba(16, 185, 129, 0.15)", padding: "2px 8px", borderRadius: "4px" } }, activeIssueDetailCard.executor || "Não atribuído")
+                  )
+                ),
+
+                // Box B: Execução Buzz Runtime
+                h(
+                  "div",
+                  {
+                    style: {
+                      borderRadius: "8px",
+                      backgroundColor: "rgba(255, 255, 255, 0.02)",
+                      border: "1px solid rgba(255, 255, 255, 0.08)",
+                      padding: "12px 14px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "6px",
+                    },
+                  },
+                  h("span", { style: { fontSize: "10px", fontWeight: "700", color: "#38bdf8", textTransform: "uppercase" } }, "Execução Buzz Runtime"),
+                  h(
+                    "div",
+                    { style: { display: "flex", justifyContent: "space-between", fontSize: "11px" } },
+                    h("span", { style: { color: "#9ca3af" } }, "Modo"),
+                    h("span", { style: { color: "#ffffff", fontFamily: "monospace" } }, `${activeIssueDetailCard.modoBuzz || "goal"} (${activeIssueDetailCard.goalMaxTurns || 20} turns max)`)
+                  ),
+                  h(
+                    "div",
+                    { style: { display: "flex", justifyContent: "space-between", fontSize: "11px" } },
+                    h("span", { style: { color: "#9ca3af" } }, "Tempo Máximo"),
+                    h("span", { style: { color: "#ffffff", fontFamily: "monospace" } }, activeIssueDetailCard.maxRuntime || "3600s")
+                  ),
+                  h(
+                    "div",
+                    { style: { display: "flex", justifyContent: "space-between", fontSize: "11px" } },
+                    h("span", { style: { color: "#9ca3af" } }, "Idempotency Key"),
+                    h("span", { style: { color: "#38bdf8", fontFamily: "monospace", fontSize: "10px" } }, activeIssueDetailCard.idempotencyKey || activeIssueDetailCard.issueId)
+                  ),
+                  h(
+                    "div",
+                    { style: { display: "flex", justifyContent: "space-between", fontSize: "11px" } },
+                    h("span", { style: { color: "#9ca3af" } }, "Worktree"),
+                    h("span", { style: { color: "#10b981", fontFamily: "monospace", fontSize: "10px" } }, activeIssueDetailCard.worktreePath || `.worktrees/${activeIssueDetailCard.issueId}`)
+                  )
+                ),
+
+                // Box C: Roteamento CoEvo-RSI & Custos
+                h(
+                  "div",
+                  {
+                    style: {
+                      borderRadius: "8px",
+                      backgroundColor: "rgba(255, 255, 255, 0.02)",
+                      border: "1px solid rgba(255, 255, 255, 0.08)",
+                      padding: "12px 14px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "6px",
+                    },
+                  },
+                  h("span", { style: { fontSize: "10px", fontWeight: "700", color: "#a855f7", textTransform: "uppercase" } }, "Roteamento CoEvo-RSI"),
+                  h(
+                    "div",
+                    { style: { fontSize: "11px", color: "#ffffff", fontWeight: "600" } },
+                    `Modelo: ${activeIssueDetailCard.recommendedModel || (activeIssueDetailCard.tier === "tier_1_exec_barato" ? "Gemini 3.8 Flash" : "Claude 3.5 Sonnet")}`
+                  ),
+                  h(
+                    "div",
+                    { style: { fontSize: "10px", color: "#9ca3af" } },
+                    `Tier: ${activeIssueDetailCard.tier === "tier_1_exec_barato" ? "Tier 1: Barato (Enxuto)" : activeIssueDetailCard.tier === "tier_2_revisor" ? "Tier 2: Revisor (Gate)" : "Tier 3: Arquiteto (Governança)"}`
+                  ),
+                  h(
+                    "div",
+                    { style: { fontSize: "10px", color: "#10b981", fontFamily: "monospace" } },
+                    `Custo Estimado: ~$${activeIssueDetailCard.estimatedCost || (activeIssueDetailCard.tier === "tier_1_exec_barato" ? "0.002" : "0.02")} | ${activeIssueDetailCard.tokens || 18}k tokens`
+                  )
+                ),
+
+                // Box D: Probes Caixa-Preta (Quality Gate)
+                h(
+                  "div",
+                  {
+                    style: {
+                      borderRadius: "8px",
+                      backgroundColor: "rgba(255, 255, 255, 0.02)",
+                      border: "1px solid rgba(255, 255, 255, 0.08)",
+                      padding: "12px 14px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "6px",
+                    },
+                  },
+                  h("span", { style: { fontSize: "10px", fontWeight: "700", color: "#10b981", textTransform: "uppercase" } }, "Probes Caixa-Preta do Gate"),
+                  h(
+                    "div",
+                    { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "10px" } },
+                    h(
+                      "div",
+                      { style: { display: "flex", justifyContent: "space-between", color: "#d1d5db" } },
+                      h("span", {}, "• Rota HTTP (Caddy 200 OK):"),
+                      h("span", { style: { color: "#10b981", fontWeight: "700" } }, "PASS")
+                    ),
+                    h(
+                      "div",
+                      { style: { display: "flex", justifyContent: "space-between", color: "#d1d5db" } },
+                      h("span", {}, "• Supabase RLS & Auth:"),
+                      h("span", { style: { color: "#10b981", fontWeight: "700" } }, "PASS")
+                    ),
+                    h(
+                      "div",
+                      { style: { display: "flex", justifyContent: "space-between", color: "#d1d5db" } },
+                      h("span", {}, "• Playwright Zero Console Err:"),
+                      h("span", { style: { color: "#10b981", fontWeight: "700" } }, "PASS")
+                    )
                   )
                 )
               )
             ),
 
-            // DSAP Backtracking & Histórico de Recusas
+            // ── FOOTER DE AÇÕES (1-CLIQUE ASSERTIVO) ──
             h(
               "div",
               {
                 style: {
-                  borderRadius: "10px",
-                  backgroundColor: "rgba(0, 0, 0, 0.25)",
-                  border: "1px solid rgba(255, 255, 255, 0.08)",
-                  padding: "12px",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "4px",
-                },
-              },
-              h(
-                "div",
-                { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
-                h("span", { style: { fontSize: "11px", fontWeight: "700", color: "#f3f4f6" } }, "Histórico de Ciclos & DSAP Backtracking"),
-                h("span", { style: { fontSize: "10px", color: "#6b7280" } }, "Threshold: similaridade >= 0.70")
-              ),
-              h(
-                "div",
-                { style: { fontSize: "11px", color: "#9ca3af" } },
-                activeIssueDetailCard.rejectionHistory && activeIssueDetailCard.rejectionHistory.length > 0
-                  ? `Recusa recente: ${activeIssueDetailCard.rejectionHistory[0].reason} (${Math.round((activeIssueDetailCard.rejectionHistory[0].similarityToFirst || 0) * 100)}% similaridade)`
-                  : "Nenhuma recusa registrada nesta issue (FPY 100% no primeiro ciclo de execução)."
-              )
-            ),
-
-            // Rodapé de Ações Rápidas (1-Clique)
-            h(
-              "div",
-              {
-                style: {
+                  padding: "14px 24px",
+                  borderTop: "1px solid rgba(255, 255, 255, 0.08)",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "space-between",
                   flexWrap: "wrap",
                   gap: "8px",
-                  paddingTop: "8px",
-                  borderTop: "1px solid rgba(255, 255, 255, 0.08)",
+                  backgroundColor: "rgba(255, 255, 255, 0.015)",
                 },
               },
               h(
@@ -2932,13 +3311,13 @@ export function apply(ctx: Context) {
                       handleOpenIssueDeepLink(card);
                     },
                     style: {
-                      padding: "7px 12px",
+                      padding: "8px 14px",
                       borderRadius: "8px",
-                      border: "1px solid rgba(56, 189, 248, 0.3)",
-                      backgroundColor: "rgba(56, 189, 248, 0.12)",
+                      border: "1px solid rgba(56, 189, 248, 0.4)",
+                      backgroundColor: "rgba(56, 189, 248, 0.15)",
                       color: "#38bdf8",
                       fontSize: "11px",
-                      fontWeight: "600",
+                      fontWeight: "700",
                       cursor: "pointer",
                       display: "flex",
                       alignItems: "center",
@@ -2947,7 +3326,7 @@ export function apply(ctx: Context) {
                     },
                     title: "Navegar diretamente para a Issue na tela nativa de Repos do Buzz Desktop",
                   },
-                  SVG.externalLink({ h, width: 12, height: 12 }),
+                  SVG.externalLink({ h, width: 13, height: 13 }),
                   "Abrir no Buzz Desktop"
                 ),
                 h(
@@ -2955,7 +3334,7 @@ export function apply(ctx: Context) {
                   {
                     onClick: (e: any) => handleCopyDeepLink(e, activeIssueDetailCard),
                     style: {
-                      padding: "7px 12px",
+                      padding: "8px 14px",
                       borderRadius: "8px",
                       border: "1px solid rgba(255, 255, 255, 0.1)",
                       backgroundColor: "rgba(255, 255, 255, 0.05)",
@@ -2968,7 +3347,7 @@ export function apply(ctx: Context) {
                       gap: "6px",
                     },
                   },
-                  SVG.copy({ h, width: 12, height: 12 }),
+                  SVG.copy({ h, width: 13, height: 13 }),
                   "Copiar Link"
                 )
               ),
@@ -2985,17 +3364,17 @@ export function apply(ctx: Context) {
                       setIsDispatchModalOpen(true);
                     },
                     style: {
-                      padding: "7px 12px",
+                      padding: "8px 14px",
                       borderRadius: "8px",
                       border: "none",
-                      backgroundColor: "rgba(245, 158, 11, 0.15)",
+                      backgroundColor: "rgba(245, 158, 11, 0.18)",
                       color: "#f59e0b",
                       fontSize: "11px",
-                      fontWeight: "600",
+                      fontWeight: "700",
                       cursor: "pointer",
                       display: "flex",
                       alignItems: "center",
-                      gap: "4px",
+                      gap: "6px",
                     },
                   },
                   SVG.zap({ h, width: 12, height: 12 }),
@@ -3011,7 +3390,7 @@ export function apply(ctx: Context) {
                         handleAcceptGate(c);
                       },
                       style: {
-                        padding: "7px 12px",
+                        padding: "8px 14px",
                         borderRadius: "8px",
                         border: "none",
                         backgroundColor: "#10b981",
@@ -3021,7 +3400,7 @@ export function apply(ctx: Context) {
                         cursor: "pointer",
                         display: "flex",
                         alignItems: "center",
-                        gap: "4px",
+                        gap: "6px",
                       },
                     },
                     SVG.checkCircle({ h, width: 12, height: 12 }),
@@ -3037,16 +3416,33 @@ export function apply(ctx: Context) {
                       setIsLogsDrawerOpen(true);
                     },
                     style: {
-                      padding: "7px 12px",
+                      padding: "8px 14px",
                       borderRadius: "8px",
                       border: "1px solid rgba(255, 255, 255, 0.1)",
                       backgroundColor: "rgba(255, 255, 255, 0.05)",
                       color: "#9ca3af",
                       fontSize: "11px",
+                      fontWeight: "500",
                       cursor: "pointer",
                     },
                   },
                   "Ver Logs"
+                ),
+                h(
+                  "button",
+                  {
+                    onClick: () => setActiveIssueDetailCard(null),
+                    style: {
+                      padding: "8px 14px",
+                      borderRadius: "8px",
+                      border: "1px solid rgba(255, 255, 255, 0.1)",
+                      backgroundColor: "transparent",
+                      color: "#9ca3af",
+                      fontSize: "11px",
+                      cursor: "pointer",
+                    },
+                  },
+                  "Fechar"
                 )
               )
             )
@@ -4176,45 +4572,98 @@ export function apply(ctx: Context) {
                     onMouseEnter: (e: any) => (e.currentTarget.style.backgroundColor = THEME.cardHover),
                     onMouseLeave: (e: any) => (e.currentTarget.style.backgroundColor = THEME.cardBg),
                   },
-                  // Card Top (Badge Priority + Issue ID)
+                  // Card Top (Tenant + Issue ID + Priority + Stage)
                   h(
                     "div",
                     { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
                     h(
-                      "span",
-                      {
-                        onClick: (e: any) => {
-                          e.stopPropagation();
-                          handleOpenIssueDeepLink(c);
+                      "div",
+                      { style: { display: "flex", alignItems: "center", gap: "6px" } },
+                      h(
+                        "span",
+                        {
+                          style: {
+                            fontSize: "9px",
+                            fontFamily: "monospace",
+                            backgroundColor: "rgba(255, 255, 255, 0.06)",
+                            color: "#8b949e",
+                            padding: "1px 5px",
+                            borderRadius: "4px",
+                            textTransform: "uppercase",
+                            fontWeight: "600",
+                          },
                         },
-                        title: "Abrir issue diretamente no Buzz Desktop",
-                        style: {
-                          fontSize: "11px",
-                          fontFamily: "monospace",
-                          color: "#60a5fa",
-                          fontWeight: "600",
-                          cursor: "pointer",
-                          textDecoration: "underline",
-                          textUnderlineOffset: "2px",
+                        c.empresa || "orgfy"
+                      ),
+                      h(
+                        "span",
+                        {
+                          onClick: (e: any) => {
+                            e.stopPropagation();
+                            handleOpenIssueDeepLink(c);
+                          },
+                          title: "Abrir issue diretamente no Buzz Desktop",
+                          style: {
+                            fontSize: "11px",
+                            fontFamily: "monospace",
+                            color: "#58a6ff",
+                            fontWeight: "700",
+                            cursor: "pointer",
+                            textDecoration: "underline",
+                            textUnderlineOffset: "2px",
+                          },
                         },
-                      },
-                      `#${(c.issueId || c.id).slice(0, 8)} ↗`
+                        `#${(c.issueId || c.id).slice(0, 8)} ↗`
+                      )
                     ),
                     h(
-                      "span",
-                      {
-                        style: {
-                          fontSize: "10px",
-                          fontWeight: "600",
-                          color:
-                            c.priority === "P0"
-                              ? "#f87171"
-                              : c.priority === "P1"
-                              ? "#fbbf24"
-                              : THEME.textMuted,
+                      "div",
+                      { style: { display: "flex", alignItems: "center", gap: "5px" } },
+                      c.ciStatus &&
+                        h(
+                          "span",
+                          {
+                            style: {
+                              fontSize: "9px",
+                              fontFamily: "monospace",
+                              fontWeight: "700",
+                              color: c.ciStatus === "pass" ? "#10b981" : c.ciStatus === "running" ? "#f59e0b" : "#ef4444",
+                              backgroundColor:
+                                c.ciStatus === "pass"
+                                  ? "rgba(16, 185, 129, 0.12)"
+                                  : c.ciStatus === "running"
+                                  ? "rgba(245, 158, 11, 0.12)"
+                                  : "rgba(239, 68, 68, 0.12)",
+                              padding: "1px 5px",
+                              borderRadius: "4px",
+                            },
+                          },
+                          `CI:${c.ciStatus.toUpperCase()}`
+                        ),
+                      h(
+                        "span",
+                        {
+                          style: {
+                            fontSize: "10px",
+                            fontWeight: "700",
+                            padding: "1px 6px",
+                            borderRadius: "4px",
+                            backgroundColor:
+                              c.priority === "P0"
+                                ? "rgba(239, 68, 68, 0.2)"
+                                : c.priority === "P1"
+                                ? "rgba(245, 158, 11, 0.2)"
+                                : "rgba(59, 130, 246, 0.2)",
+                            color:
+                              c.priority === "P0"
+                                ? "#f87171"
+                                : c.priority === "P1"
+                                ? "#fbbf24"
+                                : "#60a5fa",
+                          },
                         },
-                      },
-                      c.priority
+                        c.priority
+                      )
                     )
                   ),
                   // Card Title
@@ -4223,14 +4672,73 @@ export function apply(ctx: Context) {
                     {
                       style: {
                         fontSize: "12px",
-                        fontWeight: "500",
+                        fontWeight: "600",
                         color: THEME.textPrimary,
                         lineHeight: "1.4",
                       },
                     },
                     c.title
                   ),
-                  // Card Footer (Assignee + Relative Elapsed Time)
+                  // Informações Hermes: L-22 Aceite + Worktree Chips
+                  h(
+                    "div",
+                    { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "10px" } },
+                    c.acceptanceCommand &&
+                      h(
+                        "div",
+                        {
+                          style: {
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "5px",
+                            backgroundColor: "rgba(16, 185, 129, 0.08)",
+                            border: "1px solid rgba(16, 185, 129, 0.2)",
+                            padding: "3px 6px",
+                            borderRadius: "4px",
+                            color: "#34d399",
+                            fontFamily: "monospace",
+                            fontSize: "9.5px",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                          },
+                          title: `Comando Invariante L-22: ${c.acceptanceCommand}`,
+                        },
+                        h("span", { style: { fontWeight: "700", color: "#10b981" } }, "L-22:"),
+                        h("span", { style: { overflow: "hidden", textOverflow: "ellipsis" } }, c.acceptanceCommand)
+                      ),
+                    h(
+                      "div",
+                      { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px" } },
+                      h(
+                        "span",
+                        {
+                          style: {
+                            color: "#38bdf8",
+                            fontFamily: "monospace",
+                            fontSize: "9.5px",
+                            backgroundColor: "rgba(56, 189, 248, 0.08)",
+                            padding: "1px 5px",
+                            borderRadius: "4px",
+                          },
+                          title: `Worktree Isolada: ${c.worktreePath || `.worktrees/${c.issueId}`}`,
+                        },
+                        `📁 ${(c.worktreePath || `.worktrees/${c.issueId}`).replace(".worktrees/", "")}`
+                      ),
+                      h(
+                        "span",
+                        {
+                          style: {
+                            color: "#c084fc",
+                            fontSize: "9.5px",
+                            fontFamily: "monospace",
+                          },
+                        },
+                        `${c.recommendedModel || "Flash"} · ~$${c.estimatedCost || "0.002"}`
+                      )
+                    )
+                  ),
+                  // Card Footer (Papéis + Relative Elapsed Time)
                   h(
                     "div",
                     {
@@ -4244,8 +4752,45 @@ export function apply(ctx: Context) {
                         paddingTop: "6px",
                       },
                     },
-                    h("span", { style: { color: THEME.textSecondary, fontWeight: "500" } }, c.executor || "Não atribuído"),
-                    h("span", null, c.elapsedTime || "agora")
+                    h(
+                      "div",
+                      { style: { display: "flex", alignItems: "center", gap: "5px" } },
+                      h(
+                        "span",
+                        {
+                          style: {
+                            color: "#cbd5e1",
+                            fontWeight: "600",
+                            backgroundColor: "rgba(255, 255, 255, 0.06)",
+                            padding: "1px 5px",
+                            borderRadius: "4px",
+                          },
+                        },
+                        c.executor || "Não atribuído"
+                      ),
+                      c.revisor &&
+                        h(
+                          "span",
+                          { style: { color: "#8b949e", fontSize: "9px" } },
+                          `→ ${c.revisor}`
+                        )
+                    ),
+                    h(
+                      "span",
+                      {
+                        style: {
+                          fontFamily: "monospace",
+                          fontSize: "10px",
+                          color: "#34d399",
+                          fontWeight: "600",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "3px",
+                        },
+                        title: c.createdAt ? formatFullDateTime(c.createdAt) : undefined,
+                      },
+                      `🕒 ${formatRelativeTime(c.createdAt || c.elapsedTime)}`
+                    )
                   )
                 )
               )
