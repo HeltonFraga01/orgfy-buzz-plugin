@@ -160,25 +160,60 @@ assert.equal(acq2.code, "ACQUIRED");
 await lockTool.call({}, {}, { action: "release", issue_id: testIssue, agent_id: "OrgFy Val" });
 console.log("[ONDA 3 CHECKOUT LOCK OK]");
 
-// 4. Onda 3: orgfy_governanca_avaliar (Dry-run + Execução Real + Cooldown Anti-Spam)
+// 4. Onda 3: orgfy_governanca_avaliar (Snapshot real + cenário sintético de alertas com cooldown anti-spam)
 const govTool = h1.tools.get("orgfy_governanca_avaliar");
-const govDry = JSON.parse(await govTool.call({}, {}, { dry_run: true, auto_wake: true }));
-assert.equal(govDry.ok, true);
-assert.ok(govDry.alertsDetected >= 1);
+const govDryReal = JSON.parse(await govTool.call({}, {}, { dry_run: true, auto_wake: true }));
+assert.equal(govDryReal.ok, true);
 assert.equal(h1.notifications.length, 0, "dry_run não pode disparar notificações");
 
-const govReal1 = JSON.parse(await govTool.call({}, {}, { dry_run: false, auto_wake: true }));
+// Harness dedicado com alerta sintético para validar disparo + cooldown independentemente da esteira estar zerada
+const hAlert = makeHarness(false);
+const origRead = hAlert.tools;
+const alertCtxNotifications = [];
+const alertCtxWakes = [];
+const alertTools = new Map();
+const fakeKpisWithAlert = JSON.stringify({
+  schema_version: "1.0.0",
+  gerado_em: new Date().toISOString(),
+  janela_dias: 30,
+  fluxo: { vazao_total_feito: 10, fila_revisao_atual: 12 },
+  qualidade: { fpy_real_pct: 95 },
+  economia: { status_orcamento: "OK", uso_teto_diario_pct: 10 },
+  higiene: { wip_total_ativo: 12, orphan_wip_count: 0, estagnados_nivel_3: 2 },
+  alertas_ativos: [
+    { codigo: "REVIEW_QUEUE_BOTTLENECK", severidade: "warn", mensagem: "Teste fila 12", acao_sugerida: "Acordar revisor" },
+  ],
+});
+orgfyMod.apply({
+  react: { createElement: () => null },
+  pages: { register: () => {} },
+  settingsCards: { register: () => {} },
+  panels: { register: () => {} },
+  navigation: { open: async () => ({ status: "opened" }) },
+  notifications: { notify: async (n) => alertCtxNotifications.push(n) },
+  agents: {
+    addInstructions: () => {},
+    addTool: (t) => alertTools.set(t.name, t),
+    registerHook: () => {},
+    wake: async (w) => alertCtxWakes.push(w),
+  },
+  host: {
+    readFile: async () => new TextEncoder().encode(fakeKpisWithAlert),
+    writeFile: async () => {},
+    serveMcp: async () => ({ url: "mcp://test-alert", close: () => {} }),
+  },
+});
+const govAlertTool = alertTools.get("orgfy_governanca_avaliar");
+const govReal1 = JSON.parse(await govAlertTool.call({}, {}, { dry_run: false, auto_wake: true }));
 assert.equal(govReal1.ok, true);
-assert.ok(
-  govReal1.notificationsSent.length + govReal1.wakesTriggered.length >= 1,
-  "execução real deve disparar notificações ou wakes para alertas ativos"
-);
+assert.ok(govReal1.notificationsSent.length >= 1, "execução real deve disparar notificação para alerta ativo");
 
-const govReal2 = JSON.parse(await govTool.call({}, {}, { dry_run: false, auto_wake: true }));
+const govReal2 = JSON.parse(await govAlertTool.call({}, {}, { dry_run: false, auto_wake: true }));
 assert.equal(govReal2.ok, true);
 assert.equal(govReal2.notificationsSent.length, 0, "segunda execução imediata deve ser bloqueada por cooldown anti-spam");
 assert.ok(govReal2.skippedByCooldown.length >= 1);
 console.log("[ONDA 3 GOVERNANCA & COOLDOWN OK]", JSON.stringify({
+  real_alerts: govDryReal.alertsDetected,
   notifications: govReal1.notificationsSent.length,
   wakes: govReal1.wakesTriggered.length,
   cooldown_skipped: govReal2.skippedByCooldown.length,

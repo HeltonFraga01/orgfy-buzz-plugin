@@ -538,12 +538,13 @@ def build_alerts(
         )
 
     p90_rev = fluxo.get("revisao_espera_p90_min")
-    if (p90_rev is not None and p90_rev > 60.0) or fluxo.get("fila_revisao_atual", 0) >= 10:
+    fila_rev = fluxo.get("fila_revisao_atual", 0)
+    if fila_rev >= 10 or (fila_rev > 0 and p90_rev is not None and p90_rev > 60.0):
         alerts.append(
             {
                 "codigo": "REVIEW_QUEUE_BOTTLENECK",
                 "severidade": "warn",
-                "mensagem": f"Gargalo em revisão: {fluxo['fila_revisao_atual']} cards na fila (P90 espera: {p90_rev if p90_rev is not None else '--'} min).",
+                "mensagem": f"Gargalo em revisão: {fila_rev} cards na fila (P90 espera: {p90_rev if p90_rev is not None else '--'} min).",
                 "acao_sugerida": "Acionar revisor via ctx.agents.wake e segurar novos dispatches.",
             }
         )
