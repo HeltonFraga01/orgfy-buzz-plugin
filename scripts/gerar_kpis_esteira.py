@@ -474,7 +474,7 @@ def _collect_resolved_and_closed_ids(scratch_dir: Path) -> set[str]:
 
 
 def analyze_hygiene(
-    placar_path: Optional[Path], sentinela_path: Path
+    placar_path: Optional[Path], sentinela_path: Path, now_utc: Optional[datetime] = None
 ) -> Tuple[Dict[str, Any], int, int]:
     placar = safe_load_json(placar_path) if placar_path else None
     sentinela = safe_load_json(sentinela_path) or {}
@@ -490,7 +490,17 @@ def analyze_hygiene(
     top_orfaos: List[Dict[str, Any]] = []
 
     if isinstance(placar, dict):
-        detalhes = placar.get("cards_ativos_detalhes")
+        # Quando o placar reconciliado reporta abertos_na_tela com divergencia_relay_tela == 0,
+        # abertos_na_tela_detalhes e a fonte canonica do WIP vivo (evita contar historico morto do relay).
+        abertos_tela = placar.get("abertos_na_tela_detalhes")
+        div_tela = placar.get("divergencia_relay_tela")
+        raw_detalhes = placar.get("cards_ativos_detalhes")
+        if isinstance(abertos_tela, list) and div_tela == 0:
+            detalhes = abertos_tela
+            if isinstance(raw_detalhes, list):
+                placar_filtrados_resolvidos += max(0, len(raw_detalhes) - len(abertos_tela))
+        else:
+            detalhes = raw_detalhes
         if isinstance(detalhes, list):
             for c in detalhes:
                 if not isinstance(c, dict):
@@ -535,10 +545,17 @@ def analyze_hygiene(
     stagnated_list: List[Dict[str, Any]] = []
     sentinela_count = 0
 
+    now_ref = now_utc or datetime.now(timezone.utc)
+    sentinela_ttl_s = 48 * 3600
+    sentinela_obsoletos_ignorados = 0
     if isinstance(sentinela, dict):
         sentinela_count = len(sentinela)
         for chave, entry in sentinela.items():
             if not isinstance(entry, dict):
+                continue
+            ultimo_ts = parse_timestamp(entry.get("ultimo_disparo_ts"))
+            if ultimo_ts is not None and (now_ref - ultimo_ts).total_seconds() > sentinela_ttl_s:
+                sentinela_obsoletos_ignorados += 1
                 continue
             chave_str = str(chave)
             if chave_str.startswith("worktree:"):
@@ -677,7 +694,7 @@ def generate_kpis(
         now_utc=now,
         daily_token_cap=daily_token_cap,
     )
-    higiene, fila_revisao, sentinela_entradas = analyze_hygiene(placar_path, sentinela_path)
+    higiene, fila_revisao, sentinela_entradas = analyze_hygiene(placar_path, sentinela_path, now_utc=now)
     fluxo["fila_revisao_atual"] = fila_revisao
 
     alertas = build_alerts(fluxo, qualidade, economia, higiene)
