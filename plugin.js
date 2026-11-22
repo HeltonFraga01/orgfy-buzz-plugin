@@ -271,6 +271,58 @@ async function openSystemUri(ctx, uri) {
   }
   return opened;
 }
+async function openIssueInBuzz(ctx, issue) {
+  var _a;
+  const DEFAULT_OWNER = "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20";
+  let owner = (issue.owner || DEFAULT_OWNER).toLowerCase().trim();
+  if (!/^[0-9a-f]{64}$/i.test(owner)) {
+    owner = DEFAULT_OWNER;
+  }
+  let dtag = (issue.dtag || "orgfy").toLowerCase().trim().replace(/[^a-z0-9._-]/g, "_");
+  if (!dtag || dtag.includes("..")) {
+    dtag = "orgfy";
+  }
+  const rawId = (issue.id || "").toLowerCase().replace(/^#/, "").trim();
+  let targetId = rawId;
+  if (/^[0-9a-f]{64}$/i.test(targetId)) ;
+  else if (/^[0-9a-f]{1,63}$/i.test(targetId)) {
+    targetId = targetId.padEnd(64, "0");
+  } else {
+    let hash = "";
+    for (let i = 0; i < 64; i++) {
+      const code = (rawId.charCodeAt(i % (rawId.length || 1)) + i * 37) * 31 % 16;
+      hash += code.toString(16);
+    }
+    targetId = hash;
+  }
+  if ((_a = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a.open) {
+    try {
+      const res = await ctx.navigation.open({
+        version: 1,
+        kind: "page",
+        pluginId: "buzz.repos",
+        pageId: "repos",
+        route: {
+          version: 1,
+          params: {
+            type: "issue",
+            owner,
+            dtag,
+            id: targetId
+          }
+        }
+      });
+      if (!res || res.status === "opened") {
+        return true;
+      }
+      console.warn("[OrgFy Bridge] ctx.navigation.open retornou status não aberto:", res);
+    } catch (err) {
+      console.warn("[OrgFy Bridge] ctx.navigation.open para buzz.repos/repos falhou:", err);
+    }
+  }
+  const uri = `buzz://issue?id=${targetId}&owner=${owner}&d=${dtag}`;
+  return openSystemUri(ctx, uri);
+}
 const INITIAL_BOOTSTRAP_STEPS = [
   { step: "prerequisites", label: "Auditoria de Pré-requisitos (Python 3.10+, Git, Docker)", status: "pending" },
   { step: "repo", label: "Verificação da Esteira Determinística (REPOS/orgfy)", status: "pending" },
@@ -1456,10 +1508,20 @@ function apply(ctx) {
       return `buzz://issue?id=${issueId}&owner=${owner}&d=${empresa}`;
     };
     const handleOpenIssueDeepLink = async (c) => {
-      const uri = buildIssueDeepLink(c);
-      showNotification("info", `Abrindo issue #${c.issueId} no Buzz Desktop...`);
-      console.log("[OrgFy Control Room] Abrindo issue:", uri);
-      await openSystemUri(ctx, uri);
+      const issueId = c.fullIssueId || c.issueId;
+      showNotification("info", `Navegando para issue #${c.issueId} no Buzz Desktop...`);
+      try {
+        const opened = await openIssueInBuzz(ctx, {
+          id: issueId,
+          owner: c.owner,
+          dtag: c.empresa || (selectedTenant === "all" ? "orgfy" : selectedTenant)
+        });
+        if (opened) {
+          showNotification("success", `Navegação para issue #${c.issueId} concluída no Buzz Repos.`);
+        }
+      } catch (err) {
+        showNotification("warning", `Erro na navegação: ${(err == null ? void 0 : err.message) || err}`);
+      }
     };
     const handleCopyDeepLink = (e, c) => {
       var _a;
@@ -1916,6 +1978,30 @@ function apply(ctx) {
             },
             SVG.zap({ h, width: 13, height: 13 }),
             "+ Novo Despacho"
+          ),
+          // Toggle Catálogo de Templates & Hub de RSI na Topbar
+          h(
+            "button",
+            {
+              onClick: () => setActiveCentralTab(activeCentralTab === "templates_rsi" ? "pipeline" : "templates_rsi"),
+              title: "Alternar entre Matriz da Esteira e Catálogo de Templates & RSI",
+              style: {
+                padding: "5px 10px",
+                backgroundColor: activeCentralTab === "templates_rsi" ? "rgba(56, 189, 248, 0.2)" : "rgba(255, 255, 255, 0.04)",
+                color: activeCentralTab === "templates_rsi" ? "#38bdf8" : THEME.textPrimary,
+                border: activeCentralTab === "templates_rsi" ? "1px solid rgba(56, 189, 248, 0.4)" : `1px solid ${THEME.hairline}`,
+                borderRadius: "6px",
+                cursor: "pointer",
+                fontSize: "11px",
+                fontWeight: "500",
+                display: "flex",
+                alignItems: "center",
+                gap: "5px",
+                transition: "all 0.15s ease"
+              }
+            },
+            SVG.gitPullRequest({ h, width: 13, height: 13 }),
+            "Templates & RSI"
           ),
           // Toggle Drawer Governança
           h(
@@ -2486,6 +2572,33 @@ function apply(ctx) {
                 { style: { padding: "6px 8px", borderRadius: "6px", backgroundColor: "rgba(255,255,255,0.03)", fontSize: "10px" } },
                 h("div", { style: { color: "#ffffff", fontWeight: "600" } }, "GUARD-L01"),
                 h("div", { style: { color: THEME.textMuted } }, "Impedimento auto-revisão L-01 (10/10 cards)")
+              ),
+              h(
+                "button",
+                {
+                  onClick: () => {
+                    setIsGovernanceDrawerOpen(false);
+                    setActiveCentralTab("templates_rsi");
+                  },
+                  style: {
+                    marginTop: "6px",
+                    padding: "7px 10px",
+                    borderRadius: "6px",
+                    border: "1px solid rgba(56, 189, 248, 0.3)",
+                    backgroundColor: "rgba(56, 189, 248, 0.12)",
+                    color: "#38bdf8",
+                    fontSize: "11px",
+                    fontWeight: "600",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "6px",
+                    transition: "all 0.15s ease"
+                  }
+                },
+                SVG.gitPullRequest({ h, width: 13, height: 13 }),
+                "Explorar Catálogo de Templates & RSI Completo →"
               )
             )
           ),
@@ -3468,12 +3581,16 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
               "div",
               { style: { display: "flex", alignItems: "center", gap: "8px" } },
               h(
-                "a",
+                "button",
                 {
-                  href: buildIssueDeepLink(activeIssueDetailCard),
-                  onClick: () => handleOpenIssueDeepLink(activeIssueDetailCard),
+                  onClick: (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const card = activeIssueDetailCard;
+                    setActiveIssueDetailCard(null);
+                    handleOpenIssueDeepLink(card);
+                  },
                   style: {
-                    textDecoration: "none",
                     padding: "7px 12px",
                     borderRadius: "8px",
                     border: "1px solid rgba(56, 189, 248, 0.3)",
@@ -3484,8 +3601,10 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
                     cursor: "pointer",
                     display: "flex",
                     alignItems: "center",
-                    gap: "6px"
-                  }
+                    gap: "6px",
+                    transition: "all 0.15s ease"
+                  },
+                  title: "Navegar diretamente para a Issue na tela nativa de Repos do Buzz Desktop"
                 },
                 SVG.externalLink({ h, width: 12, height: 12 }),
                 "Abrir no Buzz Desktop"
@@ -4659,11 +4778,19 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
                 h(
                   "span",
                   {
+                    onClick: (e) => {
+                      e.stopPropagation();
+                      handleOpenIssueDeepLink(c);
+                    },
+                    title: "Abrir issue diretamente no Buzz Desktop",
                     style: {
                       fontSize: "11px",
                       fontFamily: "monospace",
                       color: "#60a5fa",
-                      fontWeight: "600"
+                      fontWeight: "600",
+                      cursor: "pointer",
+                      textDecoration: "underline",
+                      textUnderlineOffset: "2px"
                     }
                   },
                   `#${(c.issueId || c.id).slice(0, 8)} ↗`

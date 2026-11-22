@@ -15,6 +15,7 @@ import {
   fetchLiveEsteiraState,
   calculateDsapSimilarity,
   openSystemUri,
+  openIssueInBuzz,
 } from "./services/orgfy-bridge";
 import {
   executeBootstrapFlow,
@@ -602,10 +603,20 @@ export function apply(ctx: Context) {
     };
 
     const handleOpenIssueDeepLink = async (c: PipelineCard) => {
-      const uri = buildIssueDeepLink(c);
-      showNotification("info", `Abrindo issue #${c.issueId} no Buzz Desktop...`);
-      console.log("[OrgFy Control Room] Abrindo issue:", uri);
-      await openSystemUri(ctx, uri);
+      const issueId = c.fullIssueId || c.issueId;
+      showNotification("info", `Navegando para issue #${c.issueId} no Buzz Desktop...`);
+      try {
+        const opened = await openIssueInBuzz(ctx, {
+          id: issueId,
+          owner: c.owner,
+          dtag: c.empresa || (selectedTenant === "all" ? "orgfy" : selectedTenant),
+        });
+        if (opened) {
+          showNotification("success", `Navegação para issue #${c.issueId} concluída no Buzz Repos.`);
+        }
+      } catch (err: any) {
+        showNotification("warning", `Erro na navegação: ${err?.message || err}`);
+      }
     };
 
     const handleCopyDeepLink = (e: any, c: PipelineCard) => {
@@ -1112,6 +1123,31 @@ export function apply(ctx: Context) {
             },
             SVG.zap({ h, width: 13, height: 13 }),
             "+ Novo Despacho"
+          ),
+
+          // Toggle Catálogo de Templates & Hub de RSI na Topbar
+          h(
+            "button",
+            {
+              onClick: () => setActiveCentralTab(activeCentralTab === "templates_rsi" ? "pipeline" : "templates_rsi"),
+              title: "Alternar entre Matriz da Esteira e Catálogo de Templates & RSI",
+              style: {
+                padding: "5px 10px",
+                backgroundColor: activeCentralTab === "templates_rsi" ? "rgba(56, 189, 248, 0.2)" : "rgba(255, 255, 255, 0.04)",
+                color: activeCentralTab === "templates_rsi" ? "#38bdf8" : THEME.textPrimary,
+                border: activeCentralTab === "templates_rsi" ? "1px solid rgba(56, 189, 248, 0.4)" : `1px solid ${THEME.hairline}`,
+                borderRadius: "6px",
+                cursor: "pointer",
+                fontSize: "11px",
+                fontWeight: "500",
+                display: "flex",
+                alignItems: "center",
+                gap: "5px",
+                transition: "all 0.15s ease",
+              },
+            },
+            SVG.gitPullRequest({ h, width: 13, height: 13 }),
+            "Templates & RSI"
           ),
 
           // Toggle Drawer Governança
@@ -1820,6 +1856,33 @@ export function apply(ctx: Context) {
                   { style: { padding: "6px 8px", borderRadius: "6px", backgroundColor: "rgba(255,255,255,0.03)", fontSize: "10px" } },
                   h("div", { style: { color: "#ffffff", fontWeight: "600" } }, "GUARD-L01"),
                   h("div", { style: { color: THEME.textMuted } }, "Impedimento auto-revisão L-01 (10/10 cards)")
+                ),
+                h(
+                  "button",
+                  {
+                    onClick: () => {
+                      setIsGovernanceDrawerOpen(false);
+                      setActiveCentralTab("templates_rsi");
+                    },
+                    style: {
+                      marginTop: "6px",
+                      padding: "7px 10px",
+                      borderRadius: "6px",
+                      border: "1px solid rgba(56, 189, 248, 0.3)",
+                      backgroundColor: "rgba(56, 189, 248, 0.12)",
+                      color: "#38bdf8",
+                      fontSize: "11px",
+                      fontWeight: "600",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "6px",
+                      transition: "all 0.15s ease",
+                    },
+                  },
+                  SVG.gitPullRequest({ h, width: 13, height: 13 }),
+                  "Explorar Catálogo de Templates & RSI Completo →"
                 )
               )
             ),
@@ -2859,12 +2922,16 @@ export function apply(ctx: Context) {
                 "div",
                 { style: { display: "flex", alignItems: "center", gap: "8px" } },
                 h(
-                  "a",
+                  "button",
                   {
-                    href: buildIssueDeepLink(activeIssueDetailCard),
-                    onClick: () => handleOpenIssueDeepLink(activeIssueDetailCard),
+                    onClick: (e: any) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const card = activeIssueDetailCard;
+                      setActiveIssueDetailCard(null);
+                      handleOpenIssueDeepLink(card);
+                    },
                     style: {
-                      textDecoration: "none",
                       padding: "7px 12px",
                       borderRadius: "8px",
                       border: "1px solid rgba(56, 189, 248, 0.3)",
@@ -2876,7 +2943,9 @@ export function apply(ctx: Context) {
                       display: "flex",
                       alignItems: "center",
                       gap: "6px",
+                      transition: "all 0.15s ease",
                     },
+                    title: "Navegar diretamente para a Issue na tela nativa de Repos do Buzz Desktop",
                   },
                   SVG.externalLink({ h, width: 12, height: 12 }),
                   "Abrir no Buzz Desktop"
@@ -4114,11 +4183,19 @@ export function apply(ctx: Context) {
                     h(
                       "span",
                       {
+                        onClick: (e: any) => {
+                          e.stopPropagation();
+                          handleOpenIssueDeepLink(c);
+                        },
+                        title: "Abrir issue diretamente no Buzz Desktop",
                         style: {
                           fontSize: "11px",
                           fontFamily: "monospace",
                           color: "#60a5fa",
                           fontWeight: "600",
+                          cursor: "pointer",
+                          textDecoration: "underline",
+                          textUnderlineOffset: "2px",
                         },
                       },
                       `#${(c.issueId || c.id).slice(0, 8)} ↗`

@@ -226,3 +226,31 @@ Invariantes Absolutos:
 
   return { success: true, log: logBuffer };
 }
+
+/**
+ * Garante que a worktree isolada do card existe em .worktrees/<cardSlug>.
+ * Se não existir, provisiona deterministamente com branch isolada e git worktree add.
+ */
+export async function ensureCardWorktree(
+  ctx: any,
+  cardSlugOrId: string,
+  branch?: string
+): Promise<{ ok: boolean; path: string }> {
+  const slug = cardSlugOrId.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "card-worktree";
+  const wtPath = `${ORGFY_ABS_PATH}/.worktrees/${slug}`;
+  const branchName = branch || `card/${slug}`;
+
+  if (!ctx?.host?.spawn) {
+    return { ok: true, path: wtPath };
+  }
+
+  try {
+    const cmd = `cd "${ORGFY_ABS_PATH}" && mkdir -p .worktrees && if [ ! -d ".worktrees/${slug}" ]; then git worktree add -B "${branchName}" ".worktrees/${slug}" HEAD 2>/dev/null || mkdir -p ".worktrees/${slug}"; fi`;
+    const proc = await ctx.host.spawn("bash", { args: [cmd] });
+    await proc.exited;
+    return { ok: true, path: wtPath };
+  } catch (_e) {
+    return { ok: false, path: wtPath };
+  }
+}
+

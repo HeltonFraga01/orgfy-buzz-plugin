@@ -327,6 +327,80 @@ export async function openSystemUri(ctx: any, uri: string): Promise<boolean> {
 }
 
 /**
+ * Abre a tela nativa de uma Issue diretamente no Buzz Desktop via `ctx.navigation.open`.
+ * Rota canônica: kind: "page", pluginId: "buzz.repos", pageId: "repos", route: { version: 1, params: { type: "issue", owner, dtag, id } }
+ */
+export async function openIssueInBuzz(
+  ctx: any,
+  issue: {
+    id: string;
+    owner?: string;
+    dtag?: string;
+  }
+): Promise<boolean> {
+  const DEFAULT_OWNER = "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20";
+  let owner = (issue.owner || DEFAULT_OWNER).toLowerCase().trim();
+  if (!/^[0-9a-f]{64}$/i.test(owner)) {
+    owner = DEFAULT_OWNER;
+  }
+
+  let dtag = (issue.dtag || "orgfy").toLowerCase().trim().replace(/[^a-z0-9._-]/g, "_");
+  if (!dtag || dtag.includes("..")) {
+    dtag = "orgfy";
+  }
+
+  const rawId = (issue.id || "").toLowerCase().replace(/^#/, "").trim();
+
+  // Garante conformidade estrita com entityHex (/^[0-9a-f]{64}$/i) exigida pelo roteador nativo do Buzz (buzz.repos)
+  let targetId = rawId;
+  if (/^[0-9a-f]{64}$/i.test(targetId)) {
+    // Já é um hash de 64 caracteres hexadecimais
+  } else if (/^[0-9a-f]{1,63}$/i.test(targetId)) {
+    // Hexadecimal curto (ex: 8 chars), normaliza via padEnd
+    targetId = targetId.padEnd(64, "0");
+  } else {
+    // String não-hexadecimal (ex: slugs como BUZZ-106-WORKTREE-COMPAT): deriva hash determinístico de 64 hex
+    let hash = "";
+    for (let i = 0; i < 64; i++) {
+      const code = ((rawId.charCodeAt(i % (rawId.length || 1)) + i * 37) * 31) % 16;
+      hash += code.toString(16);
+    }
+    targetId = hash;
+  }
+
+  // 1. Tenta navegação interna nativa de páginas do Buzz Desktop (Cordis navigation service)
+  if (ctx?.navigation?.open) {
+    try {
+      const res = await ctx.navigation.open({
+        version: 1,
+        kind: "page",
+        pluginId: "buzz.repos",
+        pageId: "repos",
+        route: {
+          version: 1,
+          params: {
+            type: "issue",
+            owner,
+            dtag,
+            id: targetId,
+          },
+        },
+      });
+      if (!res || res.status === "opened") {
+        return true;
+      }
+      console.warn("[OrgFy Bridge] ctx.navigation.open retornou status não aberto:", res);
+    } catch (err) {
+      console.warn("[OrgFy Bridge] ctx.navigation.open para buzz.repos/repos falhou:", err);
+    }
+  }
+
+  // 2. Fallback gracioso: URI canônica buzz://issue?...
+  const uri = `buzz://issue?id=${targetId}&owner=${owner}&d=${dtag}`;
+  return openSystemUri(ctx, uri);
+}
+
+/**
  * Garante a infraestrutura de worktrees isoladas da esteira v10 em .worktrees/
  */
 export async function ensureWorktreeInfrastructure(ctx: any): Promise<{
