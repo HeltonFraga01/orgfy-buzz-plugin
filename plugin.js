@@ -2509,6 +2509,410 @@ function registerGovernanceAgentHooks(ctx) {
     return false;
   }
 }
+const RESOLVED_ARCHIVE_PATH = "/Users/heltonfraga/.buzz/.scratch/resolved-issues-archive.json";
+function decodeHostBytes(raw) {
+  if (typeof raw === "string") return raw;
+  if (raw instanceof Uint8Array) return new TextDecoder("utf-8").decode(raw);
+  if (raw instanceof ArrayBuffer) return new TextDecoder("utf-8").decode(new Uint8Array(raw));
+  if (raw && typeof raw === "object") {
+    const obj = raw;
+    if (typeof obj.content === "string") return obj.content;
+    if (typeof obj.text === "string") return obj.text;
+    if (ArrayBuffer.isView(raw)) {
+      return new TextDecoder("utf-8").decode(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength));
+    }
+  }
+  return String(raw ?? "");
+}
+async function fetchResolvedArchive(ctx) {
+  const host = ctx.host;
+  if (!(host == null ? void 0 : host.readFile)) {
+    return {
+      disponivel: false,
+      error: "ctx.host.readFile indisponível.",
+      total: 0,
+      atualizado_em: null,
+      itens: []
+    };
+  }
+  try {
+    const raw = await host.readFile(RESOLVED_ARCHIVE_PATH);
+    const parsed = JSON.parse(decodeHostBytes(raw));
+    const itens = Array.isArray(parsed == null ? void 0 : parsed.itens) ? parsed.itens : [];
+    return {
+      disponivel: true,
+      error: null,
+      total: itens.length,
+      atualizado_em: (parsed == null ? void 0 : parsed.atualizado_em) || null,
+      itens
+    };
+  } catch (err) {
+    return {
+      disponivel: false,
+      error: (err == null ? void 0 : err.message) || "Arquivo resolved-issues-archive.json não encontrado.",
+      total: 0,
+      atualizado_em: null,
+      itens: []
+    };
+  }
+}
+async function searchResolvedArchive(ctx, options = {}) {
+  const loaded = await fetchResolvedArchive(ctx);
+  if (!loaded.disponivel) {
+    return {
+      disponivel: false,
+      error: loaded.error,
+      total_arquivo: 0,
+      total_encontrados: 0,
+      resultados: []
+    };
+  }
+  const q = String(options.query || "").trim().toLowerCase();
+  const specFilter = String(options.spec || "").trim().toLowerCase();
+  const limit = Math.max(1, Math.min(50, Number(options.limit || 10)));
+  const matched = loaded.itens.filter((item) => {
+    if (specFilter && specFilter !== "all" && item.spec.toLowerCase() !== specFilter) {
+      return false;
+    }
+    if (!q) return true;
+    const haystack = [
+      item.issueId,
+      item.fullIssueId,
+      item.code,
+      item.titulo,
+      item.spec,
+      item.commitSha || "",
+      item.causaRaiz,
+      ...item.arquivosAlterados || []
+    ].join(" ").toLowerCase();
+    return q.split(/\s+/).every((tok) => haystack.includes(tok));
+  });
+  return {
+    disponivel: true,
+    error: null,
+    total_arquivo: loaded.total,
+    total_encontrados: matched.length,
+    resultados: matched.slice(0, limit)
+  };
+}
+function renderResolvedArchiveTab(props) {
+  const {
+    h,
+    items,
+    error,
+    searchQuery,
+    specFilter,
+    copiedId,
+    onSearchChange,
+    onSpecFilterChange,
+    onCopyLink,
+    onReopenFollowUp,
+    onRefresh
+  } = props;
+  if (error) {
+    return h(
+      "div",
+      {
+        style: {
+          padding: "28px",
+          borderRadius: "10px",
+          backgroundColor: "rgba(255,255,255,0.02)",
+          border: "1px solid rgba(255,255,255,0.08)",
+          textAlign: "center",
+          color: "#9ca3af",
+          fontSize: "12px"
+        }
+      },
+      h("div", { style: { color: "#f8fafc", fontWeight: "700", marginBottom: "6px" } }, "Arquivo de Issues Resolvidas indisponível"),
+      h("div", { style: { marginBottom: "12px" } }, error),
+      h(
+        "button",
+        {
+          onClick: onRefresh,
+          style: {
+            padding: "6px 14px",
+            borderRadius: "8px",
+            border: "1px solid rgba(16, 185, 129, 0.4)",
+            backgroundColor: "rgba(16, 185, 129, 0.15)",
+            color: "#10b981",
+            fontSize: "12px",
+            fontWeight: "600",
+            cursor: "pointer"
+          }
+        },
+        "Tentar novamente"
+      )
+    );
+  }
+  const specs = Array.from(new Set(items.map((i) => i.spec).filter(Boolean)));
+  const q = searchQuery.trim().toLowerCase();
+  const filtered = items.filter((item) => {
+    if (specFilter !== "all" && item.spec !== specFilter) return false;
+    if (!q) return true;
+    const hay = [
+      item.issueId,
+      item.code,
+      item.titulo,
+      item.causaRaiz,
+      item.commitSha || "",
+      ...item.arquivosAlterados || []
+    ].join(" ").toLowerCase();
+    return q.split(/\s+/).every((tok) => hay.includes(tok));
+  });
+  return h(
+    "div",
+    {
+      style: {
+        display: "flex",
+        flexDirection: "column",
+        gap: "12px",
+        paddingBottom: "24px"
+      }
+    },
+    // Barra de busca e filtros
+    h(
+      "div",
+      {
+        style: {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: "10px",
+          padding: "12px 14px",
+          borderRadius: "10px",
+          backgroundColor: "rgba(0,0,0,0.28)",
+          border: "1px solid rgba(255,255,255,0.08)"
+        }
+      },
+      h(
+        "div",
+        { style: { display: "flex", alignItems: "center", gap: "8px", flex: "1 1 320px" } },
+        h("input", {
+          type: "text",
+          value: searchQuery,
+          onChange: (e) => onSearchChange(e.target.value),
+          placeholder: "Buscar issue resolvida por código, causa raiz, arquivo ou SHA...",
+          style: {
+            flex: 1,
+            padding: "7px 12px",
+            borderRadius: "8px",
+            border: "1px solid rgba(255,255,255,0.12)",
+            backgroundColor: "rgba(0,0,0,0.35)",
+            color: "#f8fafc",
+            fontSize: "12px",
+            outline: "none"
+          }
+        }),
+        h(
+          "select",
+          {
+            value: specFilter,
+            onChange: (e) => onSpecFilterChange(e.target.value),
+            style: {
+              padding: "7px 10px",
+              borderRadius: "8px",
+              border: "1px solid rgba(255,255,255,0.12)",
+              backgroundColor: "rgba(0,0,0,0.45)",
+              color: "#e2e8f0",
+              fontSize: "12px"
+            }
+          },
+          h("option", { value: "all" }, `Todas as Specs (${items.length})`),
+          ...specs.map((sp) => h("option", { key: sp, value: sp }, sp))
+        )
+      ),
+      h(
+        "div",
+        { style: { display: "flex", alignItems: "center", gap: "10px", fontSize: "11px", color: "#9ca3af" } },
+        h("span", {}, `Exibindo ${filtered.length} de ${items.length} resolvidas (consulta sob demanda — zero poluição no Kanban ativo)`),
+        h(
+          "button",
+          {
+            onClick: onRefresh,
+            style: {
+              padding: "5px 10px",
+              borderRadius: "6px",
+              border: "1px solid rgba(255,255,255,0.12)",
+              backgroundColor: "rgba(255,255,255,0.05)",
+              color: "#e2e8f0",
+              fontSize: "11px",
+              cursor: "pointer"
+            }
+          },
+          "Atualizar"
+        )
+      )
+    ),
+    // Lista de cards resolvidos
+    filtered.length === 0 ? h(
+      "div",
+      {
+        style: {
+          padding: "24px",
+          textAlign: "center",
+          color: "#6b7280",
+          fontSize: "12px",
+          borderRadius: "10px",
+          border: "1px dashed rgba(255,255,255,0.08)"
+        }
+      },
+      "Nenhuma issue resolvida corresponde ao filtro atual."
+    ) : h(
+      "div",
+      {
+        style: {
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))",
+          gap: "10px"
+        }
+      },
+      ...filtered.slice(0, 60).map(
+        (item) => h(
+          "div",
+          {
+            key: item.issueId + item.code,
+            style: {
+              borderRadius: "10px",
+              backgroundColor: "rgba(0,0,0,0.28)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              padding: "12px 14px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "8px"
+            }
+          },
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" } },
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" } },
+              h(
+                "span",
+                {
+                  style: {
+                    fontSize: "10px",
+                    fontWeight: "700",
+                    padding: "2px 7px",
+                    borderRadius: "5px",
+                    backgroundColor: "rgba(16,185,129,0.15)",
+                    color: "#10b981",
+                    fontFamily: "monospace"
+                  }
+                },
+                item.code
+              ),
+              h(
+                "span",
+                { style: { fontSize: "10px", color: "#38bdf8", fontFamily: "monospace" } },
+                `#${item.issueId}`
+              ),
+              item.commitSha && h(
+                "span",
+                {
+                  style: {
+                    fontSize: "10px",
+                    color: "#c084fc",
+                    fontFamily: "monospace",
+                    backgroundColor: "rgba(168,85,247,0.14)",
+                    padding: "1px 6px",
+                    borderRadius: "4px"
+                  }
+                },
+                `SHA ${item.commitSha}`
+              )
+            ),
+            h(
+              "span",
+              { style: { fontSize: "10px", color: "#6b7280", textTransform: "uppercase" } },
+              item.spec
+            )
+          ),
+          h(
+            "div",
+            { style: { fontSize: "12px", fontWeight: "600", color: "#f8fafc", lineHeight: "1.35" } },
+            item.titulo
+          ),
+          h(
+            "div",
+            { style: { fontSize: "11px", color: "#9ca3af", lineHeight: "1.4" } },
+            item.causaRaiz
+          ),
+          item.arquivosAlterados && item.arquivosAlterados.length > 0 && h(
+            "div",
+            { style: { display: "flex", flexWrap: "wrap", gap: "4px" } },
+            ...item.arquivosAlterados.slice(0, 4).map(
+              (f) => h(
+                "span",
+                {
+                  key: f,
+                  style: {
+                    fontSize: "10px",
+                    fontFamily: "monospace",
+                    color: "#cbd5e1",
+                    backgroundColor: "rgba(255,255,255,0.05)",
+                    padding: "2px 6px",
+                    borderRadius: "4px"
+                  }
+                },
+                f
+              )
+            )
+          ),
+          h(
+            "div",
+            {
+              style: {
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "8px",
+                marginTop: "4px",
+                paddingTop: "8px",
+                borderTop: "1px solid rgba(255,255,255,0.06)"
+              }
+            },
+            h(
+              "button",
+              {
+                onClick: () => onCopyLink(item),
+                style: {
+                  padding: "5px 10px",
+                  borderRadius: "6px",
+                  border: "1px solid rgba(56,189,248,0.35)",
+                  backgroundColor: "rgba(56,189,248,0.12)",
+                  color: "#38bdf8",
+                  fontSize: "11px",
+                  fontWeight: "600",
+                  cursor: "pointer"
+                }
+              },
+              copiedId === item.issueId ? "Deep-Link Copiado!" : "Copiar Deep-Link"
+            ),
+            h(
+              "button",
+              {
+                onClick: () => onReopenFollowUp(item),
+                style: {
+                  padding: "5px 10px",
+                  borderRadius: "6px",
+                  border: "1px solid rgba(245,158,11,0.35)",
+                  backgroundColor: "rgba(245,158,11,0.12)",
+                  color: "#fbbf24",
+                  fontSize: "11px",
+                  fontWeight: "600",
+                  cursor: "pointer"
+                }
+              },
+              "Reabrir / Follow-up"
+            )
+          )
+        )
+      )
+    )
+  );
+}
 const inject = [
   "react",
   "pages",
@@ -3089,15 +3493,26 @@ function apply(ctx) {
     const [kpisError, setKpisError] = React.useState(null);
     const [isRecalculatingKpis, setIsRecalculatingKpis] = React.useState(false);
     const [governanceSummary, setGovernanceSummary] = React.useState(null);
+    const [resolvedItems, setResolvedItems] = React.useState([]);
+    const [resolvedError, setResolvedError] = React.useState(null);
+    const [resolvedSearch, setResolvedSearch] = React.useState("");
+    const [resolvedSpecFilter, setResolvedSpecFilter] = React.useState("all");
+    const [copiedResolvedId, setCopiedResolvedId] = React.useState(null);
     const loadKpis = React.useCallback(async () => {
       const res = await fetchKpisEsteira(ctx);
       setKpisData(res.kpis);
       setKpisHistory(res.history);
       setKpisError(res.error);
     }, []);
+    const loadResolvedArchive = React.useCallback(async () => {
+      const res = await fetchResolvedArchive(ctx);
+      setResolvedItems(res.itens);
+      setResolvedError(res.error);
+    }, []);
     React.useEffect(() => {
       loadKpis();
-    }, [loadKpis]);
+      loadResolvedArchive();
+    }, [loadKpis, loadResolvedArchive]);
     const handleRecalculateKpis = React.useCallback(async () => {
       setIsRecalculatingKpis(true);
       try {
@@ -3964,12 +4379,36 @@ function apply(ctx) {
                 },
                 SVG.activity({ h, width: 14, height: 14 }),
                 "Inteligência & Saúde"
+              ),
+              h(
+                "button",
+                {
+                  onClick: () => {
+                    setActiveCentralTab("resolvidas");
+                    loadResolvedArchive();
+                  },
+                  style: {
+                    padding: "6px 14px",
+                    borderRadius: "8px",
+                    fontSize: "12px",
+                    fontWeight: "600",
+                    cursor: "pointer",
+                    border: activeCentralTab === "resolvidas" ? "1px solid rgba(245, 158, 11, 0.45)" : "1px solid transparent",
+                    backgroundColor: activeCentralTab === "resolvidas" ? "rgba(245, 158, 11, 0.16)" : "rgba(255, 255, 255, 0.04)",
+                    color: activeCentralTab === "resolvidas" ? "#fbbf24" : "#9ca3af",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px"
+                  }
+                },
+                SVG.checkCircle({ h, width: 14, height: 14 }),
+                `Arquivo de Resolvidas (${resolvedItems.length})`
               )
             ),
             h(
               "span",
               { style: { fontSize: "11px", color: "#6b7280", fontFamily: "monospace" } },
-              activeCentralTab === "pipeline" ? "Esteira Determinística OrgFy v11" : activeCentralTab === "inteligencia" ? "Telemetria Real, Economia & Governança de Ciclo Fechado" : "Recursão & FPY (Regras L-22, L-90)"
+              activeCentralTab === "pipeline" ? "Esteira Determinística OrgFy v11" : activeCentralTab === "inteligencia" ? "Telemetria Real, Economia & Governança de Ciclo Fechado" : activeCentralTab === "resolvidas" ? "Memória Episódica Sob Demanda (Deep-Link & Reabertura)" : "Recursão & FPY (Regras L-22, L-90)"
             )
           ),
           activeCentralTab === "pipeline" ? h(
@@ -4482,6 +4921,29 @@ function apply(ctx) {
             onRecalculate: handleRecalculateKpis,
             onRunGovernanceEval: handleRunGovernanceEval,
             governanceSummary
+          }) : activeCentralTab === "resolvidas" ? renderResolvedArchiveTab({
+            h,
+            items: resolvedItems,
+            error: resolvedError,
+            searchQuery: resolvedSearch,
+            specFilter: resolvedSpecFilter,
+            copiedId: copiedResolvedId,
+            onSearchChange: setResolvedSearch,
+            onSpecFilterChange: setResolvedSpecFilter,
+            onCopyLink: (item) => {
+              var _a3;
+              try {
+                (_a3 = navigator == null ? void 0 : navigator.clipboard) == null ? void 0 : _a3.writeText(item.deepLink);
+              } catch {
+              }
+              setCopiedResolvedId(item.issueId);
+              setTimeout(() => setCopiedResolvedId(null), 2e3);
+            },
+            onReopenFollowUp: (item) => {
+              setDispatchIssueId(item.fullIssueId || item.issueId);
+              setIsDispatchModalOpen(true);
+            },
+            onRefresh: loadResolvedArchive
           }) : renderTemplatesRsiView()
         )
       ),
@@ -7833,7 +8295,27 @@ Consulte sempre orgfy_status, orgfy_kpis ou orgfy_kanban_read para inspecionar m
           return JSON.stringify(bindRes, null, 2);
         }
       });
-      console.log("[ORGFY] 10 agentTools registradas com sucesso no harness do Buzz (Ondas 1, 2 e 3 completas).");
+      ctx.agents.addTool({
+        name: "orgfy_historico_buscar",
+        description: "Busca sob demanda (just-in-time) no Arquivo de Issues Resolvidas (resolved-issues-archive.json) por código, causa raiz, arquivo alterado ou SHA, retornando deep-links e precedentes sem poluir a janela ativa.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string", description: "Palavras-chave (ex: 'porteiro', 'gate', 'T002', nome do arquivo ou SHA)" },
+            spec: { type: "string", description: "Filtrar por spec (ex: 'esteira', '0006', 'all')" },
+            limit: { type: "number", description: "Máximo de resultados (default: 10, max: 50)" }
+          }
+        },
+        call: async (_client, _context, args) => {
+          const res = await searchResolvedArchive(ctx, {
+            query: args == null ? void 0 : args.query,
+            spec: args == null ? void 0 : args.spec,
+            limit: args == null ? void 0 : args.limit
+          });
+          return JSON.stringify(res, null, 2);
+        }
+      });
+      console.log("[ORGFY] 11 agentTools registradas com sucesso no harness do Buzz (Ondas 1, 2, 3 + Arquivo de Resolvidas).");
     } catch (err) {
       console.warn("[ORGFY] Falha ao registrar agentTools:", err);
     }

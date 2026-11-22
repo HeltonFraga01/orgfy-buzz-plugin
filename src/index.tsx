@@ -64,6 +64,12 @@ import {
   bindConversationContextForCard,
   registerGovernanceAgentHooks,
 } from "./services/governance-engine";
+import {
+  fetchResolvedArchive,
+  searchResolvedArchive,
+  type ResolvedIssueItem,
+} from "./services/resolved-archive";
+import { renderResolvedArchiveTab } from "./components/ResolvedArchiveTab";
 
 export const inject = [
   "react",
@@ -647,7 +653,7 @@ export function apply(ctx: Context) {
 
     // Expansão: Modal In-Cockpit de Detalhes da Issue e Abas da Ilha Central
     const [activeIssueDetailCard, setActiveIssueDetailCard] = React.useState<PipelineCard | null>(null);
-    const [activeCentralTab, setActiveCentralTab] = React.useState<"pipeline" | "templates_rsi" | "inteligencia">("pipeline");
+    const [activeCentralTab, setActiveCentralTab] = React.useState<"pipeline" | "templates_rsi" | "inteligencia" | "resolvidas">("pipeline");
 
     // Estado da Onda 2 & 3: Inteligência & Saúde + Governança de Ciclo Fechado
     const [kpisData, setKpisData] = React.useState<KpisEsteiraPayload | null>(null);
@@ -656,6 +662,13 @@ export function apply(ctx: Context) {
     const [isRecalculatingKpis, setIsRecalculatingKpis] = React.useState<boolean>(false);
     const [governanceSummary, setGovernanceSummary] = React.useState<string | null>(null);
 
+    // Estado do Arquivo Pesquisável de Issues Resolvidas (Just-in-Time Context)
+    const [resolvedItems, setResolvedItems] = React.useState<ResolvedIssueItem[]>([]);
+    const [resolvedError, setResolvedError] = React.useState<string | null>(null);
+    const [resolvedSearch, setResolvedSearch] = React.useState<string>("");
+    const [resolvedSpecFilter, setResolvedSpecFilter] = React.useState<string>("all");
+    const [copiedResolvedId, setCopiedResolvedId] = React.useState<string | null>(null);
+
     const loadKpis = React.useCallback(async () => {
       const res = await fetchKpisEsteira(ctx);
       setKpisData(res.kpis);
@@ -663,9 +676,16 @@ export function apply(ctx: Context) {
       setKpisError(res.error);
     }, []);
 
+    const loadResolvedArchive = React.useCallback(async () => {
+      const res = await fetchResolvedArchive(ctx);
+      setResolvedItems(res.itens);
+      setResolvedError(res.error);
+    }, []);
+
     React.useEffect(() => {
       loadKpis();
-    }, [loadKpis]);
+      loadResolvedArchive();
+    }, [loadKpis, loadResolvedArchive]);
 
     const handleRecalculateKpis = React.useCallback(async () => {
       setIsRecalculatingKpis(true);
@@ -1615,6 +1635,30 @@ export function apply(ctx: Context) {
                 },
                 SVG.activity({ h, width: 14, height: 14 }),
                 "Inteligência & Saúde"
+              ),
+              h(
+                "button",
+                {
+                  onClick: () => {
+                    setActiveCentralTab("resolvidas");
+                    loadResolvedArchive();
+                  },
+                  style: {
+                    padding: "6px 14px",
+                    borderRadius: "8px",
+                    fontSize: "12px",
+                    fontWeight: "600",
+                    cursor: "pointer",
+                    border: activeCentralTab === "resolvidas" ? "1px solid rgba(245, 158, 11, 0.45)" : "1px solid transparent",
+                    backgroundColor: activeCentralTab === "resolvidas" ? "rgba(245, 158, 11, 0.16)" : "rgba(255, 255, 255, 0.04)",
+                    color: activeCentralTab === "resolvidas" ? "#fbbf24" : "#9ca3af",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                  },
+                },
+                SVG.checkCircle({ h, width: 14, height: 14 }),
+                `Arquivo de Resolvidas (${resolvedItems.length})`
               )
             ),
             h(
@@ -1624,6 +1668,8 @@ export function apply(ctx: Context) {
                 ? "Esteira Determinística OrgFy v11"
                 : activeCentralTab === "inteligencia"
                 ? "Telemetria Real, Economia & Governança de Ciclo Fechado"
+                : activeCentralTab === "resolvidas"
+                ? "Memória Episódica Sob Demanda (Deep-Link & Reabertura)"
                 : "Recursão & FPY (Regras L-22, L-90)"
             )
           ),
@@ -2180,6 +2226,29 @@ export function apply(ctx: Context) {
           onRecalculate: handleRecalculateKpis,
           onRunGovernanceEval: handleRunGovernanceEval,
           governanceSummary,
+        })
+      : activeCentralTab === "resolvidas"
+      ? renderResolvedArchiveTab({
+          h,
+          items: resolvedItems,
+          error: resolvedError,
+          searchQuery: resolvedSearch,
+          specFilter: resolvedSpecFilter,
+          copiedId: copiedResolvedId,
+          onSearchChange: setResolvedSearch,
+          onSpecFilterChange: setResolvedSpecFilter,
+          onCopyLink: (item) => {
+            try {
+              (navigator as any)?.clipboard?.writeText(item.deepLink);
+            } catch {}
+            setCopiedResolvedId(item.issueId);
+            setTimeout(() => setCopiedResolvedId(null), 2000);
+          },
+          onReopenFollowUp: (item) => {
+            setDispatchIssueId(item.fullIssueId || item.issueId);
+            setIsDispatchModalOpen(true);
+          },
+          onRefresh: loadResolvedArchive,
         })
       : renderTemplatesRsiView()
         )
@@ -5729,7 +5798,29 @@ Consulte sempre orgfy_status, orgfy_kpis ou orgfy_kanban_read para inspecionar m
         },
       });
 
-      console.log("[ORGFY] 10 agentTools registradas com sucesso no harness do Buzz (Ondas 1, 2 e 3 completas).");
+      // ── MEMÓRIA EPISÓDICA SOB DEMANDA: BUSCA NO ARQUIVO DE ISSUES RESOLVIDAS ──
+      (ctx.agents as any).addTool({
+        name: "orgfy_historico_buscar",
+        description: "Busca sob demanda (just-in-time) no Arquivo de Issues Resolvidas (resolved-issues-archive.json) por código, causa raiz, arquivo alterado ou SHA, retornando deep-links e precedentes sem poluir a janela ativa.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            query: { type: "string", description: "Palavras-chave (ex: 'porteiro', 'gate', 'T002', nome do arquivo ou SHA)" },
+            spec: { type: "string", description: "Filtrar por spec (ex: 'esteira', '0006', 'all')" },
+            limit: { type: "number", description: "Máximo de resultados (default: 10, max: 50)" },
+          },
+        },
+        call: async (_client: any, _context: any, args: any) => {
+          const res = await searchResolvedArchive(ctx, {
+            query: args?.query,
+            spec: args?.spec,
+            limit: args?.limit,
+          });
+          return JSON.stringify(res, null, 2);
+        },
+      });
+
+      console.log("[ORGFY] 11 agentTools registradas com sucesso no harness do Buzz (Ondas 1, 2, 3 + Arquivo de Resolvidas).");
     } catch (err) {
       console.warn("[ORGFY] Falha ao registrar agentTools:", err);
     }

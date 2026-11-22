@@ -81,7 +81,7 @@ function makeHarness(failReads = false) {
 
 // 1. Testes Originais (Kanban & Status Positivo/Negativo + MCP)
 const h1 = makeHarness(false);
-assert.equal(h1.tools.size, 10, "devem existir exatamente 10 agentTools registradas");
+assert.equal(h1.tools.size, 11, "devem existir exatamente 11 agentTools registradas");
 assert.ok(h1.panels.has("orgfy-channel-pulse"), "sidebar panel orgfy-channel-pulse deve ser registrado");
 assert.ok(h1.hooks.length >= 1, "hooks de governança devem ser registrados");
 
@@ -261,3 +261,14 @@ assert.equal(bindRes.sectionsCount, 2);
 assert.equal(h1.assignedFolders.length, 1);
 assert.equal(h1.injectedSections.length, 1);
 console.log("[ONDA 3+ BIND CONTEXT OK]", JSON.stringify({ folderAssigned: bindRes.folderAssigned, sectionsCount: bindRes.sectionsCount }));
+
+// 7. Arquivo de Resolvidas sob demanda: orgfy_historico_buscar (Positivo + Negativo)
+const histTool = h1.tools.get("orgfy_historico_buscar");
+const histOk = JSON.parse(await histTool.call({}, {}, { query: "porteiro", limit: 5 }));
+assert.equal(histOk.disponivel, true);
+assert.ok(histOk.total_encontrados >= 2, "deve encontrar issues resolvidas do porteiro");
+assert.ok(histOk.resultados[0].deepLink.startsWith("buzz://issue?"));
+const histFail = JSON.parse(await h2.tools.get("orgfy_historico_buscar").call({}, {}, { query: "porteiro" }));
+assert.equal(histFail.disponivel, false);
+assert.equal(histFail.total_encontrados, 0);
+console.log("[ARQUIVO RESOLVIDAS OK]", JSON.stringify({ total_arquivo: histOk.total_arquivo, porteiro_hits: histOk.total_encontrados }));
