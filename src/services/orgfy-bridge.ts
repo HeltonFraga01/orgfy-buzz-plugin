@@ -271,38 +271,59 @@ export function calculateDsapSimilarity(
 }
 
 /**
- * Abre uma URI no sistema operacional (macOS) via processo 'open' ou fallback com 'bash'.
+ * Abre uma URI no sistema operacional (macOS) via processo 'open' ou fallback com 'bash' e DOM link.
  */
 export async function openSystemUri(ctx: any, uri: string): Promise<boolean> {
+  let opened = false;
+
   // 1. Prioridade 1: Spawn nativo 'open' do macOS através do host Cordis
   if (ctx?.host?.spawn) {
     try {
       const proc = await ctx.host.spawn("open", { args: [uri] });
       const code = await proc.exited;
-      if (code === 0) return true;
+      if (code === 0) opened = true;
     } catch (e) {
       console.warn("[OrgFy Bridge] spawn direct open falhou:", e);
     }
 
-    // 2. Fallback via 'bash' (com manifest args: ["-c"])
-    try {
-      const proc = await ctx.host.spawn("bash", { args: [`open "${uri}"`] });
-      const code = await proc.exited;
-      if (code === 0) return true;
-    } catch (e) {
-      console.warn("[OrgFy Bridge] spawn bash open falhou:", e);
+    if (!opened) {
+      // 2. Fallback via 'bash' (com manifest args: ["-c"])
+      try {
+        const proc = await ctx.host.spawn("bash", { args: [`open "${uri}"`] });
+        const code = await proc.exited;
+        if (code === 0) opened = true;
+      } catch (e) {
+        console.warn("[OrgFy Bridge] spawn bash open falhou:", e);
+      }
     }
   }
 
-  // 3. Fallback via window.location somente se host.spawn indisponível
-  if (typeof window !== "undefined") {
+  // 3. Fallback Webview DOM (dispara o manipulador de protocolo do sistema)
+  if (!opened && typeof window !== "undefined" && typeof document !== "undefined") {
     try {
-      window.location.assign(uri);
-      return true;
+      const a = document.createElement("a");
+      a.href = uri;
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        try {
+          document.body.removeChild(a);
+        } catch (_) {}
+      }, 500);
+      opened = true;
     } catch (_e) {}
   }
 
-  return false;
+  // 4. Fallback via window.location somente se outros métodos falharem
+  if (!opened && typeof window !== "undefined") {
+    try {
+      window.location.assign(uri);
+      opened = true;
+    } catch (_e) {}
+  }
+
+  return opened;
 }
 
 /**

@@ -2827,10 +2827,12 @@ export function apply(ctx: Context) {
                 "div",
                 { style: { display: "flex", alignItems: "center", gap: "8px" } },
                 h(
-                  "button",
+                  "a",
                   {
+                    href: buildIssueDeepLink(activeIssueDetailCard),
                     onClick: () => handleOpenIssueDeepLink(activeIssueDetailCard),
                     style: {
+                      textDecoration: "none",
                       padding: "7px 12px",
                       borderRadius: "8px",
                       border: "1px solid rgba(56, 189, 248, 0.3)",
@@ -4043,11 +4045,16 @@ export function apply(ctx: Context) {
                       "div",
                       { style: { display: "flex", alignItems: "center", gap: "4px" } },
                       h(
-                        "span",
+                        "a",
                         {
-                          onClick: () => setActiveIssueDetailCard(c),
-                          title: `Clique para ver detalhes da issue no Cockpit (#${c.issueId})`,
+                          href: buildIssueDeepLink(c),
+                          onClick: (e: any) => {
+                            e.stopPropagation();
+                            handleOpenIssueDeepLink(c);
+                          },
+                          title: `Abrir issue #${c.issueId} no Buzz Desktop`,
                           style: {
+                            textDecoration: "none",
                             fontSize: "10px",
                             color: "#38bdf8",
                             fontFamily: "monospace",

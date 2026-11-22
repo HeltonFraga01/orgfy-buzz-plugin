@@ -226,30 +226,50 @@ function calculateDsapSimilarity(currentText, previousText) {
 }
 async function openSystemUri(ctx, uri) {
   var _a;
+  let opened = false;
   if ((_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.spawn) {
     try {
       const proc = await ctx.host.spawn("open", { args: [uri] });
       const code = await proc.exited;
-      if (code === 0) return true;
+      if (code === 0) opened = true;
     } catch (e) {
       console.warn("[OrgFy Bridge] spawn direct open falhou:", e);
     }
-    try {
-      const proc = await ctx.host.spawn("bash", { args: [`open "${uri}"`] });
-      const code = await proc.exited;
-      if (code === 0) return true;
-    } catch (e) {
-      console.warn("[OrgFy Bridge] spawn bash open falhou:", e);
+    if (!opened) {
+      try {
+        const proc = await ctx.host.spawn("bash", { args: [`open "${uri}"`] });
+        const code = await proc.exited;
+        if (code === 0) opened = true;
+      } catch (e) {
+        console.warn("[OrgFy Bridge] spawn bash open falhou:", e);
+      }
     }
   }
-  if (typeof window !== "undefined") {
+  if (!opened && typeof window !== "undefined" && typeof document !== "undefined") {
     try {
-      window.location.assign(uri);
-      return true;
+      const a = document.createElement("a");
+      a.href = uri;
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        try {
+          document.body.removeChild(a);
+        } catch (_) {
+        }
+      }, 500);
+      opened = true;
     } catch (_e) {
     }
   }
-  return false;
+  if (!opened && typeof window !== "undefined") {
+    try {
+      window.location.assign(uri);
+      opened = true;
+    } catch (_e) {
+    }
+  }
+  return opened;
 }
 const INITIAL_BOOTSTRAP_STEPS = [
   { step: "prerequisites", label: "Auditoria de Pré-requisitos (Python 3.10+, Git, Docker)", status: "pending" },
@@ -3474,10 +3494,12 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
               "div",
               { style: { display: "flex", alignItems: "center", gap: "8px" } },
               h(
-                "button",
+                "a",
                 {
+                  href: buildIssueDeepLink(activeIssueDetailCard),
                   onClick: () => handleOpenIssueDeepLink(activeIssueDetailCard),
                   style: {
+                    textDecoration: "none",
                     padding: "7px 12px",
                     borderRadius: "8px",
                     border: "1px solid rgba(56, 189, 248, 0.3)",
@@ -4618,11 +4640,16 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
                   "div",
                   { style: { display: "flex", alignItems: "center", gap: "4px" } },
                   h(
-                    "span",
+                    "a",
                     {
-                      onClick: () => setActiveIssueDetailCard(c),
-                      title: `Clique para ver detalhes da issue no Cockpit (#${c.issueId})`,
+                      href: buildIssueDeepLink(c),
+                      onClick: (e) => {
+                        e.stopPropagation();
+                        handleOpenIssueDeepLink(c);
+                      },
+                      title: `Abrir issue #${c.issueId} no Buzz Desktop`,
                       style: {
+                        textDecoration: "none",
                         fontSize: "10px",
                         color: "#38bdf8",
                         fontFamily: "monospace",
