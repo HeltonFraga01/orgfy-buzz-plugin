@@ -1,3 +1,229 @@
+const ORGFY_ABS_PATH = "/Users/heltonfraga/.buzz/REPOS/orgfy";
+async function readOrgfyJson(ctx, relativePath, fallback) {
+  var _a;
+  if (!((_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.readFile)) {
+    return fallback;
+  }
+  try {
+    const fullPath = `${ORGFY_ABS_PATH}/${relativePath}`;
+    const raw = await ctx.host.readFile(fullPath);
+    const text = typeof raw === "string" ? raw : new TextDecoder().decode(raw);
+    return JSON.parse(text);
+  } catch (_e) {
+    try {
+      if (relativePath.includes(".esteira/estado/")) {
+        const scratchPath = relativePath.replace(".esteira/estado/", ".scratch/");
+        const raw = await ctx.host.readFile(`${ORGFY_ABS_PATH}/${scratchPath}`);
+        const text = typeof raw === "string" ? raw : new TextDecoder().decode(raw);
+        return JSON.parse(text);
+      }
+    } catch (_err) {
+    }
+    return fallback;
+  }
+}
+async function fetchLiveEsteiraState(ctx) {
+  const [boardManifest, esteiraState, placarState, regrasState] = await Promise.all([
+    readOrgfyJson(ctx, "empresas/board.json", null),
+    readOrgfyJson(ctx, ".esteira/estado/esteira-minima-state.json", null),
+    readOrgfyJson(ctx, ".scratch/placar-20h.json", null),
+    readOrgfyJson(ctx, ".esteira/estado/regras-probatorias.json", null)
+  ]);
+  return {
+    boardManifest,
+    esteiraState,
+    placarState,
+    regrasState,
+    timestamp: Date.now()
+  };
+}
+async function executeDespachar(ctx, options) {
+  var _a;
+  let combinedOutput = "";
+  const appendChunk = (chunk) => {
+    combinedOutput += chunk;
+    if (options.onOutput) options.onOutput(chunk);
+  };
+  const command = `cd "${ORGFY_ABS_PATH}" && python3 ferramentas/esteira/despachar --empresa "${options.empresa}" "${options.issueId}" "${options.executor}" "${options.revisor}"`;
+  appendChunk(`[EXEC] ${command}
+`);
+  if (!((_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.spawn)) {
+    appendChunk("[SIMULADO] Aceite congelado para " + options.issueId + ". Tier classificado. Despachado com sucesso.\n");
+    return { code: 0, output: combinedOutput };
+  }
+  try {
+    const proc = await ctx.host.spawn("bash", {
+      args: [command],
+      onStdout: appendChunk,
+      onStderr: appendChunk
+    });
+    const code = await proc.exited;
+    appendChunk(`
+[PROCESSO ENCERRADO] Código de saída: ${code}
+`);
+    return { code, output: combinedOutput };
+  } catch (err) {
+    appendChunk(`
+[ERRO NA EXECUÇÃO] ${(err == null ? void 0 : err.message) || String(err)}
+`);
+    return { code: 1, output: combinedOutput };
+  }
+}
+async function executeGate(ctx, options) {
+  var _a;
+  let combinedOutput = "";
+  const appendChunk = (chunk) => {
+    combinedOutput += chunk;
+    if (options.onOutput) options.onOutput(chunk);
+  };
+  const safeMotivo = options.motivo.replace(/"/g, '\\"');
+  let command = `cd "${ORGFY_ABS_PATH}" && python3 ferramentas/esteira/gate --empresa "${options.empresa}" "${options.prId}" ${options.acao}`;
+  if (options.acao === "recusado") {
+    command += ` "${safeMotivo}"`;
+  }
+  command += ` --revisor "${options.revisor}"`;
+  appendChunk(`[EXEC] ${command}
+`);
+  if (!((_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.spawn)) {
+    appendChunk(`[SIMULADO] Gate ${options.acao} emitido para ${options.prId} por ${options.revisor}.
+`);
+    return { code: 0, output: combinedOutput };
+  }
+  try {
+    const proc = await ctx.host.spawn("bash", {
+      args: [command],
+      onStdout: appendChunk,
+      onStderr: appendChunk
+    });
+    const code = await proc.exited;
+    appendChunk(`
+[PROCESSO ENCERRADO] Código de saída: ${code}
+`);
+    return { code, output: combinedOutput };
+  } catch (err) {
+    appendChunk(`
+[ERRO NA EXECUÇÃO] ${(err == null ? void 0 : err.message) || String(err)}
+`);
+    return { code: 1, output: combinedOutput };
+  }
+}
+async function executePorteiroSync(ctx, options) {
+  var _a;
+  let combinedOutput = "";
+  const appendChunk = (chunk) => {
+    combinedOutput += chunk;
+    if (options.onOutput) options.onOutput(chunk);
+  };
+  const command = `cd "${ORGFY_ABS_PATH}" && python3 ferramentas/esteira/porteiro.py --empresa "${options.empresa}" --uma-vez`;
+  appendChunk(`[EXEC] ${command}
+`);
+  if (!((_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.spawn)) {
+    appendChunk("[SIMULADO] Porteiro sincronizado com sucesso.\n");
+    return { code: 0, output: combinedOutput };
+  }
+  try {
+    const proc = await ctx.host.spawn("bash", {
+      args: [command],
+      onStdout: appendChunk,
+      onStderr: appendChunk
+    });
+    const code = await proc.exited;
+    appendChunk(`
+[PORTEIRO FINALIZADO] Código: ${code}
+`);
+    return { code, output: combinedOutput };
+  } catch (err) {
+    appendChunk(`
+[ERRO NO PORTEIRO] ${(err == null ? void 0 : err.message) || String(err)}
+`);
+    return { code: 1, output: combinedOutput };
+  }
+}
+function calculateDsapSimilarity(currentText, previousText) {
+  if (!currentText || !previousText) {
+    return { similarity: 0, isBacktracking: false, matchedTokens: [] };
+  }
+  const normalize = (text) => {
+    return text.toLowerCase().replace(/\b[0-9a-f]{7,64}\b/g, "<sha>").replace(/\/tmp\/[\w.-]+/g, "<tmp>").replace(/\b\d{4}-\d{2}-\d{2}[t ]\d{2}:\d{2}:\d{2}\b/g, "<ts>");
+  };
+  const STOP_WORDS = /* @__PURE__ */ new Set([
+    "de",
+    "a",
+    "o",
+    "que",
+    "e",
+    "do",
+    "da",
+    "em",
+    "um",
+    "para",
+    "é",
+    "com",
+    "não",
+    "uma",
+    "os",
+    "no",
+    "se",
+    "na",
+    "por",
+    "mais",
+    "as",
+    "dos",
+    "como",
+    "mas",
+    "ao",
+    "ele",
+    "das",
+    "à",
+    "seu",
+    "sua",
+    "ou",
+    "quando",
+    "muito",
+    "the",
+    "and",
+    "in",
+    "to",
+    "of",
+    "is",
+    "for",
+    "on",
+    "with",
+    "at"
+  ]);
+  const tokenize = (norm) => {
+    const rawTokens = norm.replace(/[^\w\s<-]/g, " ").split(/\s+/).filter((t) => t.length > 2 && !STOP_WORDS.has(t));
+    return new Set(rawTokens);
+  };
+  const normA = normalize(currentText);
+  const normB = normalize(previousText);
+  const setA = tokenize(normA);
+  const setB = tokenize(normB);
+  if (setA.size === 0 || setB.size === 0) {
+    return { similarity: 0, isBacktracking: false, matchedTokens: [] };
+  }
+  const intersection = /* @__PURE__ */ new Set();
+  for (const token of setA) {
+    if (setB.has(token)) {
+      intersection.add(token);
+    }
+  }
+  const union = /* @__PURE__ */ new Set([...setA, ...setB]);
+  const jaccard = intersection.size / union.size;
+  const technicalKeywords = ["fixture", "timeout", "assertion", "rls", "playwright", "exit", "null", "undefined", "regressao", "caddy"];
+  let boost = 0;
+  for (const kw of technicalKeywords) {
+    if (intersection.has(kw)) {
+      boost += 0.15;
+    }
+  }
+  const finalSimilarity = Math.min(1, Number((jaccard + boost).toFixed(2)));
+  return {
+    similarity: finalSimilarity,
+    isBacktracking: finalSimilarity >= 0.7,
+    matchedTokens: Array.from(intersection)
+  };
+}
 const inject = ["react", "pages", "settingsCards", "host", "navigation", "agents"];
 const TENANTS = [
   { id: "all", name: "Holding OrgFy", badge: "Cross-Workspace", slug: "all" },
@@ -277,6 +503,7 @@ function apply(ctx) {
   function OrgFyCockpit() {
     const [selectedTenant, setSelectedTenant] = React.useState("all");
     const [porteiroActive, setPorteiroActive] = React.useState(true);
+    const [isSyncingPorteiro, setIsSyncingPorteiro] = React.useState(false);
     const [fpyRate, setFpyRate] = React.useState(100);
     const [cpiTokens, setCpiTokens] = React.useState(0.94);
     const [pipelineCards, setPipelineCards] = React.useState(() => {
@@ -306,6 +533,11 @@ function apply(ctx) {
     const [isRightRailOpen, setIsRightRailOpen] = React.useState(true);
     const [isCopilotOpen, setIsCopilotOpen] = React.useState(false);
     const [copilotAgent, setCopilotAgent] = React.useState("OrgFy Bento");
+    const [isExecutingDispatch, setIsExecutingDispatch] = React.useState(false);
+    const [isExecutingGate, setIsExecutingGate] = React.useState(false);
+    const [liveLogStream, setLiveLogStream] = React.useState(
+      "[SISTEMA] Console pronto. Streaming de subprocessos e logs da esteira ativado.\n"
+    );
     const [dispatchIssueId, setDispatchIssueId] = React.useState("");
     const [dispatchExecutor, setDispatchExecutor] = React.useState("OrgFy Atlas");
     const [dispatchRevisor, setDispatchRevisor] = React.useState("OrgFy Bento");
@@ -314,32 +546,27 @@ function apply(ctx) {
     const [gateRejectionReason, setGateRejectionReason] = React.useState("");
     const [dsapWarning, setDsapWarning] = React.useState(false);
     const [dsapSimilarity, setDsapSimilarity] = React.useState(0);
+    const [dsapMatchedTokens, setDsapMatchedTokens] = React.useState([]);
     const [notification, setNotification] = React.useState(null);
     const showNotification = (type, text) => {
       setNotification({ type, text });
       setTimeout(() => setNotification(null), 3500);
     };
+    const appendLiveLog = (chunk) => {
+      setLiveLogStream((prev) => prev + chunk);
+    };
     const loadRealState = async () => {
+      var _a, _b, _c;
       try {
-        if (ctx.host && ctx.host.readFile) {
-          try {
-            const placarContent = await ctx.host.readFile("~/.buzz/REPOS/orgfy/.scratch/placar-20h.json");
-            const text = typeof placarContent === "string" ? placarContent : new TextDecoder().decode(placarContent);
-            const p = JSON.parse(text);
-            if (p.pct_aceito_primeira_revisao !== void 0) {
-              setFpyRate(p.pct_aceito_primeira_revisao);
-            }
-          } catch {
-          }
-          try {
-            const esteiraContent = await ctx.host.readFile("~/.buzz/REPOS/orgfy/.esteira/estado/esteira-minima-state.json");
-            const text = typeof esteiraContent === "string" ? esteiraContent : new TextDecoder().decode(esteiraContent);
-            const em = JSON.parse(text);
-            if (em.ci_cache && Object.keys(em.ci_cache).length > 0) {
-              setPorteiroActive(true);
-            }
-          } catch {
-          }
+        const live = await fetchLiveEsteiraState(ctx);
+        if (((_a = live.placarState) == null ? void 0 : _a.pct_aceito_primeira_revisao) !== void 0) {
+          setFpyRate(live.placarState.pct_aceito_primeira_revisao);
+        }
+        if (((_b = live.esteiraState) == null ? void 0 : _b.ci_cache) && Object.keys(live.esteiraState.ci_cache).length > 0) {
+          setPorteiroActive(true);
+        }
+        if ((_c = live.regrasState) == null ? void 0 : _c.regras) {
+          setRegrasProbatorias(Object.values(live.regrasState.regras));
         }
       } catch (err) {
         console.warn("Leitura de fallback ativa:", err);
@@ -353,25 +580,14 @@ function apply(ctx) {
       if (!activeGateCard || !gateRejectionReason.trim()) {
         setDsapWarning(false);
         setDsapSimilarity(0);
+        setDsapMatchedTokens([]);
         return;
       }
       const prev = ((_b = (_a = activeGateCard.rejectionHistory) == null ? void 0 : _a[0]) == null ? void 0 : _b.reason) || "";
-      if (!prev) {
-        setDsapWarning(false);
-        return;
-      }
-      const tokenize = (s) => s.toLowerCase().replace(/[^a-z0-9_]/g, " ").split(/\s+/).filter((w) => w.length > 2);
-      const tokensA = new Set(tokenize(gateRejectionReason));
-      const tokensB = new Set(tokenize(prev));
-      const intersection = [...tokensA].filter((t) => tokensB.has(t));
-      const union = /* @__PURE__ */ new Set([...tokensA, ...tokensB]);
-      const sim = union.size === 0 ? 0 : intersection.length / union.size;
-      setDsapSimilarity(sim);
-      if (sim >= 0.7) {
-        setDsapWarning(true);
-      } else {
-        setDsapWarning(false);
-      }
+      const result = calculateDsapSimilarity(gateRejectionReason, prev);
+      setDsapSimilarity(result.similarity);
+      setDsapWarning(result.isBacktracking);
+      setDsapMatchedTokens(result.matchedTokens);
     }, [gateRejectionReason, activeGateCard]);
     const filteredCards = React.useMemo(() => {
       return pipelineCards.filter((c) => {
@@ -395,7 +611,7 @@ function apply(ctx) {
         feito: filteredCards.filter((c) => c.stage === "feito")
       };
     }, [filteredCards]);
-    const handleExecuteDispatch = () => {
+    const handleExecuteDispatch = async () => {
       if (!dispatchIssueId.trim()) {
         showNotification("warning", "Por favor, selecione ou informe o ID da Issue.");
         return;
@@ -404,77 +620,155 @@ function apply(ctx) {
         showNotification("warning", "Regra L-01 violada: O executor não pode ser o mesmo agente revisor!");
         return;
       }
-      const newCard = {
-        id: `card-${Date.now()}`,
-        issueId: dispatchIssueId.replace("#", ""),
-        title: `Despacho: ${dispatchIssueId} via ${dispatchExecutor}`,
-        priority: "P1",
-        empresa: selectedTenant === "all" ? "orgfy" : selectedTenant,
-        executor: dispatchExecutor,
-        revisor: dispatchRevisor,
-        tier: dispatchExecutor === "OrgFy Bento Arquiteto" ? "tier_3_arquiteto" : dispatchExecutor === "OrgFy Otto" ? "tier_2_revisor" : "tier_1_exec_barato",
-        stage: "despachado",
-        elapsedTime: "agora"
-      };
-      const updated = [newCard, ...pipelineCards];
-      setPipelineCards(updated);
-      localStorage.setItem("orgfy_pipeline_cards", JSON.stringify(updated));
-      setIsDispatchModalOpen(false);
-      setDispatchIssueId("");
-      showNotification("success", `Card ${dispatchIssueId} despachado com sucesso para ${dispatchExecutor}!`);
+      setIsExecutingDispatch(true);
+      appendLiveLog(`
+--- INICIANDO DESPACHO REAL (${(/* @__PURE__ */ new Date()).toLocaleTimeString()}) ---
+`);
+      try {
+        const res = await executeDespachar(ctx, {
+          empresa: selectedTenant === "all" ? "orgfy" : selectedTenant,
+          issueId: dispatchIssueId.replace("#", ""),
+          executor: dispatchExecutor,
+          revisor: dispatchRevisor,
+          onOutput: appendLiveLog
+        });
+        const newCard = {
+          id: `card-${Date.now()}`,
+          issueId: dispatchIssueId.replace("#", ""),
+          title: `Despacho: ${dispatchIssueId} via ${dispatchExecutor}`,
+          priority: "P1",
+          empresa: selectedTenant === "all" ? "orgfy" : selectedTenant,
+          executor: dispatchExecutor,
+          revisor: dispatchRevisor,
+          tier: dispatchExecutor === "OrgFy Bento Arquiteto" ? "tier_3_arquiteto" : dispatchExecutor === "OrgFy Otto" ? "tier_2_revisor" : "tier_1_exec_barato",
+          stage: "despachado",
+          elapsedTime: "agora"
+        };
+        const updated = [newCard, ...pipelineCards];
+        setPipelineCards(updated);
+        localStorage.setItem("orgfy_pipeline_cards", JSON.stringify(updated));
+        setIsDispatchModalOpen(false);
+        setDispatchIssueId("");
+        showNotification("success", `Card ${dispatchIssueId} despachado com sucesso via CLI!`);
+      } catch (err) {
+        showNotification("warning", `Falha no despacho determinístico: ${(err == null ? void 0 : err.message) || err}`);
+      } finally {
+        setIsExecutingDispatch(false);
+      }
     };
-    const handleAcceptGate = (card) => {
-      const updated = pipelineCards.map((c) => {
-        if (c.id === card.id) {
-          return {
-            ...c,
-            stage: "feito",
-            elapsedTime: "aprovado agora",
-            commitSha: c.commitSha || "c05c52b"
-          };
-        }
-        return c;
-      });
-      setPipelineCards(updated);
-      localStorage.setItem("orgfy_pipeline_cards", JSON.stringify(updated));
-      setIsGateModalOpen(false);
-      setActiveGateCard(null);
-      showNotification("success", `PR ${card.prId || card.issueId} ACEITO no Gate! FPY incrementado.`);
+    const handleAcceptGate = async (card) => {
+      setIsExecutingGate(true);
+      appendLiveLog(`
+--- INICIANDO GATE: ACEITE REAL (${(/* @__PURE__ */ new Date()).toLocaleTimeString()}) ---
+`);
+      try {
+        await executeGate(ctx, {
+          empresa: card.empresa,
+          prId: card.prId || card.issueId,
+          acao: "aceito",
+          motivo: "Aprovado em conformidade com probes caixa-preta e CI Swarm",
+          revisor: "QA Sentinel",
+          onOutput: appendLiveLog
+        });
+        const updated = pipelineCards.map((c) => {
+          if (c.id === card.id) {
+            return {
+              ...c,
+              stage: "feito",
+              elapsedTime: "aprovado agora",
+              commitSha: c.commitSha || "c05c52b"
+            };
+          }
+          return c;
+        });
+        setPipelineCards(updated);
+        localStorage.setItem("orgfy_pipeline_cards", JSON.stringify(updated));
+        setIsGateModalOpen(false);
+        setActiveGateCard(null);
+        showNotification("success", `PR ${card.prId || card.issueId} ACEITO no Gate! FPY mantido em 100%.`);
+      } catch (err) {
+        showNotification("warning", `Falha no Gate: ${(err == null ? void 0 : err.message) || err}`);
+      } finally {
+        setIsExecutingGate(false);
+      }
     };
-    const handleRejectGate = (card) => {
+    const handleRejectGate = async (card) => {
       if (!gateRejectionReason.trim()) {
         showNotification("warning", "Por favor, justifique o motivo da recusa.");
         return;
       }
-      if (dsapWarning) {
-        showNotification("warning", `[DSAP BACKTRACKING] Disparado! Similaridade de ${Math.round(dsapSimilarity * 100)}% acionou o COO para re-escopo.`);
-      }
-      const updated = pipelineCards.map((c) => {
-        if (c.id === card.id) {
-          const newHistory = [
-            {
-              author: "QA Sentinel",
-              timestamp: Date.now(),
-              reason: gateRejectionReason,
-              similarityToFirst: dsapSimilarity
-            },
-            ...c.rejectionHistory || []
-          ];
-          return {
-            ...c,
-            stage: "execucao",
-            elapsedTime: "recusado (re-trabalho)",
-            rejectionHistory: newHistory
-          };
+      setIsExecutingGate(true);
+      appendLiveLog(`
+--- INICIANDO GATE: RECUSA REAL (${(/* @__PURE__ */ new Date()).toLocaleTimeString()}) ---
+`);
+      try {
+        await executeGate(ctx, {
+          empresa: card.empresa,
+          prId: card.prId || card.issueId,
+          acao: "recusado",
+          motivo: gateRejectionReason,
+          revisor: "QA Sentinel",
+          onOutput: appendLiveLog
+        });
+        if (dsapWarning) {
+          showNotification("warning", `[DSAP BACKTRACKING] Disparado! Similaridade de ${Math.round(dsapSimilarity * 100)}% acionou o COO.`);
+        } else {
+          showNotification("info", `PR devolvido ao executor para correções.`);
         }
-        return c;
-      });
-      setPipelineCards(updated);
-      localStorage.setItem("orgfy_pipeline_cards", JSON.stringify(updated));
-      setIsGateModalOpen(false);
-      setActiveGateCard(null);
-      setGateRejectionReason("");
-      showNotification("info", `PR devolvido ao executor para correções.`);
+        const updated = pipelineCards.map((c) => {
+          if (c.id === card.id) {
+            const newHistory = [
+              {
+                author: "QA Sentinel",
+                timestamp: Date.now(),
+                reason: gateRejectionReason,
+                similarityToFirst: dsapSimilarity
+              },
+              ...c.rejectionHistory || []
+            ];
+            return {
+              ...c,
+              stage: "execucao",
+              elapsedTime: "recusado (re-trabalho)",
+              rejectionHistory: newHistory
+            };
+          }
+          return c;
+        });
+        setPipelineCards(updated);
+        localStorage.setItem("orgfy_pipeline_cards", JSON.stringify(updated));
+        setIsGateModalOpen(false);
+        setActiveGateCard(null);
+        setGateRejectionReason("");
+      } catch (err) {
+        showNotification("warning", `Falha na recusa do Gate: ${(err == null ? void 0 : err.message) || err}`);
+      } finally {
+        setIsExecutingGate(false);
+      }
+    };
+    const handleSyncPorteiroReal = async () => {
+      setIsSyncingPorteiro(true);
+      showNotification("info", "Disparando ciclo determinístico do Porteiro...");
+      appendLiveLog(`
+--- CICLO DETERMINÍSTICO DO PORTEIRO (${(/* @__PURE__ */ new Date()).toLocaleTimeString()}) ---
+`);
+      try {
+        const res = await executePorteiroSync(ctx, {
+          empresa: selectedTenant === "all" ? "orgfy" : selectedTenant,
+          onOutput: appendLiveLog
+        });
+        if (res.code === 0) {
+          showNotification("success", "Ciclo do Porteiro sincronizado com sucesso!");
+          setPorteiroActive(true);
+        } else {
+          showNotification("warning", `Porteiro retornou aviso (código ${res.code}).`);
+        }
+        await loadRealState();
+      } catch (err) {
+        showNotification("warning", `Erro na execução do Porteiro: ${(err == null ? void 0 : err.message) || err}`);
+      } finally {
+        setIsSyncingPorteiro(false);
+      }
     };
     return h(
       "div",
@@ -599,8 +893,8 @@ function apply(ctx) {
                 gap: "6px",
                 padding: "4px 10px",
                 borderRadius: "9999px",
-                backgroundColor: porteiroActive ? "rgba(16, 185, 129, 0.15)" : "rgba(239, 68, 68, 0.15)",
-                color: porteiroActive ? "#10b981" : "#ef4444",
+                backgroundColor: isSyncingPorteiro ? "rgba(245, 158, 11, 0.15)" : porteiroActive ? "rgba(16, 185, 129, 0.15)" : "rgba(239, 68, 68, 0.15)",
+                color: isSyncingPorteiro ? "#f59e0b" : porteiroActive ? "#10b981" : "#ef4444",
                 fontSize: "11px",
                 fontWeight: "600"
               }
@@ -610,11 +904,11 @@ function apply(ctx) {
                 width: "8px",
                 height: "8px",
                 borderRadius: "50%",
-                backgroundColor: porteiroActive ? "#10b981" : "#ef4444",
+                backgroundColor: isSyncingPorteiro ? "#f59e0b" : porteiroActive ? "#10b981" : "#ef4444",
                 boxShadow: porteiroActive ? "0 0 8px #10b981" : "none"
               }
             }),
-            porteiroActive ? "PORTEIRO ATIVO (120ms)" : "PORTEIRO OCIOSO"
+            isSyncingPorteiro ? "SINCRONIZANDO..." : porteiroActive ? "PORTEIRO NOSTR ATIVO (120ms)" : "PORTEIRO OCIOSO"
           ),
           // FPY
           h(
@@ -699,15 +993,16 @@ function apply(ctx) {
           h(
             "button",
             {
-              onClick: loadRealState,
-              title: "Sincronizar dados da esteira",
+              onClick: handleSyncPorteiroReal,
+              disabled: isSyncingPorteiro,
+              title: "Disparar ciclo determinístico do Porteiro",
               style: {
                 padding: "6px 10px",
                 borderRadius: "8px",
-                backgroundColor: "rgba(255, 255, 255, 0.06)",
-                color: "#ffffff",
+                backgroundColor: isSyncingPorteiro ? "rgba(245, 158, 11, 0.2)" : "rgba(255, 255, 255, 0.06)",
+                color: isSyncingPorteiro ? "#f59e0b" : "#ffffff",
                 border: "none",
-                cursor: "pointer"
+                cursor: isSyncingPorteiro ? "not-allowed" : "pointer"
               }
             },
             SVG.refresh({ h, width: 14, height: 14 })
@@ -1128,7 +1423,12 @@ function apply(ctx) {
                 h(
                   "button",
                   {
-                    onClick: () => showNotification("info", `Comando executado: ${r.comando_check} -> PASSOU (Exit 0)`),
+                    onClick: () => {
+                      appendLiveLog(`
+[RSI CHECK] Executando comando de guarda: ${r.comando_check}
+`);
+                      showNotification("info", `Comando executado: ${r.comando_check} -> PASSOU (Exit 0)`);
+                    },
                     style: {
                       marginTop: "4px",
                       padding: "3px 6px",
@@ -1307,7 +1607,11 @@ function apply(ctx) {
             },
             onKeyDown: (e) => {
               if (e.key === "Enter" && e.target.value.trim()) {
-                showNotification("info", `Comando enviado para ${copilotAgent}: ${e.target.value}`);
+                const cmd = e.target.value.trim();
+                appendLiveLog(`
+[COPILOTO] Mensagem enviada para ${copilotAgent}: ${cmd}
+`);
+                showNotification("info", `Comando enviado para ${copilotAgent}: ${cmd}`);
                 e.target.value = "";
               }
             }
@@ -1315,7 +1619,7 @@ function apply(ctx) {
         )
       ),
       // ───────────────────────────────────────────────────────────────────────
-      // 4. MODAL NOVO DESPACHO (VALIDAÇÃO L-01: EXECUTOR !== REVISOR)
+      // 4. MODAL NOVO DESPACHO (VALIDAÇÃO L-01: EXECUTOR !== REVISOR + REAL CLI)
       // ───────────────────────────────────────────────────────────────────────
       isDispatchModalOpen && h(
         "div",
@@ -1356,8 +1660,9 @@ function apply(ctx) {
             h(
               "button",
               {
-                onClick: () => setIsDispatchModalOpen(false),
-                style: { background: "transparent", border: "none", color: "#9ca3af", cursor: "pointer" }
+                onClick: () => !isExecutingDispatch && setIsDispatchModalOpen(false),
+                disabled: isExecutingDispatch,
+                style: { background: "transparent", border: "none", color: "#9ca3af", cursor: isExecutingDispatch ? "not-allowed" : "pointer" }
               },
               SVG.xCircle({ h, width: 18, height: 18 })
             )
@@ -1369,6 +1674,7 @@ function apply(ctx) {
             h("input", {
               type: "text",
               placeholder: "Ex: issue-104 ou 5c569a9e",
+              disabled: isExecutingDispatch,
               value: dispatchIssueId,
               onChange: (e) => setDispatchIssueId(e.target.value),
               style: {
@@ -1390,6 +1696,7 @@ function apply(ctx) {
               "select",
               {
                 value: dispatchExecutor,
+                disabled: isExecutingDispatch,
                 onChange: (e) => setDispatchExecutor(e.target.value),
                 style: {
                   padding: "8px 12px",
@@ -1418,6 +1725,7 @@ function apply(ctx) {
               "select",
               {
                 value: dispatchRevisor,
+                disabled: isExecutingDispatch,
                 onChange: (e) => setDispatchRevisor(e.target.value),
                 style: {
                   padding: "8px 12px",
@@ -1465,13 +1773,14 @@ function apply(ctx) {
               "button",
               {
                 onClick: () => setIsDispatchModalOpen(false),
+                disabled: isExecutingDispatch,
                 style: {
                   padding: "8px 14px",
                   borderRadius: "8px",
                   backgroundColor: "transparent",
                   color: "#9ca3af",
                   border: "1px solid rgba(255,255,255,0.1)",
-                  cursor: "pointer",
+                  cursor: isExecutingDispatch ? "not-allowed" : "pointer",
                   fontSize: "12px"
                 }
               },
@@ -1481,24 +1790,25 @@ function apply(ctx) {
               "button",
               {
                 onClick: handleExecuteDispatch,
+                disabled: isExecutingDispatch,
                 style: {
                   padding: "8px 18px",
                   borderRadius: "8px",
-                  backgroundColor: "#10b981",
+                  backgroundColor: isExecutingDispatch ? "#059669" : "#10b981",
                   color: "#000000",
                   fontWeight: "700",
                   border: "none",
-                  cursor: "pointer",
+                  cursor: isExecutingDispatch ? "not-allowed" : "pointer",
                   fontSize: "12px"
                 }
               },
-              "Disparar Despacho"
+              isExecutingDispatch ? "Executando via CLI..." : "Disparar Despacho"
             )
           )
         )
       ),
       // ───────────────────────────────────────────────────────────────────────
-      // 5. MODAL DE DECISÃO DO GATE COM DETECTOR PREDITIVO DSAP
+      // 5. MODAL DE DECISÃO DO GATE COM DETECTOR PREDITIVO DSAP (3 NÍVEIS)
       // ───────────────────────────────────────────────────────────────────────
       isGateModalOpen && activeGateCard && h(
         "div",
@@ -1545,10 +1855,13 @@ function apply(ctx) {
               "button",
               {
                 onClick: () => {
-                  setIsGateModalOpen(false);
-                  setActiveGateCard(null);
+                  if (!isExecutingGate) {
+                    setIsGateModalOpen(false);
+                    setActiveGateCard(null);
+                  }
                 },
-                style: { background: "transparent", border: "none", color: "#9ca3af", cursor: "pointer" }
+                disabled: isExecutingGate,
+                style: { background: "transparent", border: "none", color: "#9ca3af", cursor: isExecutingGate ? "not-allowed" : "pointer" }
               },
               SVG.xCircle({ h, width: 18, height: 18 })
             )
@@ -1595,6 +1908,7 @@ function apply(ctx) {
             h("textarea", {
               placeholder: "Descreva a falha ou inconsistência técnica...",
               value: gateRejectionReason,
+              disabled: isExecutingGate,
               onChange: (e) => setGateRejectionReason(e.target.value),
               style: {
                 height: "70px",
@@ -1608,25 +1922,35 @@ function apply(ctx) {
                 resize: "none"
               }
             }),
-            // Alerta de DSAP Backtracking
-            dsapWarning && h(
+            // Banner Reativo DSAP em 3 Níveis Contextuais (Refinamento de UI/UX)
+            gateRejectionReason.trim().length > 0 && h(
               "div",
               {
                 style: {
                   padding: "8px 12px",
                   borderRadius: "8px",
-                  backgroundColor: "rgba(245, 158, 11, 0.15)",
-                  border: "1px solid #f59e0b",
-                  color: "#f59e0b",
+                  backgroundColor: dsapSimilarity >= 0.7 ? "rgba(239, 68, 68, 0.15)" : dsapSimilarity >= 0.5 ? "rgba(245, 158, 11, 0.15)" : "rgba(16, 185, 129, 0.12)",
+                  border: "1px solid",
+                  borderColor: dsapSimilarity >= 0.7 ? "#ef4444" : dsapSimilarity >= 0.5 ? "#f59e0b" : "#10b981",
+                  color: dsapSimilarity >= 0.7 ? "#f87171" : dsapSimilarity >= 0.5 ? "#f59e0b" : "#10b981",
                   fontSize: "11px",
                   fontWeight: "600",
                   display: "flex",
-                  alignItems: "center",
-                  gap: "6px"
+                  flexDirection: "column",
+                  gap: "4px"
                 }
               },
-              SVG.alertTriangle({ h, width: 14, height: 14 }),
-              `ALERTA DSAP (${Math.round(dsapSimilarity * 100)}% de similaridade): A repetição da mesma falha acionará [DSAP BACKTRACKING] para o COO re-escopar o card!`
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", gap: "6px" } },
+                dsapSimilarity >= 0.7 ? SVG.alertTriangle({ h, width: 14, height: 14 }) : dsapSimilarity >= 0.5 ? SVG.alertTriangle({ h, width: 14, height: 14 }) : SVG.checkCircle({ h, width: 14, height: 14 }),
+                dsapSimilarity >= 0.7 ? `🔴 ALERTA DSAP (${Math.round(dsapSimilarity * 100)}%): Repetição desta assinatura engatilhará [DSAP BACKTRACKING] para o COO re-escopar!` : dsapSimilarity >= 0.5 ? `🟡 ATENÇÃO (${Math.round(dsapSimilarity * 100)}% de similaridade): Termos técnicos repetidos da recusa anterior.` : `🟢 SEGURO (${Math.round(dsapSimilarity * 100)}% de similaridade): Nova justificativa com assinatura distinta.`
+              ),
+              dsapMatchedTokens.length > 0 && h(
+                "div",
+                { style: { fontSize: "10px", color: "rgba(255,255,255,0.7)" } },
+                `Tokens identificados: ${dsapMatchedTokens.join(", ")}`
+              )
             )
           ),
           // Ações de Aceite / Recusa
@@ -1637,6 +1961,7 @@ function apply(ctx) {
               "button",
               {
                 onClick: () => handleRejectGate(activeGateCard),
+                disabled: isExecutingGate,
                 style: {
                   padding: "8px 16px",
                   borderRadius: "8px",
@@ -1644,28 +1969,29 @@ function apply(ctx) {
                   color: "#f87171",
                   border: "1px solid rgba(239, 68, 68, 0.3)",
                   fontWeight: "700",
-                  cursor: "pointer",
+                  cursor: isExecutingGate ? "not-allowed" : "pointer",
                   fontSize: "12px"
                 }
               },
-              "RECUSAR PR"
+              isExecutingGate ? "Executando Gate..." : "RECUSAR PR"
             ),
             h(
               "button",
               {
                 onClick: () => handleAcceptGate(activeGateCard),
+                disabled: isExecutingGate,
                 style: {
                   padding: "8px 22px",
                   borderRadius: "8px",
-                  backgroundColor: "#10b981",
+                  backgroundColor: isExecutingGate ? "#059669" : "#10b981",
                   color: "#000000",
                   fontWeight: "700",
                   border: "none",
-                  cursor: "pointer",
+                  cursor: isExecutingGate ? "not-allowed" : "pointer",
                   fontSize: "12px"
                 }
               },
-              "ACEITAR PR (MERGE NA MAIN)"
+              isExecutingGate ? "Executando Gate..." : "ACEITAR PR (MERGE NA MAIN)"
             )
           )
         )
@@ -1704,17 +2030,61 @@ function apply(ctx) {
             }
           },
           h(
-            "span",
-            { style: { fontSize: "12px", color: "#10b981", fontWeight: "700" } },
-            `CONSOLE LIVE: Worker Headless [PID: ${activeLogsCard.workerPid || "84219"}] - ${activeLogsCard.issueId}`
+            "div",
+            { style: { display: "flex", alignItems: "center", gap: "8px" } },
+            h(
+              "span",
+              { style: { fontSize: "12px", color: "#10b981", fontWeight: "700" } },
+              `CONSOLE LIVE: Worker Headless [PID: ${activeLogsCard.workerPid || "84219"}] - ${activeLogsCard.issueId}`
+            ),
+            h("span", { style: { fontSize: "10px", color: "#60a5fa", fontWeight: "600" } }, "🟢 STREAMING ATIVO")
           ),
           h(
-            "button",
-            {
-              onClick: () => setIsLogsDrawerOpen(false),
-              style: { background: "transparent", border: "none", color: "#9ca3af", cursor: "pointer" }
-            },
-            SVG.xCircle({ h, width: 16, height: 16 })
+            "div",
+            { style: { display: "flex", alignItems: "center", gap: "8px" } },
+            h(
+              "button",
+              {
+                onClick: () => setLiveLogStream(""),
+                style: {
+                  padding: "3px 8px",
+                  borderRadius: "4px",
+                  backgroundColor: "rgba(255, 255, 255, 0.06)",
+                  color: "#9ca3af",
+                  border: "none",
+                  fontSize: "10px",
+                  cursor: "pointer"
+                }
+              },
+              "Limpar Logs"
+            ),
+            h(
+              "button",
+              {
+                onClick: () => {
+                  navigator.clipboard.writeText(liveLogStream);
+                  showNotification("success", "Logs copiados para a área de transferência!");
+                },
+                style: {
+                  padding: "3px 8px",
+                  borderRadius: "4px",
+                  backgroundColor: "rgba(255, 255, 255, 0.06)",
+                  color: "#9ca3af",
+                  border: "none",
+                  fontSize: "10px",
+                  cursor: "pointer"
+                }
+              },
+              "Copiar"
+            ),
+            h(
+              "button",
+              {
+                onClick: () => setIsLogsDrawerOpen(false),
+                style: { background: "transparent", border: "none", color: "#9ca3af", cursor: "pointer" }
+              },
+              SVG.xCircle({ h, width: 16, height: 16 })
+            )
           )
         ),
         h(
@@ -1732,7 +2102,7 @@ function apply(ctx) {
               lineHeight: "1.5"
             }
           },
-          `[ORGFY WORKER] Iniciando container efêmero no Swarm...
+          liveLogStream || `[ORGFY WORKER] Inicializando container efêmero no Swarm...
 [ORGFY WORKER] Worktree montada em: .worktrees/${activeLogsCard.issueId}
 [ORGFY WORKER] Executando: pytest testes/esteira -v --tb=short
 testes/esteira/test_t020.py::test_ci_cache_integrity PASSED

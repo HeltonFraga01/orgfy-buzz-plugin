@@ -31,7 +31,7 @@
       {
         "id": "python",
         "program": "python3",
-        "args": ["-c"]
+        "args": []
       },
       {
         "id": "git",
