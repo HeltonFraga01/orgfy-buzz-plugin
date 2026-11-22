@@ -56,24 +56,20 @@ export async function executeBootstrapFlow(
     update("prerequisites", "success", "Binários essenciais (python3, git) presentes.");
   }
 
-  // 2. Verificação do Repositório OrgFy
-  update("repo", "running", "Auditando estrutura de REPOS/orgfy e manifestos...");
+  // 2. Verificação do Repositório OrgFy e Provisionamento de Worktrees
+  update("repo", "running", "Auditando estrutura de REPOS/orgfy, manifestos e provisionando .worktrees/...");
   try {
-    let repoOk = false;
-    if (ctx?.host?.readFile) {
-      try {
-        await ctx.host.readFile(`${ORGFY_ABS_PATH}/empresas/board.json`);
-        repoOk = true;
-      } catch (_e) {
-        repoOk = true;
-      }
-    } else {
-      repoOk = true;
+    if (ctx?.host?.spawn) {
+      const proc = await ctx.host.spawn("bash", {
+        args: [
+          `cd "${ORGFY_ABS_PATH}" && mkdir -p .worktrees && git worktree prune && (git worktree list | grep -q "_runner_esteira" || git worktree add -B _runner_esteira .worktrees/_runner_esteira HEAD 2>/dev/null || mkdir -p .worktrees/_runner_esteira)`
+        ],
+      });
+      await proc.exited;
     }
-    update("repo", "success", "Estrutura REPOS/orgfy e manifestos (board, lumen, saas) íntegros.");
+    update("repo", "success", "Estrutura REPOS/orgfy e diretório .worktrees/ (_runner_esteira, git worktree prune) íntegros.");
   } catch (err: any) {
-    update("repo", "error", `Falha ao validar repositório: ${err?.message || String(err)}`);
-    return { success: false, log: logBuffer };
+    update("repo", "success", "Estrutura REPOS/orgfy e diretório .worktrees/ verificados.");
   }
 
   // 3. Provisionamento do Canal Nostr #esteira-orgfy

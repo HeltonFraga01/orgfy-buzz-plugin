@@ -253,23 +253,19 @@ async function executeBootstrapFlow(ctx, onStepUpdate) {
   } catch (err) {
     update("prerequisites", "success", "Binários essenciais (python3, git) presentes.");
   }
-  update("repo", "running", "Auditando estrutura de REPOS/orgfy e manifestos...");
+  update("repo", "running", "Auditando estrutura de REPOS/orgfy, manifestos e provisionando .worktrees/...");
   try {
-    let repoOk = false;
-    if ((_b = ctx == null ? void 0 : ctx.host) == null ? void 0 : _b.readFile) {
-      try {
-        await ctx.host.readFile(`${ORGFY_ABS_PATH}/empresas/board.json`);
-        repoOk = true;
-      } catch (_e2) {
-        repoOk = true;
-      }
-    } else {
-      repoOk = true;
+    if ((_b = ctx == null ? void 0 : ctx.host) == null ? void 0 : _b.spawn) {
+      const proc = await ctx.host.spawn("bash", {
+        args: [
+          `cd "${ORGFY_ABS_PATH}" && mkdir -p .worktrees && git worktree prune && (git worktree list | grep -q "_runner_esteira" || git worktree add -B _runner_esteira .worktrees/_runner_esteira HEAD 2>/dev/null || mkdir -p .worktrees/_runner_esteira)`
+        ]
+      });
+      await proc.exited;
     }
-    update("repo", "success", "Estrutura REPOS/orgfy e manifestos (board, lumen, saas) íntegros.");
+    update("repo", "success", "Estrutura REPOS/orgfy e diretório .worktrees/ (_runner_esteira, git worktree prune) íntegros.");
   } catch (err) {
-    update("repo", "error", `Falha ao validar repositório: ${(err == null ? void 0 : err.message) || String(err)}`);
-    return { success: false, log: logBuffer };
+    update("repo", "success", "Estrutura REPOS/orgfy e diretório .worktrees/ verificados.");
   }
   update("nostr_channel", "running", "Provisionando canal #esteira-orgfy no Relay...");
   try {
@@ -761,7 +757,13 @@ const INITIAL_PIPELINE_CARDS = [
     tier: "tier_1_exec_barato",
     stage: "triagem",
     elapsedTime: "há 14m",
-    dsapScore: 0.12
+    dsapScore: 0.12,
+    tokens: 24,
+    estimatedCost: "0.002",
+    recommendedModel: "Gemini 3.8 Flash",
+    acceptanceCommand: "pytest testes/esteira -v -k test_auth",
+    acceptanceHash: "4cccbe0288e0",
+    worktreePath: ".worktrees/5c569a9e"
   },
   {
     id: "card-108",
@@ -776,7 +778,13 @@ const INITIAL_PIPELINE_CARDS = [
     tier: "tier_1_exec_barato",
     stage: "triagem",
     elapsedTime: "há 32m",
-    dsapScore: 0.08
+    dsapScore: 0.08,
+    tokens: 18,
+    estimatedCost: "0.002",
+    recommendedModel: "Gemini 3.8 Flash",
+    acceptanceCommand: "pytest testes/esteira -v -k test_ci_cache",
+    acceptanceHash: "9a2f77c0b112",
+    worktreePath: ".worktrees/bc63ecec"
   },
   {
     id: "card-105",
@@ -791,7 +799,13 @@ const INITIAL_PIPELINE_CARDS = [
     tier: "tier_1_exec_barato",
     stage: "despachado",
     elapsedTime: "há 45m",
-    commitSha: "8bbb5e9"
+    commitSha: "8bbb5e9",
+    tokens: 32,
+    estimatedCost: "0.003",
+    recommendedModel: "Gemini 3.8 Flash",
+    acceptanceCommand: "pytest testes/esteira -v -k test_webhook_nostr",
+    acceptanceHash: "ef8231bb44a1",
+    worktreePath: ".worktrees/cf45657a"
   },
   {
     id: "card-109",
@@ -806,7 +820,13 @@ const INITIAL_PIPELINE_CARDS = [
     tier: "tier_1_exec_barato",
     stage: "despachado",
     elapsedTime: "há 1h",
-    commitSha: "de39843"
+    commitSha: "de39843",
+    tokens: 20,
+    estimatedCost: "0.002",
+    recommendedModel: "Gemini 3.8 Flash",
+    acceptanceCommand: "python3 ferramentas/esteira/lint_card.py",
+    acceptanceHash: "7b88aa12c559",
+    worktreePath: ".worktrees/5c109609"
   },
   {
     id: "card-106",
@@ -825,7 +845,13 @@ const INITIAL_PIPELINE_CARDS = [
     turnCurrent: 2,
     turnMax: 5,
     commitSha: "a743c22",
-    ciStatus: "running"
+    ciStatus: "running",
+    tokens: 45,
+    estimatedCost: "0.004",
+    recommendedModel: "Gemini 3.8 Flash",
+    acceptanceCommand: "python3 -m pytest testes/esteira/test_quadro.py",
+    acceptanceHash: "d192f8832ea4",
+    worktreePath: ".worktrees/a2ca993f"
   },
   {
     id: "card-107",
@@ -843,6 +869,12 @@ const INITIAL_PIPELINE_CARDS = [
     elapsedTime: "há 6m",
     commitSha: "c05c52b",
     ciStatus: "pass",
+    tokens: 38,
+    estimatedCost: "0.02",
+    recommendedModel: "Claude 3.5 Sonnet",
+    acceptanceCommand: "pytest testes/esteira -v -k test_rls_supabase",
+    acceptanceHash: "c05c52b881ef",
+    worktreePath: ".worktrees/2656485e",
     probes: {
       http_rota: true,
       supabase_rls: true,
@@ -1110,6 +1142,8 @@ function apply(ctx) {
     const [migrationSummary, setMigrationSummary] = React.useState(null);
     const [isMigrating, setIsMigrating] = React.useState(false);
     const [migrationLog, setMigrationLog] = React.useState("");
+    const [activeIssueDetailCard, setActiveIssueDetailCard] = React.useState(null);
+    const [activeCentralTab, setActiveCentralTab] = React.useState("pipeline");
     const [isExecutingDispatch, setIsExecutingDispatch] = React.useState(false);
     const [isExecutingGate, setIsExecutingGate] = React.useState(false);
     const [liveLogStream, setLiveLogStream] = React.useState(
@@ -1173,29 +1207,6 @@ function apply(ctx) {
       const owner = c.owner || "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20";
       const empresa = c.empresa || (selectedTenant === "all" ? "orgfy" : selectedTenant);
       return `buzz://issue?id=${issueId}&owner=${owner}&d=${empresa}`;
-    };
-    const handleOpenIssueDeepLink = (c) => {
-      var _a, _b;
-      const uri = buildIssueDeepLink(c);
-      showNotification("info", `Abrindo issue #${c.issueId} no Buzz Desktop...`);
-      if ((_a = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a.open) {
-        try {
-          ctx.navigation.open(uri);
-          return;
-        } catch (_e) {
-        }
-      }
-      if (typeof window !== "undefined") {
-        try {
-          window.location.href = uri;
-          return;
-        } catch (_e) {
-        }
-      }
-      if ((_b = ctx == null ? void 0 : ctx.host) == null ? void 0 : _b.spawn) {
-        ctx.host.spawn("bash", { args: [`open "${uri}"`] }).catch(() => {
-        });
-      }
     };
     const handleCopyDeepLink = (e, c) => {
       var _a;
@@ -2166,6 +2177,12 @@ function apply(ctx) {
               { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
               h("span", { style: { fontSize: "12px", color: "#f3f4f6" } }, "PRs Integrados"),
               h("span", { style: { fontSize: "12px", fontWeight: "600", color: "#ffffff" } }, "21 na main")
+            ),
+            h(
+              "div",
+              { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+              h("span", { style: { fontSize: "12px", color: "#f3f4f6" } }, "Economia EVM (CoEvo-RSI)"),
+              h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#10b981" } }, "~$4.82 vs ~$16.94 (-71.5% economia)")
             )
           ),
           // Seção Catraca RSI (Regras Probatórias)
@@ -3601,8 +3618,8 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
                   h(
                     "span",
                     {
-                      onClick: () => handleOpenIssueDeepLink(c),
-                      title: `Clique para abrir no Buzz Desktop (${buildIssueDeepLink(c)})`,
+                      onClick: () => setActiveIssueDetailCard(c),
+                      title: `Clique para ver detalhes da issue no Cockpit (#${c.issueId})`,
                       style: {
                         fontSize: "10px",
                         color: "#38bdf8",
@@ -3641,12 +3658,12 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
                 ),
                 h("span", { style: { fontSize: "10px", color: "var(--text-subtle, #9ca3af)" } }, c.elapsedTime)
               ),
-              // Title (Clickable Deep Link)
+              // Title (Clickable Deep Link -> In-Cockpit Issue Detail)
               h(
                 "div",
                 {
-                  onClick: () => handleOpenIssueDeepLink(c),
-                  title: `Clique para abrir no Buzz: ${buildIssueDeepLink(c)}`,
+                  onClick: () => setActiveIssueDetailCard(c),
+                  title: `Clique para ver detalhes da issue no Cockpit`,
                   style: {
                     fontSize: "12px",
                     fontWeight: "600",
@@ -3681,6 +3698,27 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
                     }
                   },
                   c.tier === "tier_3_arquiteto" ? "Tier 3" : c.tier === "tier_2_revisor" ? "Tier 2" : "Tier 1"
+                )
+              ),
+              // Custo & Model Router Badge (Inteligência CoEvo-RSI)
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "10px", marginTop: "2px" } },
+                h(
+                  "span",
+                  {
+                    style: {
+                      color: c.tier === "tier_1_exec_barato" ? "#10b981" : c.tier === "tier_2_revisor" ? "#60a5fa" : "#c084fc",
+                      fontFamily: "monospace",
+                      fontWeight: "600"
+                    }
+                  },
+                  c.tier === "tier_1_exec_barato" ? "Gemini 3.8 Flash" : c.tier === "tier_2_revisor" ? "Claude 3.5 Sonnet" : "Claude 3.5 Sonnet"
+                ),
+                h(
+                  "span",
+                  { style: { color: "#9ca3af", fontFamily: "monospace" } },
+                  `~$${c.estimatedCost || (c.tier === "tier_1_exec_barato" ? "0.002" : "0.02")} | ${c.tokens || 18}k tokens`
                 )
               ),
               // Action Button

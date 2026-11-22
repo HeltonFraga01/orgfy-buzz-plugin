@@ -31,6 +31,12 @@ import {
   type MigrationSummary,
   type AgentMigrationItem,
 } from "./services/migration";
+import {
+  CANONICAL_TEMPLATES,
+  fetchRsiHubState,
+  compileProbationaryRule,
+  type CardTemplateItem,
+} from "./services/templates-rsi";
 
 export const inject = ["react", "pages", "settingsCards", "host", "navigation", "agents"];
 
@@ -60,6 +66,12 @@ export const INITIAL_PIPELINE_CARDS: PipelineCard[] = [
     stage: "triagem",
     elapsedTime: "há 14m",
     dsapScore: 0.12,
+    tokens: 24,
+    estimatedCost: "0.002",
+    recommendedModel: "Gemini 3.8 Flash",
+    acceptanceCommand: "pytest testes/esteira -v -k test_auth",
+    acceptanceHash: "4cccbe0288e0",
+    worktreePath: ".worktrees/5c569a9e",
   },
   {
     id: "card-108",
@@ -75,6 +87,12 @@ export const INITIAL_PIPELINE_CARDS: PipelineCard[] = [
     stage: "triagem",
     elapsedTime: "há 32m",
     dsapScore: 0.08,
+    tokens: 18,
+    estimatedCost: "0.002",
+    recommendedModel: "Gemini 3.8 Flash",
+    acceptanceCommand: "pytest testes/esteira -v -k test_ci_cache",
+    acceptanceHash: "9a2f77c0b112",
+    worktreePath: ".worktrees/bc63ecec",
   },
   {
     id: "card-105",
@@ -90,6 +108,12 @@ export const INITIAL_PIPELINE_CARDS: PipelineCard[] = [
     stage: "despachado",
     elapsedTime: "há 45m",
     commitSha: "8bbb5e9",
+    tokens: 32,
+    estimatedCost: "0.003",
+    recommendedModel: "Gemini 3.8 Flash",
+    acceptanceCommand: "pytest testes/esteira -v -k test_webhook_nostr",
+    acceptanceHash: "ef8231bb44a1",
+    worktreePath: ".worktrees/cf45657a",
   },
   {
     id: "card-109",
@@ -105,6 +129,12 @@ export const INITIAL_PIPELINE_CARDS: PipelineCard[] = [
     stage: "despachado",
     elapsedTime: "há 1h",
     commitSha: "de39843",
+    tokens: 20,
+    estimatedCost: "0.002",
+    recommendedModel: "Gemini 3.8 Flash",
+    acceptanceCommand: "python3 ferramentas/esteira/lint_card.py",
+    acceptanceHash: "7b88aa12c559",
+    worktreePath: ".worktrees/5c109609",
   },
   {
     id: "card-106",
@@ -124,6 +154,12 @@ export const INITIAL_PIPELINE_CARDS: PipelineCard[] = [
     turnMax: 5,
     commitSha: "a743c22",
     ciStatus: "running",
+    tokens: 45,
+    estimatedCost: "0.004",
+    recommendedModel: "Gemini 3.8 Flash",
+    acceptanceCommand: "python3 -m pytest testes/esteira/test_quadro.py",
+    acceptanceHash: "d192f8832ea4",
+    worktreePath: ".worktrees/a2ca993f",
   },
   {
     id: "card-107",
@@ -141,6 +177,12 @@ export const INITIAL_PIPELINE_CARDS: PipelineCard[] = [
     elapsedTime: "há 6m",
     commitSha: "c05c52b",
     ciStatus: "pass",
+    tokens: 38,
+    estimatedCost: "0.02",
+    recommendedModel: "Claude 3.5 Sonnet",
+    acceptanceCommand: "pytest testes/esteira -v -k test_rls_supabase",
+    acceptanceHash: "c05c52b881ef",
+    worktreePath: ".worktrees/2656485e",
     probes: {
       http_rota: true,
       supabase_rls: true,
@@ -415,6 +457,10 @@ export function apply(ctx: Context) {
     const [isMigrating, setIsMigrating] = React.useState<boolean>(false);
     const [migrationLog, setMigrationLog] = React.useState<string>("");
 
+    // Expansão: Modal In-Cockpit de Detalhes da Issue e Abas da Ilha Central
+    const [activeIssueDetailCard, setActiveIssueDetailCard] = React.useState<PipelineCard | null>(null);
+    const [activeCentralTab, setActiveCentralTab] = React.useState<"pipeline" | "templates_rsi">("pipeline");
+
     // Estados de Execução Concorrente e Loading (Fase 2)
     const [isExecutingDispatch, setIsExecutingDispatch] = React.useState<boolean>(false);
     const [isExecutingGate, setIsExecutingGate] = React.useState<boolean>(false);
@@ -511,7 +557,7 @@ export function apply(ctx: Context) {
         } catch (_e) {}
       }
       if (ctx?.host?.spawn) {
-        ctx.host.spawn("bash", { args: [`open "${uri}"`] }).catch(() => {});
+        ctx.host.spawn("bash", { args: ["-c", `open "${uri}"`] }).catch(() => {});
       }
     };
 
@@ -1563,6 +1609,12 @@ export function apply(ctx: Context) {
                 { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
                 h("span", { style: { fontSize: "12px", color: "#f3f4f6" } }, "PRs Integrados"),
                 h("span", { style: { fontSize: "12px", fontWeight: "600", color: "#ffffff" } }, "21 na main")
+              ),
+              h(
+                "div",
+                { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+                h("span", { style: { fontSize: "12px", color: "#f3f4f6" } }, "Economia EVM (CoEvo-RSI)"),
+                h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#10b981" } }, "~$4.82 vs ~$16.94 (-71.5% economia)")
               )
             ),
 
@@ -3099,8 +3151,8 @@ export function apply(ctx: Context) {
                       h(
                         "span",
                         {
-                          onClick: () => handleOpenIssueDeepLink(c),
-                          title: `Clique para abrir no Buzz Desktop (${buildIssueDeepLink(c)})`,
+                          onClick: () => setActiveIssueDetailCard(c),
+                          title: `Clique para ver detalhes da issue no Cockpit (#${c.issueId})`,
                           style: {
                             fontSize: "10px",
                             color: "#38bdf8",
@@ -3139,12 +3191,12 @@ export function apply(ctx: Context) {
                     ),
                     h("span", { style: { fontSize: "10px", color: "var(--text-subtle, #9ca3af)" } }, c.elapsedTime)
                   ),
-                  // Title (Clickable Deep Link)
+                  // Title (Clickable Deep Link -> In-Cockpit Issue Detail)
                   h(
                     "div",
                     {
-                      onClick: () => handleOpenIssueDeepLink(c),
-                      title: `Clique para abrir no Buzz: ${buildIssueDeepLink(c)}`,
+                      onClick: () => setActiveIssueDetailCard(c),
+                      title: `Clique para ver detalhes da issue no Cockpit`,
                       style: {
                         fontSize: "12px",
                         fontWeight: "600",
@@ -3189,6 +3241,31 @@ export function apply(ctx: Context) {
                         },
                       },
                       c.tier === "tier_3_arquiteto" ? "Tier 3" : c.tier === "tier_2_revisor" ? "Tier 2" : "Tier 1"
+                    )
+                  ),
+                  // Custo & Model Router Badge (Inteligência CoEvo-RSI)
+                  h(
+                    "div",
+                    { style: { display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "10px", marginTop: "2px" } },
+                    h(
+                      "span",
+                      {
+                        style: {
+                          color: c.tier === "tier_1_exec_barato" ? "#10b981" : c.tier === "tier_2_revisor" ? "#60a5fa" : "#c084fc",
+                          fontFamily: "monospace",
+                          fontWeight: "600",
+                        },
+                      },
+                      c.tier === "tier_1_exec_barato"
+                        ? "Gemini 3.8 Flash"
+                        : c.tier === "tier_2_revisor"
+                        ? "Claude 3.5 Sonnet"
+                        : "Claude 3.5 Sonnet"
+                    ),
+                    h(
+                      "span",
+                      { style: { color: "#9ca3af", fontFamily: "monospace" } },
+                      `~$${c.estimatedCost || (c.tier === "tier_1_exec_barato" ? "0.002" : "0.02")} | ${c.tokens || 18}k tokens`
                     )
                   ),
                   // Action Button

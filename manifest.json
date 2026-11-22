@@ -37,6 +37,11 @@
         "id": "git",
         "program": "git",
         "args": []
+      },
+      {
+        "id": "open",
+        "program": "open",
+        "args": []
       }
     ],
     "commands": [

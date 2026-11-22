@@ -166,6 +166,12 @@ export interface PipelineCard {
   turnCurrent?: number;
   turnMax?: number;
   ciStatus?: "pass" | "running" | "fail";
+  tokens?: number;
+  estimatedCost?: string;
+  recommendedModel?: string;
+  acceptanceCommand?: string;
+  acceptanceHash?: string;
+  worktreePath?: string;
   probes?: {
     http_rota: boolean;
     supabase_rls: boolean;
@@ -177,4 +183,13 @@ export interface PipelineCard {
     reason: string;
     similarityToFirst?: number;
   }>;
+}
+
+export interface TemplateItem {
+  name: string;
+  path: string;
+  fpy: number;
+  commonError: string;
+  contractVersion: string;
+  description: string;
 }

@@ -269,3 +269,67 @@ export function calculateDsapSimilarity(
     matchedTokens: Array.from(intersection),
   };
 }
+
+/**
+ * Abre uma URI no sistema operacional (macOS) via processo 'open' ou fallback com 'bash'.
+ */
+export async function openSystemUri(ctx: any, uri: string): Promise<boolean> {
+  // 1. Tenta window.location
+  if (typeof window !== "undefined") {
+    try {
+      window.location.assign(uri);
+    } catch (_e) {}
+  }
+
+  if (!ctx?.host?.spawn) return false;
+
+  // 2. Tenta processo nativo 'open' (declarado no manifest)
+  try {
+    const proc = await ctx.host.spawn("open", { args: [uri] });
+    const code = await proc.exited;
+    if (code === 0) return true;
+  } catch (_e) {}
+
+  // 3. Fallback via 'bash' com flag -c (já embutida no manifest args: ["-c"])
+  try {
+    const proc = await ctx.host.spawn("bash", { args: [`open "${uri}"`] });
+    const code = await proc.exited;
+    return code === 0;
+  } catch (_err) {
+    return false;
+  }
+}
+
+/**
+ * Garante a infraestrutura de worktrees isoladas da esteira v10 em .worktrees/
+ */
+export async function ensureWorktreeInfrastructure(ctx: any): Promise<{
+  success: boolean;
+  worktrees: string[];
+  output: string;
+}> {
+  if (!ctx?.host?.spawn) {
+    return { success: true, worktrees: ["_runner_esteira"], output: "[SIMULADO] Worktrees garantidas.\n" };
+  }
+
+  let output = "";
+  const append = (c: string) => (output += c);
+
+  try {
+    const cmd = `cd "${ORGFY_ABS_PATH}" && mkdir -p .worktrees && git worktree prune && git worktree list`;
+    const proc = await ctx.host.spawn("bash", {
+      args: [cmd],
+      onStdout: append,
+      onStderr: append,
+    });
+    const code = await proc.exited;
+    const worktrees = output
+      .split("\n")
+      .filter((line) => line.includes(".worktrees/"))
+      .map((line) => line.split(/\s+/)[0]);
+
+    return { success: code === 0, worktrees, output };
+  } catch (err: any) {
+    return { success: false, worktrees: [], output: `Erro: ${err?.message || err}` };
+  }
+}
