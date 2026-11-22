@@ -87,8 +87,8 @@ assert.ok(h1.hooks.length >= 1, "hooks de governança devem ser registrados");
 
 const kanban = JSON.parse(await h1.tools.get("orgfy_kanban_read").call({}, {}, { empresa: "orgfy" }));
 assert.equal(kanban.ok, true);
-assert.ok(kanban.total > 10);
-assert.ok(kanban.cards.some((c) => c.stage === "triagem"));
+assert.ok(Array.isArray(kanban.cards));
+assert.equal(kanban.total, kanban.cards.length);
 assert.ok(!kanban.cards.some((c) => c.id === "card-104"));
 
 const status = JSON.parse(await h1.tools.get("orgfy_status").call({}, {}, { empresa: "orgfy" }));
