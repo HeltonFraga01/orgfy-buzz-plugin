@@ -423,23 +423,44 @@ def analyze_economy(
     return economia, len(items)
 
 
+def _collect_resolved_and_closed_ids(scratch_dir: Path) -> set[str]:
+    closed: set[str] = set()
+    archive = safe_load_json(scratch_dir / "resolved-issues-archive.json")
+    if isinstance(archive, dict):
+        for item in archive.get("itens", []):
+            if isinstance(item, dict):
+                for key in ("issueId", "fullIssueId"):
+                    val = str(item.get(key) or "").strip().lower()
+                    if val:
+                        closed.add(val[:8])
+                        closed.add(val)
+    for p in scratch_dir.glob("*fechad*.json"):
+        data = safe_load_json(p)
+        if data is None:
+            continue
+        raw_txt = json.dumps(data).lower()
+        for m in re.findall(r"\b[0-9a-f]{8,64}\b", raw_txt):
+            closed.add(m[:8])
+    return closed
+
+
 def analyze_hygiene(
     placar_path: Optional[Path], sentinela_path: Path
 ) -> Tuple[Dict[str, Any], int, int]:
     placar = safe_load_json(placar_path) if placar_path else None
     sentinela = safe_load_json(sentinela_path) or {}
+    scratch_dir = sentinela_path.parent
+    buzz_dir = scratch_dir.parent
+    closed_ids = _collect_resolved_and_closed_ids(scratch_dir)
 
     fila_revisao = 0
     wip_total_ativo = 0
     wip_atribuido = 0
     orphan_count = 0
+    placar_filtrados_resolvidos = 0
     top_orfaos: List[Dict[str, Any]] = []
 
     if isinstance(placar, dict):
-        cards_por_estado = placar.get("cards_por_estado")
-        if isinstance(cards_por_estado, dict):
-            fila_revisao = int(cards_por_estado.get("revisao") or 0)
-
         detalhes = placar.get("cards_ativos_detalhes")
         if isinstance(detalhes, list):
             for c in detalhes:
@@ -448,6 +469,12 @@ def analyze_hygiene(
                 estado = str(c.get("estado") or "").strip().lower()
                 if estado == "feito":
                     continue
+                cid = str(c.get("issue_id") or c.get("id") or "").strip().lower()
+                if cid and (cid in closed_ids or cid[:8] in closed_ids):
+                    placar_filtrados_resolvidos += 1
+                    continue
+                if estado == "revisao":
+                    fila_revisao += 1
                 wip_total_ativo += 1
                 bola = str(c.get("bola") or "").strip().lower()
                 resp = str(c.get("responsavel") or c.get("executor") or "").strip().lower()
@@ -466,11 +493,16 @@ def analyze_hygiene(
                         )
                 else:
                     wip_atribuido += 1
+        else:
+            cards_por_estado = placar.get("cards_por_estado")
+            if isinstance(cards_por_estado, dict):
+                fila_revisao = int(cards_por_estado.get("revisao") or 0)
 
     orphan_pct = round((orphan_count / wip_total_ativo) * 100.0, 2) if wip_total_ativo > 0 else 0.0
 
     estagnados_n3 = 0
     estagnados_n2 = 0
+    worktrees_fantasmas_ignorados = 0
     stagnated_list: List[Dict[str, Any]] = []
     sentinela_count = 0
 
@@ -479,6 +511,16 @@ def analyze_hygiene(
         for chave, entry in sentinela.items():
             if not isinstance(entry, dict):
                 continue
+            chave_str = str(chave)
+            if chave_str.startswith("worktree:"):
+                wt_name = chave_str.split("worktree:", 1)[1]
+                wt_exists = (
+                    (buzz_dir / ".worktrees" / wt_name).exists()
+                    or (buzz_dir / "REPOS" / "orgfy" / ".worktrees" / wt_name).exists()
+                )
+                if not wt_exists:
+                    worktrees_fantasmas_ignorados += 1
+                    continue
             nivel = int(entry.get("nivel_notificado") or 0)
             ciclos = int(entry.get("ciclos") or 0)
             if nivel >= 3:
@@ -488,7 +530,7 @@ def analyze_hygiene(
             if nivel >= 2 and ciclos > 0:
                 stagnated_list.append(
                     {
-                        "chave": str(chave),
+                        "chave": chave_str,
                         "ciclos": ciclos,
                         "nivel": nivel,
                     }
@@ -504,6 +546,8 @@ def analyze_hygiene(
         "top_orfaos": top_orfaos,
         "estagnados_nivel_3": estagnados_n3,
         "estagnados_nivel_2": estagnados_n2,
+        "worktrees_fantasmas_ignorados": worktrees_fantasmas_ignorados,
+        "placar_filtrados_resolvidos": placar_filtrados_resolvidos,
         "top_estagnados": stagnated_list[:8],
     }
 
