@@ -549,6 +549,24 @@ export function apply(ctx: Context) {
       loadMigrationData();
     }, []);
 
+    // Listener global para fechar modais com tecla Escape (Zero travamento)
+    React.useEffect(() => {
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === "Escape") {
+          setIsBootstrapModalOpen(false);
+          setIsDispatchModalOpen(false);
+          setIsGateModalOpen(false);
+          setIsLogsDrawerOpen(false);
+          setIsMcpDiagnosticsOpen(false);
+          setIsMigrationModalOpen(false);
+          setIsGovernanceDrawerOpen(false);
+          setActiveIssueDetailCard(null);
+        }
+      };
+      window.addEventListener("keydown", handleKeyDown);
+      return () => window.removeEventListener("keydown", handleKeyDown);
+    }, []);
+
     // Disparo da Migração Atômica de Agentes & Workspace
     const handleExecuteMigration = async () => {
       setIsMigrating(true);
@@ -3008,16 +3026,45 @@ export function apply(ctx: Context) {
               { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
               h(
                 "div",
-                { style: { display: "flex", alignItems: "center", gap: "8px" } },
+                { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
                 SVG.zap({ h, width: 20, height: 20 }),
-                h("h3", { style: { margin: 0, fontSize: "16px", color: "#ffffff", fontWeight: "700" } }, "Auto-Bootstrap da Holding OrgFy")
+                h("h3", { style: { margin: 0, fontSize: "16px", color: "#ffffff", fontWeight: "700" } }, "Auto-Bootstrap da Holding OrgFy"),
+                // Badge de Configuração Existente
+                (migrationSummary?.total || 16) > 0 &&
+                  h(
+                    "div",
+                    {
+                      style: {
+                        padding: "2px 8px",
+                        borderRadius: "6px",
+                        backgroundColor: "rgba(56, 189, 248, 0.15)",
+                        border: "1px solid rgba(56, 189, 248, 0.35)",
+                        color: "#38bdf8",
+                        fontSize: "10px",
+                        fontWeight: "600",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "4px",
+                      },
+                    },
+                    SVG.checkCircle({ h, width: 11, height: 11 }),
+                    `Configuração Existente (${migrationSummary?.total || 16} agentes prontos)`
+                  )
               ),
               h(
                 "button",
                 {
-                  onClick: () => !isBootstrapping && setIsBootstrapModalOpen(false),
-                  disabled: isBootstrapping,
-                  style: { background: "transparent", border: "none", color: "#9ca3af", cursor: isBootstrapping ? "not-allowed" : "pointer" },
+                  onClick: () => setIsBootstrapModalOpen(false),
+                  title: "Fechar (Esc)",
+                  style: {
+                    background: "transparent",
+                    border: "none",
+                    color: "#9ca3af",
+                    cursor: "pointer",
+                    padding: "4px",
+                    display: "flex",
+                    alignItems: "center",
+                  },
                 },
                 SVG.xCircle({ h, width: 18, height: 18 })
               )
@@ -3136,12 +3183,12 @@ export function apply(ctx: Context) {
             // Actions
             h(
               "div",
-              { style: { display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "6px" } },
+              { style: { display: "flex", justifyContent: "flex-end", alignItems: "center", gap: "10px", marginTop: "6px" } },
               h(
                 "button",
                 {
                   onClick: () => setIsBootstrapModalOpen(false),
-                  disabled: isBootstrapping,
+                  title: "Fechar (Esc)",
                   style: {
                     padding: "8px 16px",
                     borderRadius: "8px",
@@ -3149,11 +3196,40 @@ export function apply(ctx: Context) {
                     border: "1px solid rgba(255, 255, 255, 0.15)",
                     color: "#9ca3af",
                     fontSize: "12px",
-                    cursor: isBootstrapping ? "not-allowed" : "pointer",
+                    cursor: "pointer",
                   },
                 },
                 "Fechar"
               ),
+              // Botão de Reconciliação & Migração (quando configuração existente for detectada)
+              (migrationSummary?.total || 16) > 0 &&
+                h(
+                  "button",
+                  {
+                    onClick: async () => {
+                      setIsBootstrapModalOpen(false);
+                      setIsMigrationModalOpen(true);
+                      if (!isMigrating) {
+                        handleExecuteMigration();
+                      }
+                    },
+                    style: {
+                      padding: "8px 16px",
+                      borderRadius: "8px",
+                      backgroundColor: "rgba(56, 189, 248, 0.15)",
+                      border: "1px solid rgba(56, 189, 248, 0.4)",
+                      color: "#38bdf8",
+                      fontWeight: "700",
+                      fontSize: "12px",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                    },
+                  },
+                  SVG.users({ h, width: 14, height: 14 }),
+                  "Reconciliar & Migrar Esteira"
+                ),
               h(
                 "button",
                 {
@@ -3162,12 +3238,12 @@ export function apply(ctx: Context) {
                   style: {
                     padding: "8px 18px",
                     borderRadius: "8px",
-                    backgroundColor: "#10b981",
+                    backgroundColor: isBootstrapping ? "rgba(16, 185, 129, 0.5)" : "#10b981",
                     border: "none",
                     color: "#000000",
                     fontWeight: "700",
                     fontSize: "12px",
-                    cursor: isBootstrapping ? "not-allowed" : "pointer",
+                    cursor: isBootstrapping ? "wait" : "pointer",
                     display: "flex",
                     alignItems: "center",
                     gap: "6px",
