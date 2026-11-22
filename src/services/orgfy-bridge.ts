@@ -274,30 +274,35 @@ export function calculateDsapSimilarity(
  * Abre uma URI no sistema operacional (macOS) via processo 'open' ou fallback com 'bash'.
  */
 export async function openSystemUri(ctx: any, uri: string): Promise<boolean> {
-  // 1. Tenta window.location
+  // 1. Prioridade 1: Spawn nativo 'open' do macOS através do host Cordis
+  if (ctx?.host?.spawn) {
+    try {
+      const proc = await ctx.host.spawn("open", { args: [uri] });
+      const code = await proc.exited;
+      if (code === 0) return true;
+    } catch (e) {
+      console.warn("[OrgFy Bridge] spawn direct open falhou:", e);
+    }
+
+    // 2. Fallback via 'bash' (com manifest args: ["-c"])
+    try {
+      const proc = await ctx.host.spawn("bash", { args: [`open "${uri}"`] });
+      const code = await proc.exited;
+      if (code === 0) return true;
+    } catch (e) {
+      console.warn("[OrgFy Bridge] spawn bash open falhou:", e);
+    }
+  }
+
+  // 3. Fallback via window.location somente se host.spawn indisponível
   if (typeof window !== "undefined") {
     try {
       window.location.assign(uri);
+      return true;
     } catch (_e) {}
   }
 
-  if (!ctx?.host?.spawn) return false;
-
-  // 2. Tenta processo nativo 'open' (declarado no manifest)
-  try {
-    const proc = await ctx.host.spawn("open", { args: [uri] });
-    const code = await proc.exited;
-    if (code === 0) return true;
-  } catch (_e) {}
-
-  // 3. Fallback via 'bash' com flag -c (já embutida no manifest args: ["-c"])
-  try {
-    const proc = await ctx.host.spawn("bash", { args: [`open "${uri}"`] });
-    const code = await proc.exited;
-    return code === 0;
-  } catch (_err) {
-    return false;
-  }
+  return false;
 }
 
 /**

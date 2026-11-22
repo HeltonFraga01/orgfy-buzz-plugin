@@ -14,6 +14,7 @@ import {
   executePorteiroSync,
   fetchLiveEsteiraState,
   calculateDsapSimilarity,
+  openSystemUri,
 } from "./services/orgfy-bridge";
 import {
   executeBootstrapFlow,
@@ -55,13 +56,13 @@ export const INITIAL_PIPELINE_CARDS: PipelineCard[] = [
   {
     id: "card-104",
     issueId: "5c569a9e",
-    fullIssueId: "5c569a9e223bf018a5c7d48be601ffd07048cff2d453d987852b42934756e104",
+    fullIssueId: "5c569a9ec219d3edf31158a93a7e7110542e8be69a32ae0f250abff32e98e9f8",
     owner: "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20",
-    title: "Refatorar Autenticação PKCE e Session Store",
+    title: "FIX-TEST-0006-AC003 — Atualizar fixture laudo_bin_com_decidido",
     priority: "P0",
     empresa: "orgfy",
-    executor: "OrgFy Atlas",
-    revisor: "OrgFy Bento",
+    executor: "OrgFy Val",
+    revisor: "OrgFy Teo",
     tier: "tier_1_exec_barato",
     stage: "triagem",
     elapsedTime: "há 14m",
@@ -75,14 +76,14 @@ export const INITIAL_PIPELINE_CARDS: PipelineCard[] = [
   },
   {
     id: "card-108",
-    issueId: "bc63ecec",
-    fullIssueId: "bc63ecec1168bfc5409f1813e21b797ead65ce2cf9c62d0b6dd05d7c2ba09dc3",
+    issueId: "62e83956",
+    fullIssueId: "62e83956c5ba9a82d1b4a0fdc9dd0e4c62e00848300d1047f77c2e2fd6ece013",
     owner: "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20",
-    title: "Isolamento de Cache de CI no Swarm Efêmero",
+    title: "ESTEIRA-0008 — Autonomia do Ciclo Fechado da Esteira (Gatilho pós-Merge)",
     priority: "P1",
-    empresa: "lumen-iptv",
-    executor: "OrgFy Val",
-    revisor: "QA Sentinel",
+    empresa: "orgfy",
+    executor: "OrgFy Otto",
+    revisor: "OrgFy Bento Arquiteto",
     tier: "tier_1_exec_barato",
     stage: "triagem",
     elapsedTime: "há 32m",
@@ -92,14 +93,14 @@ export const INITIAL_PIPELINE_CARDS: PipelineCard[] = [
     recommendedModel: "Gemini 3.8 Flash",
     acceptanceCommand: "pytest testes/esteira -v -k test_ci_cache",
     acceptanceHash: "9a2f77c0b112",
-    worktreePath: ".worktrees/bc63ecec",
+    worktreePath: ".worktrees/62e83956",
   },
   {
     id: "card-105",
-    issueId: "cf45657a",
-    fullIssueId: "cf45657a827409f1813e21b797ead65ce2cf9c62d0b6dd05d7c2ba09dc3105",
+    issueId: "6b631f8e",
+    fullIssueId: "6b631f8e322bb274d3abec1cbc8d9c5be7cb724ab49c3f69591ece9bbebf16ca",
     owner: "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20",
-    title: "Implementar Rota de Webhook para Gate Nostr",
+    title: "GATE-ACEITE-ESCRITA-AUTORIZADA — Conciliar integridade do aceite",
     priority: "P1",
     empresa: "orgfy",
     executor: "OrgFy Atlas",
@@ -113,16 +114,16 @@ export const INITIAL_PIPELINE_CARDS: PipelineCard[] = [
     recommendedModel: "Gemini 3.8 Flash",
     acceptanceCommand: "pytest testes/esteira -v -k test_webhook_nostr",
     acceptanceHash: "ef8231bb44a1",
-    worktreePath: ".worktrees/cf45657a",
+    worktreePath: ".worktrees/6b631f8e",
   },
   {
     id: "card-109",
-    issueId: "5c109609",
-    fullIssueId: "5c109609a5c7d48be601ffd07048cff2d453d987852b42934756e1c10900000",
+    issueId: "fef9b85e",
+    fullIssueId: "fef9b85ecca881d393d8c51efe91a9fdf628bdfe73b2fed6432893b22cec2531",
     owner: "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20",
-    title: "Sincronização Atômica de Manifestos da Holding",
+    title: "BUZZ-106-WORKTREE-COMPAT — Compatibilizar entregar e gate com git rev-parse",
     priority: "P2",
-    empresa: "saas-tributario",
+    empresa: "orgfy",
     executor: "OrgFy Val",
     revisor: "QA Sentinel",
     tier: "tier_1_exec_barato",
@@ -134,7 +135,7 @@ export const INITIAL_PIPELINE_CARDS: PipelineCard[] = [
     recommendedModel: "Gemini 3.8 Flash",
     acceptanceCommand: "python3 ferramentas/esteira/lint_card.py",
     acceptanceHash: "7b88aa12c559",
-    worktreePath: ".worktrees/5c109609",
+    worktreePath: ".worktrees/fef9b85e",
   },
   {
     id: "card-106",
@@ -163,13 +164,13 @@ export const INITIAL_PIPELINE_CARDS: PipelineCard[] = [
   },
   {
     id: "card-107",
-    issueId: "2656485e",
+    issueId: "f46e22fd",
     prId: "PR #42",
-    fullIssueId: "2656485e827409f1813e21b797ead65ce2cf9c62d0b6dd05d7c2ba09dc3107",
+    fullIssueId: "f46e22fd6d0b7fff0d0ad34d98d3abcb6b7443aa635e59516698cfe7e1b24343",
     owner: "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20",
-    title: "Reconciliação de Modelo de Referência e RLS Supabase",
+    title: "ESTEIRA-0015 — Reconciliar congelamento do aceite com escrita autorizada",
     priority: "P0",
-    empresa: "lumen-iptv",
+    empresa: "orgfy",
     executor: "OrgFy Atlas",
     revisor: "OrgFy Bento",
     tier: "tier_1_exec_barato",
@@ -182,7 +183,7 @@ export const INITIAL_PIPELINE_CARDS: PipelineCard[] = [
     recommendedModel: "Claude 3.5 Sonnet",
     acceptanceCommand: "pytest testes/esteira -v -k test_rls_supabase",
     acceptanceHash: "c05c52b881ef",
-    worktreePath: ".worktrees/2656485e",
+    worktreePath: ".worktrees/f46e22fd",
     probes: {
       http_rota: true,
       supabase_rls: true,
@@ -199,11 +200,11 @@ export const INITIAL_PIPELINE_CARDS: PipelineCard[] = [
   },
   {
     id: "card-102",
-    issueId: "c05c52b5",
+    issueId: "3c0b1dae",
     prId: "PR #40",
-    fullIssueId: "c05c52b5827409f1813e21b797ead65ce2cf9c62d0b6dd05d7c2ba09dc3102",
+    fullIssueId: "3c0b1dae116452ea3eda7addc3456c6ee64a1c13d332804699b567c3fbe41792",
     owner: "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20",
-    title: "Esteira Mínima v10 e Cutover Determinístico",
+    title: "ESTEIRA-0013 — Despacho paralelo até a capacidade e recuperação",
     priority: "P0",
     empresa: "orgfy",
     executor: "OrgFy Bento Arquiteto",
@@ -564,24 +565,11 @@ export function apply(ctx: Context) {
       return `buzz://issue?id=${issueId}&owner=${owner}&d=${empresa}`;
     };
 
-    const handleOpenIssueDeepLink = (c: PipelineCard) => {
+    const handleOpenIssueDeepLink = async (c: PipelineCard) => {
       const uri = buildIssueDeepLink(c);
       showNotification("info", `Abrindo issue #${c.issueId} no Buzz Desktop...`);
-      if ((ctx as any)?.navigation?.open) {
-        try {
-          (ctx as any).navigation.open(uri);
-          return;
-        } catch (_e) {}
-      }
-      if (typeof window !== "undefined") {
-        try {
-          window.location.href = uri;
-          return;
-        } catch (_e) {}
-      }
-      if (ctx?.host?.spawn) {
-        ctx.host.spawn("bash", { args: ["-c", `open "${uri}"`] }).catch(() => {});
-      }
+      console.log("[OrgFy Control Room] Abrindo issue:", uri);
+      await openSystemUri(ctx, uri);
     };
 
     const handleCopyDeepLink = (e: any, c: PipelineCard) => {
