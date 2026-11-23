@@ -344,16 +344,33 @@ async function fetchLiveKanbanSnapshot(ctx, filter) {
             try {
               let grepOut = "";
               const gProc = await ctx.host.spawn("git", {
-                args: ["-C", wtFull, "grep", "-h", "-o", "-E", "buzz://issue\\?id=[0-9a-fA-F]{64}&owner=[0-9a-fA-F]{64}", "--", "docs/deliveries/"],
+                args: [
+                  "-C",
+                  wtFull,
+                  "grep",
+                  "-H",
+                  "-o",
+                  "-E",
+                  "buzz://issue\\?id=[0-9a-fA-F]{64}&owner=[0-9a-fA-F]{64}",
+                  "--",
+                  "docs/deliveries/"
+                ],
                 onStdout: (c) => {
                   grepOut += c;
                 }
               });
               await gProc.exited;
-              const m = grepOut.match(/id=([0-9a-fA-F]{64})&owner=([0-9a-fA-F]{64})/);
-              if (m) {
-                resolvedFullIssueId = m[1].toLowerCase();
-                resolvedOwner = m[2].toLowerCase();
+              for (const line of grepOut.split("\n")) {
+                const colonIdx = line.indexOf(":");
+                if (colonIdx <= 0) continue;
+                const fileName = line.slice(0, colonIdx).toLowerCase();
+                if (!fileName.includes(slugLower)) continue;
+                const m = line.slice(colonIdx + 1).match(/id=([0-9a-fA-F]{64})&owner=([0-9a-fA-F]{64})/);
+                if (m) {
+                  resolvedFullIssueId = m[1].toLowerCase();
+                  resolvedOwner = m[2].toLowerCase();
+                  break;
+                }
               }
             } catch {
             }
