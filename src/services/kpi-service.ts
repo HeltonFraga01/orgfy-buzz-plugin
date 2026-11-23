@@ -255,18 +255,23 @@ export async function recalculateKpisNow(ctx: Context): Promise<{
   let output = "";
 
   try {
+    // manifest.json declara o processo pelo id "python" (program: "python3") e "bash" (args: ["-c"]).
+    // Chamar "python3" como id disparava "Process is not declared" no sandbox do Buzz Desktop.
     if (host?.exec) {
-      let res = await host.exec("python3", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
+      let res = await host.exec("python", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
       if (res?.exitCode && res.exitCode !== 0) {
-        res = await host.exec("python", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
+        res = await host.exec("bash", [
+          "-c",
+          `python3 "${KPI_SCRIPT_PATH}" --output "${KPI_SNAPSHOT_PATH}"`,
+        ]);
       }
       output = [res?.stdout, res?.stderr].filter(Boolean).join("\n").trim();
     } else if (host?.spawn) {
-      const proc = await host.spawn("python3", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
+      const proc = await host.spawn("python", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
       if (proc?.exited) {
         await proc.exited;
       }
-      output = "Recálculo executado via subprocesso.";
+      output = "Recálculo executado via subprocesso (python).";
     }
   } catch (err: any) {
     output = `Aviso ao executar script: ${err?.message || err}`;
