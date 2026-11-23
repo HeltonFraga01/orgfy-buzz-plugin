@@ -418,6 +418,7 @@ export async function fetchLiveKanbanSnapshot(
             revisor: "Revisão pendente",
             tier: "tier_1_exec_barato",
             stage: "execucao",
+            priority: "P1",
             worktreePath: `.worktrees/${shortLockId}`,
             updatedAt: Number(rec.acquiredAt || nowMs),
           });
@@ -472,6 +473,7 @@ export async function fetchLiveKanbanSnapshot(
             revisor: "Revisão pendente",
             tier: "tier_1_exec_barato",
             stage: "execucao",
+            priority: "P1",
             branch: branchName,
             commitSha: headMatch ? headMatch[1].slice(0, 7) : undefined,
             worktreePath: `.worktrees/${slug}`,

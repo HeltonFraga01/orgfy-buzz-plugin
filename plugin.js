@@ -118,7 +118,7 @@ async function fetchLiveEsteiraState(ctx, empresa) {
   };
 }
 async function fetchLiveKanbanSnapshot(ctx, filter) {
-  var _a, _b, _c, _d, _e;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i;
   const [live, canvasText] = await Promise.all([
     fetchLiveEsteiraState(ctx, filter == null ? void 0 : filter.empresa),
     readOrgfyText(ctx, ".scratch/canvas_atual.md")
@@ -262,6 +262,84 @@ async function fetchLiveKanbanSnapshot(ctx, filter) {
         worktreePath: `.worktrees/${shortId}`
       });
     }
+  }
+  try {
+    if ((_f = ctx == null ? void 0 : ctx.host) == null ? void 0 : _f.readFile) {
+      const rawLocks = await ctx.host.readFile("/Users/heltonfraga/.buzz/.scratch/orgfy-locks.json");
+      const lockTxt = typeof rawLocks === "string" ? rawLocks : rawLocks instanceof Uint8Array ? new TextDecoder("utf-8").decode(rawLocks) : String(rawLocks ?? "");
+      const parsedLocks = JSON.parse(lockTxt);
+      const nowMs = Date.now();
+      if (parsedLocks && typeof parsedLocks === "object" && !Array.isArray(parsedLocks)) {
+        for (const [lockIssueId, rec] of Object.entries(parsedLocks)) {
+          if (!rec || typeof rec.expiresAt !== "number" || rec.expiresAt <= nowMs) continue;
+          const shortLockId = lockIssueId.slice(0, 8);
+          if (cardMap.has(shortLockId)) continue;
+          cardMap.set(shortLockId, {
+            id: `lock-${shortLockId}`,
+            issueId: shortLockId,
+            fullIssueId: lockIssueId.length === 64 ? lockIssueId : void 0,
+            title: `Card em execução (#${shortLockId})`,
+            empresa: (filter == null ? void 0 : filter.empresa) && filter.empresa !== "all" ? filter.empresa : "orgfy",
+            executor: String(rec.agentKey || "Agente OrgFy"),
+            revisor: "Revisão pendente",
+            tier: "tier_1_exec_barato",
+            stage: "execucao",
+            priority: "P1",
+            worktreePath: `.worktrees/${shortLockId}`,
+            updatedAt: Number(rec.acquiredAt || nowMs)
+          });
+        }
+      }
+    }
+  } catch {
+  }
+  try {
+    if ((_g = ctx == null ? void 0 : ctx.host) == null ? void 0 : _g.spawn) {
+      let wtOut = "";
+      const proc = await ctx.host.spawn("git", {
+        args: ["-C", ORGFY_ABS_PATH, "worktree", "list", "--porcelain"],
+        onStdout: (chunk) => {
+          wtOut += chunk;
+        }
+      });
+      const code = await proc.exited;
+      if (code === 0 && wtOut.trim()) {
+        const blocks = wtOut.trim().split(/\n\s*\n/);
+        for (const blk of blocks) {
+          const wtMatch = blk.match(/^worktree\s+(.+)$/m);
+          const headMatch = blk.match(/^HEAD\s+([0-9a-f]{7,40})$/m);
+          const branchMatch = blk.match(/^branch\s+refs\/heads\/(.+)$/m);
+          if (!wtMatch || !branchMatch) continue;
+          const wtFull = wtMatch[1].trim();
+          const branchName = branchMatch[1].trim();
+          if (branchName === "main" || branchName === "master") continue;
+          if (!wtFull.includes("/.worktrees/")) continue;
+          const slug = ((_i = (_h = wtFull.split("/.worktrees/")[1]) == null ? void 0 : _h.split("/")[0]) == null ? void 0 : _i.trim()) || "";
+          if (!slug || slug.startsWith("_")) continue;
+          const slugLower = slug.toLowerCase();
+          const alreadyListed = Array.from(cardMap.values()).some(
+            (c) => c.branch && c.branch.toLowerCase() === branchName.toLowerCase() || c.worktreePath && c.worktreePath.toLowerCase().includes(slugLower) || c.title && c.title.toLowerCase().includes(slugLower)
+          );
+          if (alreadyListed) continue;
+          cardMap.set(`wt-${slug}`, {
+            id: `wt-${slug}`,
+            issueId: slug.toUpperCase().slice(0, 18),
+            title: `${slug.toUpperCase()} (${branchName})`,
+            empresa: (filter == null ? void 0 : filter.empresa) && filter.empresa !== "all" ? filter.empresa : "orgfy",
+            executor: "Em execução (worktree)",
+            revisor: "Revisão pendente",
+            tier: "tier_1_exec_barato",
+            stage: "execucao",
+            priority: "P1",
+            branch: branchName,
+            commitSha: headMatch ? headMatch[1].slice(0, 7) : void 0,
+            worktreePath: `.worktrees/${slug}`,
+            updatedAt: Date.now()
+          });
+        }
+      }
+    }
+  } catch {
   }
   let result = Array.from(cardMap.values());
   if ((filter == null ? void 0 : filter.empresa) && filter.empresa !== "all") {
@@ -2196,14 +2274,28 @@ async function syncLocksFromDisk(ctx) {
 }
 async function persistLocksToDisk(ctx) {
   const host = ctx.host;
-  if (!(host == null ? void 0 : host.writeFile)) return;
-  try {
-    const obj = {};
-    for (const [k, v] of memoryLocks.entries()) {
-      obj[k] = v;
+  if (!host) return;
+  const obj = {};
+  for (const [k, v] of memoryLocks.entries()) {
+    obj[k] = v;
+  }
+  const serialized = JSON.stringify(obj, null, 2);
+  if (host.writeFile) {
+    try {
+      await host.writeFile(LOCKS_FILE_PATH, serialized);
+      return;
+    } catch {
     }
-    await host.writeFile(LOCKS_FILE_PATH, JSON.stringify(obj, null, 2));
-  } catch {
+  }
+  if (host.spawn) {
+    try {
+      const pyCode = "import pathlib, sys; p = pathlib.Path(sys.argv[1]); p.parent.mkdir(parents=True, exist_ok=True); p.write_text(sys.argv[2], encoding='utf-8')";
+      const proc = await host.spawn("python", {
+        args: ["-c", pyCode, LOCKS_FILE_PATH, serialized]
+      });
+      await proc.exited;
+    } catch {
+    }
   }
 }
 async function acquireCheckoutLock(ctx, issueId, agentKey, ttlMs = DEFAULT_LOCK_TTL_MS, nowMs = Date.now()) {
@@ -8067,16 +8159,18 @@ Regras Invariantes:
 - Hard Cap Orçamentário (80% alerta / 100% bloqueio): Despachos são bloqueados ao atingir 100% do teto diário salvo board_override=true.
 - Checkout Lock Atômico: Nenhum card pode ser executado em paralelo por dois agentes; adquira lock antes de atuar.
 - DSAP Backtracking: Na 2ª recusa consecutiva com similaridade >= 0.70, o card entra em backtracking para o COO re-escopar.
+- Atribuição de Issues (FERR-ASSIGN-AUTH): NUNCA execute 'buzz issues assign' diretamente (falha com auth_error Kind 1 em chamadores locais); use sempre 'python3 ferramentas/assign_issue.py' na raiz do REPOS/orgfy.
+- Decisor Híbrido v12: orgfy_lint_card usa Decisions API com fallback determinístico offline automático (ferramentas/esteira/decisor_fallback.py) em caso de falta de saldo ou timeout.
 Ferramentas nativas disponíveis neste plugin:
 1. orgfy_status({ empresa? }): Consulta o placar de 20h, FPY, CPI de tokens, contagem de aceites, merged e raias da esteira.
-2. orgfy_kanban_read({ stage?, empresa? }): Lê a matriz Kanban completa (triagem, despachado, execucao, revisao, feito) com comandos de aceite, hashes e worktrees.
+2. orgfy_kanban_read({ stage?, empresa? }): Lê a matriz Kanban completa (triagem, despachado, execucao, revisao, feito) incluindo worktrees e locks ativos.
 3. orgfy_despachar({ issue_id, executor, revisor, empresa?, board_override? }): Despacha card em worktree isolado respeitando Hard Cap orçamentário e lock atômico.
 4. orgfy_gate({ pr_id, decisao, motivo, revisor, empresa? }): Aplica o Gate Caixa-Preta (aceito/recusado) com probes de validação.
 5. orgfy_porteiro_sync({ empresa? }): Dispara sincronização determinística de eventos Nostr e ciclo de execução.
 6. orgfy_kpis({ recalcular? }): Lê os KPIs reais de Fluxo, Qualidade, Economia e Higiene (kpis-esteira.json) e opcionalmente recalcula via script Python.
-7. orgfy_checkout_lock({ action, issue_id?, agent_id?, ttl_minutes? }): Gerencia lock atômico de checkout (acquire, release, list) para evitar trabalho duplicado.
+7. orgfy_checkout_lock({ action, issue_id?, agent_id?, ttl_minutes? }): Gerencia lock atômico de checkout (acquire, release, list) com persistência garantida em ~/.buzz/.scratch/orgfy-locks.json.
 8. orgfy_governanca_avaliar({ dry_run?, auto_wake? }): Avalia orçamento, fila de revisão, WIP órfão e estagnação nível 3, disparando alertas/wakes com cooldown anti-spam.
-9. orgfy_lint_card({ title, objective?, done_when?, acceptance_command?, executor?, revisor? }): Audita qualidade semântica e regras L-01/L-22 antes do despacho.
+9. orgfy_lint_card({ title, objective?, done_when?, acceptance_command?, executor?, revisor? }): Audita qualidade semântica (Decisions API + fallback offline) e regras L-01/L-22 antes do despacho.
 10. orgfy_bind_context({ conversation_id, issue_id, worktree_path?, title?, acceptance_command?, acceptance_hash?, executor?, revisor? }): Vincula o worktree e injeta regras vivas L-22/L-90 direto na conversa do agente.
 Consulte sempre orgfy_status, orgfy_kpis ou orgfy_kanban_read para inspecionar métricas reais antes de agir.`
       });
