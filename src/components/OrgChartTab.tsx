@@ -172,7 +172,30 @@ export function renderOrgChartTab(props: {
                 )
               ),
               h("span", { style: { fontSize: "10px", color: "#9ca3af" } }, `Papel: ${ag.papel} · Paralelismo: ${ag.parallelism}x`),
-              h("span", { style: { fontSize: "10px", fontFamily: "monospace", color: "#60a5fa" } }, ag.model),
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" } },
+                h(
+                  "span",
+                  { style: { fontSize: "10px", fontFamily: "monospace", color: ag.modelSource === "buzz_live" ? "#38bdf8" : "#9ca3af" } },
+                  ag.model
+                ),
+                h(
+                  "span",
+                  {
+                    style: {
+                      fontSize: "8.5px",
+                      fontFamily: "monospace",
+                      padding: "1px 4px",
+                      borderRadius: "3px",
+                      backgroundColor: ag.modelSource === "buzz_live" ? "rgba(16,185,129,0.16)" : "rgba(156,163,175,0.14)",
+                      color: ag.modelSource === "buzz_live" ? "#10b981" : "#9ca3af",
+                    },
+                    title: ag.modelSource === "buzz_live" ? "Lido ao vivo do Buzz Desktop (buzz.agent.v1)" : "Referência do manifesto empresas/*.json",
+                  },
+                  ag.modelSource === "buzz_live" ? (ag.provider ? `LIVE · ${ag.provider}` : "LIVE") : "manifesto"
+                )
+              ),
               ag.activeLock &&
                 h(
                   "span",

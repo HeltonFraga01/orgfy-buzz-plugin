@@ -61,9 +61,10 @@ async function readOrgfyText(ctx, relativePath) {
   }
 }
 function formatRelativeTime(dateInput) {
-  if (!dateInput) return "recente";
-  const ts = typeof dateInput === "number" ? dateInput : new Date(dateInput).getTime();
-  if (isNaN(ts) || ts <= 0) return "recente";
+  if (!dateInput) return "--";
+  let ts = typeof dateInput === "number" ? dateInput : new Date(dateInput).getTime();
+  if (isNaN(ts) || ts <= 0) return "--";
+  if (ts < 1e12) ts = ts * 1e3;
   const diffMs = Date.now() - ts;
   if (diffMs < 0) return "agora";
   const diffSecs = Math.floor(diffMs / 1e3);
@@ -169,6 +170,43 @@ async function fetchLiveKanbanSnapshot(ctx, filter) {
       aceiteCacheByIssue.set(item.issue_id.slice(0, 8), item);
     }
   }
+  const issueTimestampMap = /* @__PURE__ */ new Map();
+  const short8ToFull64 = /* @__PURE__ */ new Map();
+  for (const fullK of Object.keys(aceites)) {
+    if (/^[0-9a-f]{64}$/i.test(fullK)) short8ToFull64.set(fullK.slice(0, 8).toLowerCase(), fullK.toLowerCase());
+  }
+  for (const [, item] of Object.entries(aceiteCache)) {
+    if ((item == null ? void 0 : item.issue_id) && /^[0-9a-f]{64}$/i.test(item.issue_id)) {
+      short8ToFull64.set(item.issue_id.slice(0, 8).toLowerCase(), item.issue_id.toLowerCase());
+    }
+  }
+  try {
+    if ((_e = ctx == null ? void 0 : ctx.host) == null ? void 0 : _e.readFile) {
+      const rawTrans = await ctx.host.readFile("/Users/heltonfraga/.buzz/.scratch/esteira-transicoes.jsonl");
+      const transTxt = typeof rawTrans === "string" ? rawTrans : rawTrans instanceof Uint8Array ? new TextDecoder("utf-8").decode(rawTrans) : String(rawTrans ?? "");
+      for (const line of transTxt.split("\n")) {
+        if (!line.trim()) continue;
+        try {
+          const ev = JSON.parse(line);
+          const full = typeof (ev == null ? void 0 : ev.issue_id) === "string" ? ev.issue_id.trim().toLowerCase() : "";
+          if (/^[0-9a-f]{64}$/i.test(full)) {
+            short8ToFull64.set(full.slice(0, 8), full);
+            const rawTs = Number((ev == null ? void 0 : ev.ts) || (ev == null ? void 0 : ev.timestamp) || 0);
+            if (rawTs > 17e8) {
+              const tsMs = rawTs < 1e12 ? rawTs * 1e3 : rawTs;
+              const prev = issueTimestampMap.get(full) || 0;
+              if (tsMs > prev) {
+                issueTimestampMap.set(full, tsMs);
+                issueTimestampMap.set(full.slice(0, 8), tsMs);
+              }
+            }
+          }
+        } catch {
+        }
+      }
+    }
+  } catch {
+  }
   if (hasCanvas && canvasText) {
     const linkPattern = /\[([^\]]+)\]\(buzz:\/\/issue\?id=([0-9a-fA-F]{64})&owner=([0-9a-fA-F]{64})&d=([^)]+)\)/;
     const lines = canvasText.split("\n");
@@ -234,7 +272,7 @@ async function fetchLiveKanbanSnapshot(ctx, filter) {
       const branch = branchMatch ? branchMatch[1] : void 0;
       const prMatch = `${statusText} ${branchCell}`.match(/PR\s+`?([0-9a-fA-F]{7,64})`?/i);
       const prId = prMatch ? prMatch[1] : void 0;
-      const shaMatch = (cachedAceite == null ? void 0 : cachedAceite.sha_pr) || ((_e = `${statusText} ${branchCell}`.match(/SHA\s+`?([0-9a-fA-F]{7,40})`?/i)) == null ? void 0 : _e[1]);
+      const shaMatch = (cachedAceite == null ? void 0 : cachedAceite.sha_pr) || ((_f = `${statusText} ${branchCell}`.match(/SHA\s+`?([0-9a-fA-F]{7,40})`?/i)) == null ? void 0 : _f[1]);
       const card = {
         id: `card-${shortId}`,
         issueId: shortId,
@@ -256,7 +294,8 @@ async function fetchLiveKanbanSnapshot(ctx, filter) {
         acceptanceCommand,
         acceptanceHash,
         worktreePath: `.worktrees/${shortId}`,
-        branch
+        branch,
+        createdAt: issueTimestampMap.get(fullId.toLowerCase()) || issueTimestampMap.get(shortId.toLowerCase()) || ((cachedAceite == null ? void 0 : cachedAceite.ts) ? Number(cachedAceite.ts) < 1e12 ? Number(cachedAceite.ts) * 1e3 : Number(cachedAceite.ts) : void 0)
       };
       cardMap.set(shortId, card);
     }
@@ -287,29 +326,6 @@ async function fetchLiveKanbanSnapshot(ctx, filter) {
     }
   }
   const DEFAULT_ORGFY_OWNER = "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20";
-  const short8ToFull64 = /* @__PURE__ */ new Map();
-  for (const fullK of Object.keys(aceites)) {
-    if (/^[0-9a-f]{64}$/i.test(fullK)) short8ToFull64.set(fullK.slice(0, 8).toLowerCase(), fullK.toLowerCase());
-  }
-  for (const [, item] of Object.entries(aceiteCache)) {
-    if ((item == null ? void 0 : item.issue_id) && /^[0-9a-f]{64}$/i.test(item.issue_id)) {
-      short8ToFull64.set(item.issue_id.slice(0, 8).toLowerCase(), item.issue_id.toLowerCase());
-    }
-  }
-  try {
-    if ((_f = ctx == null ? void 0 : ctx.host) == null ? void 0 : _f.readFile) {
-      const rawTrans = await ctx.host.readFile("/Users/heltonfraga/.buzz/.scratch/esteira-transicoes.jsonl");
-      const transTxt = typeof rawTrans === "string" ? rawTrans : rawTrans instanceof Uint8Array ? new TextDecoder("utf-8").decode(rawTrans) : String(rawTrans ?? "");
-      for (const line of transTxt.split("\n")) {
-        const m = line.match(/"issue_id"\s*:\s*"([0-9a-f]{64})"/i);
-        if (m) {
-          const full = m[1].toLowerCase();
-          short8ToFull64.set(full.slice(0, 8), full);
-        }
-      }
-    }
-  } catch {
-  }
   const resolveIssueMetadataFromRelay = async (fullId) => {
     var _a2;
     if (!((_a2 = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a2.spawn) || !/^[0-9a-f]{64}$/i.test(fullId)) return null;
@@ -390,6 +406,7 @@ async function fetchLiveKanbanSnapshot(ctx, filter) {
             acceptanceCommand: resolvedAcceptanceCmd,
             acceptanceHash: resolvedAcceptanceHash,
             worktreePath: `.worktrees/${shortLockId}`,
+            createdAt: Number(rec.acquiredAt || issueTimestampMap.get(fullLockId) || nowMs),
             updatedAt: Number(rec.acquiredAt || nowMs)
           });
         }
@@ -3330,6 +3347,7 @@ function renderResolvedArchiveTab(props) {
   );
 }
 const BOARD_APPROVALS_PATH = "/Users/heltonfraga/.buzz/.scratch/board-approvals.json";
+const BUZZ_AGENT_STATE_DIR = "/Users/heltonfraga/Library/Application Support/xyz.block.buzz.desktop/agents/state";
 function isPlaceholderHex(val) {
   const clean = String(val || "").trim().toLowerCase();
   if (!/^[0-9a-f]{64}$/.test(clean)) return true;
@@ -3487,28 +3505,59 @@ async function fetchHoldingControlPlane(ctx) {
   for (const lk of activeLocks) {
     locksByAgent.set(lk.agentKey.toLowerCase(), lk);
   }
-  const buildCompanyItem = (slug, nome, nivel, estagio, ceoEmpresa, reportaA, man) => {
+  const liveAgentConfigCache = /* @__PURE__ */ new Map();
+  const readLiveBuzzAgent = async (pubkey) => {
+    const clean = pubkey.trim().toLowerCase();
+    if (isPlaceholderHex(clean)) return null;
+    if (liveAgentConfigCache.has(clean)) return liveAgentConfigCache.get(clean) || null;
+    const host = ctx.host;
+    if (!(host == null ? void 0 : host.readFile)) return null;
+    try {
+      const raw = await host.readFile(`${BUZZ_AGENT_STATE_DIR}/buzz.agent.v1%3A${clean}`);
+      const parsed = JSON.parse(decodeRaw(raw));
+      const cfg = parsed == null ? void 0 : parsed.config;
+      if (cfg && typeof cfg === "object") {
+        const res = {
+          model: typeof cfg.model === "string" && cfg.model.trim() ? cfg.model.trim() : void 0,
+          provider: typeof cfg.provider === "string" && cfg.provider.trim() ? cfg.provider.trim() : void 0
+        };
+        liveAgentConfigCache.set(clean, res);
+        return res;
+      }
+    } catch {
+    }
+    return null;
+  };
+  const buildCompanyItem = async (slug, nome, nivel, estagio, ceoEmpresa, reportaA, man) => {
     var _a2, _b2, _c2, _d2;
     const canal = String((man == null ? void 0 : man.canal) || "");
     const canalPronto = !isPlaceholderChannel(canal);
     const agentesObj = (man == null ? void 0 : man.agentes) && typeof man.agentes === "object" ? man.agentes : {};
+    const entries = Object.entries(agentesObj);
+    const liveConfigs = await Promise.all(
+      entries.map(([, info]) => readLiveBuzzAgent(String((info == null ? void 0 : info.pubkey) || "")))
+    );
     const agentes = [];
     let agentesProntos = 0;
-    for (const [agName, info] of Object.entries(agentesObj)) {
+    entries.forEach(([agName, info], idx) => {
       const pk = String((info == null ? void 0 : info.pubkey) || "").trim();
       const pkReady = !isPlaceholderHex(pk);
       if (pkReady) agentesProntos++;
+      const liveCfg = liveConfigs[idx];
+      const hasLiveModel = Boolean(liveCfg == null ? void 0 : liveCfg.model);
       agentes.push({
         name: agName,
         empresa: slug,
         papel: String((info == null ? void 0 : info.papel) || "agente"),
-        model: String((info == null ? void 0 : info.model) || "não definido"),
+        model: hasLiveModel ? String(liveCfg.model) : String((info == null ? void 0 : info.model) || "não definido"),
+        provider: liveCfg == null ? void 0 : liveCfg.provider,
+        modelSource: hasLiveModel ? "buzz_live" : "manifesto",
         parallelism: Number((info == null ? void 0 : info.parallelism) || 1),
         pubkey: pk,
         pubkeyReady: pkReady,
         activeLock: locksByAgent.get(agName.toLowerCase()) || null
       });
-    }
+    });
     const pendencias = [];
     if (!man) {
       pendencias.push(`Manifesto empresas/${slug}.json não encontrado`);
@@ -3544,7 +3593,7 @@ async function fetchHoldingControlPlane(ctx) {
   };
   const empresas = [];
   empresas.push(
-    buildCompanyItem(
+    await buildCompanyItem(
       "orgfy",
       ((_a = boardJson == null ? void 0 : boardJson.core_framework) == null ? void 0 : _a.nome) || "OrgFy Core (Engenharia & Método)",
       "core",
@@ -3558,9 +3607,9 @@ async function fetchHoldingControlPlane(ctx) {
   const subManifests = await Promise.all(
     subs.map((s) => readOrgfyJson(ctx, (s == null ? void 0 : s.manifesto) || `empresas/${s == null ? void 0 : s.slug}.json`, null))
   );
-  subs.forEach((s, idx) => {
-    empresas.push(
-      buildCompanyItem(
+  const subItems = await Promise.all(
+    subs.map(
+      (s, idx) => buildCompanyItem(
         String((s == null ? void 0 : s.slug) || `sub-${idx}`),
         String((s == null ? void 0 : s.nome) || (s == null ? void 0 : s.workspace_buzz) || (s == null ? void 0 : s.slug) || "Subsidiária"),
         "subsidiaria",
@@ -3569,8 +3618,9 @@ async function fetchHoldingControlPlane(ctx) {
         String((s == null ? void 0 : s.reporta_a) || "OrgFy Iris"),
         subManifests[idx]
       )
-    );
-  });
+    )
+  );
+  empresas.push(...subItems);
   const regrasObj = (regrasJson == null ? void 0 : regrasJson.regras) && typeof regrasJson.regras === "object" ? regrasJson.regras : {};
   const regrasProbatorias = Object.entries(regrasObj).map(
     ([id, r]) => ({
@@ -4317,7 +4367,30 @@ function renderOrgChartTab(props) {
                 )
               ),
               h("span", { style: { fontSize: "10px", color: "#9ca3af" } }, `Papel: ${ag.papel} · Paralelismo: ${ag.parallelism}x`),
-              h("span", { style: { fontSize: "10px", fontFamily: "monospace", color: "#60a5fa" } }, ag.model),
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" } },
+                h(
+                  "span",
+                  { style: { fontSize: "10px", fontFamily: "monospace", color: ag.modelSource === "buzz_live" ? "#38bdf8" : "#9ca3af" } },
+                  ag.model
+                ),
+                h(
+                  "span",
+                  {
+                    style: {
+                      fontSize: "8.5px",
+                      fontFamily: "monospace",
+                      padding: "1px 4px",
+                      borderRadius: "3px",
+                      backgroundColor: ag.modelSource === "buzz_live" ? "rgba(16,185,129,0.16)" : "rgba(156,163,175,0.14)",
+                      color: ag.modelSource === "buzz_live" ? "#10b981" : "#9ca3af"
+                    },
+                    title: ag.modelSource === "buzz_live" ? "Lido ao vivo do Buzz Desktop (buzz.agent.v1)" : "Referência do manifesto empresas/*.json"
+                  },
+                  ag.modelSource === "buzz_live" ? ag.provider ? `LIVE · ${ag.provider}` : "LIVE" : "manifesto"
+                )
+              ),
               ag.activeLock && h(
                 "span",
                 { style: { fontSize: "9.5px", fontFamily: "monospace", color: "#fbbf24", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
@@ -6009,7 +6082,7 @@ function apply(ctx) {
                   h(
                     "span",
                     { style: { fontFamily: "monospace", fontSize: "10px", color: "#34d399" } },
-                    formatRelativeTime(c.createdAt || c.elapsedTime)
+                    formatRelativeTime(c.createdAt || c.updatedAt || c.elapsedTime)
                   ),
                   h(
                     "div",
@@ -7377,7 +7450,7 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
                     fontWeight: "600"
                   }
                 },
-                formatRelativeTime(activeIssueDetailCard.createdAt || activeIssueDetailCard.elapsedTime)
+                formatRelativeTime(activeIssueDetailCard.createdAt || activeIssueDetailCard.updatedAt || activeIssueDetailCard.elapsedTime)
               ),
               h("span", { style: { color: "#4b5563" } }, "•"),
               h("span", { style: { color: "#cbd5e1" } }, `Autoridade: ${activeIssueDetailCard.decisor || "OrgFy Iris"}`),
@@ -9113,7 +9186,7 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
                     title: c.createdAt ? formatFullDateTime(c.createdAt) : void 0
                   },
                   SVG.clock({ h, width: 10, height: 10 }),
-                  formatRelativeTime(c.createdAt || c.elapsedTime)
+                  formatRelativeTime(c.createdAt || c.updatedAt || c.elapsedTime)
                 )
               ),
               // Ação Rápida da Raia (Despachar / Ver Logs / Decidir Gate)
@@ -9253,6 +9326,7 @@ Regras Invariantes:
 - Checkout Lock Atômico (Nostr 64-hex): Nenhum card pode ser executado em paralelo por dois agentes; adquira lock passando SEMPRE o issue_id Nostr completo (64 hex) + title, revisor, acceptance_command e branch.
 - DSAP Backtracking: Na 2ª recusa consecutiva com similaridade >= 0.70, o card entra em backtracking para o COO re-escopar.
 - Atribuição de Issues (FERR-ASSIGN-AUTH): NUNCA execute 'buzz issues assign' diretamente (falha com auth_error Kind 1 em chamadores locais); use sempre 'python3 ferramentas/assign_issue.py' na raiz do REPOS/orgfy.
+- Push autenticado no Relay (worktree): Se 'git push relay' falhar com exit 128 ('no nostr key configured'), chame a tool 'buzz__repo' para obter o header 'Authorization: Nostr ...', configure 'git config http.<relay_git_url>.extraHeader' na worktree e reexecute 'entregar'.
 - Decisor Híbrido v12: orgfy_lint_card usa Decisions API com fallback determinístico offline automático (ferramentas/esteira/decisor_fallback.py) em caso de falta de saldo ou timeout.
 Ferramentas nativas disponíveis neste plugin:
 1. orgfy_status({ empresa? }): Consulta o placar de 20h, FPY, CPI de tokens, contagem de aceites, merged e raias da esteira.

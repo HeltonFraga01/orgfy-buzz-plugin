@@ -9,6 +9,7 @@ import { ORGFY_ABS_PATH, readOrgfyJson, readOrgfyText } from "./orgfy-bridge";
 import { listActiveLocks, type CheckoutLockRecord } from "./governance-engine";
 
 export const BOARD_APPROVALS_PATH = "/Users/heltonfraga/.buzz/.scratch/board-approvals.json";
+export const BUZZ_AGENT_STATE_DIR = "/Users/heltonfraga/Library/Application Support/xyz.block.buzz.desktop/agents/state";
 
 export interface BoardCouncilMember {
   id: string;
@@ -23,6 +24,8 @@ export interface HoldingAgentNode {
   empresa: string;
   papel: string;
   model: string;
+  provider?: string;
+  modelSource: "buzz_live" | "manifesto";
   parallelism: number;
   pubkey: string;
   pubkeyReady: boolean;
@@ -294,7 +297,33 @@ export async function fetchHoldingControlPlane(ctx: Context): Promise<HoldingCon
     locksByAgent.set(lk.agentKey.toLowerCase(), lk);
   }
 
-  const buildCompanyItem = (
+  // Lê modelo e provedor REAIS ativos no Buzz Desktop para cada pubkey válida
+  const liveAgentConfigCache = new Map<string, { model?: string; provider?: string }>();
+  const readLiveBuzzAgent = async (pubkey: string): Promise<{ model?: string; provider?: string } | null> => {
+    const clean = pubkey.trim().toLowerCase();
+    if (isPlaceholderHex(clean)) return null;
+    if (liveAgentConfigCache.has(clean)) return liveAgentConfigCache.get(clean) || null;
+    const host = (ctx as any).host;
+    if (!host?.readFile) return null;
+    try {
+      const raw = await host.readFile(`${BUZZ_AGENT_STATE_DIR}/buzz.agent.v1%3A${clean}`);
+      const parsed = JSON.parse(decodeRaw(raw));
+      const cfg = parsed?.config;
+      if (cfg && typeof cfg === "object") {
+        const res = {
+          model: typeof cfg.model === "string" && cfg.model.trim() ? cfg.model.trim() : undefined,
+          provider: typeof cfg.provider === "string" && cfg.provider.trim() ? cfg.provider.trim() : undefined,
+        };
+        liveAgentConfigCache.set(clean, res);
+        return res;
+      }
+    } catch {
+      // Agente ainda não configurado no Buzz Desktop local
+    }
+    return null;
+  };
+
+  const buildCompanyItem = async (
     slug: string,
     nome: string,
     nivel: "core" | "subsidiaria",
@@ -302,28 +331,36 @@ export async function fetchHoldingControlPlane(ctx: Context): Promise<HoldingCon
     ceoEmpresa: string,
     reportaA: string,
     man: any
-  ): CompanyReadinessItem => {
+  ): Promise<CompanyReadinessItem> => {
     const canal = String(man?.canal || "");
     const canalPronto = !isPlaceholderChannel(canal);
     const agentesObj = man?.agentes && typeof man.agentes === "object" ? man.agentes : {};
+    const entries = Object.entries(agentesObj as Record<string, any>);
+    const liveConfigs = await Promise.all(
+      entries.map(([, info]) => readLiveBuzzAgent(String(info?.pubkey || "")))
+    );
     const agentes: HoldingAgentNode[] = [];
     let agentesProntos = 0;
 
-    for (const [agName, info] of Object.entries(agentesObj as Record<string, any>)) {
+    entries.forEach(([agName, info], idx) => {
       const pk = String(info?.pubkey || "").trim();
       const pkReady = !isPlaceholderHex(pk);
       if (pkReady) agentesProntos++;
+      const liveCfg = liveConfigs[idx];
+      const hasLiveModel = Boolean(liveCfg?.model);
       agentes.push({
         name: agName,
         empresa: slug,
         papel: String(info?.papel || "agente"),
-        model: String(info?.model || "não definido"),
+        model: hasLiveModel ? String(liveCfg!.model) : String(info?.model || "não definido"),
+        provider: liveCfg?.provider,
+        modelSource: hasLiveModel ? "buzz_live" : "manifesto",
         parallelism: Number(info?.parallelism || 1),
         pubkey: pk,
         pubkeyReady: pkReady,
         activeLock: locksByAgent.get(agName.toLowerCase()) || null,
       });
-    }
+    });
 
     const pendencias: string[] = [];
     if (!man) {
@@ -368,7 +405,7 @@ export async function fetchHoldingControlPlane(ctx: Context): Promise<HoldingCon
 
   const empresas: CompanyReadinessItem[] = [];
   empresas.push(
-    buildCompanyItem(
+    await buildCompanyItem(
       "orgfy",
       boardJson?.core_framework?.nome || "OrgFy Core (Engenharia & Método)",
       "core",
@@ -383,8 +420,8 @@ export async function fetchHoldingControlPlane(ctx: Context): Promise<HoldingCon
   const subManifests = await Promise.all(
     subs.map((s: any) => readOrgfyJson<any>(ctx, s?.manifesto || `empresas/${s?.slug}.json`, null))
   );
-  subs.forEach((s: any, idx: number) => {
-    empresas.push(
+  const subItems = await Promise.all(
+    subs.map((s: any, idx: number) =>
       buildCompanyItem(
         String(s?.slug || `sub-${idx}`),
         String(s?.nome || s?.workspace_buzz || s?.slug || "Subsidiária"),
@@ -394,8 +431,9 @@ export async function fetchHoldingControlPlane(ctx: Context): Promise<HoldingCon
         String(s?.reporta_a || "OrgFy Iris"),
         subManifests[idx]
       )
-    );
-  });
+    )
+  );
+  empresas.push(...subItems);
 
   const regrasObj = regrasJson?.regras && typeof regrasJson.regras === "object" ? regrasJson.regras : {};
   const regrasProbatorias: RealProbationaryRule[] = Object.entries(regrasObj as Record<string, any>).map(

@@ -92,9 +92,11 @@ export async function fetchCardAceite(ctx: any, issueId: string): Promise<CardAc
  * "há 1d 14h", "há 3h 25m", "há 14m", "há 45s", etc.
  */
 export function formatRelativeTime(dateInput: number | string | Date | undefined): string {
-  if (!dateInput) return "recente";
-  const ts = typeof dateInput === "number" ? dateInput : new Date(dateInput).getTime();
-  if (isNaN(ts) || ts <= 0) return "recente";
+  if (!dateInput) return "--";
+  let ts = typeof dateInput === "number" ? dateInput : new Date(dateInput).getTime();
+  if (isNaN(ts) || ts <= 0) return "--";
+  // Normaliza Unix epoch em segundos para milissegundos
+  if (ts < 1e12) ts = ts * 1000;
 
   const diffMs = Date.now() - ts;
   if (diffMs < 0) return "agora";
@@ -256,6 +258,52 @@ export async function fetchLiveKanbanSnapshot(
     }
   }
 
+  // Indexa timestamps reais (ms) e IDs 64-hex a partir de esteira-transicoes.jsonl
+  const issueTimestampMap = new Map<string, number>();
+  const short8ToFull64 = new Map<string, string>();
+  for (const fullK of Object.keys(aceites)) {
+    if (/^[0-9a-f]{64}$/i.test(fullK)) short8ToFull64.set(fullK.slice(0, 8).toLowerCase(), fullK.toLowerCase());
+  }
+  for (const [, item] of Object.entries(aceiteCache)) {
+    if (item?.issue_id && /^[0-9a-f]{64}$/i.test(item.issue_id)) {
+      short8ToFull64.set(item.issue_id.slice(0, 8).toLowerCase(), item.issue_id.toLowerCase());
+    }
+  }
+  try {
+    if (ctx?.host?.readFile) {
+      const rawTrans = await ctx.host.readFile("/Users/heltonfraga/.buzz/.scratch/esteira-transicoes.jsonl");
+      const transTxt =
+        typeof rawTrans === "string"
+          ? rawTrans
+          : rawTrans instanceof Uint8Array
+          ? new TextDecoder("utf-8").decode(rawTrans)
+          : String(rawTrans ?? "");
+      for (const line of transTxt.split("\n")) {
+        if (!line.trim()) continue;
+        try {
+          const ev = JSON.parse(line);
+          const full = typeof ev?.issue_id === "string" ? ev.issue_id.trim().toLowerCase() : "";
+          if (/^[0-9a-f]{64}$/i.test(full)) {
+            short8ToFull64.set(full.slice(0, 8), full);
+            const rawTs = Number(ev?.ts || ev?.timestamp || 0);
+            if (rawTs > 1700000000) {
+              const tsMs = rawTs < 1e12 ? rawTs * 1000 : rawTs;
+              const prev = issueTimestampMap.get(full) || 0;
+              if (tsMs > prev) {
+                issueTimestampMap.set(full, tsMs);
+                issueTimestampMap.set(full.slice(0, 8), tsMs);
+              }
+            }
+          }
+        } catch {
+          // Linha malformada ignorada
+        }
+      }
+    }
+  } catch {
+    // Arquivo esteira-transicoes.jsonl opcional
+  }
+
   // 1. Extrai cards reais do canvas_atual.md (suporta tabelas de 4, 5 ou 6+ colunas)
   if (hasCanvas && canvasText) {
     const linkPattern = /\[([^\]]+)\]\(buzz:\/\/issue\?id=([0-9a-fA-F]{64})&owner=([0-9a-fA-F]{64})&d=([^)]+)\)/;
@@ -384,6 +432,10 @@ export async function fetchLiveKanbanSnapshot(
         acceptanceHash,
         worktreePath: `.worktrees/${shortId}`,
         branch,
+        createdAt:
+          issueTimestampMap.get(fullId.toLowerCase()) ||
+          issueTimestampMap.get(shortId.toLowerCase()) ||
+          (cachedAceite?.ts ? (Number(cachedAceite.ts) < 1e12 ? Number(cachedAceite.ts) * 1000 : Number(cachedAceite.ts)) : undefined),
       };
 
       cardMap.set(shortId, card);
@@ -419,35 +471,6 @@ export async function fetchLiveKanbanSnapshot(
 
   // 3. Mescla locks ativos (orgfy-locks.json) na raia Em Execução (fail-closed: exige 64-hex Nostr real)
   const DEFAULT_ORGFY_OWNER = "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20";
-  const short8ToFull64 = new Map<string, string>();
-  for (const fullK of Object.keys(aceites)) {
-    if (/^[0-9a-f]{64}$/i.test(fullK)) short8ToFull64.set(fullK.slice(0, 8).toLowerCase(), fullK.toLowerCase());
-  }
-  for (const [, item] of Object.entries(aceiteCache)) {
-    if (item?.issue_id && /^[0-9a-f]{64}$/i.test(item.issue_id)) {
-      short8ToFull64.set(item.issue_id.slice(0, 8).toLowerCase(), item.issue_id.toLowerCase());
-    }
-  }
-  try {
-    if (ctx?.host?.readFile) {
-      const rawTrans = await ctx.host.readFile("/Users/heltonfraga/.buzz/.scratch/esteira-transicoes.jsonl");
-      const transTxt =
-        typeof rawTrans === "string"
-          ? rawTrans
-          : rawTrans instanceof Uint8Array
-          ? new TextDecoder("utf-8").decode(rawTrans)
-          : String(rawTrans ?? "");
-      for (const line of transTxt.split("\n")) {
-        const m = line.match(/"issue_id"\s*:\s*"([0-9a-f]{64})"/i);
-        if (m) {
-          const full = m[1].toLowerCase();
-          short8ToFull64.set(full.slice(0, 8), full);
-        }
-      }
-    }
-  } catch {
-    // Arquivo esteira-transicoes.jsonl opcional
-  }
 
   const resolveIssueMetadataFromRelay = async (
     fullId: string
@@ -556,6 +579,7 @@ export async function fetchLiveKanbanSnapshot(
             acceptanceCommand: resolvedAcceptanceCmd,
             acceptanceHash: resolvedAcceptanceHash,
             worktreePath: `.worktrees/${shortLockId}`,
+            createdAt: Number(rec.acquiredAt || issueTimestampMap.get(fullLockId) || nowMs),
             updatedAt: Number(rec.acquiredAt || nowMs),
           });
         }

@@ -1899,7 +1899,7 @@ export function apply(ctx: Context) {
                         h(
                           "span",
                           { style: { fontFamily: "monospace", fontSize: "10px", color: "#34d399" } },
-                          formatRelativeTime(c.createdAt || c.elapsedTime)
+                          formatRelativeTime(c.createdAt || c.updatedAt || c.elapsedTime)
                         ),
                         h(
                           "div",
@@ -3357,7 +3357,7 @@ export function apply(ctx: Context) {
                       fontWeight: "600",
                     },
                   },
-                  formatRelativeTime(activeIssueDetailCard.createdAt || activeIssueDetailCard.elapsedTime)
+                  formatRelativeTime(activeIssueDetailCard.createdAt || activeIssueDetailCard.updatedAt || activeIssueDetailCard.elapsedTime)
                 ),
                 h("span", { style: { color: "#4b5563" } }, "•"),
                 h("span", { style: { color: "#cbd5e1" } }, `Autoridade: ${activeIssueDetailCard.decisor || "OrgFy Iris"}`),
@@ -5185,7 +5185,7 @@ export function apply(ctx: Context) {
                         title: c.createdAt ? formatFullDateTime(c.createdAt) : undefined,
                       },
                       SVG.clock({ h, width: 10, height: 10 }),
-                      formatRelativeTime(c.createdAt || c.elapsedTime)
+                      formatRelativeTime(c.createdAt || c.updatedAt || c.elapsedTime)
                     )
                   ),
                   // Ação Rápida da Raia (Despachar / Ver Logs / Decidir Gate)
@@ -5340,6 +5340,7 @@ Regras Invariantes:
 - Checkout Lock Atômico (Nostr 64-hex): Nenhum card pode ser executado em paralelo por dois agentes; adquira lock passando SEMPRE o issue_id Nostr completo (64 hex) + title, revisor, acceptance_command e branch.
 - DSAP Backtracking: Na 2ª recusa consecutiva com similaridade >= 0.70, o card entra em backtracking para o COO re-escopar.
 - Atribuição de Issues (FERR-ASSIGN-AUTH): NUNCA execute 'buzz issues assign' diretamente (falha com auth_error Kind 1 em chamadores locais); use sempre 'python3 ferramentas/assign_issue.py' na raiz do REPOS/orgfy.
+- Push autenticado no Relay (worktree): Se 'git push relay' falhar com exit 128 ('no nostr key configured'), chame a tool 'buzz__repo' para obter o header 'Authorization: Nostr ...', configure 'git config http.<relay_git_url>.extraHeader' na worktree e reexecute 'entregar'.
 - Decisor Híbrido v12: orgfy_lint_card usa Decisions API com fallback determinístico offline automático (ferramentas/esteira/decisor_fallback.py) em caso de falta de saldo ou timeout.
 Ferramentas nativas disponíveis neste plugin:
 1. orgfy_status({ empresa? }): Consulta o placar de 20h, FPY, CPI de tokens, contagem de aceites, merged e raias da esteira.
