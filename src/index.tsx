@@ -799,6 +799,9 @@ export function apply(ctx: Context) {
     };
 
     // Deep Link Helpers (buzz://issue?...)
+    const hasValidNostrIssueId = (c: PipelineCard) =>
+      Boolean(c.fullIssueId && /^[0-9a-f]{64}$/i.test(c.fullIssueId.trim()));
+
     const buildIssueDeepLink = (c: PipelineCard) => {
       const issueId = c.fullIssueId || c.issueId;
       const owner = c.owner || "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20";
@@ -807,7 +810,12 @@ export function apply(ctx: Context) {
     };
 
     const handleOpenIssueDeepLink = async (c: PipelineCard) => {
-      const issueId = c.fullIssueId || c.issueId;
+      if (!hasValidNostrIssueId(c)) {
+        setActiveIssueDetailCard(c);
+        showNotification("info", `Worktree local (${c.issueId}) sem Issue Nostr vinculada — exibindo detalhes no Cockpit.`);
+        return;
+      }
+      const issueId = c.fullIssueId!;
       showNotification("info", `Navegando para issue #${c.issueId} no Buzz Desktop...`);
       try {
         const opened = await openIssueInBuzz(ctx, {
@@ -817,8 +825,12 @@ export function apply(ctx: Context) {
         });
         if (opened) {
           showNotification("success", `Navegação para issue #${c.issueId} concluída no Buzz Repos.`);
+        } else {
+          setActiveIssueDetailCard(c);
+          showNotification("warning", `Não foi possível abrir a issue #${c.issueId} no Buzz Repos — exibindo detalhes no Cockpit.`);
         }
       } catch (err: any) {
+        setActiveIssueDetailCard(c);
         showNotification("warning", `Erro na navegação: ${err?.message || err}`);
       }
     };
@@ -5121,20 +5133,28 @@ export function apply(ctx: Context) {
                         {
                           onClick: (e: any) => {
                             e.stopPropagation();
-                            handleOpenIssueDeepLink(c);
+                            if (hasValidNostrIssueId(c)) {
+                              handleOpenIssueDeepLink(c);
+                            } else {
+                              setActiveIssueDetailCard(c);
+                            }
                           },
-                          title: "Abrir issue diretamente no Buzz Desktop",
+                          title: hasValidNostrIssueId(c)
+                            ? "Abrir issue diretamente no Buzz Desktop"
+                            : "Worktree local — clique para ver detalhes no Cockpit",
                           style: {
                             fontSize: "11px",
                             fontFamily: "monospace",
-                            color: "#58a6ff",
+                            color: hasValidNostrIssueId(c) ? "#58a6ff" : "#f59e0b",
                             fontWeight: "700",
                             cursor: "pointer",
-                            textDecoration: "underline",
+                            textDecoration: hasValidNostrIssueId(c) ? "underline" : "none",
                             textUnderlineOffset: "2px",
                           },
                         },
-                        `#${(c.issueId || c.id).slice(0, 8)} ↗`
+                        hasValidNostrIssueId(c)
+                          ? `#${(c.issueId || c.id).slice(0, 8)} ↗`
+                          : `#${(c.issueId || c.id).slice(0, 12)}`
                       )
                     ),
                     h(

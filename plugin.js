@@ -118,7 +118,7 @@ async function fetchLiveEsteiraState(ctx, empresa) {
   };
 }
 async function fetchLiveKanbanSnapshot(ctx, filter) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
   const [live, canvasText] = await Promise.all([
     fetchLiveEsteiraState(ctx, filter == null ? void 0 : filter.empresa),
     readOrgfyText(ctx, ".scratch/canvas_atual.md")
@@ -321,10 +321,51 @@ async function fetchLiveKanbanSnapshot(ctx, filter) {
             (c) => c.branch && c.branch.toLowerCase() === branchName.toLowerCase() || c.worktreePath && c.worktreePath.toLowerCase().includes(slugLower) || c.title && c.title.toLowerCase().includes(slugLower)
           );
           if (alreadyListed) continue;
+          let resolvedFullIssueId = void 0;
+          let resolvedOwner = void 0;
+          let resolvedObjetivo = void 0;
+          let resolvedAceite = void 0;
+          try {
+            const cardMd = await readOrgfyText(ctx, `cards/${slug.toUpperCase()}.md`);
+            if (cardMd) {
+              const objMatch = cardMd.match(/##\s*1\.\s*Objetivo[\s\S]*?\n+([^\n#]+)/i);
+              if (objMatch) resolvedObjetivo = objMatch[1].trim();
+              const acMatch = cardMd.match(/##\s*8\.\s*Comando de aceite[\s\S]*?```(?:bash|sh)?\s*\n([^\n`]+)/i);
+              if (acMatch) resolvedAceite = acMatch[1].trim();
+              const linkM = cardMd.match(/buzz:\/\/issue\?id=([0-9a-f]{64})&owner=([0-9a-f]{64})/i);
+              if (linkM) {
+                resolvedFullIssueId = linkM[1].toLowerCase();
+                resolvedOwner = linkM[2].toLowerCase();
+              }
+            }
+          } catch {
+          }
+          if (!resolvedFullIssueId && ((_j = ctx == null ? void 0 : ctx.host) == null ? void 0 : _j.spawn)) {
+            try {
+              let grepOut = "";
+              const gProc = await ctx.host.spawn("git", {
+                args: ["-C", wtFull, "grep", "-h", "-o", "-E", "buzz://issue\\?id=[0-9a-fA-F]{64}&owner=[0-9a-fA-F]{64}", "--", "docs/deliveries/"],
+                onStdout: (c) => {
+                  grepOut += c;
+                }
+              });
+              await gProc.exited;
+              const m = grepOut.match(/id=([0-9a-fA-F]{64})&owner=([0-9a-fA-F]{64})/);
+              if (m) {
+                resolvedFullIssueId = m[1].toLowerCase();
+                resolvedOwner = m[2].toLowerCase();
+              }
+            } catch {
+            }
+          }
           cardMap.set(`wt-${slug}`, {
             id: `wt-${slug}`,
-            issueId: slug.toUpperCase().slice(0, 18),
+            issueId: resolvedFullIssueId ? resolvedFullIssueId.slice(0, 8) : slug.toUpperCase().slice(0, 18),
+            fullIssueId: resolvedFullIssueId,
+            owner: resolvedOwner,
             title: `${slug.toUpperCase()} (${branchName})`,
+            objetivo: resolvedObjetivo || `${slug.toUpperCase()} em execução na branch ${branchName}`,
+            acceptanceCommand: resolvedAceite,
             empresa: (filter == null ? void 0 : filter.empresa) && filter.empresa !== "all" ? filter.empresa : "orgfy",
             executor: "Em execução (worktree)",
             revisor: "Revisão pendente",
@@ -650,25 +691,19 @@ function calculateDsapSimilarity(currentText, previousText) {
     matchedTokens: Array.from(intersection)
   };
 }
+function isValidNostrIssueId(id) {
+  return /^[0-9a-f]{64}$/i.test(String(id || "").replace(/^#/, "").trim());
+}
 async function openSystemUri(ctx, uri) {
   var _a;
   let opened = false;
   if ((_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.spawn) {
     try {
-      const proc = await ctx.host.spawn("bash", { args: [`open "${uri}"`] });
+      const proc = await ctx.host.spawn("open", { args: [uri] });
       const code = await proc.exited;
       if (code === 0) opened = true;
     } catch (e) {
-      console.warn("[OrgFy Bridge] spawn bash open falhou:", e);
-    }
-    if (!opened) {
-      try {
-        const proc = await ctx.host.spawn("open", { args: [uri] });
-        const code = await proc.exited;
-        if (code === 0) opened = true;
-      } catch (e) {
-        console.warn("[OrgFy Bridge] spawn direct open falhou:", e);
-      }
+      console.warn("[OrgFy Bridge] spawn direct open falhou:", e);
     }
   }
   if (!opened && typeof window !== "undefined" && typeof document !== "undefined") {
@@ -688,13 +723,6 @@ async function openSystemUri(ctx, uri) {
     } catch (_e) {
     }
   }
-  if (!opened && typeof window !== "undefined") {
-    try {
-      window.location.assign(uri);
-      opened = true;
-    } catch (_e) {
-    }
-  }
   return opened;
 }
 async function openIssueInBuzz(ctx, issue) {
@@ -709,20 +737,11 @@ async function openIssueInBuzz(ctx, issue) {
     dtag = "orgfy";
   }
   const rawId = (issue.id || "").toLowerCase().replace(/^#/, "").trim();
-  let targetId = rawId;
-  if (/^[0-9a-f]{64}$/i.test(targetId)) ;
-  else if (/^[0-9a-f]{1,63}$/i.test(targetId)) {
-    targetId = targetId.padEnd(64, "0");
-  } else {
-    let hash = "";
-    for (let i = 0; i < 64; i++) {
-      const code = (rawId.charCodeAt(i % (rawId.length || 1)) + i * 37) * 31 % 16;
-      hash += code.toString(16);
-    }
-    targetId = hash;
+  if (!isValidNostrIssueId(rawId)) {
+    console.warn("[OrgFy Bridge] openIssueInBuzz bloqueado: ID não é um hash Nostr válido de 64 hex:", rawId);
+    return false;
   }
-  const uri = `buzz://issue?id=${targetId}&owner=${owner}&d=${dtag}`;
-  const openedViaSystem = await openSystemUri(ctx, uri);
+  const uri = `buzz://issue?id=${rawId}&owner=${owner}&d=${dtag}`;
   if ((_a = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a.open) {
     try {
       await ctx.navigation.open({
@@ -736,15 +755,16 @@ async function openIssueInBuzz(ctx, issue) {
             type: "issue",
             owner,
             dtag,
-            id: targetId
+            id: rawId
           }
         }
       });
+      return true;
     } catch (err) {
-      console.warn("[OrgFy Bridge] ctx.navigation.open falhou:", err);
+      console.warn("[OrgFy Bridge] ctx.navigation.open falhou, tentando openSystemUri:", err);
     }
   }
-  return openedViaSystem;
+  return openSystemUri(ctx, uri);
 }
 const INITIAL_BOOTSTRAP_STEPS = [
   { step: "prerequisites", label: "Auditoria de Pré-requisitos (Python 3.10+, Git, Docker)", status: "pending" },
@@ -3780,6 +3800,7 @@ function apply(ctx) {
         setIsMigrating(false);
       }
     };
+    const hasValidNostrIssueId = (c) => Boolean(c.fullIssueId && /^[0-9a-f]{64}$/i.test(c.fullIssueId.trim()));
     const buildIssueDeepLink = (c) => {
       const issueId = c.fullIssueId || c.issueId;
       const owner = c.owner || "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20";
@@ -3787,7 +3808,12 @@ function apply(ctx) {
       return `buzz://issue?id=${issueId}&owner=${owner}&d=${empresa}`;
     };
     const handleOpenIssueDeepLink = async (c) => {
-      const issueId = c.fullIssueId || c.issueId;
+      if (!hasValidNostrIssueId(c)) {
+        setActiveIssueDetailCard(c);
+        showNotification("info", `Worktree local (${c.issueId}) sem Issue Nostr vinculada — exibindo detalhes no Cockpit.`);
+        return;
+      }
+      const issueId = c.fullIssueId;
       showNotification("info", `Navegando para issue #${c.issueId} no Buzz Desktop...`);
       try {
         const opened = await openIssueInBuzz(ctx, {
@@ -3797,8 +3823,12 @@ function apply(ctx) {
         });
         if (opened) {
           showNotification("success", `Navegação para issue #${c.issueId} concluída no Buzz Repos.`);
+        } else {
+          setActiveIssueDetailCard(c);
+          showNotification("warning", `Não foi possível abrir a issue #${c.issueId} no Buzz Repos — exibindo detalhes no Cockpit.`);
         }
       } catch (err) {
+        setActiveIssueDetailCard(c);
         showNotification("warning", `Erro na navegação: ${(err == null ? void 0 : err.message) || err}`);
       }
     };
@@ -7844,20 +7874,24 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
                     {
                       onClick: (e) => {
                         e.stopPropagation();
-                        handleOpenIssueDeepLink(c);
+                        if (hasValidNostrIssueId(c)) {
+                          handleOpenIssueDeepLink(c);
+                        } else {
+                          setActiveIssueDetailCard(c);
+                        }
                       },
-                      title: "Abrir issue diretamente no Buzz Desktop",
+                      title: hasValidNostrIssueId(c) ? "Abrir issue diretamente no Buzz Desktop" : "Worktree local — clique para ver detalhes no Cockpit",
                       style: {
                         fontSize: "11px",
                         fontFamily: "monospace",
-                        color: "#58a6ff",
+                        color: hasValidNostrIssueId(c) ? "#58a6ff" : "#f59e0b",
                         fontWeight: "700",
                         cursor: "pointer",
-                        textDecoration: "underline",
+                        textDecoration: hasValidNostrIssueId(c) ? "underline" : "none",
                         textUnderlineOffset: "2px"
                       }
                     },
-                    `#${(c.issueId || c.id).slice(0, 8)} ↗`
+                    hasValidNostrIssueId(c) ? `#${(c.issueId || c.id).slice(0, 8)} ↗` : `#${(c.issueId || c.id).slice(0, 12)}`
                   )
                 ),
                 h(

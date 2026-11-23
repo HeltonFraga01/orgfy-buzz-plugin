@@ -464,10 +464,53 @@ export async function fetchLiveKanbanSnapshot(
           );
           if (alreadyListed) continue;
 
+          // Tenta resolver o ID Nostr real (64 hex) a partir de laudos em docs/deliveries/ ou cards/ na worktree
+          let resolvedFullIssueId: string | undefined = undefined;
+          let resolvedOwner: string | undefined = undefined;
+          let resolvedObjetivo: string | undefined = undefined;
+          let resolvedAceite: string | undefined = undefined;
+          try {
+            const cardMd = await readOrgfyText(ctx, `cards/${slug.toUpperCase()}.md`);
+            if (cardMd) {
+              const objMatch = cardMd.match(/##\s*1\.\s*Objetivo[\s\S]*?\n+([^\n#]+)/i);
+              if (objMatch) resolvedObjetivo = objMatch[1].trim();
+              const acMatch = cardMd.match(/##\s*8\.\s*Comando de aceite[\s\S]*?```(?:bash|sh)?\s*\n([^\n`]+)/i);
+              if (acMatch) resolvedAceite = acMatch[1].trim();
+              const linkM = cardMd.match(/buzz:\/\/issue\?id=([0-9a-f]{64})&owner=([0-9a-f]{64})/i);
+              if (linkM) {
+                resolvedFullIssueId = linkM[1].toLowerCase();
+                resolvedOwner = linkM[2].toLowerCase();
+              }
+            }
+          } catch {
+            // Card markdown opcional
+          }
+          if (!resolvedFullIssueId && ctx?.host?.spawn) {
+            try {
+              let grepOut = "";
+              const gProc = await ctx.host.spawn("git", {
+                args: ["-C", wtFull, "grep", "-h", "-o", "-E", "buzz://issue\\?id=[0-9a-fA-F]{64}&owner=[0-9a-fA-F]{64}", "--", "docs/deliveries/"],
+                onStdout: (c: string) => { grepOut += c; },
+              });
+              await gProc.exited;
+              const m = grepOut.match(/id=([0-9a-fA-F]{64})&owner=([0-9a-fA-F]{64})/);
+              if (m) {
+                resolvedFullIssueId = m[1].toLowerCase();
+                resolvedOwner = m[2].toLowerCase();
+              }
+            } catch {
+              // Opcional
+            }
+          }
+
           cardMap.set(`wt-${slug}`, {
             id: `wt-${slug}`,
-            issueId: slug.toUpperCase().slice(0, 18),
+            issueId: resolvedFullIssueId ? resolvedFullIssueId.slice(0, 8) : slug.toUpperCase().slice(0, 18),
+            fullIssueId: resolvedFullIssueId,
+            owner: resolvedOwner,
             title: `${slug.toUpperCase()} (${branchName})`,
+            objetivo: resolvedObjetivo || `${slug.toUpperCase()} em execução na branch ${branchName}`,
+            acceptanceCommand: resolvedAceite,
             empresa: filter?.empresa && filter.empresa !== "all" ? filter.empresa : "orgfy",
             executor: "Em execução (worktree)",
             revisor: "Revisão pendente",
@@ -859,30 +902,24 @@ export function calculateDsapSimilarity(
   };
 }
 
+export function isValidNostrIssueId(id?: string | null): boolean {
+  return /^[0-9a-f]{64}$/i.test(String(id || "").replace(/^#/, "").trim());
+}
+
 /**
- * Abre uma URI no sistema operacional (macOS) via processo 'open' ou fallback com 'bash' e DOM link.
+ * Abre uma URI no sistema operacional (macOS) via processo 'open' direto (sem bash -c) ou fallback DOM.
  */
 export async function openSystemUri(ctx: any, uri: string): Promise<boolean> {
   let opened = false;
 
-  // 1. Prioridade 1: Spawn nativo via 'bash -c' do host Cordis
+  // 1. Prioridade 1: Spawn direto de 'open' (sem shell)
   if (ctx?.host?.spawn) {
     try {
-      const proc = await ctx.host.spawn("bash", { args: [`open "${uri}"`] });
+      const proc = await ctx.host.spawn("open", { args: [uri] });
       const code = await proc.exited;
       if (code === 0) opened = true;
     } catch (e) {
-      console.warn("[OrgFy Bridge] spawn bash open falhou:", e);
-    }
-
-    if (!opened) {
-      try {
-        const proc = await ctx.host.spawn("open", { args: [uri] });
-        const code = await proc.exited;
-        if (code === 0) opened = true;
-      } catch (e) {
-        console.warn("[OrgFy Bridge] spawn direct open falhou:", e);
-      }
+      console.warn("[OrgFy Bridge] spawn direct open falhou:", e);
     }
   }
 
@@ -903,20 +940,13 @@ export async function openSystemUri(ctx: any, uri: string): Promise<boolean> {
     } catch (_e) {}
   }
 
-  // 3. Fallback via window.location somente se outros métodos falharem
-  if (!opened && typeof window !== "undefined") {
-    try {
-      window.location.assign(uri);
-      opened = true;
-    } catch (_e) {}
-  }
-
   return opened;
 }
 
 /**
  * Abre a tela nativa de uma Issue diretamente no Buzz Desktop.
- * Dispara via protocolo buzz://issue? e também notifica o roteador de páginas do Buzz.
+ * Exige estritamente um Nostr event ID real de 64 caracteres hexadecimais —
+ * NUNCA fabrica hash falso ou zero-padded (o que causa tela "This page isn't available").
  */
 export async function openIssueInBuzz(
   ctx: any,
@@ -938,30 +968,14 @@ export async function openIssueInBuzz(
   }
 
   const rawId = (issue.id || "").toLowerCase().replace(/^#/, "").trim();
-
-  // Garante conformidade estrita com entityHex (/^[0-9a-f]{64}$/i) exigida pelo roteador nativo do Buzz (buzz.repos)
-  let targetId = rawId;
-  if (/^[0-9a-f]{64}$/i.test(targetId)) {
-    // Já é um hash de 64 caracteres hexadecimais
-  } else if (/^[0-9a-f]{1,63}$/i.test(targetId)) {
-    // Hexadecimal curto (ex: 8 chars), normaliza via padEnd
-    targetId = targetId.padEnd(64, "0");
-  } else {
-    // String não-hexadecimal: deriva hash determinístico de 64 hex
-    let hash = "";
-    for (let i = 0; i < 64; i++) {
-      const code = ((rawId.charCodeAt(i % (rawId.length || 1)) + i * 37) * 31) % 16;
-      hash += code.toString(16);
-    }
-    targetId = hash;
+  if (!isValidNostrIssueId(rawId)) {
+    console.warn("[OrgFy Bridge] openIssueInBuzz bloqueado: ID não é um hash Nostr válido de 64 hex:", rawId);
+    return false;
   }
 
-  const uri = `buzz://issue?id=${targetId}&owner=${owner}&d=${dtag}`;
+  const uri = `buzz://issue?id=${rawId}&owner=${owner}&d=${dtag}`;
 
-  // 1. Disparo direto do deep-link buzz://issue via spawn (garante transição imediata para a tela de Repos do Buzz)
-  const openedViaSystem = await openSystemUri(ctx, uri);
-
-  // 2. Também tenta navegação interna nativa se disponível
+  // 1. Tenta navegação interna nativa primeiro (mais rápida e sem flash)
   if (ctx?.navigation?.open) {
     try {
       await ctx.navigation.open({
@@ -975,16 +989,18 @@ export async function openIssueInBuzz(
             type: "issue",
             owner,
             dtag,
-            id: targetId,
+            id: rawId,
           },
         },
       });
+      return true;
     } catch (err) {
-      console.warn("[OrgFy Bridge] ctx.navigation.open falhou:", err);
+      console.warn("[OrgFy Bridge] ctx.navigation.open falhou, tentando openSystemUri:", err);
     }
   }
 
-  return openedViaSystem;
+  // 2. Fallback: deep-link buzz://issue via protocolo do SO
+  return openSystemUri(ctx, uri);
 }
 
 /**
