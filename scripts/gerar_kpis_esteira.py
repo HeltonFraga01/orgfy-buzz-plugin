@@ -334,6 +334,13 @@ def analyze_economy(
 
     by_model: Dict[Tuple[str, str], Dict[str, Any]] = {}
 
+    latest_token_date: Optional[str] = None
+
+    def _track_token_date(day_str: str) -> None:
+        nonlocal latest_token_date
+        if day_str and (latest_token_date is None or day_str > latest_token_date):
+            latest_token_date = day_str
+
     for it in items:
         in_tok = int(it.get("input_tokens") or 0)
         out_tok = int(it.get("output_tokens") or 0)
@@ -349,7 +356,9 @@ def analyze_economy(
 
         dt = parse_timestamp(it.get("created_at"))
         if dt is not None:
-            if dt.strftime("%Y-%m-%d") == today_str:
+            d_str = dt.strftime("%Y-%m-%d")
+            _track_token_date(d_str)
+            if d_str == today_str:
                 tokens_hoje += tok_sum
             if dt >= cutoff_7d:
                 tokens_7d += tok_sum
@@ -379,15 +388,48 @@ def analyze_economy(
         rec["cache_read_tokens"] += cache_read
         rec["duration_ms_sum"] += dur_ms
 
-    # Também checa se metricas_turnos.json traz por_dia para o dia corrente
+    # Também checa metricas_turnos.json (por_dia estruturado e tabela bloco_markdown)
     if isinstance(metricas, dict):
+        mt_by_day: Dict[str, int] = defaultdict(int)
         por_dia = metricas.get("por_dia") or metricas.get("dias")
-        if isinstance(por_dia, dict) and today_str in por_dia:
-            day_entry = por_dia[today_str]
-            if isinstance(day_entry, dict):
-                mt_today = int(day_entry.get("tokens_totais") or day_entry.get("tokens") or 0)
-                if mt_today > tokens_hoje:
-                    tokens_hoje = mt_today
+        if isinstance(por_dia, dict):
+            for day_key, day_entry in por_dia.items():
+                if isinstance(day_entry, dict):
+                    mt_val = int(day_entry.get("tokens_totais") or day_entry.get("tokens") or 0)
+                    if mt_val > 0:
+                        mt_by_day[str(day_key)[:10]] += mt_val
+
+        bloco_md = metricas.get("bloco_markdown")
+        if isinstance(bloco_md, str) and not mt_by_day:
+            import re
+            for line in bloco_md.splitlines():
+                m = re.match(r"^\|\s*(\d{4}-\d{2}-\d{2})\s*\|[^|]+\|[^|]+\|[^|]+\|\s*([^|]+)\|", line)
+                if not m:
+                    continue
+                day_key = m.group(1)
+                tok_cell = m.group(2)
+                m_num = re.search(r"(\d+)", tok_cell)
+                if m_num:
+                    mt_by_day[day_key] += int(m_num.group(1))
+
+        if mt_by_day:
+            mt_hoje = mt_by_day.get(today_str, 0)
+            mt_7d = 0
+            mt_30d = 0
+            for day_key, val in mt_by_day.items():
+                _track_token_date(day_key)
+                dt_day = parse_timestamp(f"{day_key}T23:59:59Z")
+                if dt_day is not None:
+                    if dt_day >= cutoff_7d:
+                        mt_7d += val
+                    if dt_day >= cutoff_30d:
+                        mt_30d += val
+            if mt_hoje > tokens_hoje:
+                tokens_hoje = mt_hoje
+            if mt_7d > tokens_7d:
+                tokens_7d = mt_7d
+            if mt_30d > tokens_30d:
+                tokens_30d = mt_30d
 
     uso_teto_pct = round((tokens_hoje / daily_token_cap) * 100.0, 2) if daily_token_cap > 0 else 0.0
     if uso_teto_pct >= 100.0:
@@ -437,6 +479,7 @@ def analyze_economy(
         "tokens_hoje": tokens_hoje,
         "tokens_7d": tokens_7d,
         "tokens_30d": tokens_30d,
+        "ultima_data_telemetria_tokens": latest_token_date,
         "tokens_historico_acumulado": tokens_historico_bruto,
         "uso_teto_diario_pct": uso_teto_pct,
         "status_orcamento": status_orcamento,

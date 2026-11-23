@@ -3,6 +3,19 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+// Evita ExperimentalWarning do Node v22+ ao inspecionar globalThis.localStorage sem --localstorage-file
+const _memStore = new Map();
+Object.defineProperty(globalThis, "localStorage", {
+  configurable: true,
+  writable: true,
+  value: {
+    getItem: (k) => (_memStore.has(String(k)) ? _memStore.get(String(k)) : null),
+    setItem: (k, v) => _memStore.set(String(k), String(v)),
+    removeItem: (k) => _memStore.delete(String(k)),
+    clear: () => _memStore.clear(),
+  },
+});
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pluginUrl = pathToFileURL(path.resolve(__dirname, "plugin.js")).href;
 const orgfyMod = await import(pluginUrl);
