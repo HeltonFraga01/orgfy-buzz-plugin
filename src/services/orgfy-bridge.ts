@@ -221,6 +221,32 @@ export async function fetchLiveKanbanSnapshot(
       : Object.keys((live.esteiraState?.merged as Record<string, any>) || {})
   );
 
+  // Indexa pubkey -> nome amigável do agente a partir do manifesto da empresa (evita pubkey crua de 64 hex no card)
+  const pubkeyToAgentName = new Map<string, string>();
+  try {
+    const orgfyMan = await readOrgfyJson<any>(ctx, "empresas/orgfy.json", null);
+    const agentesObj = orgfyMan?.agentes;
+    if (agentesObj && typeof agentesObj === "object") {
+      for (const [agentName, info] of Object.entries(agentesObj as Record<string, any>)) {
+        const pk = typeof info?.pubkey === "string" ? info.pubkey.trim().toLowerCase() : "";
+        if (/^[0-9a-f]{64}$/i.test(pk)) {
+          pubkeyToAgentName.set(pk, agentName);
+        }
+      }
+    }
+  } catch {
+    // Opcional
+  }
+  const resolveAgentDisplay = (raw: string | undefined, fallback: string): string => {
+    const val = String(raw || "").trim();
+    if (!val) return fallback;
+    const lower = val.toLowerCase();
+    if (/^[0-9a-f]{64}$/i.test(lower)) {
+      return pubkeyToAgentName.get(lower) || `Agente #${lower.slice(0, 8)}`;
+    }
+    return val;
+  };
+
   // Indexa aceite_cache por prefixo curto (8 chars) e por issue_id completo
   const aceiteCacheByIssue = new Map<string, any>();
   for (const [, item] of Object.entries(aceiteCache)) {
@@ -340,8 +366,8 @@ export async function fetchLiveKanbanSnapshot(
         title,
         priority: title.includes("P0") ? "P0" : title.includes("P1") ? "P1" : "P2",
         empresa: tenant,
-        executor: executor || "A definir",
-        revisor: revisor || "A definir",
+        executor: resolveAgentDisplay(executor, "A definir"),
+        revisor: resolveAgentDisplay(revisor, "A definir"),
         decisor: "OrgFy Iris",
         tier: executor.includes("Bento")
           ? "tier_3_arquiteto"
@@ -517,11 +543,11 @@ export async function fetchLiveKanbanSnapshot(
             owner: resolvedOwner,
             title: resolvedTitle,
             empresa: filter?.empresa && filter.empresa !== "all" ? filter.empresa : "orgfy",
-            executor: String(rec.agentKey || "Agente OrgFy"),
-            revisor:
-              (typeof rec.revisor === "string" && rec.revisor.trim()) ||
-              relayMeta?.revisor ||
-              "Revisão pendente",
+            executor: resolveAgentDisplay(String(rec.agentKey || ""), "Agente OrgFy"),
+            revisor: resolveAgentDisplay(
+              (typeof rec.revisor === "string" && rec.revisor.trim()) || relayMeta?.revisor,
+              "Revisão pendente"
+            ),
             decisor: "OrgFy Iris",
             tier: "tier_1_exec_barato",
             stage: "execucao",
