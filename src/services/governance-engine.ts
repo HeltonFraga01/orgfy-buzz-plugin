@@ -116,15 +116,33 @@ async function syncLocksFromDisk(ctx: Context): Promise<void> {
 
 async function persistLocksToDisk(ctx: Context): Promise<void> {
   const host = (ctx as any).host;
-  if (!host?.writeFile) return;
-  try {
-    const obj: Record<string, CheckoutLockRecord> = {};
-    for (const [k, v] of memoryLocks.entries()) {
-      obj[k] = v;
+  if (!host) return;
+  const obj: Record<string, CheckoutLockRecord> = {};
+  for (const [k, v] of memoryLocks.entries()) {
+    obj[k] = v;
+  }
+  const serialized = JSON.stringify(obj, null, 2);
+
+  if (host.writeFile) {
+    try {
+      await host.writeFile(LOCKS_FILE_PATH, serialized);
+      return;
+    } catch {
+      // Fallback para persistência via python3 abaixo
     }
-    await host.writeFile(LOCKS_FILE_PATH, JSON.stringify(obj, null, 2));
-  } catch {
-    // Ignora caso writeFile não esteja habilitado
+  }
+
+  if (host.spawn) {
+    try {
+      const pyCode =
+        "import pathlib, sys; p = pathlib.Path(sys.argv[1]); p.parent.mkdir(parents=True, exist_ok=True); p.write_text(sys.argv[2], encoding='utf-8')";
+      const proc = await host.spawn("python", {
+        args: ["-c", pyCode, LOCKS_FILE_PATH, serialized],
+      });
+      await proc.exited;
+    } catch {
+      // Ignora em ambientes de teste sem spawn real
+    }
   }
 }
 

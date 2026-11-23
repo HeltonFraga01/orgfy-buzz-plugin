@@ -391,6 +391,99 @@ export async function fetchLiveKanbanSnapshot(
     }
   }
 
+  // 3. Mescla locks ativos (orgfy-locks.json) na raia Em Execução
+  try {
+    if (ctx?.host?.readFile) {
+      const rawLocks = await ctx.host.readFile("/Users/heltonfraga/.buzz/.scratch/orgfy-locks.json");
+      const lockTxt =
+        typeof rawLocks === "string"
+          ? rawLocks
+          : rawLocks instanceof Uint8Array
+          ? new TextDecoder("utf-8").decode(rawLocks)
+          : String(rawLocks ?? "");
+      const parsedLocks = JSON.parse(lockTxt);
+      const nowMs = Date.now();
+      if (parsedLocks && typeof parsedLocks === "object" && !Array.isArray(parsedLocks)) {
+        for (const [lockIssueId, rec] of Object.entries(parsedLocks as Record<string, any>)) {
+          if (!rec || typeof rec.expiresAt !== "number" || rec.expiresAt <= nowMs) continue;
+          const shortLockId = lockIssueId.slice(0, 8);
+          if (cardMap.has(shortLockId)) continue;
+          cardMap.set(shortLockId, {
+            id: `lock-${shortLockId}`,
+            issueId: shortLockId,
+            fullIssueId: lockIssueId.length === 64 ? lockIssueId : undefined,
+            title: `Card em execução (#${shortLockId})`,
+            empresa: filter?.empresa && filter.empresa !== "all" ? filter.empresa : "orgfy",
+            executor: String(rec.agentKey || "Agente OrgFy"),
+            revisor: "Revisão pendente",
+            tier: "tier_1_exec_barato",
+            stage: "execucao",
+            worktreePath: `.worktrees/${shortLockId}`,
+            updatedAt: rec.acquiredAt ? formatRelativeTime(rec.acquiredAt) : "ativo",
+          });
+        }
+      }
+    }
+  } catch {
+    // Arquivo orgfy-locks.json opcional
+  }
+
+  // 4. Mescla worktrees Git ativas (ex.: .worktrees/e2e-smoke-v12) que ainda não constam no canvas
+  try {
+    if (ctx?.host?.spawn) {
+      let wtOut = "";
+      const proc = await ctx.host.spawn("git", {
+        args: ["-C", ORGFY_ABS_PATH, "worktree", "list", "--porcelain"],
+        onStdout: (chunk: string) => {
+          wtOut += chunk;
+        },
+      });
+      const code = await proc.exited;
+      if (code === 0 && wtOut.trim()) {
+        const blocks = wtOut.trim().split(/\n\s*\n/);
+        for (const blk of blocks) {
+          const wtMatch = blk.match(/^worktree\s+(.+)$/m);
+          const headMatch = blk.match(/^HEAD\s+([0-9a-f]{7,40})$/m);
+          const branchMatch = blk.match(/^branch\s+refs\/heads\/(.+)$/m);
+          if (!wtMatch || !branchMatch) continue;
+          const wtFull = wtMatch[1].trim();
+          const branchName = branchMatch[1].trim();
+          if (branchName === "main" || branchName === "master") continue;
+          if (!wtFull.includes("/.worktrees/")) continue;
+          const slug = wtFull.split("/.worktrees/")[1]?.split("/")[0]?.trim() || "";
+          if (!slug || slug.startsWith("_")) continue;
+
+          // Evita duplicar card já presente no Kanban (por slug, branch ou título)
+          const slugLower = slug.toLowerCase();
+          const alreadyListed = Array.from(cardMap.values()).some(
+            (c) =>
+              (c.branch && c.branch.toLowerCase() === branchName.toLowerCase()) ||
+              (c.worktreePath && c.worktreePath.toLowerCase().includes(slugLower)) ||
+              (c.title && c.title.toLowerCase().includes(slugLower))
+          );
+          if (alreadyListed) continue;
+
+          cardMap.set(`wt-${slug}`, {
+            id: `wt-${slug}`,
+            issueId: slug.toUpperCase().slice(0, 18),
+            title: `${slug.toUpperCase()} (${branchName})`,
+            empresa: filter?.empresa && filter.empresa !== "all" ? filter.empresa : "orgfy",
+            executor: "Em execução (worktree)",
+            revisor: "Revisão pendente",
+            tier: "tier_1_exec_barato",
+            stage: "execucao",
+            branch: branchName,
+            commitSha: headMatch ? headMatch[1].slice(0, 7) : undefined,
+            worktreePath: `.worktrees/${slug}`,
+            updatedAt: "ativo",
+          });
+        }
+      }
+    }
+  } catch {
+    // Worktree discovery opcional
+  }
+
   let result = Array.from(cardMap.values());
   if (filter?.empresa && filter.empresa !== "all") {
     result = result.filter((c) => !c.empresa || c.empresa === filter.empresa);
