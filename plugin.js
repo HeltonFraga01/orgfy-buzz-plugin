@@ -616,24 +616,51 @@ async function executeDespachar(ctx, options) {
     appendChunk("[SIMULADO] Aceite congelado para " + options.issueId + ". Tier classificado. Despachado com sucesso.\n");
     return { code: 0, output: combinedOutput };
   }
-  try {
-    const proc = await ctx.host.spawn("python", {
-      args: pyArgs,
-      cwd: ORGFY_ABS_PATH,
-      onStdout: appendChunk,
-      onStderr: appendChunk
-    });
-    const code = await proc.exited;
-    appendChunk(`
+  const isTransientRelayMiss = (text) => /(n[aã]o foi poss[ií]vel obter conte[uú]do|not found|n[aã]o encontrad|timeout|timed out|relay)/i.test(text);
+  const maxAttempts = 3;
+  const backoffMs = [2e3, 4e3];
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let attemptOutput = "";
+    const appendAttempt = (chunk) => {
+      attemptOutput += chunk;
+      appendChunk(chunk);
+    };
+    try {
+      const proc = await ctx.host.spawn("python", {
+        args: pyArgs,
+        cwd: ORGFY_ABS_PATH,
+        onStdout: appendAttempt,
+        onStderr: appendAttempt
+      });
+      const code = await proc.exited;
+      if (code === 0) {
+        appendChunk(`
+[PROCESSO ENCERRADO] Código de saída: 0
+`);
+        return { code: 0, output: combinedOutput };
+      }
+      if (attempt < maxAttempts && isTransientRelayMiss(attemptOutput)) {
+        const waitMs = backoffMs[attempt - 1] ?? 3e3;
+        appendChunk(
+          `
+[RETRY ${attempt}/${maxAttempts - 1}] Issue recém-criada ainda propagando no relay; aguardando ${waitMs / 1e3}s...
+`
+        );
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        continue;
+      }
+      appendChunk(`
 [PROCESSO ENCERRADO] Código de saída: ${code}
 `);
-    return { code, output: combinedOutput };
-  } catch (err) {
-    appendChunk(`
+      return { code, output: combinedOutput };
+    } catch (err) {
+      appendChunk(`
 [ERRO NA EXECUÇÃO] ${(err == null ? void 0 : err.message) || String(err)}
 `);
-    return { code: 1, output: combinedOutput };
+      return { code: 1, output: combinedOutput };
+    }
   }
+  return { code: 1, output: combinedOutput };
 }
 async function executeGate(ctx, options) {
   var _a;
@@ -2410,28 +2437,31 @@ const DEFAULT_COOLDOWN_MS = 15 * 60 * 1e3;
 const memoryLocks = /* @__PURE__ */ new Map();
 const alertCooldowns = /* @__PURE__ */ new Map();
 function purgeExpiredLocks(now) {
+  let removed = 0;
   for (const [key, rec] of memoryLocks.entries()) {
     if (rec.expiresAt <= now) {
       memoryLocks.delete(key);
+      removed++;
     }
   }
+  return removed;
 }
-async function syncLocksFromDisk(ctx) {
+async function syncLocksFromDisk(ctx, nowMs = Date.now()) {
   const host = ctx.host;
-  if (!(host == null ? void 0 : host.readFile)) return;
+  if (!(host == null ? void 0 : host.readFile)) return 0;
+  let expiredOnDisk = 0;
   try {
     const raw = await host.readFile(LOCKS_FILE_PATH);
     const text = typeof raw === "string" ? raw : raw instanceof Uint8Array ? new TextDecoder("utf-8").decode(raw) : raw instanceof ArrayBuffer ? new TextDecoder("utf-8").decode(new Uint8Array(raw)) : ArrayBuffer.isView(raw) ? new TextDecoder("utf-8").decode(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength)) : String(raw ?? "");
     const parsed = JSON.parse(text);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      const now = Date.now();
       for (const [k, v] of Object.entries(parsed)) {
-        if (v && typeof v.agentKey === "string" && typeof v.expiresAt === "number" && v.expiresAt > now) {
+        if (v && typeof v.agentKey === "string" && typeof v.expiresAt === "number" && v.expiresAt > nowMs) {
           if (!memoryLocks.has(k)) {
             memoryLocks.set(k, {
               issueId: k,
               agentKey: v.agentKey,
-              acquiredAt: Number(v.acquiredAt || now),
+              acquiredAt: Number(v.acquiredAt || nowMs),
               expiresAt: v.expiresAt,
               title: typeof v.title === "string" ? v.title : void 0,
               owner: typeof v.owner === "string" ? v.owner : void 0,
@@ -2440,11 +2470,14 @@ async function syncLocksFromDisk(ctx) {
               branch: typeof v.branch === "string" ? v.branch : void 0
             });
           }
+        } else {
+          expiredOnDisk++;
         }
       }
     }
   } catch {
   }
+  return expiredOnDisk;
 }
 async function persistLocksToDisk(ctx) {
   const host = ctx.host;
@@ -2573,8 +2606,11 @@ async function releaseCheckoutLock(ctx, issueId, agentKey, force = false) {
   };
 }
 async function listActiveLocks(ctx, nowMs = Date.now()) {
-  await syncLocksFromDisk(ctx);
-  purgeExpiredLocks(nowMs);
+  const expiredOnDisk = await syncLocksFromDisk(ctx, nowMs);
+  const removedInMem = purgeExpiredLocks(nowMs);
+  if (expiredOnDisk > 0 || removedInMem > 0) {
+    await persistLocksToDisk(ctx);
+  }
   return Array.from(memoryLocks.values());
 }
 function evaluateBudgetGate(kpis, boardOverride = false) {
@@ -2818,16 +2854,21 @@ async function lintCardForDispatch(ctx, input) {
 async function bindConversationContextForCard(ctx, input) {
   var _a;
   const agentsApi = ctx.agents;
+  const host = ctx.host;
   const notes = [];
   let folderAssigned = false;
   let sectionsInjected = false;
+  let remoteOrMissingAgent = false;
   const worktreePath = ((_a = input.worktreePath) == null ? void 0 : _a.trim()) || null;
+  const isMissingAgentErr = (msg) => /(does not exist|not found|n[aã]o existe|unknown agent|agent.*missing|no such conversation)/i.test(msg);
   if (worktreePath && (agentsApi == null ? void 0 : agentsApi.assignConversationFolder)) {
     try {
       await agentsApi.assignConversationFolder(input.conversationId, worktreePath);
       folderAssigned = true;
     } catch (err) {
-      notes.push(`Falha em assignConversationFolder: ${(err == null ? void 0 : err.message) || err}`);
+      const msg = String((err == null ? void 0 : err.message) || err);
+      if (isMissingAgentErr(msg)) remoteOrMissingAgent = true;
+      notes.push(`Falha em assignConversationFolder: ${msg}`);
     }
   } else if (worktreePath) {
     notes.push("API ctx.agents.assignConversationFolder indisponível neste host.");
@@ -2859,18 +2900,49 @@ async function bindConversationContextForCard(ctx, input) {
       await agentsApi.setConversationSections(input.conversationId, sections);
       sectionsInjected = true;
     } catch (err) {
-      notes.push(`Falha em setConversationSections: ${(err == null ? void 0 : err.message) || err}`);
+      const msg = String((err == null ? void 0 : err.message) || err);
+      if (isMissingAgentErr(msg)) remoteOrMissingAgent = true;
+      notes.push(`Falha em setConversationSections: ${msg}`);
     }
   } else {
     notes.push("API ctx.agents.setConversationSections indisponível neste host.");
   }
+  let fallbackContextFile = null;
+  let degradedFallback = false;
+  if (!folderAssigned && !sectionsInjected && remoteOrMissingAgent) {
+    const safeId = String(input.issueId || "card").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 16) || "card";
+    const ctxPath = `/Users/heltonfraga/.buzz/.scratch/orgfy-context-${safeId}.json`;
+    const payload = JSON.stringify(
+      {
+        issueId: input.issueId,
+        conversationId: input.conversationId,
+        worktreePath,
+        sections,
+        savedAt: (/* @__PURE__ */ new Date()).toISOString()
+      },
+      null,
+      2
+    );
+    if (host == null ? void 0 : host.writeFile) {
+      try {
+        await host.writeFile(ctxPath, payload);
+        fallbackContextFile = ctxPath;
+        degradedFallback = true;
+        notes.push(`Fallback aplicado: agente/conversa não local neste aparelho; contexto L-22/L-90 persistido em ${ctxPath}.`);
+      } catch (wErr) {
+        notes.push(`Falha ao gravar fallback de contexto: ${(wErr == null ? void 0 : wErr.message) || wErr}`);
+      }
+    }
+  }
   return {
-    ok: folderAssigned || sectionsInjected,
+    ok: folderAssigned || sectionsInjected || degradedFallback,
     conversationId: input.conversationId,
     folderAssigned,
     worktreePath,
     sectionsInjected,
-    sectionsCount: sectionsInjected ? sections.length : 0,
+    sectionsCount: sectionsInjected || degradedFallback ? sections.length : 0,
+    fallbackContextFile,
+    degradedFallback,
     notes
   };
 }
@@ -8499,11 +8571,15 @@ Consulte sempre orgfy_status, orgfy_kpis ou orgfy_kanban_read para inspecionar m
             executor: args.executor,
             revisor: args.revisor
           });
+          if (res.code !== 0) {
+            await releaseCheckoutLock(ctx, args.issue_id, args.executor, true);
+          }
           return JSON.stringify({
             status: res.code === 0 ? "ok" : "error",
             exitCode: res.code,
             budgetGate,
-            lock: lockRes.lock,
+            lock: res.code === 0 ? lockRes.lock : null,
+            lockReleasedOnFailure: res.code !== 0,
             output: res.output
           }, null, 2);
         }

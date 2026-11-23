@@ -120,17 +120,21 @@ export function resetGovernanceMemoryStateForTests(): void {
   alertCooldowns.clear();
 }
 
-function purgeExpiredLocks(now: number): void {
+function purgeExpiredLocks(now: number): number {
+  let removed = 0;
   for (const [key, rec] of memoryLocks.entries()) {
     if (rec.expiresAt <= now) {
       memoryLocks.delete(key);
+      removed++;
     }
   }
+  return removed;
 }
 
-async function syncLocksFromDisk(ctx: Context): Promise<void> {
+async function syncLocksFromDisk(ctx: Context, nowMs: number = Date.now()): Promise<number> {
   const host = (ctx as any).host;
-  if (!host?.readFile) return;
+  if (!host?.readFile) return 0;
+  let expiredOnDisk = 0;
   try {
     const raw = await host.readFile(LOCKS_FILE_PATH);
     const text =
@@ -145,14 +149,13 @@ async function syncLocksFromDisk(ctx: Context): Promise<void> {
         : String(raw ?? "");
     const parsed = JSON.parse(text);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      const now = Date.now();
       for (const [k, v] of Object.entries(parsed as Record<string, any>)) {
-        if (v && typeof v.agentKey === "string" && typeof v.expiresAt === "number" && v.expiresAt > now) {
+        if (v && typeof v.agentKey === "string" && typeof v.expiresAt === "number" && v.expiresAt > nowMs) {
           if (!memoryLocks.has(k)) {
             memoryLocks.set(k, {
               issueId: k,
               agentKey: v.agentKey,
-              acquiredAt: Number(v.acquiredAt || now),
+              acquiredAt: Number(v.acquiredAt || nowMs),
               expiresAt: v.expiresAt,
               title: typeof v.title === "string" ? v.title : undefined,
               owner: typeof v.owner === "string" ? v.owner : undefined,
@@ -161,12 +164,15 @@ async function syncLocksFromDisk(ctx: Context): Promise<void> {
               branch: typeof v.branch === "string" ? v.branch : undefined,
             });
           }
+        } else {
+          expiredOnDisk++;
         }
       }
     }
   } catch {
     // Arquivo pode ainda não existir
   }
+  return expiredOnDisk;
 }
 
 async function persistLocksToDisk(ctx: Context): Promise<void> {
@@ -332,8 +338,11 @@ export async function releaseCheckoutLock(
 }
 
 export async function listActiveLocks(ctx: Context, nowMs: number = Date.now()): Promise<CheckoutLockRecord[]> {
-  await syncLocksFromDisk(ctx);
-  purgeExpiredLocks(nowMs);
+  const expiredOnDisk = await syncLocksFromDisk(ctx, nowMs);
+  const removedInMem = purgeExpiredLocks(nowMs);
+  if (expiredOnDisk > 0 || removedInMem > 0) {
+    await persistLocksToDisk(ctx);
+  }
   return Array.from(memoryLocks.values());
 }
 
@@ -688,6 +697,8 @@ export interface ConversationContextBindResult {
   worktreePath: string | null;
   sectionsInjected: boolean;
   sectionsCount: number;
+  fallbackContextFile?: string | null;
+  degradedFallback?: boolean;
   notes: string[];
 }
 
@@ -705,17 +716,23 @@ export async function bindConversationContextForCard(
   }
 ): Promise<ConversationContextBindResult> {
   const agentsApi = (ctx as any).agents;
+  const host = (ctx as any).host;
   const notes: string[] = [];
   let folderAssigned = false;
   let sectionsInjected = false;
+  let remoteOrMissingAgent = false;
   const worktreePath = input.worktreePath?.trim() || null;
+  const isMissingAgentErr = (msg: string) =>
+    /(does not exist|not found|n[aã]o existe|unknown agent|agent.*missing|no such conversation)/i.test(msg);
 
   if (worktreePath && agentsApi?.assignConversationFolder) {
     try {
       await agentsApi.assignConversationFolder(input.conversationId, worktreePath);
       folderAssigned = true;
     } catch (err: any) {
-      notes.push(`Falha em assignConversationFolder: ${err?.message || err}`);
+      const msg = String(err?.message || err);
+      if (isMissingAgentErr(msg)) remoteOrMissingAgent = true;
+      notes.push(`Falha em assignConversationFolder: ${msg}`);
     }
   } else if (worktreePath) {
     notes.push("API ctx.agents.assignConversationFolder indisponível neste host.");
@@ -753,19 +770,51 @@ export async function bindConversationContextForCard(
       await agentsApi.setConversationSections(input.conversationId, sections);
       sectionsInjected = true;
     } catch (err: any) {
-      notes.push(`Falha em setConversationSections: ${err?.message || err}`);
+      const msg = String(err?.message || err);
+      if (isMissingAgentErr(msg)) remoteOrMissingAgent = true;
+      notes.push(`Falha em setConversationSections: ${msg}`);
     }
   } else {
     notes.push("API ctx.agents.setConversationSections indisponível neste host.");
   }
 
+  let fallbackContextFile: string | null = null;
+  let degradedFallback = false;
+  if (!folderAssigned && !sectionsInjected && remoteOrMissingAgent) {
+    const safeId = String(input.issueId || "card").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 16) || "card";
+    const ctxPath = `/Users/heltonfraga/.buzz/.scratch/orgfy-context-${safeId}.json`;
+    const payload = JSON.stringify(
+      {
+        issueId: input.issueId,
+        conversationId: input.conversationId,
+        worktreePath,
+        sections,
+        savedAt: new Date().toISOString(),
+      },
+      null,
+      2
+    );
+    if (host?.writeFile) {
+      try {
+        await host.writeFile(ctxPath, payload);
+        fallbackContextFile = ctxPath;
+        degradedFallback = true;
+        notes.push(`Fallback aplicado: agente/conversa não local neste aparelho; contexto L-22/L-90 persistido em ${ctxPath}.`);
+      } catch (wErr: any) {
+        notes.push(`Falha ao gravar fallback de contexto: ${wErr?.message || wErr}`);
+      }
+    }
+  }
+
   return {
-    ok: folderAssigned || sectionsInjected,
+    ok: folderAssigned || sectionsInjected || degradedFallback,
     conversationId: input.conversationId,
     folderAssigned,
     worktreePath,
     sectionsInjected,
-    sectionsCount: sectionsInjected ? sections.length : 0,
+    sectionsCount: sectionsInjected || degradedFallback ? sections.length : 0,
+    fallbackContextFile,
+    degradedFallback,
     notes,
   };
 }

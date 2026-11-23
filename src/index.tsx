@@ -5613,11 +5613,15 @@ Consulte sempre orgfy_status, orgfy_kpis ou orgfy_kanban_read para inspecionar m
             executor: args.executor,
             revisor: args.revisor,
           });
+          if (res.code !== 0) {
+            await releaseCheckoutLock(ctx, args.issue_id, args.executor, true);
+          }
           return JSON.stringify({
             status: res.code === 0 ? "ok" : "error",
             exitCode: res.code,
             budgetGate,
-            lock: lockRes.lock,
+            lock: res.code === 0 ? lockRes.lock : null,
+            lockReleasedOnFailure: res.code !== 0,
             output: res.output,
           }, null, 2);
         },

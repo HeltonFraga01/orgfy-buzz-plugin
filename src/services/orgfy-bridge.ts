@@ -857,21 +857,50 @@ export async function executeDespachar(
     return { code: 0, output: combinedOutput };
   }
 
-  try {
-    const proc = await ctx.host.spawn("python", {
-      args: pyArgs,
-      cwd: ORGFY_ABS_PATH,
-      onStdout: appendChunk,
-      onStderr: appendChunk,
-    });
+  const isTransientRelayMiss = (text: string) =>
+    /(n[aã]o foi poss[ií]vel obter conte[uú]do|not found|n[aã]o encontrad|timeout|timed out|relay)/i.test(text);
 
-    const code = await proc.exited;
-    appendChunk(`\n[PROCESSO ENCERRADO] Código de saída: ${code}\n`);
-    return { code, output: combinedOutput };
-  } catch (err: any) {
-    appendChunk(`\n[ERRO NA EXECUÇÃO] ${err?.message || String(err)}\n`);
-    return { code: 1, output: combinedOutput };
+  const maxAttempts = 3;
+  const backoffMs = [2000, 4000];
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let attemptOutput = "";
+    const appendAttempt = (chunk: string) => {
+      attemptOutput += chunk;
+      appendChunk(chunk);
+    };
+    try {
+      const proc = await ctx.host.spawn("python", {
+        args: pyArgs,
+        cwd: ORGFY_ABS_PATH,
+        onStdout: appendAttempt,
+        onStderr: appendAttempt,
+      });
+
+      const code = await proc.exited;
+      if (code === 0) {
+        appendChunk(`\n[PROCESSO ENCERRADO] Código de saída: 0\n`);
+        return { code: 0, output: combinedOutput };
+      }
+
+      if (attempt < maxAttempts && isTransientRelayMiss(attemptOutput)) {
+        const waitMs = backoffMs[attempt - 1] ?? 3000;
+        appendChunk(
+          `\n[RETRY ${attempt}/${maxAttempts - 1}] Issue recém-criada ainda propagando no relay; aguardando ${waitMs / 1000}s...\n`
+        );
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        continue;
+      }
+
+      appendChunk(`\n[PROCESSO ENCERRADO] Código de saída: ${code}\n`);
+      return { code, output: combinedOutput };
+    } catch (err: any) {
+      appendChunk(`\n[ERRO NA EXECUÇÃO] ${err?.message || String(err)}\n`);
+      return { code: 1, output: combinedOutput };
+    }
   }
+
+  return { code: 1, output: combinedOutput };
 }
 
 /**
