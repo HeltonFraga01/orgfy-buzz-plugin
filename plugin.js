@@ -9276,12 +9276,16 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
       )
     );
   }
+  const ORGFY_PAGE_ICON = "data:image/svg+xml;base64," + btoa(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="orgfy" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#059669"/><stop offset="100%" stop-color="#0f766e"/></linearGradient></defs><rect width="64" height="64" rx="16" fill="url(#orgfy)"/><polygon points="32,12 50,22.5 50,41.5 32,52 14,41.5 14,22.5" fill="none" stroke="#ffffff" stroke-width="3.5" stroke-linejoin="round"/><polyline points="14,22.5 32,33 50,22.5" fill="none" stroke="#ffffff" stroke-width="3.5" stroke-linejoin="round"/><line x1="32" y1="33" x2="32" y2="52" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round"/><circle cx="32" cy="33" r="4" fill="#a7f3d0"/></svg>'
+  );
   ctx.pages.register({
     id: "orgfy",
     title: "OrgFy Control Room",
     layout: "workspace",
     primary: true,
     placement: "topbar",
+    icon: ORGFY_PAGE_ICON,
     component: OrgFyCockpit
   });
   if (ctx.settingsCards) {
