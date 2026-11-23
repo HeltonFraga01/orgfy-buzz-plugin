@@ -155,6 +155,13 @@ export async function acquireCheckoutLock(
 ): Promise<LockActionResult> {
   const cleanIssue = String(issueId || "").trim();
   const cleanAgent = String(agentKey || "").trim();
+  // Defesa contra chamadores que passam minutos (ex: 30, 60) em vez de ms
+  const normalizedTtlMs =
+    typeof ttlMs === "number" && Number.isFinite(ttlMs) && ttlMs > 0
+      ? ttlMs <= 1440
+        ? ttlMs * 60 * 1000
+        : ttlMs
+      : DEFAULT_LOCK_TTL_MS;
   if (!cleanIssue || !cleanAgent) {
     return {
       ok: false,
@@ -173,7 +180,7 @@ export async function acquireCheckoutLock(
         issueId: cleanIssue,
         agentKey: cleanAgent,
         acquiredAt: existing.acquiredAt,
-        expiresAt: nowMs + ttlMs,
+        expiresAt: nowMs + normalizedTtlMs,
       };
       memoryLocks.set(cleanIssue, renewed);
       await persistLocksToDisk(ctx);
@@ -197,7 +204,7 @@ export async function acquireCheckoutLock(
     issueId: cleanIssue,
     agentKey: cleanAgent,
     acquiredAt: nowMs,
-    expiresAt: nowMs + ttlMs,
+    expiresAt: nowMs + normalizedTtlMs,
   };
   memoryLocks.set(cleanIssue, created);
   await persistLocksToDisk(ctx);

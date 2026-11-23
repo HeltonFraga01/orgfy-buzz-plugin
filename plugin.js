@@ -118,7 +118,7 @@ async function fetchLiveEsteiraState(ctx, empresa) {
   };
 }
 async function fetchLiveKanbanSnapshot(ctx, filter) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
+  var _a, _b, _c, _d, _e, _f, _g, _h;
   const [live, canvasText] = await Promise.all([
     fetchLiveEsteiraState(ctx, filter == null ? void 0 : filter.empresa),
     readOrgfyText(ctx, ".scratch/canvas_atual.md")
@@ -313,9 +313,11 @@ async function fetchLiveKanbanSnapshot(ctx, filter) {
           const wtFull = wtMatch[1].trim();
           const branchName = branchMatch[1].trim();
           if (branchName === "main" || branchName === "master") continue;
-          if (!wtFull.includes("/.worktrees/")) continue;
-          const slug = ((_i = (_h = wtFull.split("/.worktrees/")[1]) == null ? void 0 : _h.split("/")[0]) == null ? void 0 : _i.trim()) || "";
+          const wtMatchDir = wtFull.match(/\/\.?worktrees\/([^/]+)/);
+          if (!wtMatchDir) continue;
+          const slug = (wtMatchDir[1] || "").trim();
           if (!slug || slug.startsWith("_")) continue;
+          const wtRelPath = wtFull.includes("/.worktrees/") ? `.worktrees/${slug}` : `worktrees/${slug}`;
           const slugLower = slug.toLowerCase();
           const alreadyListed = Array.from(cardMap.values()).some(
             (c) => c.branch && c.branch.toLowerCase() === branchName.toLowerCase() || c.worktreePath && c.worktreePath.toLowerCase().includes(slugLower) || c.title && c.title.toLowerCase().includes(slugLower)
@@ -340,7 +342,7 @@ async function fetchLiveKanbanSnapshot(ctx, filter) {
             }
           } catch {
           }
-          if (!resolvedFullIssueId && ((_j = ctx == null ? void 0 : ctx.host) == null ? void 0 : _j.spawn)) {
+          if (!resolvedFullIssueId && ((_h = ctx == null ? void 0 : ctx.host) == null ? void 0 : _h.spawn)) {
             try {
               let grepOut = "";
               const gProc = await ctx.host.spawn("git", {
@@ -391,7 +393,7 @@ async function fetchLiveKanbanSnapshot(ctx, filter) {
             priority: "P1",
             branch: branchName,
             commitSha: headMatch ? headMatch[1].slice(0, 7) : void 0,
-            worktreePath: `.worktrees/${slug}`,
+            worktreePath: wtRelPath,
             updatedAt: Date.now()
           });
         }
@@ -2347,6 +2349,7 @@ async function persistLocksToDisk(ctx) {
 async function acquireCheckoutLock(ctx, issueId, agentKey, ttlMs = DEFAULT_LOCK_TTL_MS, nowMs = Date.now()) {
   const cleanIssue = String(issueId || "").trim();
   const cleanAgent = String(agentKey || "").trim();
+  const normalizedTtlMs = typeof ttlMs === "number" && Number.isFinite(ttlMs) && ttlMs > 0 ? ttlMs <= 1440 ? ttlMs * 60 * 1e3 : ttlMs : DEFAULT_LOCK_TTL_MS;
   if (!cleanIssue || !cleanAgent) {
     return {
       ok: false,
@@ -2363,7 +2366,7 @@ async function acquireCheckoutLock(ctx, issueId, agentKey, ttlMs = DEFAULT_LOCK_
         issueId: cleanIssue,
         agentKey: cleanAgent,
         acquiredAt: existing.acquiredAt,
-        expiresAt: nowMs + ttlMs
+        expiresAt: nowMs + normalizedTtlMs
       };
       memoryLocks.set(cleanIssue, renewed);
       await persistLocksToDisk(ctx);
@@ -2386,7 +2389,7 @@ async function acquireCheckoutLock(ctx, issueId, agentKey, ttlMs = DEFAULT_LOCK_
     issueId: cleanIssue,
     agentKey: cleanAgent,
     acquiredAt: nowMs,
-    expiresAt: nowMs + ttlMs
+    expiresAt: nowMs + normalizedTtlMs
   };
   memoryLocks.set(cleanIssue, created);
   await persistLocksToDisk(ctx);

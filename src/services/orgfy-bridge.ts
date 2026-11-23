@@ -450,9 +450,11 @@ export async function fetchLiveKanbanSnapshot(
           const wtFull = wtMatch[1].trim();
           const branchName = branchMatch[1].trim();
           if (branchName === "main" || branchName === "master") continue;
-          if (!wtFull.includes("/.worktrees/")) continue;
-          const slug = wtFull.split("/.worktrees/")[1]?.split("/")[0]?.trim() || "";
+          const wtMatchDir = wtFull.match(/\/\.?worktrees\/([^/]+)/);
+          if (!wtMatchDir) continue;
+          const slug = (wtMatchDir[1] || "").trim();
           if (!slug || slug.startsWith("_")) continue;
+          const wtRelPath = wtFull.includes("/.worktrees/") ? `.worktrees/${slug}` : `worktrees/${slug}`;
 
           // Evita duplicar card já presente no Kanban (por slug, branch ou título)
           const slugLower = slug.toLowerCase();
@@ -537,7 +539,7 @@ export async function fetchLiveKanbanSnapshot(
             priority: "P1",
             branch: branchName,
             commitSha: headMatch ? headMatch[1].slice(0, 7) : undefined,
-            worktreePath: `.worktrees/${slug}`,
+            worktreePath: wtRelPath,
             updatedAt: Date.now(),
           });
         }
