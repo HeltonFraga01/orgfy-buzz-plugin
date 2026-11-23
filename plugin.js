@@ -1543,73 +1543,6 @@ async function executeAgentMigration(ctx, onOutput) {
     return { success: false, output: combinedOutput };
   }
 }
-const CANONICAL_TEMPLATES = [
-  {
-    id: "template-v7-1",
-    name: "Card v7.1 / v10 Soberano",
-    filename: "card-v7.1-template.md",
-    path: "templates/card-v7.1-template.md",
-    version: "v7.1",
-    status: "canônico_v10",
-    fpyHistorical: 100,
-    totalCardsProcessed: 320,
-    frequentErrorsBlocked: [
-      "Alteração indevida de testes pelo executor (blindada por hash de congelamento SHA-256)",
-      "Ausência de evidências visuais no Quality Gate (blindada por probe Playwright obrigatório)",
-      "Vazamento de contexto e ruído no chat (blindado por worktree isolada e ORGFY_SEM_CANVAS=1)"
-    ],
-    description: "Template oficial de engenharia determinística v10. Incorpora cabeçalho de triagem, comandos congelados e probes caixa-preta.",
-    sampleAcceptanceCommand: "python3 -m pytest -q testes/test_feature.py && python3 ferramentas/esteira/lint_card.py"
-  },
-  {
-    id: "template-v3",
-    name: "Card v3 Determinístico Canônico",
-    filename: "card-v3-template.md",
-    path: "templates/card-v3-template.md",
-    version: "v3",
-    status: "estável_v3",
-    fpyHistorical: 94.2,
-    totalCardsProcessed: 180,
-    frequentErrorsBlocked: [
-      "Ambiguidade na resolução de papéis de revisor independente",
-      "Execução sem declaração explícita de modelo no modo Buzz"
-    ],
-    description: "Template de transição estável v3 com blocos estritos de Contexto, Autoridade, Decisão e Papéis.",
-    sampleAcceptanceCommand: "python3 -m pytest -q testes/unit/"
-  },
-  {
-    id: "template-v2",
-    name: "Card v2 Enxuto Legado",
-    filename: "card-v2-template.md",
-    path: "templates/card-v2-template.md",
-    version: "v2",
-    status: "legado",
-    fpyHistorical: 82.5,
-    totalCardsProcessed: 95,
-    frequentErrorsBlocked: [
-      "Falta de validação de exit code de comandos secundários",
-      "Conflitos de concorrência em branch única sem worktree"
-    ],
-    description: "Template legado simplificado. Recomendado migrar para v7.1 para compliance total com o Gate Caixa-Preta.",
-    sampleAcceptanceCommand: "pytest testes/legacy/"
-  },
-  {
-    id: "template-experience",
-    name: "Laudo de Experiência & UX",
-    filename: "experience-template.md",
-    path: "templates/experience-template.md",
-    version: "experience",
-    status: "especializado",
-    fpyHistorical: 96.8,
-    totalCardsProcessed: 64,
-    frequentErrorsBlocked: [
-      "Laudos subjetivos sem evidência visual reproduzível (L-24)",
-      "Aprovação sem inspeção de console errors em navegadores reais"
-    ],
-    description: "Template obrigatório para cards de frontend, design system e interação de usuário com captura de screenshots.",
-    sampleAcceptanceCommand: "npx playwright test --headed && python3 ferramentas/esteira/probe_caixa_preta.py"
-  }
-];
 async function compileProbationaryRule(ctx, options) {
   var _a;
   let combinedOutput = "";
@@ -3393,6 +3326,1007 @@ function renderResolvedArchiveTab(props) {
     )
   );
 }
+const BOARD_APPROVALS_PATH = "/Users/heltonfraga/.buzz/.scratch/board-approvals.json";
+function isPlaceholderHex(val) {
+  const clean = String(val || "").trim().toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(clean)) return true;
+  return /^([0-9a-f]{2})\1{31}$/.test(clean) || /^[a-f]{2}(\d)\1{61}$/.test(clean);
+}
+function isPlaceholderChannel(val) {
+  const clean = String(val || "").trim().toLowerCase();
+  if (!clean) return true;
+  return clean.startsWith("a1111111-") || clean.startsWith("b2222222-") || clean.includes("0000-0000");
+}
+function decodeRaw(raw) {
+  if (typeof raw === "string") return raw;
+  if (raw instanceof Uint8Array) return new TextDecoder("utf-8").decode(raw);
+  if (raw instanceof ArrayBuffer) return new TextDecoder("utf-8").decode(new Uint8Array(raw));
+  return String(raw ?? "");
+}
+async function readBoardApprovals(ctx) {
+  const host = ctx.host;
+  if (!(host == null ? void 0 : host.readFile)) return [];
+  try {
+    const raw = await host.readFile(BOARD_APPROVALS_PATH);
+    const parsed = JSON.parse(decodeRaw(raw));
+    if (Array.isArray(parsed == null ? void 0 : parsed.items)) {
+      return parsed.items;
+    }
+  } catch {
+  }
+  return [];
+}
+async function writeBoardApprovals(ctx, items) {
+  const host = ctx.host;
+  if (!host) return false;
+  const serialized = JSON.stringify(
+    {
+      schema_version: "1.0.0",
+      updated_at: (/* @__PURE__ */ new Date()).toISOString(),
+      items
+    },
+    null,
+    2
+  );
+  if (host.writeFile) {
+    try {
+      await host.writeFile(BOARD_APPROVALS_PATH, serialized);
+      return true;
+    } catch {
+    }
+  }
+  if (host.spawn) {
+    try {
+      const py = "import pathlib, sys; p = pathlib.Path(sys.argv[1]); p.parent.mkdir(parents=True, exist_ok=True); p.write_text(sys.argv[2], encoding='utf-8')";
+      const proc = await host.spawn("python", { args: ["-c", py, BOARD_APPROVALS_PATH, serialized] });
+      const code = await proc.exited;
+      return code === 0;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+async function createBoardApproval(ctx, input) {
+  const existing = await readBoardApprovals(ctx);
+  const item = {
+    id: `apr-${Date.now().toString(36)}`,
+    empresa: input.empresa || "board",
+    tipo: input.tipo,
+    titulo: input.titulo.trim(),
+    descricao: input.descricao.trim(),
+    solicitante: (input.solicitante || "Helton Fraga / Board").trim(),
+    status: "pendente",
+    criadoEm: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  const next = [item, ...existing];
+  const ok = await writeBoardApprovals(ctx, next);
+  return { ok, item, items: next };
+}
+async function decideBoardApproval(ctx, approvalId, decision, notaDecisao) {
+  const existing = await readBoardApprovals(ctx);
+  const next = existing.map(
+    (it) => it.id === approvalId ? {
+      ...it,
+      status: decision,
+      decididoEm: (/* @__PURE__ */ new Date()).toISOString(),
+      decididoPor: "Helton Fraga (Board)",
+      notaDecisao: void 0
+    } : it
+  );
+  const ok = await writeBoardApprovals(ctx, next);
+  return { ok, items: next };
+}
+async function readRealTemplates(ctx) {
+  const catalog = [
+    { id: "tpl-v71", name: "Card v7.1 (Execução Determinística)", path: "templates/card-v7.1-template.md" },
+    { id: "tpl-v3", name: "Card v3 (Canônico 13 Seções)", path: "templates/card-v3-template.md" },
+    { id: "tpl-v2", name: "Card v2 (Legado)", path: "templates/card-v2-template.md" },
+    { id: "tpl-exp", name: "Laudo de Experiência & UX", path: "templates/experience-template.md" }
+  ];
+  const results = await Promise.all(
+    catalog.map(async (item) => {
+      const content = await readOrgfyText(ctx, item.path);
+      if (!content) {
+        return {
+          ...item,
+          exists: false,
+          linesCount: 0,
+          versionTag: "ausente",
+          preview: "Arquivo não encontrado em REPOS/orgfy.",
+          content: ""
+        };
+      }
+      const lines = content.split("\n");
+      const marker = content.match(/<!--\s*orgfy:card\s+([a-z0-9.]+)\s*-->/i);
+      const firstHeading = lines.find((l) => l.trim().startsWith("#")) || lines[0] || "";
+      return {
+        ...item,
+        exists: true,
+        linesCount: lines.length,
+        versionTag: marker ? marker[1] : "markdown",
+        preview: firstHeading.replace(/^#+\s*/, "").trim().slice(0, 120),
+        content
+      };
+    })
+  );
+  return results;
+}
+async function readWorkflowStatuses(ctx) {
+  const files = [{ name: "orgfy-esteira.yaml", path: ".buzz/workflows/orgfy-esteira.yaml" }];
+  return Promise.all(
+    files.map(async (wf) => {
+      const txt = await readOrgfyText(ctx, wf.path);
+      if (!txt) {
+        return { ...wf, exists: false, enabled: null };
+      }
+      const m = txt.match(/^\s*enabled\s*:\s*(true|false)\b/im);
+      return {
+        ...wf,
+        exists: true,
+        enabled: m ? m[1].toLowerCase() === "true" : true
+      };
+    })
+  );
+}
+async function fetchHoldingControlPlane(ctx) {
+  var _a, _b, _c, _d, _e, _f, _g, _h;
+  const [boardJson, orgfyJson, activeLocks, approvals, workflows, templatesReais, regrasJson] = await Promise.all([
+    readOrgfyJson(ctx, "empresas/board.json", null),
+    readOrgfyJson(ctx, "empresas/orgfy.json", null),
+    listActiveLocks(ctx),
+    readBoardApprovals(ctx),
+    readWorkflowStatuses(ctx),
+    readRealTemplates(ctx),
+    readOrgfyJson(ctx, ".esteira/estado/regras-probatorias.json", null)
+  ]);
+  const locksByAgent = /* @__PURE__ */ new Map();
+  for (const lk of activeLocks) {
+    locksByAgent.set(lk.agentKey.toLowerCase(), lk);
+  }
+  const buildCompanyItem = (slug, nome, nivel, estagio, ceoEmpresa, reportaA, man) => {
+    var _a2, _b2, _c2, _d2;
+    const canal = String((man == null ? void 0 : man.canal) || "");
+    const canalPronto = !isPlaceholderChannel(canal);
+    const agentesObj = (man == null ? void 0 : man.agentes) && typeof man.agentes === "object" ? man.agentes : {};
+    const agentes = [];
+    let agentesProntos = 0;
+    for (const [agName, info] of Object.entries(agentesObj)) {
+      const pk = String((info == null ? void 0 : info.pubkey) || "").trim();
+      const pkReady = !isPlaceholderHex(pk);
+      if (pkReady) agentesProntos++;
+      agentes.push({
+        name: agName,
+        empresa: slug,
+        papel: String((info == null ? void 0 : info.papel) || "agente"),
+        model: String((info == null ? void 0 : info.model) || "não definido"),
+        parallelism: Number((info == null ? void 0 : info.parallelism) || 1),
+        pubkey: pk,
+        pubkeyReady: pkReady,
+        activeLock: locksByAgent.get(agName.toLowerCase()) || null
+      });
+    }
+    const pendencias = [];
+    if (!man) {
+      pendencias.push(`Manifesto empresas/${slug}.json não encontrado`);
+    } else {
+      if (!canalPronto) pendencias.push("UUID do canal Buzz ainda em placeholder");
+      const faltamPk = agentes.filter((a) => !a.pubkeyReady).map((a) => a.name);
+      if (faltamPk.length > 0) {
+        pendencias.push(`Pubkeys pendentes (${faltamPk.length}): ${faltamPk.slice(0, 3).join(", ")}${faltamPk.length > 3 ? "…" : ""}`);
+      }
+      const probes = (_a2 = man == null ? void 0 : man.probes_caixa_preta) == null ? void 0 : _a2.probes_padrao;
+      if (Array.isArray(probes) && probes.some((p) => String((p == null ? void 0 : p.url) || "").includes(".internal"))) {
+        pendencias.push("URL de staging dos probes ainda com domínio .internal");
+      }
+    }
+    return {
+      slug,
+      nome,
+      nivel,
+      workspaceBuzz: String(((_b2 = man == null ? void 0 : man.hierarquia) == null ? void 0 : _b2.workspace_buzz) || nome),
+      ceoEmpresa,
+      reportaA,
+      estagio: pendencias.length === 0 ? "operacional" : estagio,
+      canal,
+      canalPronto,
+      budgetTokensDiario: typeof ((_c2 = man == null ? void 0 : man.governanca_orcamento) == null ? void 0 : _c2.budget_tokens_diario) === "number" ? man.governanca_orcamento.budget_tokens_diario : null,
+      cpiMinimo: typeof ((_d2 = man == null ? void 0 : man.governanca_orcamento) == null ? void 0 : _d2.cpi_minimo) === "number" ? man.governanca_orcamento.cpi_minimo : null,
+      agentesTotal: agentes.length,
+      agentesProntos,
+      locksAtivos: agentes.filter((a) => a.activeLock !== null).length,
+      pendenciasOnboarding: pendencias,
+      agentes
+    };
+  };
+  const empresas = [];
+  empresas.push(
+    buildCompanyItem(
+      "orgfy",
+      ((_a = boardJson == null ? void 0 : boardJson.core_framework) == null ? void 0 : _a.nome) || "OrgFy Core (Engenharia & Método)",
+      "core",
+      "operacional",
+      "OrgFy Bento (COO)",
+      "OrgFy Iris",
+      orgfyJson
+    )
+  );
+  const subs = Array.isArray(boardJson == null ? void 0 : boardJson.subsidiarias) ? boardJson.subsidiarias : [];
+  const subManifests = await Promise.all(
+    subs.map((s) => readOrgfyJson(ctx, (s == null ? void 0 : s.manifesto) || `empresas/${s == null ? void 0 : s.slug}.json`, null))
+  );
+  subs.forEach((s, idx) => {
+    empresas.push(
+      buildCompanyItem(
+        String((s == null ? void 0 : s.slug) || `sub-${idx}`),
+        String((s == null ? void 0 : s.nome) || (s == null ? void 0 : s.workspace_buzz) || (s == null ? void 0 : s.slug) || "Subsidiária"),
+        "subsidiaria",
+        String((s == null ? void 0 : s.estagio) || "onboarding"),
+        String((s == null ? void 0 : s.ceo_empresa) || "A definir"),
+        String((s == null ? void 0 : s.reporta_a) || "OrgFy Iris"),
+        subManifests[idx]
+      )
+    );
+  });
+  const regrasObj = (regrasJson == null ? void 0 : regrasJson.regras) && typeof regrasJson.regras === "object" ? regrasJson.regras : {};
+  const regrasProbatorias = Object.entries(regrasObj).map(
+    ([id, r]) => ({
+      id,
+      erroId: String((r == null ? void 0 : r.erro_id) || id),
+      descricao: String((r == null ? void 0 : r.descricao) || "Sem descrição"),
+      status: String((r == null ? void 0 : r.status) || "DESCONHECIDO"),
+      cardsAvaliados: Number((r == null ? void 0 : r.cards_avaliados) || 0),
+      janelaAlvo: Number((r == null ? void 0 : r.janela_alvo) || 10),
+      fpyObservado: typeof (r == null ? void 0 : r.fpy_observado) === "number" ? r.fpy_observado : null
+    })
+  );
+  return {
+    ok: boardJson !== null || orgfyJson !== null,
+    loadedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    boardNome: String((boardJson == null ? void 0 : boardJson.nome) || "Conselho da Holding OrgFy"),
+    fundador: {
+      nome: String(((_b = boardJson == null ? void 0 : boardJson.fundador) == null ? void 0 : _b.nome) || "Helton Fraga"),
+      papel: String(((_c = boardJson == null ? void 0 : boardJson.fundador) == null ? void 0 : _c.papel) || "Fundador"),
+      pubkey: String(((_d = boardJson == null ? void 0 : boardJson.fundador) == null ? void 0 : _d.pubkey) || "")
+    },
+    ceoHolding: {
+      nome: String(((_e = boardJson == null ? void 0 : boardJson.ceo_holding) == null ? void 0 : _e.nome) || "OrgFy Iris"),
+      papel: String(((_f = boardJson == null ? void 0 : boardJson.ceo_holding) == null ? void 0 : _f.papel) || "CEO da Holding"),
+      pubkey: String(((_g = boardJson == null ? void 0 : boardJson.ceo_holding) == null ? void 0 : _g.pubkey) || "")
+    },
+    conselho: Array.isArray(boardJson == null ? void 0 : boardJson.conselho) ? boardJson.conselho : [],
+    fluxoEscalada: (boardJson == null ? void 0 : boardJson.fluxo_escalada) && typeof boardJson.fluxo_escalada === "object" ? boardJson.fluxo_escalada : {},
+    cadeiaComando: Array.isArray((_h = boardJson == null ? void 0 : boardJson.protocolo_governanca) == null ? void 0 : _h.cadeia_comando) ? boardJson.protocolo_governanca.cadeia_comando : [],
+    empresas,
+    approvals,
+    workflows,
+    regrasProbatorias,
+    templatesReais,
+    activeLocks
+  };
+}
+const fmtTokens = (n) => {
+  if (n === null || !Number.isFinite(n)) return "--";
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${Math.round(n / 1e3)}k`;
+  return String(n);
+};
+function renderBoardHoldingTab(props) {
+  const { h, holding, kpis } = props;
+  if (!holding) {
+    return h(
+      "div",
+      {
+        style: {
+          padding: "32px",
+          textAlign: "center",
+          color: "#9ca3af",
+          fontSize: "13px"
+        }
+      },
+      "Carregando estado real da Holding e do Conselho (empresas/board.json)..."
+    );
+  }
+  const pendingApprovals = holding.approvals.filter((a) => a.status === "pendente");
+  const workflowOk = holding.workflows.every((w) => w.exists && w.enabled === true);
+  return h(
+    "div",
+    {
+      style: {
+        display: "flex",
+        flexDirection: "column",
+        gap: "16px",
+        flex: 1,
+        minHeight: 0,
+        overflowY: "auto",
+        paddingRight: "4px"
+      }
+    },
+    // 1. Cabeçalho Executivo da Holding
+    h(
+      "div",
+      {
+        style: {
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          padding: "14px 18px",
+          borderRadius: "10px",
+          backgroundColor: "rgba(255,255,255,0.025)",
+          border: "1px solid rgba(255,255,255,0.08)",
+          flexWrap: "wrap",
+          gap: "12px"
+        }
+      },
+      h(
+        "div",
+        { style: { display: "flex", flexDirection: "column", gap: "4px" } },
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", gap: "10px" } },
+          h("span", { style: { fontSize: "15px", fontWeight: "700", color: "#f3f4f6" } }, holding.boardNome),
+          h(
+            "span",
+            {
+              style: {
+                fontSize: "10px",
+                fontFamily: "monospace",
+                padding: "2px 7px",
+                borderRadius: "9999px",
+                backgroundColor: workflowOk ? "rgba(16,185,129,0.14)" : "rgba(239,68,68,0.18)",
+                color: workflowOk ? "#10b981" : "#f87171",
+                fontWeight: "700"
+              }
+            },
+            workflowOk ? "WORKFLOW ATIVO" : "ALERTA WORKFLOW"
+          )
+        ),
+        h(
+          "span",
+          { style: { fontSize: "11px", color: "#9ca3af" } },
+          `Fundador: ${holding.fundador.nome} · CEO Holding: ${holding.ceoHolding.nome} · ${holding.empresas.length} empresas no portfólio · ${pendingApprovals.length} aprovação(ões) pendente(s)`
+        )
+      ),
+      h(
+        "button",
+        {
+          onClick: props.onRefresh,
+          style: {
+            padding: "6px 12px",
+            borderRadius: "7px",
+            border: "1px solid rgba(255,255,255,0.12)",
+            backgroundColor: "rgba(255,255,255,0.04)",
+            color: "#e5e7eb",
+            fontSize: "11px",
+            fontWeight: "600",
+            cursor: "pointer"
+          }
+        },
+        "Atualizar Holding"
+      )
+    ),
+    // 2. Portfólio de Empresas (Core + Subsidiárias)
+    h(
+      "div",
+      { style: { display: "flex", flexDirection: "column", gap: "8px" } },
+      h(
+        "div",
+        { style: { fontSize: "11px", fontWeight: "700", color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.06em" } },
+        "Portfólio de Empresas & Prontidão Operacional"
+      ),
+      h(
+        "div",
+        {
+          style: {
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(290px, 1fr))",
+            gap: "12px"
+          }
+        },
+        holding.empresas.map((emp) => {
+          const isOp = emp.estagio === "operacional";
+          const statusColor = isOp ? "#10b981" : emp.estagio === "onboarding" ? "#f59e0b" : "#60a5fa";
+          return h(
+            "div",
+            {
+              key: emp.slug,
+              style: {
+                padding: "14px 16px",
+                borderRadius: "10px",
+                backgroundColor: "#15161a",
+                border: "1px solid rgba(255,255,255,0.08)",
+                display: "flex",
+                flexDirection: "column",
+                gap: "10px"
+              }
+            },
+            h(
+              "div",
+              { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px" } },
+              h(
+                "div",
+                { style: { display: "flex", flexDirection: "column", gap: "2px" } },
+                h("span", { style: { fontSize: "13px", fontWeight: "700", color: "#f3f4f6" } }, emp.nome),
+                h(
+                  "span",
+                  { style: { fontSize: "10px", color: "#9ca3af", fontFamily: "monospace" } },
+                  `Workspace: ${emp.workspaceBuzz} · Liderança: ${emp.ceoEmpresa}`
+                )
+              ),
+              h(
+                "span",
+                {
+                  style: {
+                    fontSize: "10px",
+                    fontWeight: "700",
+                    padding: "2px 8px",
+                    borderRadius: "9999px",
+                    backgroundColor: `${statusColor}20`,
+                    color: statusColor,
+                    textTransform: "uppercase"
+                  }
+                },
+                emp.estagio
+              )
+            ),
+            h(
+              "div",
+              {
+                style: {
+                  display: "grid",
+                  gridTemplateColumns: "repeat(3, 1fr)",
+                  gap: "8px",
+                  padding: "8px 10px",
+                  borderRadius: "8px",
+                  backgroundColor: "rgba(0,0,0,0.28)",
+                  fontSize: "11px"
+                }
+              },
+              h(
+                "div",
+                null,
+                h("div", { style: { fontSize: "9px", color: "#6b7280" } }, "AGENTES"),
+                h("div", { style: { fontWeight: "700", color: "#f3f4f6", fontFamily: "monospace" } }, `${emp.agentesProntos}/${emp.agentesTotal}`)
+              ),
+              h(
+                "div",
+                null,
+                h("div", { style: { fontSize: "9px", color: "#6b7280" } }, "TETO/DIA"),
+                h("div", { style: { fontWeight: "700", color: "#f3f4f6", fontFamily: "monospace" } }, `${fmtTokens(emp.budgetTokensDiario)} tok`)
+              ),
+              h(
+                "div",
+                null,
+                h("div", { style: { fontSize: "9px", color: "#6b7280" } }, "EM EXECUÇÃO"),
+                h("div", { style: { fontWeight: "700", color: emp.locksAtivos > 0 ? "#f59e0b" : "#10b981", fontFamily: "monospace" } }, `${emp.locksAtivos} ativo(s)`)
+              )
+            ),
+            emp.slug === "orgfy" && kpis ? h(
+              "div",
+              { style: { fontSize: "11px", color: "#9ca3af", display: "flex", gap: "10px", fontFamily: "monospace" } },
+              h("span", { style: { color: "#10b981" } }, `FPY: ${kpis.qualidade.fpy_real_pct ?? "--"}%`),
+              h("span", null, `30d: ${kpis.fluxo.vazao_30d} merges`),
+              h("span", null, `Alertas: ${kpis.alertas_ativos.length}`)
+            ) : null,
+            emp.pendenciasOnboarding.length > 0 ? h(
+              "div",
+              {
+                style: {
+                  padding: "8px 10px",
+                  borderRadius: "7px",
+                  backgroundColor: "rgba(245,158,11,0.08)",
+                  border: "1px solid rgba(245,158,11,0.22)",
+                  fontSize: "10px",
+                  color: "#fbbf24",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "3px"
+                }
+              },
+              h("strong", null, "Pendências para virar a chave:"),
+              emp.pendenciasOnboarding.map((p, i) => h("span", { key: i }, `• ${p}`))
+            ) : h(
+              "div",
+              { style: { fontSize: "10px", color: "#10b981" } },
+              "✓ Manifesto, canal e chaves operacionais validados."
+            ),
+            h(
+              "button",
+              {
+                onClick: () => props.onSelectTenant(emp.slug),
+                style: {
+                  marginTop: "auto",
+                  padding: "6px 10px",
+                  borderRadius: "6px",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                  backgroundColor: "rgba(255,255,255,0.04)",
+                  color: "#e5e7eb",
+                  fontSize: "11px",
+                  fontWeight: "600",
+                  cursor: "pointer"
+                }
+              },
+              `Abrir Esteira de ${emp.nome} →`
+            )
+          );
+        })
+      )
+    ),
+    // 3. Linha inferior: Conselho Funcional + Fila de Aprovações do Board
+    h(
+      "div",
+      {
+        style: {
+          display: "grid",
+          gridTemplateColumns: "1fr 1.35fr",
+          gap: "12px"
+        }
+      },
+      // Conselho Funcional + Fluxo de Escalada
+      h(
+        "div",
+        {
+          style: {
+            padding: "14px 16px",
+            borderRadius: "10px",
+            backgroundColor: "#15161a",
+            border: "1px solid rgba(255,255,255,0.08)",
+            display: "flex",
+            flexDirection: "column",
+            gap: "10px"
+          }
+        },
+        h("div", { style: { fontSize: "11px", fontWeight: "700", color: "#9ca3af", textTransform: "uppercase" } }, "Conselho Funcional (Board)"),
+        holding.conselho.map(
+          (c) => h(
+            "div",
+            {
+              key: c.id,
+              style: {
+                padding: "8px 10px",
+                borderRadius: "7px",
+                backgroundColor: "rgba(0,0,0,0.25)",
+                border: "1px solid rgba(255,255,255,0.05)",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "8px"
+              }
+            },
+            h(
+              "div",
+              { style: { display: "flex", flexDirection: "column", gap: "2px" } },
+              h("span", { style: { fontSize: "12px", fontWeight: "600", color: "#f3f4f6" } }, c.area),
+              h("span", { style: { fontSize: "10px", color: "#9ca3af" } }, c.responsavel)
+            ),
+            h(
+              "span",
+              {
+                style: {
+                  fontSize: "9px",
+                  fontWeight: "700",
+                  padding: "2px 6px",
+                  borderRadius: "4px",
+                  backgroundColor: c.status === "ativo" ? "rgba(16,185,129,0.16)" : "rgba(96,165,250,0.16)",
+                  color: c.status === "ativo" ? "#10b981" : "#60a5fa",
+                  textTransform: "uppercase"
+                }
+              },
+              c.status
+            )
+          )
+        ),
+        Object.keys(holding.fluxoEscalada).length > 0 && h(
+          "div",
+          {
+            style: {
+              marginTop: "4px",
+              padding: "10px",
+              borderRadius: "7px",
+              backgroundColor: "rgba(56,189,248,0.06)",
+              border: "1px solid rgba(56,189,248,0.18)",
+              fontSize: "10px",
+              color: "#cbd5e1",
+              display: "flex",
+              flexDirection: "column",
+              gap: "4px"
+            }
+          },
+          h("strong", { style: { color: "#38bdf8" } }, "Roteamento de Autonomia:"),
+          Object.entries(holding.fluxoEscalada).map(
+            ([k, v]) => h("span", { key: k }, `• ${k.replace(/_/g, " ")}: ${v}`)
+          )
+        )
+      ),
+      // Fila de Aprovações do Board (Persistida em board-approvals.json)
+      h(
+        "div",
+        {
+          style: {
+            padding: "14px 16px",
+            borderRadius: "10px",
+            backgroundColor: "#15161a",
+            border: "1px solid rgba(255,255,255,0.08)",
+            display: "flex",
+            flexDirection: "column",
+            gap: "10px"
+          }
+        },
+        h(
+          "div",
+          { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+          h("div", { style: { fontSize: "11px", fontWeight: "700", color: "#9ca3af", textTransform: "uppercase" } }, "Fila de Aprovações do Board (Z5 / Z6 / Investimentos)"),
+          h("span", { style: { fontSize: "10px", fontFamily: "monospace", color: "#9ca3af" } }, `${pendingApprovals.length} pendente(s)`)
+        ),
+        // Formulário rápido de nova deliberação
+        h(
+          "div",
+          {
+            style: {
+              display: "grid",
+              gridTemplateColumns: "1fr 120px 130px",
+              gap: "6px"
+            }
+          },
+          h("input", {
+            type: "text",
+            placeholder: "Nova pauta ou aprovação para o Board...",
+            value: props.newApprovalTitle,
+            onChange: (e) => props.setNewApprovalTitle(e.target.value),
+            style: {
+              padding: "6px 10px",
+              borderRadius: "6px",
+              backgroundColor: "rgba(0,0,0,0.3)",
+              border: "1px solid rgba(255,255,255,0.1)",
+              color: "#f3f4f6",
+              fontSize: "11px",
+              outline: "none"
+            }
+          }),
+          h(
+            "select",
+            {
+              value: props.newApprovalCompany,
+              onChange: (e) => props.setNewApprovalCompany(e.target.value),
+              style: {
+                padding: "6px 8px",
+                borderRadius: "6px",
+                backgroundColor: "rgba(0,0,0,0.3)",
+                border: "1px solid rgba(255,255,255,0.1)",
+                color: "#f3f4f6",
+                fontSize: "11px"
+              }
+            },
+            h("option", { value: "board" }, "Board"),
+            holding.empresas.map((e) => h("option", { key: e.slug, value: e.slug }, e.nome))
+          ),
+          h(
+            "select",
+            {
+              value: props.newApprovalType,
+              onChange: (e) => props.setNewApprovalType(e.target.value),
+              style: {
+                padding: "6px 8px",
+                borderRadius: "6px",
+                backgroundColor: "rgba(0,0,0,0.3)",
+                border: "1px solid rgba(255,255,255,0.1)",
+                color: "#f3f4f6",
+                fontSize: "11px"
+              }
+            },
+            h("option", { value: "investimento" }, "Investimento"),
+            h("option", { value: "orcamento" }, "Orçamento"),
+            h("option", { value: "metodo_z5_z6" }, "Método Z5/Z6"),
+            h("option", { value: "intervencao" }, "Intervenção"),
+            h("option", { value: "onboarding" }, "Onboarding")
+          )
+        ),
+        h(
+          "div",
+          { style: { display: "flex", gap: "6px" } },
+          h("input", {
+            type: "text",
+            placeholder: "Contexto objetivo ou impacto esperado...",
+            value: props.newApprovalDesc,
+            onChange: (e) => props.setNewApprovalDesc(e.target.value),
+            style: {
+              flex: 1,
+              padding: "6px 10px",
+              borderRadius: "6px",
+              backgroundColor: "rgba(0,0,0,0.3)",
+              border: "1px solid rgba(255,255,255,0.1)",
+              color: "#f3f4f6",
+              fontSize: "11px",
+              outline: "none"
+            }
+          }),
+          h(
+            "button",
+            {
+              onClick: () => {
+                if (!props.newApprovalTitle.trim()) return;
+                props.onCreateApproval({
+                  empresa: props.newApprovalCompany,
+                  tipo: props.newApprovalType,
+                  titulo: props.newApprovalTitle,
+                  descricao: props.newApprovalDesc || "Registrado via OrgFy Control Plane"
+                });
+              },
+              style: {
+                padding: "6px 12px",
+                borderRadius: "6px",
+                border: "none",
+                backgroundColor: "#10b981",
+                color: "#000000",
+                fontSize: "11px",
+                fontWeight: "700",
+                cursor: "pointer"
+              }
+            },
+            "+ Registrar"
+          )
+        ),
+        holding.approvals.length === 0 ? h(
+          "div",
+          { style: { padding: "18px", textAlign: "center", color: "#6b7280", fontSize: "11px" } },
+          "Nenhuma deliberação registrada em board-approvals.json ainda."
+        ) : h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: "6px", maxHeight: "230px", overflowY: "auto" } },
+          holding.approvals.map(
+            (ap) => h(
+              "div",
+              {
+                key: ap.id,
+                style: {
+                  padding: "8px 10px",
+                  borderRadius: "7px",
+                  backgroundColor: "rgba(0,0,0,0.28)",
+                  border: "1px solid rgba(255,255,255,0.06)",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: "10px"
+                }
+              },
+              h(
+                "div",
+                { style: { display: "flex", flexDirection: "column", gap: "2px", minWidth: 0 } },
+                h(
+                  "div",
+                  { style: { display: "flex", alignItems: "center", gap: "6px" } },
+                  h("span", { style: { fontSize: "9px", fontFamily: "monospace", color: "#38bdf8", textTransform: "uppercase" } }, `${ap.empresa} · ${ap.tipo}`),
+                  h("span", { style: { fontSize: "12px", fontWeight: "600", color: "#f3f4f6" } }, ap.titulo)
+                ),
+                h("span", { style: { fontSize: "10px", color: "#9ca3af" } }, ap.descricao)
+              ),
+              ap.status === "pendente" ? h(
+                "div",
+                { style: { display: "flex", gap: "6px", flexShrink: 0 } },
+                h(
+                  "button",
+                  {
+                    onClick: () => props.onDecideApproval(ap.id, "aprovado"),
+                    style: {
+                      padding: "4px 8px",
+                      borderRadius: "5px",
+                      border: "none",
+                      backgroundColor: "rgba(16,185,129,0.2)",
+                      color: "#10b981",
+                      fontSize: "10px",
+                      fontWeight: "700",
+                      cursor: "pointer"
+                    }
+                  },
+                  "Aprovar"
+                ),
+                h(
+                  "button",
+                  {
+                    onClick: () => props.onDecideApproval(ap.id, "recusado"),
+                    style: {
+                      padding: "4px 8px",
+                      borderRadius: "5px",
+                      border: "none",
+                      backgroundColor: "rgba(239,68,68,0.18)",
+                      color: "#f87171",
+                      fontSize: "10px",
+                      fontWeight: "700",
+                      cursor: "pointer"
+                    }
+                  },
+                  "Recusar"
+                )
+              ) : h(
+                "span",
+                {
+                  style: {
+                    fontSize: "10px",
+                    fontWeight: "700",
+                    color: ap.status === "aprovado" ? "#10b981" : "#f87171",
+                    textTransform: "uppercase",
+                    flexShrink: 0
+                  }
+                },
+                ap.status
+              )
+            )
+          )
+        )
+      )
+    )
+  );
+}
+function renderOrgChartTab(props) {
+  const { h, holding, selectedTenant } = props;
+  if (!holding) {
+    return h(
+      "div",
+      { style: { padding: "32px", textAlign: "center", color: "#9ca3af", fontSize: "13px" } },
+      "Carregando organograma real da holding..."
+    );
+  }
+  const visibleCompanies = selectedTenant === "all" || selectedTenant === "board" ? holding.empresas : holding.empresas.filter((e) => e.slug === selectedTenant);
+  return h(
+    "div",
+    {
+      style: {
+        display: "flex",
+        flexDirection: "column",
+        gap: "16px",
+        flex: 1,
+        minHeight: 0,
+        overflowY: "auto",
+        paddingRight: "4px"
+      }
+    },
+    // Topo da Hierarquia: Fundador -> CEO Holding (Board)
+    h(
+      "div",
+      {
+        style: {
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: "12px"
+        }
+      },
+      h(
+        "div",
+        {
+          style: {
+            padding: "14px 16px",
+            borderRadius: "10px",
+            backgroundColor: "#15161a",
+            border: "1px solid rgba(16,185,129,0.3)",
+            display: "flex",
+            flexDirection: "column",
+            gap: "4px"
+          }
+        },
+        h("span", { style: { fontSize: "10px", color: "#10b981", fontWeight: "700", textTransform: "uppercase" } }, "Nível 0 · Presidente do Conselho"),
+        h("span", { style: { fontSize: "14px", fontWeight: "700", color: "#f3f4f6" } }, holding.fundador.nome),
+        h("span", { style: { fontSize: "11px", color: "#9ca3af" } }, holding.fundador.papel)
+      ),
+      h(
+        "div",
+        {
+          style: {
+            padding: "14px 16px",
+            borderRadius: "10px",
+            backgroundColor: "#15161a",
+            border: "1px solid rgba(56,189,248,0.3)",
+            display: "flex",
+            flexDirection: "column",
+            gap: "4px"
+          }
+        },
+        h("span", { style: { fontSize: "10px", color: "#38bdf8", fontWeight: "700", textTransform: "uppercase" } }, "Nível 1 · CEO da Holding (Board)"),
+        h("span", { style: { fontSize: "14px", fontWeight: "700", color: "#f3f4f6" } }, holding.ceoHolding.nome),
+        h("span", { style: { fontSize: "11px", color: "#9ca3af" } }, holding.ceoHolding.papel)
+      )
+    ),
+    // Empresas e Times
+    visibleCompanies.map(
+      (emp) => h(
+        "div",
+        {
+          key: emp.slug,
+          style: {
+            padding: "14px 16px",
+            borderRadius: "10px",
+            backgroundColor: "#15161a",
+            border: "1px solid rgba(255,255,255,0.08)",
+            display: "flex",
+            flexDirection: "column",
+            gap: "12px"
+          }
+        },
+        h(
+          "div",
+          { style: { display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid rgba(255,255,255,0.06)", paddingBottom: "8px" } },
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "center", gap: "8px" } },
+            h("span", { style: { fontSize: "13px", fontWeight: "700", color: "#f3f4f6" } }, emp.nome),
+            h(
+              "span",
+              { style: { fontSize: "10px", fontFamily: "monospace", color: "#9ca3af" } },
+              `Reporta a ${emp.reportaA} · ${emp.agentesProntos}/${emp.agentesTotal} prontos`
+            )
+          ),
+          h(
+            "span",
+            {
+              style: {
+                fontSize: "10px",
+                fontFamily: "monospace",
+                color: emp.nivel === "core" ? "#38bdf8" : "#c084fc",
+                textTransform: "uppercase"
+              }
+            },
+            emp.nivel === "core" ? "Fábrica de Método" : "Subsidiária"
+          )
+        ),
+        h(
+          "div",
+          {
+            style: {
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))",
+              gap: "8px"
+            }
+          },
+          emp.agentes.map((ag) => {
+            const isBusy = ag.activeLock !== null;
+            const badgeColor = isBusy ? "#f59e0b" : ag.pubkeyReady ? "#10b981" : "#6b7280";
+            const badgeText = isBusy ? "EM EXECUÇÃO" : ag.pubkeyReady ? "PRONTO" : "PUBKEY PENDENTE";
+            return h(
+              "div",
+              {
+                key: `${emp.slug}-${ag.name}`,
+                style: {
+                  padding: "10px 12px",
+                  borderRadius: "8px",
+                  backgroundColor: "rgba(0,0,0,0.28)",
+                  border: isBusy ? "1px solid rgba(245,158,11,0.4)" : "1px solid rgba(255,255,255,0.06)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "4px"
+                }
+              },
+              h(
+                "div",
+                { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "6px" } },
+                h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, ag.name),
+                h(
+                  "span",
+                  {
+                    style: {
+                      fontSize: "9px",
+                      fontWeight: "700",
+                      padding: "1px 5px",
+                      borderRadius: "4px",
+                      backgroundColor: `${badgeColor}22`,
+                      color: badgeColor
+                    }
+                  },
+                  badgeText
+                )
+              ),
+              h("span", { style: { fontSize: "10px", color: "#9ca3af" } }, `Papel: ${ag.papel} · Paralelismo: ${ag.parallelism}x`),
+              h("span", { style: { fontSize: "10px", fontFamily: "monospace", color: "#60a5fa" } }, ag.model),
+              ag.activeLock && h(
+                "span",
+                { style: { fontSize: "9.5px", fontFamily: "monospace", color: "#fbbf24", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
+                `Lock #${ag.activeLock.issueId.slice(0, 8)}${ag.activeLock.title ? ` · ${ag.activeLock.title}` : ""}`
+              )
+            );
+          })
+        )
+      )
+    )
+  );
+}
 const inject = [
   "react",
   "pages",
@@ -3911,7 +4845,7 @@ function apply(ctx) {
   const React = ctx.react;
   const h = React.createElement;
   function OrgFyCockpit() {
-    var _a2, _b2;
+    var _a2, _b2, _c2, _d, _e, _f, _g, _h;
     const [selectedTenant, setSelectedTenant] = React.useState("all");
     const [porteiroActive, setPorteiroActive] = React.useState(true);
     const [isSyncingPorteiro, setIsSyncingPorteiro] = React.useState(false);
@@ -3967,7 +4901,12 @@ function apply(ctx) {
     const [isMigrating, setIsMigrating] = React.useState(false);
     const [migrationLog, setMigrationLog] = React.useState("");
     const [activeIssueDetailCard, setActiveIssueDetailCard] = React.useState(null);
-    const [activeCentralTab, setActiveCentralTab] = React.useState("pipeline");
+    const [activeCentralTab, setActiveCentralTab] = React.useState("board");
+    const [holdingData, setHoldingData] = React.useState(null);
+    const [newApprovalTitle, setNewApprovalTitle] = React.useState("");
+    const [newApprovalDesc, setNewApprovalDesc] = React.useState("");
+    const [newApprovalCompany, setNewApprovalCompany] = React.useState("board");
+    const [newApprovalType, setNewApprovalType] = React.useState("investimento");
     const [kpisData, setKpisData] = React.useState(null);
     const [kpisHistory, setKpisHistory] = React.useState([]);
     const [kpisError, setKpisError] = React.useState(null);
@@ -3978,6 +4917,10 @@ function apply(ctx) {
     const [resolvedSearch, setResolvedSearch] = React.useState("");
     const [resolvedSpecFilter, setResolvedSpecFilter] = React.useState("all");
     const [copiedResolvedId, setCopiedResolvedId] = React.useState(null);
+    const loadHolding = React.useCallback(async () => {
+      const snap = await fetchHoldingControlPlane(ctx);
+      setHoldingData(snap);
+    }, []);
     const loadKpis = React.useCallback(async () => {
       const res = await fetchKpisEsteira(ctx);
       setKpisData(res.kpis);
@@ -3990,9 +4933,10 @@ function apply(ctx) {
       setResolvedError(res.error);
     }, []);
     React.useEffect(() => {
+      loadHolding();
       loadKpis();
       loadResolvedArchive();
-    }, [loadKpis, loadResolvedArchive]);
+    }, [loadHolding, loadKpis, loadResolvedArchive]);
     const handleRecalculateKpis = React.useCallback(async () => {
       setIsRecalculatingKpis(true);
       try {
@@ -4128,7 +5072,7 @@ function apply(ctx) {
       showNotification("success", `Deep link copiado: buzz://issue?id=${(c.fullIssueId || c.issueId).slice(0, 8)}...`);
     };
     const loadRealState = async () => {
-      var _a3, _b3, _c2, _d;
+      var _a3, _b3, _c3, _d2;
       try {
         const [live, status, liveCards] = await Promise.all([
           fetchLiveEsteiraState(ctx),
@@ -4142,7 +5086,7 @@ function apply(ctx) {
         }
         if (typeof (status == null ? void 0 : status.cpi_tokens) === "number") {
           setCpiTokens(status.cpi_tokens);
-        } else if (((_c2 = (_b3 = live.metricasTurnos) == null ? void 0 : _b3.governanca_orcamento) == null ? void 0 : _c2.cpi_tokens) !== void 0) {
+        } else if (((_c3 = (_b3 = live.metricasTurnos) == null ? void 0 : _b3.governanca_orcamento) == null ? void 0 : _c3.cpi_tokens) !== void 0) {
           setCpiTokens(live.metricasTurnos.governanca_orcamento.cpi_tokens);
         }
         if (typeof (status == null ? void 0 : status.porteiro_online) === "boolean") {
@@ -4157,7 +5101,7 @@ function apply(ctx) {
         if (typeof (status == null ? void 0 : status.total_aceites_blindados) === "number") {
           setTotalAceitesBlindados(status.total_aceites_blindados);
         }
-        if ((_d = live.regrasState) == null ? void 0 : _d.regras) {
+        if ((_d2 = live.regrasState) == null ? void 0 : _d2.regras) {
           setRegrasProbatorias(Object.values(live.regrasState.regras));
         }
         setPipelineCards(liveCards);
@@ -4586,36 +5530,12 @@ function apply(ctx) {
             SVG.zap({ h, width: 13, height: 13 }),
             "+ Novo Despacho"
           ),
-          // Toggle Catálogo de Templates & Hub de RSI na Topbar
-          h(
-            "button",
-            {
-              onClick: () => setActiveCentralTab(activeCentralTab === "templates_rsi" ? "pipeline" : "templates_rsi"),
-              title: "Alternar entre Matriz da Esteira e Catálogo de Templates & RSI",
-              style: {
-                padding: "5px 10px",
-                backgroundColor: activeCentralTab === "templates_rsi" ? "rgba(56, 189, 248, 0.2)" : "rgba(255, 255, 255, 0.04)",
-                color: activeCentralTab === "templates_rsi" ? "#38bdf8" : THEME.textPrimary,
-                border: activeCentralTab === "templates_rsi" ? "1px solid rgba(56, 189, 248, 0.4)" : `1px solid ${THEME.hairline}`,
-                borderRadius: "6px",
-                cursor: "pointer",
-                fontSize: "11px",
-                fontWeight: "500",
-                display: "flex",
-                alignItems: "center",
-                gap: "5px",
-                transition: "all 0.15s ease"
-              }
-            },
-            SVG.gitPullRequest({ h, width: 13, height: 13 }),
-            "Templates & RSI"
-          ),
-          // Toggle Drawer Governança
+          // Toggle Drawer Governança (sem botão duplicado de Templates & RSI nem Copiloto simulado)
           h(
             "button",
             {
               onClick: () => setIsGovernanceDrawerOpen(!isGovernanceDrawerOpen),
-              title: "Abrir Painel Lateral de Governança & RSI",
+              title: "Abrir Painel Lateral de Governança & EVM",
               style: {
                 padding: "5px 10px",
                 backgroundColor: isGovernanceDrawerOpen ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.04)",
@@ -4631,30 +5551,7 @@ function apply(ctx) {
               }
             },
             SVG.shield({ h, width: 13, height: 13 }),
-            "Governança ▤"
-          ),
-          // Toggle Copiloto
-          h(
-            "button",
-            {
-              onClick: () => setIsCopilotOpen((v) => !v),
-              title: "Abrir Copiloto Sagrado",
-              style: {
-                padding: "5px 10px",
-                backgroundColor: isCopilotOpen ? "rgba(59, 130, 246, 0.2)" : "rgba(255,255,255,0.04)",
-                color: isCopilotOpen ? "#60a5fa" : THEME.textPrimary,
-                border: `1px solid ${THEME.hairline}`,
-                borderRadius: "6px",
-                cursor: "pointer",
-                fontSize: "11px",
-                fontWeight: "500",
-                display: "flex",
-                alignItems: "center",
-                gap: "5px"
-              }
-            },
-            SVG.messageCircle({ h, width: 13, height: 13 }),
-            "Copiloto"
+            "Governança"
           ),
           // Botão Migrador de Agentes
           h(
@@ -4794,102 +5691,48 @@ function apply(ctx) {
             },
             h(
               "div",
-              { style: { display: "flex", alignItems: "center", gap: "8px" } },
-              h(
-                "button",
-                {
-                  onClick: () => setActiveCentralTab("pipeline"),
-                  style: {
-                    padding: "6px 14px",
-                    borderRadius: "8px",
-                    fontSize: "12px",
-                    fontWeight: "600",
-                    cursor: "pointer",
-                    border: activeCentralTab === "pipeline" ? "1px solid rgba(16, 185, 129, 0.4)" : "1px solid transparent",
-                    backgroundColor: activeCentralTab === "pipeline" ? "rgba(16, 185, 129, 0.15)" : "rgba(255, 255, 255, 0.04)",
-                    color: activeCentralTab === "pipeline" ? "#10b981" : "#9ca3af",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "6px"
-                  }
-                },
-                SVG.activity({ h, width: 14, height: 14 }),
-                "Matriz da Esteira (Kanban)"
-              ),
-              h(
-                "button",
-                {
-                  onClick: () => setActiveCentralTab("templates_rsi"),
-                  style: {
-                    padding: "6px 14px",
-                    borderRadius: "8px",
-                    fontSize: "12px",
-                    fontWeight: "600",
-                    cursor: "pointer",
-                    border: activeCentralTab === "templates_rsi" ? "1px solid rgba(56, 189, 248, 0.4)" : "1px solid transparent",
-                    backgroundColor: activeCentralTab === "templates_rsi" ? "rgba(56, 189, 248, 0.15)" : "rgba(255, 255, 255, 0.04)",
-                    color: activeCentralTab === "templates_rsi" ? "#38bdf8" : "#9ca3af",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "6px"
-                  }
-                },
-                SVG.gitPullRequest({ h, width: 14, height: 14 }),
-                "Catálogo de Templates & Hub de RSI"
-              ),
-              h(
-                "button",
-                {
-                  onClick: () => {
-                    setActiveCentralTab("inteligencia");
-                    loadKpis();
+              { style: { display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" } },
+              [
+                { id: "board", label: "Board & Holding", color: "#10b981", icon: SVG.shield },
+                { id: "orgchart", label: "Organograma", color: "#38bdf8", icon: SVG.users },
+                { id: "pipeline", label: "Esteira (Kanban)", color: "#10b981", icon: SVG.columns },
+                { id: "inteligencia", label: "Saúde & FinOps", color: "#c084fc", icon: SVG.activity },
+                { id: "templates_rsi", label: "Templates & RSI", color: "#38bdf8", icon: SVG.fileText },
+                { id: "resolvidas", label: `Arquivo (${resolvedItems.length})`, color: "#fbbf24", icon: SVG.checkCircle }
+              ].map(
+                (t) => h(
+                  "button",
+                  {
+                    key: t.id,
+                    onClick: () => {
+                      setActiveCentralTab(t.id);
+                      if (t.id === "board" || t.id === "orgchart" || t.id === "templates_rsi") loadHolding();
+                      if (t.id === "inteligencia") loadKpis();
+                      if (t.id === "resolvidas") loadResolvedArchive();
+                    },
+                    style: {
+                      padding: "6px 12px",
+                      borderRadius: "7px",
+                      fontSize: "12px",
+                      fontWeight: "600",
+                      cursor: "pointer",
+                      border: activeCentralTab === t.id ? `1px solid ${t.color}66` : "1px solid transparent",
+                      backgroundColor: activeCentralTab === t.id ? `${t.color}22` : "rgba(255, 255, 255, 0.04)",
+                      color: activeCentralTab === t.id ? t.color : "#9ca3af",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px"
+                    }
                   },
-                  style: {
-                    padding: "6px 14px",
-                    borderRadius: "8px",
-                    fontSize: "12px",
-                    fontWeight: "600",
-                    cursor: "pointer",
-                    border: activeCentralTab === "inteligencia" ? "1px solid rgba(168, 85, 247, 0.45)" : "1px solid transparent",
-                    backgroundColor: activeCentralTab === "inteligencia" ? "rgba(168, 85, 247, 0.16)" : "rgba(255, 255, 255, 0.04)",
-                    color: activeCentralTab === "inteligencia" ? "#c084fc" : "#9ca3af",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "6px"
-                  }
-                },
-                SVG.activity({ h, width: 14, height: 14 }),
-                "Inteligência & Saúde"
-              ),
-              h(
-                "button",
-                {
-                  onClick: () => {
-                    setActiveCentralTab("resolvidas");
-                    loadResolvedArchive();
-                  },
-                  style: {
-                    padding: "6px 14px",
-                    borderRadius: "8px",
-                    fontSize: "12px",
-                    fontWeight: "600",
-                    cursor: "pointer",
-                    border: activeCentralTab === "resolvidas" ? "1px solid rgba(245, 158, 11, 0.45)" : "1px solid transparent",
-                    backgroundColor: activeCentralTab === "resolvidas" ? "rgba(245, 158, 11, 0.16)" : "rgba(255, 255, 255, 0.04)",
-                    color: activeCentralTab === "resolvidas" ? "#fbbf24" : "#9ca3af",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "6px"
-                  }
-                },
-                SVG.checkCircle({ h, width: 14, height: 14 }),
-                `Arquivo de Resolvidas (${resolvedItems.length})`
+                  t.icon({ h, width: 13, height: 13 }),
+                  t.label
+                )
               )
             ),
             h(
               "span",
               { style: { fontSize: "11px", color: "#6b7280", fontFamily: "monospace" } },
-              activeCentralTab === "pipeline" ? "Esteira Determinística OrgFy v11" : activeCentralTab === "inteligencia" ? "Telemetria Real, Economia & Governança de Ciclo Fechado" : activeCentralTab === "resolvidas" ? "Memória Episódica Sob Demanda (Deep-Link & Reabertura)" : "Recursão & FPY (Regras L-22, L-90)"
+              activeCentralTab === "board" ? "Conselho da Holding · Visão Multi-Empresa" : activeCentralTab === "orgchart" ? "Hierarquia Real (empresas/*.json)" : activeCentralTab === "pipeline" ? "Esteira Determinística OrgFy v12" : activeCentralTab === "inteligencia" ? "Telemetria Real, Economia & Workflows" : activeCentralTab === "resolvidas" ? "Memória Episódica Sob Demanda" : "Templates Reais & Regras L-90"
             )
           ),
           activeCentralTab === "pipeline" ? h(
@@ -5393,7 +6236,47 @@ function apply(ctx) {
                 )
               )
             )
-          ) : activeCentralTab === "inteligencia" ? renderIntelligenceTab({
+          ) : activeCentralTab === "board" ? renderBoardHoldingTab({
+            h,
+            holding: holdingData,
+            kpis: kpisData,
+            onSelectTenant: (slug) => {
+              setSelectedTenant(slug);
+              setActiveCentralTab("pipeline");
+            },
+            onCreateApproval: async (input) => {
+              const res = await createBoardApproval(ctx, input);
+              if (res.ok) {
+                setNewApprovalTitle("");
+                setNewApprovalDesc("");
+                await loadHolding();
+                showNotification("success", "Deliberação registrada em board-approvals.json.");
+              }
+            },
+            onDecideApproval: async (id, decision) => {
+              const res = await decideBoardApproval(ctx, id, decision);
+              if (res.ok) {
+                await loadHolding();
+                showNotification("success", `Deliberação marcada como ${decision}.`);
+              }
+            },
+            onRefresh: () => {
+              loadHolding();
+              loadKpis();
+            },
+            newApprovalTitle,
+            setNewApprovalTitle,
+            newApprovalDesc,
+            setNewApprovalDesc,
+            newApprovalCompany,
+            setNewApprovalCompany,
+            newApprovalType,
+            setNewApprovalType
+          }) : activeCentralTab === "orgchart" ? renderOrgChartTab({
+            h,
+            holding: holdingData,
+            selectedTenant
+          }) : activeCentralTab === "inteligencia" ? renderIntelligenceTab({
             h,
             kpis: kpisData,
             history: kpisHistory,
@@ -5499,7 +6382,7 @@ function apply(ctx) {
                     borderRadius: "4px"
                   }
                 },
-                "v10 SOBERANA"
+                "v12 CONTROL PLANE"
               )
             ),
             h(
@@ -6084,19 +6967,19 @@ function apply(ctx) {
               "div",
               { style: { display: "flex", justifyContent: "space-between", fontSize: "12px" } },
               h("span", null, "• http_rota (Caddy v3 200 OK):"),
-              h("span", { style: { color: "#10b981", fontWeight: "600" } }, "PASSOU")
+              h("span", { style: { color: ((_a2 = activeGateCard.probes) == null ? void 0 : _a2.http_rota) ? "#10b981" : "#9ca3af", fontWeight: "600" } }, ((_b2 = activeGateCard.probes) == null ? void 0 : _b2.http_rota) ? "PASS" : "Não executado")
             ),
             h(
               "div",
               { style: { display: "flex", justifyContent: "space-between", fontSize: "12px" } },
               h("span", null, "• supabase_rls (Políticas & Migrations):"),
-              h("span", { style: { color: "#10b981", fontWeight: "600" } }, "PASSOU")
+              h("span", { style: { color: ((_c2 = activeGateCard.probes) == null ? void 0 : _c2.supabase_rls) ? "#10b981" : "#9ca3af", fontWeight: "600" } }, ((_d = activeGateCard.probes) == null ? void 0 : _d.supabase_rls) ? "PASS" : "Não executado")
             ),
             h(
               "div",
               { style: { display: "flex", justifyContent: "space-between", fontSize: "12px" } },
               h("span", null, "• playwright_console (0 erros runtime):"),
-              h("span", { style: { color: "#10b981", fontWeight: "600" } }, "PASSOU")
+              h("span", { style: { color: ((_e = activeGateCard.probes) == null ? void 0 : _e.playwright_console) ? "#10b981" : "#9ca3af", fontWeight: "600" } }, ((_f = activeGateCard.probes) == null ? void 0 : _f.playwright_console) ? "PASS" : "Não executado")
             )
           ),
           // Justificativa de Recusa & Detector DSAP
@@ -6234,7 +7117,7 @@ function apply(ctx) {
             h(
               "span",
               { style: { fontSize: "12px", color: "#10b981", fontWeight: "700" } },
-              `CONSOLE LIVE: Worker Headless [PID: ${activeLogsCard.workerPid || "84219"}] - ${activeLogsCard.issueId}`
+              `CONSOLE LIVE: ${activeLogsCard.workerPid ? `PID ${activeLogsCard.workerPid}` : "Sessão CLI"} — #${activeLogsCard.issueId}`
             ),
             h("span", { style: { fontSize: "10px", color: "#60a5fa", fontWeight: "600" } }, "🟢 STREAMING ATIVO")
           ),
@@ -6881,7 +7764,7 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
                   }
                 },
                 h("span", { style: { fontSize: "10px", fontWeight: "700", color: "#38bdf8", textTransform: "uppercase" } }, "Transcript & Diffs do Agente (Nativo)"),
-                ((_b2 = (_a2 = ctx.agents) == null ? void 0 : _a2.ui) == null ? void 0 : _b2.Transcript) && (activeIssueDetailCard == null ? void 0 : activeIssueDetailCard.conversationId) ? h(ctx.agents.ui.Transcript, {
+                ((_h = (_g = ctx.agents) == null ? void 0 : _g.ui) == null ? void 0 : _h.Transcript) && (activeIssueDetailCard == null ? void 0 : activeIssueDetailCard.conversationId) ? h(ctx.agents.ui.Transcript, {
                   conversationId: activeIssueDetailCard.conversationId,
                   compact: true
                 }) : h(
@@ -7520,7 +8403,7 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
               { style: { display: "flex", alignItems: "center", gap: "8px" } },
               SVG.users({ h, width: 20, height: 20 }),
               h("h3", { style: { margin: 0, fontSize: "16px", color: "#ffffff", fontWeight: "700" } }, "Migrador de Agentes & Workspace Soberano"),
-              h("span", { style: { fontSize: "11px", padding: "2px 8px", borderRadius: "9999px", backgroundColor: "rgba(56, 189, 248, 0.2)", color: "#38bdf8", fontWeight: "700" } }, "v10 Canônico")
+              h("span", { style: { fontSize: "11px", padding: "2px 8px", borderRadius: "9999px", backgroundColor: "rgba(56, 189, 248, 0.2)", color: "#38bdf8", fontWeight: "700" } }, "v12 Buzz-Native")
             ),
             h(
               "button",
@@ -7703,6 +8586,11 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
       )
     );
     function renderTemplatesRsiView() {
+      var _a3, _b3;
+      const templatesReais = (holdingData == null ? void 0 : holdingData.templatesReais) || [];
+      const regrasReais = (holdingData == null ? void 0 : holdingData.regrasProbatorias) || [];
+      const fpyReal = (_a3 = kpisData == null ? void 0 : kpisData.qualidade) == null ? void 0 : _a3.fpy_real_pct;
+      const totalIntegrados = (_b3 = kpisData == null ? void 0 : kpisData.fluxo) == null ? void 0 : _b3.vazao_total_feito;
       return h(
         "div",
         {
@@ -7715,102 +8603,67 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
             paddingRight: "6px"
           }
         },
-        // Cabeçalho da Seção de Templates
         h(
           "div",
           {
             style: {
               padding: "14px 18px",
-              borderRadius: "12px",
-              backgroundColor: "rgba(0, 0, 0, 0.3)",
+              borderRadius: "10px",
+              backgroundColor: "rgba(255, 255, 255, 0.025)",
               border: "1px solid rgba(255, 255, 255, 0.08)",
               display: "flex",
               justifyContent: "space-between",
-              alignItems: "center"
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: "10px"
             }
           },
           h(
             "div",
             { style: { display: "flex", flexDirection: "column", gap: "4px" } },
-            h(
-              "span",
-              { style: { fontSize: "14px", fontWeight: "700", color: "#ffffff" } },
-              "Catálogo Canônico de Templates de Card & Contratos FPY"
-            ),
-            h(
-              "span",
-              { style: { fontSize: "11px", color: "#9ca3af" } },
-              "Modelos determinísticos com First-Pass Yield (FPY) auditado e comandos de aceite congelados (Regra L-22)."
-            )
+            h("span", { style: { fontSize: "14px", fontWeight: "700", color: "#f3f4f6" } }, "Templates Reais do Repositório & Motor RSI (Zero Mockups)"),
+            h("span", { style: { fontSize: "11px", color: "#9ca3af" } }, "Arquivos lidos diretamente de REPOS/orgfy/templates/ e regras-probatorias.json.")
           ),
           h(
             "div",
-            { style: { display: "flex", alignItems: "center", gap: "10px" } },
+            { style: { display: "flex", alignItems: "center", gap: "8px" } },
             h(
               "span",
-              {
-                style: {
-                  fontSize: "11px",
-                  padding: "4px 10px",
-                  borderRadius: "6px",
-                  backgroundColor: "rgba(16, 185, 129, 0.15)",
-                  color: "#10b981",
-                  fontWeight: "700",
-                  fontFamily: "monospace"
-                }
-              },
-              "FPY Médio: 98.4%"
+              { style: { fontSize: "11px", padding: "4px 10px", borderRadius: "6px", backgroundColor: "rgba(16, 185, 129, 0.14)", color: "#10b981", fontWeight: "700", fontFamily: "monospace" } },
+              `FPY Real: ${typeof fpyReal === "number" ? `${fpyReal.toFixed(1)}%` : "--"}`
             ),
             h(
               "span",
-              {
-                style: {
-                  fontSize: "11px",
-                  padding: "4px 10px",
-                  borderRadius: "6px",
-                  backgroundColor: "rgba(56, 189, 248, 0.15)",
-                  color: "#38bdf8",
-                  fontWeight: "700",
-                  fontFamily: "monospace"
-                }
-              },
-              "659 Cards Processados"
+              { style: { fontSize: "11px", padding: "4px 10px", borderRadius: "6px", backgroundColor: "rgba(56, 189, 248, 0.14)", color: "#38bdf8", fontWeight: "700", fontFamily: "monospace" } },
+              `${typeof totalIntegrados === "number" ? totalIntegrados : "--"} integrados`
             )
           )
         ),
-        // Grid com os 4 Templates Canônicos
         h(
           "div",
-          {
-            style: {
-              display: "grid",
-              gridTemplateColumns: "repeat(2, 1fr)",
-              gap: "14px"
-            }
-          },
-          CANONICAL_TEMPLATES.map(
+          { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "12px" } },
+          templatesReais.map(
             (tmpl) => h(
               "div",
               {
                 key: tmpl.id,
                 style: {
-                  borderRadius: "12px",
-                  backgroundColor: "rgba(0, 0, 0, 0.25)",
+                  borderRadius: "10px",
+                  backgroundColor: "#15161a",
                   border: "1px solid rgba(255, 255, 255, 0.08)",
-                  padding: "16px",
+                  padding: "14px 16px",
                   display: "flex",
                   flexDirection: "column",
-                  gap: "10px"
+                  gap: "8px"
                 }
               },
-              // Card Header
               h(
                 "div",
-                { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start" } },
+                { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px" } },
                 h(
                   "div",
                   { style: { display: "flex", flexDirection: "column", gap: "2px" } },
-                  h("span", { style: { fontSize: "13px", fontWeight: "700", color: "#ffffff" } }, tmpl.name),
+                  h("span", { style: { fontSize: "13px", fontWeight: "700", color: "#f3f4f6" } }, tmpl.name),
                   h("span", { style: { fontSize: "10px", color: "#6b7280", fontFamily: "monospace" } }, tmpl.path)
                 ),
                 h(
@@ -7818,117 +8671,90 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
                   {
                     style: {
                       fontSize: "10px",
-                      padding: "2px 8px",
+                      padding: "2px 7px",
                       borderRadius: "4px",
                       fontWeight: "700",
-                      backgroundColor: tmpl.fpyHistorical >= 98 ? "rgba(16, 185, 129, 0.2)" : tmpl.fpyHistorical >= 90 ? "rgba(56, 189, 248, 0.2)" : "rgba(245, 158, 11, 0.2)",
-                      color: tmpl.fpyHistorical >= 98 ? "#10b981" : tmpl.fpyHistorical >= 90 ? "#38bdf8" : "#f59e0b",
+                      backgroundColor: tmpl.exists ? "rgba(16, 185, 129, 0.16)" : "rgba(239, 68, 68, 0.16)",
+                      color: tmpl.exists ? "#10b981" : "#f87171",
                       fontFamily: "monospace"
                     }
                   },
-                  `${tmpl.fpyHistorical.toFixed(1)}% FPY`
+                  tmpl.exists ? `${tmpl.versionTag} · ${tmpl.linesCount} linhas` : "AUSENTE"
                 )
               ),
-              // Descrição
-              h("p", { style: { fontSize: "11px", color: "#9ca3af", margin: 0, lineHeight: "1.4" } }, tmpl.description),
-              // Erros Blindados
+              h("p", { style: { fontSize: "11px", color: "#9ca3af", margin: 0, lineHeight: "1.4" } }, tmpl.preview),
               h(
                 "div",
-                { style: { display: "flex", flexDirection: "column", gap: "4px" } },
-                h("span", { style: { fontSize: "10px", fontWeight: "700", color: "#60a5fa" } }, "Erros Frequentes Blindados:"),
-                tmpl.frequentErrorsBlocked.map(
-                  (err, i) => h(
-                    "div",
-                    { key: i, style: { fontSize: "10px", color: "#d1d5db", display: "flex", gap: "6px" } },
-                    h("span", { style: { color: "#10b981" } }, "✓"),
-                    h("span", {}, err)
-                  )
-                )
-              ),
-              // Exemplo de Comando de Aceite
-              h(
-                "div",
-                {
-                  style: {
-                    marginTop: "auto",
-                    padding: "8px 10px",
-                    borderRadius: "6px",
-                    backgroundColor: "#050706",
-                    border: "1px solid rgba(255, 255, 255, 0.05)"
-                  }
-                },
-                h("span", { style: { fontSize: "9px", color: "#6b7280", display: "block" } }, "Comando Padrão (Regra L-22):"),
-                h("code", { style: { fontSize: "10px", color: "#34d399", fontFamily: "monospace" } }, tmpl.sampleAcceptanceCommand)
-              ),
-              // Botão de Copiar Caminho
-              h(
-                "button",
-                {
-                  onClick: () => {
-                    var _a3;
-                    if (typeof navigator !== "undefined" && ((_a3 = navigator == null ? void 0 : navigator.clipboard) == null ? void 0 : _a3.writeText)) {
-                      navigator.clipboard.writeText(tmpl.path);
+                { style: { display: "flex", gap: "8px", marginTop: "auto" } },
+                h(
+                  "button",
+                  {
+                    onClick: () => {
+                      var _a4;
+                      if (typeof navigator !== "undefined" && ((_a4 = navigator == null ? void 0 : navigator.clipboard) == null ? void 0 : _a4.writeText)) {
+                        navigator.clipboard.writeText(tmpl.path);
+                      }
+                      showNotification("success", `Caminho copiado: ${tmpl.path}`);
+                    },
+                    style: {
+                      flex: 1,
+                      padding: "6px 10px",
+                      borderRadius: "6px",
+                      border: "1px solid rgba(255, 255, 255, 0.1)",
+                      backgroundColor: "rgba(255, 255, 255, 0.04)",
+                      color: "#cbd5e1",
+                      fontSize: "10px",
+                      fontWeight: "600",
+                      cursor: "pointer"
                     }
-                    showNotification("success", `Caminho copiado: ${tmpl.path}`);
                   },
-                  style: {
-                    padding: "6px 10px",
-                    borderRadius: "6px",
-                    border: "1px solid rgba(255, 255, 255, 0.1)",
-                    backgroundColor: "rgba(255, 255, 255, 0.04)",
-                    color: "#9ca3af",
-                    fontSize: "10px",
-                    fontWeight: "600",
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: "4px"
-                  }
-                },
-                SVG.copy({ h, width: 11, height: 11 }),
-                "Copiar Caminho do Template"
+                  "Copiar Caminho"
+                ),
+                tmpl.exists && h(
+                  "button",
+                  {
+                    onClick: () => {
+                      var _a4;
+                      if (typeof navigator !== "undefined" && ((_a4 = navigator == null ? void 0 : navigator.clipboard) == null ? void 0 : _a4.writeText)) {
+                        navigator.clipboard.writeText(tmpl.content);
+                      }
+                      showNotification("success", `Conteúdo real de ${tmpl.path} copiado!`);
+                    },
+                    style: {
+                      flex: 1,
+                      padding: "6px 10px",
+                      borderRadius: "6px",
+                      border: "1px solid rgba(56, 189, 248, 0.3)",
+                      backgroundColor: "rgba(56, 189, 248, 0.1)",
+                      color: "#38bdf8",
+                      fontSize: "10px",
+                      fontWeight: "600",
+                      cursor: "pointer"
+                    }
+                  },
+                  "Copiar Template"
+                )
               )
             )
           )
         ),
-        // Seção do Hub de Aprendizado Recursivo (RSI Engine & Regras Probatórias)
         h(
           "div",
           {
             style: {
-              borderRadius: "12px",
-              backgroundColor: "rgba(0, 0, 0, 0.35)",
+              borderRadius: "10px",
+              backgroundColor: "#15161a",
               border: "1px solid rgba(168, 85, 247, 0.25)",
-              padding: "18px",
+              padding: "16px",
               display: "flex",
               flexDirection: "column",
-              gap: "14px"
+              gap: "12px"
             }
           },
           h(
             "div",
             { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
-            h(
-              "div",
-              { style: { display: "flex", alignItems: "center", gap: "8px" } },
-              SVG.shield({ h, width: 16, height: 16 }),
-              h("span", { style: { fontSize: "13px", fontWeight: "700", color: "#ffffff" } }, "Motor RSI: Regras Probatórias Compiladas"),
-              h(
-                "span",
-                {
-                  style: {
-                    fontSize: "10px",
-                    padding: "2px 8px",
-                    borderRadius: "4px",
-                    backgroundColor: "rgba(168, 85, 247, 0.2)",
-                    color: "#c084fc",
-                    fontWeight: "700"
-                  }
-                },
-                "Janela de 10 cards (Regra L-90)"
-              )
-            ),
+            h("span", { style: { fontSize: "13px", fontWeight: "700", color: "#f3f4f6" } }, `Regras Probatórias L-90 (${regrasReais.length} ativas em regras-probatorias.json)`),
             h(
               "button",
               {
@@ -7936,11 +8762,12 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
                   showNotification("info", "Disparando retro.py para compilação probatória...");
                   const res = await compileProbationaryRule(ctx, {
                     erroId: "auto-" + Date.now().toString().slice(-4),
-                    descricao: "Prevenção automática compilada pelo operador no Cockpit",
+                    descricao: "Prevenção compilada via Control Plane v2",
                     comandoCheck: "python3 -m pytest -q testes/esteira -v"
                   });
                   if (res.success) {
-                    showNotification("success", "Regra probatória compilada com sucesso na janela de 10 cards!");
+                    await loadHolding();
+                    showNotification("success", "Regra probatória compilada com sucesso!");
                   } else {
                     showNotification("warning", "Falha na compilação da regra probatória.");
                   }
@@ -7953,87 +8780,38 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
                   color: "#000000",
                   fontSize: "11px",
                   fontWeight: "700",
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "6px"
+                  cursor: "pointer"
                 }
               },
-              SVG.zap({ h, width: 12, height: 12 }),
-              "Compilar Nova Regra Probatória"
+              "+ Compilar Regra"
             )
           ),
-          h(
-            "p",
-            { style: { fontSize: "11px", color: "#9ca3af", margin: 0, lineHeight: "1.4" } },
-            "Erros detectados 2x+ na esteira são automaticamente sintetizados em regras executáveis pelo retro.py. Se o FPY cair durante a janela de 10 cards, a regra é revertida (REVERTIDA) sem intervenção humana."
-          ),
-          // Tabela de Regras
-          h(
+          regrasReais.length === 0 ? h(
             "div",
-            {
-              style: {
-                borderRadius: "8px",
-                backgroundColor: "rgba(0, 0, 0, 0.25)",
-                border: "1px solid rgba(255, 255, 255, 0.05)",
-                overflow: "hidden"
-              }
-            },
-            h(
-              "div",
-              {
-                style: {
-                  display: "grid",
-                  gridTemplateColumns: "100px 1fr 140px 110px",
-                  padding: "8px 12px",
-                  backgroundColor: "rgba(255, 255, 255, 0.03)",
-                  fontSize: "10px",
-                  fontWeight: "700",
-                  color: "#9ca3af",
-                  borderBottom: "1px solid rgba(255, 255, 255, 0.05)"
-                }
-              },
-              h("span", {}, "REGRA ID"),
-              h("span", {}, "DESCRIÇÃO DO ERRO"),
-              h("span", {}, "JANELA DE AVALIAÇÃO"),
-              h("span", {}, "STATUS")
-            ),
-            [
-              { id: "GUARD-T020", desc: "Blindagem de integridade do ci_cache e aceite_cache", window: "10 / 10 cards", status: "ATIVA", color: "#10b981" },
-              { id: "GUARD-L01", desc: "Impedimento de auto-revisão (Executor !== Revisor)", window: "10 / 10 cards", status: "CONSOLIDADA", color: "#38bdf8" },
-              { id: "GUARD-L22", desc: "Bloqueio de alteração de testes por hash SHA-256", window: "8 / 10 cards", status: "EM AVALIAÇÃO", color: "#c084fc" }
-            ].map(
+            { style: { padding: "14px", textAlign: "center", color: "#9ca3af", fontSize: "11px" } },
+            "Nenhuma regra probatória registrada em .esteira/estado/regras-probatorias.json no momento."
+          ) : h(
+            "div",
+            { style: { display: "flex", flexDirection: "column", gap: "6px" } },
+            regrasReais.map(
               (r) => h(
                 "div",
                 {
                   key: r.id,
                   style: {
                     display: "grid",
-                    gridTemplateColumns: "100px 1fr 140px 110px",
-                    padding: "8px 12px",
-                    fontSize: "10px",
-                    borderBottom: "1px solid rgba(255, 255, 255, 0.03)",
+                    gridTemplateColumns: "110px 1fr 120px 100px",
+                    padding: "8px 10px",
+                    borderRadius: "6px",
+                    backgroundColor: "rgba(0,0,0,0.25)",
+                    fontSize: "11px",
                     alignItems: "center"
                   }
                 },
                 h("span", { style: { fontFamily: "monospace", color: "#f3f4f6", fontWeight: "600" } }, r.id),
-                h("span", { style: { color: "#9ca3af" } }, r.desc),
-                h("span", { style: { fontFamily: "monospace", color: "#60a5fa" } }, r.window),
-                h(
-                  "span",
-                  {
-                    style: {
-                      fontSize: "9px",
-                      padding: "1px 6px",
-                      borderRadius: "4px",
-                      backgroundColor: `${r.color}22`,
-                      color: r.color,
-                      fontWeight: "700",
-                      width: "fit-content"
-                    }
-                  },
-                  r.status
-                )
+                h("span", { style: { color: "#9ca3af" } }, r.descricao),
+                h("span", { style: { fontFamily: "monospace", color: "#60a5fa" } }, `${r.cardsAvaliados}/${r.janelaAlvo} cards`),
+                h("span", { style: { fontSize: "10px", fontWeight: "700", color: "#10b981" } }, r.status)
               )
             )
           )
@@ -8277,7 +9055,7 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
                         fontFamily: "monospace"
                       }
                     },
-                    `${c.recommendedModel || "Flash"} · ~$${c.estimatedCost || "0.002"}`
+                    c.branch || c.tier
                   )
                 )
               ),
@@ -8395,12 +9173,12 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
             fontSize: "11px"
           }
         },
-        h("span", { style: { color: "#9ca3af" } }, "Porteiro Nostr:"),
-        h("span", { style: { color: "#10b981", fontWeight: "600" } }, "🟢 ATIVO (Sub-second)"),
-        h("span", { style: { color: "#9ca3af" } }, "First-Pass Yield (FPY):"),
-        h("span", { style: { color: "#10b981", fontWeight: "600" } }, "100.0%"),
-        h("span", { style: { color: "#9ca3af" } }, "CPI EVM:"),
-        h("span", { style: { color: "#10b981", fontWeight: "600" } }, "0.94 (Margem > 0.85)")
+        h("span", { style: { color: "#9ca3af" } }, "Arquitetura:"),
+        h("span", { style: { color: "#10b981", fontWeight: "600" } }, "OrgFy v12 Control Plane"),
+        h("span", { style: { color: "#9ca3af" } }, "Camadas:"),
+        h("span", { style: { color: "#38bdf8", fontWeight: "600" } }, "Board → Core → Subsidiárias"),
+        h("span", { style: { color: "#9ca3af" } }, "Telemetria:"),
+        h("span", { style: { color: "#cbd5e1", fontWeight: "600" } }, "100% ao vivo no Cockpit")
       ),
       h(
         "button",
