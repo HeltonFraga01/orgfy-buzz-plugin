@@ -318,6 +318,16 @@ async function fetchLiveKanbanSnapshot(ctx, filter) {
           const slug = (wtMatchDir[1] || "").trim();
           if (!slug || slug.startsWith("_")) continue;
           const wtRelPath = wtFull.includes("/.worktrees/") ? `.worktrees/${slug}` : `worktrees/${slug}`;
+          if (headMatch && headMatch[1]) {
+            try {
+              const ancProc = await ctx.host.spawn("git", {
+                args: ["-C", ORGFY_ABS_PATH, "merge-base", "--is-ancestor", headMatch[1], "origin/main"]
+              });
+              const ancCode = await ancProc.exited;
+              if (ancCode === 0) continue;
+            } catch {
+            }
+          }
           const slugLower = slug.toLowerCase();
           const alreadyListed = Array.from(cardMap.values()).some(
             (c) => c.branch && c.branch.toLowerCase() === branchName.toLowerCase() || c.worktreePath && c.worktreePath.toLowerCase().includes(slugLower) || c.title && c.title.toLowerCase().includes(slugLower)

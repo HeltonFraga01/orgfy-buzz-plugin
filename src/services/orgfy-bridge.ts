@@ -456,6 +456,19 @@ export async function fetchLiveKanbanSnapshot(
           if (!slug || slug.startsWith("_")) continue;
           const wtRelPath = wtFull.includes("/.worktrees/") ? `.worktrees/${slug}` : `worktrees/${slug}`;
 
+          // Ignora worktrees cujo HEAD já está integrado em origin/main (evita cards "fantasmas" após merge)
+          if (headMatch && headMatch[1]) {
+            try {
+              const ancProc = await ctx.host.spawn("git", {
+                args: ["-C", ORGFY_ABS_PATH, "merge-base", "--is-ancestor", headMatch[1], "origin/main"],
+              });
+              const ancCode = await ancProc.exited;
+              if (ancCode === 0) continue;
+            } catch {
+              // Se falhar, mantém a worktree visível
+            }
+          }
+
           // Evita duplicar card já presente no Kanban (por slug, branch ou título)
           const slugLower = slug.toLowerCase();
           const alreadyListed = Array.from(cardMap.values()).some(
