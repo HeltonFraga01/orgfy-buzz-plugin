@@ -419,7 +419,7 @@ export async function fetchLiveKanbanSnapshot(
             tier: "tier_1_exec_barato",
             stage: "execucao",
             worktreePath: `.worktrees/${shortLockId}`,
-            updatedAt: rec.acquiredAt ? formatRelativeTime(rec.acquiredAt) : "ativo",
+            updatedAt: Number(rec.acquiredAt || nowMs),
           });
         }
       }
@@ -475,7 +475,7 @@ export async function fetchLiveKanbanSnapshot(
             branch: branchName,
             commitSha: headMatch ? headMatch[1].slice(0, 7) : undefined,
             worktreePath: `.worktrees/${slug}`,
-            updatedAt: "ativo",
+            updatedAt: Date.now(),
           });
         }
       }
