@@ -253,7 +253,41 @@ const lintGood = JSON.parse(await lintTool.call({}, {}, {
 }));
 assert.equal(lintGood.approved, true);
 assert.equal(lintGood.issues.length, 0);
-console.log("[ONDA 3 LINT CARD OK]", JSON.stringify({ bad_issues: lintBad.issues.length, good_score: lintGood.score }));
+
+const lintBadTemplate = JSON.parse(await lintTool.call({}, {}, {
+  title: "CI-PORTEIRO-LOCK-ISOLADO Isolar lock do porteiro.py nos testes de CI",
+  acceptance_command: "python3 -m pytest -q testes/esteira-0002/test_porteiro_dry_run.py",
+  executor: "OrgFy Val",
+  revisor: "OrgFy Teo",
+  card_markdown: "## Objetivo\nIsolar lock\n## Papéis\n- Executor: OrgFy Val",
+}));
+assert.equal(lintBadTemplate.approved, false, "card fora do template OrgFy/Spec-Kit deve ser recusado");
+assert.ok(lintBadTemplate.issues.some((i) => i.includes("Template OrgFy")), "deve acusar ausência de marcador de template");
+assert.ok(lintBadTemplate.issues.some((i) => i.includes("Spec-Kit")), "deve acusar ausência de Spec-Kit");
+
+const lintGoodTemplate = JSON.parse(await lintTool.call({}, {}, {
+  title: "SPEC-0011 T001 Isolar lock do porteiro.py nos testes de CI",
+  acceptance_command: "python3 -m pytest -q testes/esteira-0002/test_porteiro_dry_run.py",
+  executor: "OrgFy Val",
+  revisor: "OrgFy Teo",
+  card_markdown: [
+    "<!-- orgfy:card v4 -->",
+    "# SPEC-0011 T001 Isolar lock do porteiro.py",
+    "## Objetivo / Goal",
+    "Isolar --state-file em tmp_path.",
+    "## Papéis e ambiente",
+    "- **Autoridade:** specs/planned/0011-porteiro/spec.md",
+    "- **Executor:** OrgFy Val",
+    "- **Revisor:** OrgFy Teo",
+    "- **Decisor:** OrgFy Iris",
+    "## Escopo",
+    "### Paths",
+    "- **Leitura:** ferramentas/esteira/porteiro.py",
+    "- **Escrita exclusiva:** testes/esteira-0002/test_porteiro_dry_run.py",
+  ].join("\n"),
+}));
+assert.equal(lintGoodTemplate.approved, true, "card no template OrgFy/Spec-Kit completo deve ser aprovado");
+console.log("[ONDA 3 LINT CARD OK]", JSON.stringify({ bad_issues: lintBad.issues.length, bad_tpl_issues: lintBadTemplate.issues.length, good_score: lintGood.score }));
 
 // 6. Onda 3+: orgfy_bind_context (assignConversationFolder + setConversationSections)
 const bindTool = h1.tools.get("orgfy_bind_context");

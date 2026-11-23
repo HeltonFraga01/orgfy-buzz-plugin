@@ -391,7 +391,79 @@ export async function fetchLiveKanbanSnapshot(
     }
   }
 
-  // 3. Mescla locks ativos (orgfy-locks.json) na raia Em Execução
+  // 3. Mescla locks ativos (orgfy-locks.json) na raia Em Execução (fail-closed: exige 64-hex Nostr real)
+  const DEFAULT_ORGFY_OWNER = "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20";
+  const short8ToFull64 = new Map<string, string>();
+  for (const fullK of Object.keys(aceites)) {
+    if (/^[0-9a-f]{64}$/i.test(fullK)) short8ToFull64.set(fullK.slice(0, 8).toLowerCase(), fullK.toLowerCase());
+  }
+  for (const [, item] of Object.entries(aceiteCache)) {
+    if (item?.issue_id && /^[0-9a-f]{64}$/i.test(item.issue_id)) {
+      short8ToFull64.set(item.issue_id.slice(0, 8).toLowerCase(), item.issue_id.toLowerCase());
+    }
+  }
+  try {
+    if (ctx?.host?.readFile) {
+      const rawTrans = await ctx.host.readFile("/Users/heltonfraga/.buzz/.scratch/esteira-transicoes.jsonl");
+      const transTxt =
+        typeof rawTrans === "string"
+          ? rawTrans
+          : rawTrans instanceof Uint8Array
+          ? new TextDecoder("utf-8").decode(rawTrans)
+          : String(rawTrans ?? "");
+      for (const line of transTxt.split("\n")) {
+        const m = line.match(/"issue_id"\s*:\s*"([0-9a-f]{64})"/i);
+        if (m) {
+          const full = m[1].toLowerCase();
+          short8ToFull64.set(full.slice(0, 8), full);
+        }
+      }
+    }
+  } catch {
+    // Arquivo esteira-transicoes.jsonl opcional
+  }
+
+  const resolveIssueMetadataFromRelay = async (
+    fullId: string
+  ): Promise<{ title?: string; owner?: string; revisor?: string; acceptanceCommand?: string; branch?: string } | null> => {
+    if (!ctx?.host?.spawn || !/^[0-9a-f]{64}$/i.test(fullId)) return null;
+    try {
+      let out = "";
+      const p = await ctx.host.spawn("buzz", {
+        args: ["issues", "get", "--event", fullId],
+        onStdout: (c: string) => {
+          out += c;
+        },
+      });
+      const code = await p.exited;
+      if (code !== 0 || !out.trim()) return null;
+      const parsed = JSON.parse(out);
+      const ev = Array.isArray(parsed) ? parsed[0] : parsed;
+      if (!ev || typeof ev !== "object") return null;
+      const tags: any[] = Array.isArray(ev.tags) ? ev.tags : [];
+      const subjectTag = tags.find((t) => Array.isArray(t) && t[0] === "subject" && typeof t[1] === "string");
+      const aTag = tags.find((t) => Array.isArray(t) && t[0] === "a" && typeof t[1] === "string");
+      let owner: string | undefined;
+      if (aTag) {
+        const parts = String(aTag[1]).split(":");
+        if (parts.length >= 2 && /^[0-9a-f]{64}$/i.test(parts[1])) owner = parts[1].toLowerCase();
+      }
+      const content = String(ev.content || "");
+      const revM = content.match(/(?:-\s+)?(?:\*\*)?Revisor(?:\*\*)?:\s*([^\n\r|]+)/i);
+      const branchM = content.match(/(?:-\s+)?(?:\*\*)?Branch(?:\*\*)?:\s*`?([a-zA-Z0-9._/-]+)`?/i);
+      const acM = content.match(/##\s*(?:Comando de aceite|Aceite)[\s\S]*?```(?:bash|sh)?\s*\n([^\n`]+)/i);
+      return {
+        title: subjectTag ? String(subjectTag[1]).trim() : undefined,
+        owner: owner || DEFAULT_ORGFY_OWNER,
+        revisor: revM ? revM[1].replace(/\*/g, "").trim() : undefined,
+        branch: branchM ? branchM[1].trim() : undefined,
+        acceptanceCommand: acM ? acM[1].trim() : undefined,
+      };
+    } catch {
+      return null;
+    }
+  };
+
   try {
     if (ctx?.host?.readFile) {
       const rawLocks = await ctx.host.readFile("/Users/heltonfraga/.buzz/.scratch/orgfy-locks.json");
@@ -406,19 +478,57 @@ export async function fetchLiveKanbanSnapshot(
       if (parsedLocks && typeof parsedLocks === "object" && !Array.isArray(parsedLocks)) {
         for (const [lockIssueId, rec] of Object.entries(parsedLocks as Record<string, any>)) {
           if (!rec || typeof rec.expiresAt !== "number" || rec.expiresAt <= nowMs) continue;
-          const shortLockId = lockIssueId.slice(0, 8);
+          const cleanLock = String(lockIssueId || "").replace(/^#/, "").trim().toLowerCase();
+          const fullLockId = /^[0-9a-f]{64}$/i.test(cleanLock)
+            ? cleanLock
+            : short8ToFull64.get(cleanLock.slice(0, 8));
+          // Fail-closed: nunca exibe card no Kanban sem Issue Nostr real de 64 hex
+          if (!fullLockId) continue;
+          const shortLockId = fullLockId.slice(0, 8);
           if (cardMap.has(shortLockId)) continue;
+
+          const aceiteRecord = aceites[fullLockId] || aceites[shortLockId] || null;
+          const cachedAceite = aceiteCacheByIssue.get(fullLockId) || aceiteCacheByIssue.get(shortLockId) || null;
+          const relayMeta =
+            !rec.title || !rec.acceptanceCommand ? await resolveIssueMetadataFromRelay(fullLockId) : null;
+          const resolvedTitle =
+            (typeof rec.title === "string" && rec.title.trim()) ||
+            relayMeta?.title ||
+            `Issue Nostr #${shortLockId}`;
+          const resolvedOwner =
+            (typeof rec.owner === "string" && /^[0-9a-f]{64}$/i.test(rec.owner) && rec.owner.toLowerCase()) ||
+            relayMeta?.owner ||
+            DEFAULT_ORGFY_OWNER;
+          const resolvedAcceptanceCmd =
+            (typeof rec.acceptanceCommand === "string" && rec.acceptanceCommand.trim()) ||
+            (typeof aceiteRecord === "object" && aceiteRecord?.comando) ||
+            cachedAceite?.comando ||
+            relayMeta?.acceptanceCommand ||
+            undefined;
+          const resolvedAcceptanceHash =
+            (typeof aceiteRecord === "object" && aceiteRecord?.hash_comando) ||
+            cachedAceite?.hash_comando ||
+            undefined;
+
           cardMap.set(shortLockId, {
             id: `lock-${shortLockId}`,
             issueId: shortLockId,
-            fullIssueId: lockIssueId.length === 64 ? lockIssueId : undefined,
-            title: `Card em execução (#${shortLockId})`,
+            fullIssueId: fullLockId,
+            owner: resolvedOwner,
+            title: resolvedTitle,
             empresa: filter?.empresa && filter.empresa !== "all" ? filter.empresa : "orgfy",
             executor: String(rec.agentKey || "Agente OrgFy"),
-            revisor: "Revisão pendente",
+            revisor:
+              (typeof rec.revisor === "string" && rec.revisor.trim()) ||
+              relayMeta?.revisor ||
+              "Revisão pendente",
+            decisor: "OrgFy Iris",
             tier: "tier_1_exec_barato",
             stage: "execucao",
             priority: "P1",
+            branch: (typeof rec.branch === "string" && rec.branch.trim()) || relayMeta?.branch || undefined,
+            acceptanceCommand: resolvedAcceptanceCmd,
+            acceptanceHash: resolvedAcceptanceHash,
             worktreePath: `.worktrees/${shortLockId}`,
             updatedAt: Number(rec.acquiredAt || nowMs),
           });
@@ -430,6 +540,7 @@ export async function fetchLiveKanbanSnapshot(
   }
 
   // 4. Mescla worktrees Git ativas (ex.: .worktrees/e2e-smoke-v12) que ainda não constam no canvas
+  //    Fail-closed: só exibe worktree vinculada a uma Issue Nostr real de 64 hex
   try {
     if (ctx?.host?.spawn) {
       let wtOut = "";
@@ -536,17 +647,23 @@ export async function fetchLiveKanbanSnapshot(
             }
           }
 
-          cardMap.set(`wt-${slug}`, {
+          // Fail-closed: worktrees locais sem Issue Nostr vinculada não viram cards órfãos no Kanban
+          if (!resolvedFullIssueId) continue;
+          const shortWtIssue = resolvedFullIssueId.slice(0, 8);
+          if (cardMap.has(shortWtIssue)) continue;
+
+          cardMap.set(shortWtIssue, {
             id: `wt-${slug}`,
-            issueId: resolvedFullIssueId ? resolvedFullIssueId.slice(0, 8) : slug.toUpperCase().slice(0, 18),
+            issueId: shortWtIssue,
             fullIssueId: resolvedFullIssueId,
-            owner: resolvedOwner,
+            owner: resolvedOwner || DEFAULT_ORGFY_OWNER,
             title: `${slug.toUpperCase()} (${branchName})`,
             objetivo: resolvedObjetivo || `${slug.toUpperCase()} em execução na branch ${branchName}`,
             acceptanceCommand: resolvedAceite,
             empresa: filter?.empresa && filter.empresa !== "all" ? filter.empresa : "orgfy",
             executor: "Em execução (worktree)",
             revisor: "Revisão pendente",
+            decisor: "OrgFy Iris",
             tier: "tier_1_exec_barato",
             stage: "execucao",
             priority: "P1",

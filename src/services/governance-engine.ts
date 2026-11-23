@@ -6,6 +6,56 @@ export interface CheckoutLockRecord {
   agentKey: string;
   acquiredAt: number;
   expiresAt: number;
+  title?: string;
+  owner?: string;
+  revisor?: string;
+  acceptanceCommand?: string;
+  branch?: string;
+}
+
+export interface LockMetadataInput {
+  title?: string;
+  owner?: string;
+  revisor?: string;
+  acceptanceCommand?: string;
+  branch?: string;
+}
+
+async function resolveFullNostrIssueId(ctx: Context, rawId: string): Promise<string> {
+  const clean = String(rawId || "").replace(/^#/, "").trim().toLowerCase();
+  if (/^[0-9a-f]{64}$/i.test(clean)) return clean;
+  if (!/^[0-9a-f]{6,63}$/i.test(clean)) return rawId.trim();
+  const host = (ctx as any).host;
+  if (!host?.readFile) return clean;
+  const decode = (raw: any) =>
+    typeof raw === "string"
+      ? raw
+      : raw instanceof Uint8Array
+      ? new TextDecoder("utf-8").decode(raw)
+      : String(raw ?? "");
+  try {
+    const rawT = await host.readFile("/Users/heltonfraga/.buzz/.scratch/esteira-transicoes.jsonl");
+    const lines = decode(rawT).split("\n");
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (!lines[i].includes(clean)) continue;
+      const m = lines[i].match(new RegExp(`"issue_id"\\s*:\\s*"(${clean}[0-9a-f]{${64 - clean.length}})"`, "i"));
+      if (m) return m[1].toLowerCase();
+    }
+  } catch {
+    // Opcional
+  }
+  try {
+    const rawE = await host.readFile("/Users/heltonfraga/.buzz/REPOS/orgfy/.esteira/estado/esteira-minima-state.json");
+    const parsed = JSON.parse(decode(rawE));
+    for (const k of Object.keys(parsed?.aceites || {})) {
+      if (k.toLowerCase().startsWith(clean) && /^[0-9a-f]{64}$/i.test(k)) {
+        return k.toLowerCase();
+      }
+    }
+  } catch {
+    // Opcional
+  }
+  return clean;
 }
 
 export interface LockActionResult {
@@ -104,6 +154,11 @@ async function syncLocksFromDisk(ctx: Context): Promise<void> {
               agentKey: v.agentKey,
               acquiredAt: Number(v.acquiredAt || now),
               expiresAt: v.expiresAt,
+              title: typeof v.title === "string" ? v.title : undefined,
+              owner: typeof v.owner === "string" ? v.owner : undefined,
+              revisor: typeof v.revisor === "string" ? v.revisor : undefined,
+              acceptanceCommand: typeof v.acceptanceCommand === "string" ? v.acceptanceCommand : undefined,
+              branch: typeof v.branch === "string" ? v.branch : undefined,
             });
           }
         }
@@ -151,9 +206,11 @@ export async function acquireCheckoutLock(
   issueId: string,
   agentKey: string,
   ttlMs: number = DEFAULT_LOCK_TTL_MS,
-  nowMs: number = Date.now()
+  nowMs: number = Date.now(),
+  meta?: LockMetadataInput
 ): Promise<LockActionResult> {
-  const cleanIssue = String(issueId || "").trim();
+  const rawIssue = String(issueId || "").trim();
+  const cleanIssue = await resolveFullNostrIssueId(ctx, rawIssue);
   const cleanAgent = String(agentKey || "").trim();
   // Defesa contra chamadores que passam minutos (ex: 30, 60) em vez de ms
   const normalizedTtlMs =
@@ -173,14 +230,26 @@ export async function acquireCheckoutLock(
   await syncLocksFromDisk(ctx);
   purgeExpiredLocks(nowMs);
 
-  const existing = memoryLocks.get(cleanIssue);
+  const shortKey = cleanIssue.slice(0, 8);
+  const existing =
+    memoryLocks.get(cleanIssue) ||
+    (cleanIssue.length === 64 ? memoryLocks.get(shortKey) : undefined);
+
   if (existing && existing.expiresAt > nowMs) {
     if (existing.agentKey === cleanAgent) {
+      if (existing.issueId !== cleanIssue) {
+        memoryLocks.delete(existing.issueId);
+      }
       const renewed: CheckoutLockRecord = {
         issueId: cleanIssue,
         agentKey: cleanAgent,
         acquiredAt: existing.acquiredAt,
         expiresAt: nowMs + normalizedTtlMs,
+        title: meta?.title?.trim() || existing.title,
+        owner: meta?.owner?.trim() || existing.owner,
+        revisor: meta?.revisor?.trim() || existing.revisor,
+        acceptanceCommand: meta?.acceptanceCommand?.trim() || existing.acceptanceCommand,
+        branch: meta?.branch?.trim() || existing.branch,
       };
       memoryLocks.set(cleanIssue, renewed);
       await persistLocksToDisk(ctx);
@@ -205,6 +274,11 @@ export async function acquireCheckoutLock(
     agentKey: cleanAgent,
     acquiredAt: nowMs,
     expiresAt: nowMs + normalizedTtlMs,
+    title: meta?.title?.trim() || undefined,
+    owner: meta?.owner?.trim() || undefined,
+    revisor: meta?.revisor?.trim() || undefined,
+    acceptanceCommand: meta?.acceptanceCommand?.trim() || undefined,
+    branch: meta?.branch?.trim() || undefined,
   };
   memoryLocks.set(cleanIssue, created);
   await persistLocksToDisk(ctx);
@@ -222,11 +296,16 @@ export async function releaseCheckoutLock(
   agentKey?: string,
   force: boolean = false
 ): Promise<LockActionResult> {
-  const cleanIssue = String(issueId || "").trim();
+  const rawIssue = String(issueId || "").trim();
+  const cleanIssue = await resolveFullNostrIssueId(ctx, rawIssue);
   await syncLocksFromDisk(ctx);
   purgeExpiredLocks(Date.now());
 
-  const existing = memoryLocks.get(cleanIssue);
+  const shortKey = cleanIssue.slice(0, 8);
+  const existing =
+    memoryLocks.get(cleanIssue) ||
+    memoryLocks.get(rawIssue) ||
+    memoryLocks.get(shortKey);
   if (!existing) {
     return {
       ok: true,
@@ -243,12 +322,12 @@ export async function releaseCheckoutLock(
     };
   }
 
-  memoryLocks.delete(cleanIssue);
+  memoryLocks.delete(existing.issueId);
   await persistLocksToDisk(ctx);
   return {
     ok: true,
     code: "RELEASED",
-    message: `Lock de ${cleanIssue} liberado com sucesso.`,
+    message: `Lock de ${existing.issueId} liberado com sucesso.`,
   };
 }
 
@@ -446,12 +525,15 @@ export async function lintCardForDispatch(
     descricao?: string;
     executor?: string;
     revisor?: string;
+    cardMarkdown?: string;
+    specPath?: string;
   }
 ): Promise<CardLintResult> {
   const issues: string[] = [];
   const titulo = String(input.titulo || "").trim();
   const cmd = String(input.acceptanceCommand || "").trim();
   const desc = String(input.descricao || "").trim();
+  const md = String(input.cardMarkdown || "").trim();
 
   if (!titulo || titulo.length < 10) {
     issues.push("Título muito curto ou ausente (mínimo 10 caracteres).");
@@ -466,6 +548,20 @@ export async function lintCardForDispatch(
   }
   if (input.executor && input.revisor && input.executor.trim() === input.revisor.trim()) {
     issues.push("Regra L-01 violada: executor e revisor não podem ser o mesmo agente.");
+  }
+  if (md) {
+    if (!/<!--\s*orgfy:card\s+(?:v3|v4|v7\.1|v7\.2)\s*-->/i.test(md)) {
+      issues.push("Template OrgFy ausente: marcador '<!-- orgfy:card v4 -->' ou '<!-- orgfy:card v3 -->' obrigatório (use ./ferramentas/orgfy-card-new).");
+    }
+    if (!/(specs\/[a-z0-9_/-]+|SPEC-\d{4}|\*\*Autoridade:\*\*)/i.test(md) && !input.specPath?.trim()) {
+      issues.push("Spec-Kit obrigatório: informe referência à spec ('specs/.../spec.md' ou 'SPEC-NNNN') e Autoridade.");
+    }
+    if (!/(?:\*\*Leitura:\*\*|Leitura:)/i.test(md) || !/(?:\*\*Escrita\s+exclusiva:\*\*|Escrita\s+exclusiva:)/i.test(md)) {
+      issues.push("Paths obrigatórios ausentes: preencha 'Leitura:' e 'Escrita exclusiva:' conforme contratos/card.md.");
+    }
+    if (!/##\s+Pap[eé]is\s+e\s+ambiente/i.test(md)) {
+      issues.push("Seção obrigatória ausente: '## Papéis e ambiente' (com Executor, Revisor, Decisor e Workspace).");
+    }
   }
 
   const fallbackCls = classifyFallbackRiskAndSurface(titulo, desc);

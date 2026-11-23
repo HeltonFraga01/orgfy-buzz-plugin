@@ -5480,27 +5480,28 @@ export function apply(ctx: Context) {
     try {
       (ctx.agents as any).addInstructions({
         id: "orgfy-governance-v11",
-        text: `Esteira OrgFy v11 (Holding Cortexx) — Governança Determinística & Ciclo Fechado:
+        text: `Esteira OrgFy v12 (Holding Cortexx) — Governança Determinística & Ciclo Fechado:
 Você opera sobre a fábrica de software agêntica da holding Cortexx (empresas: orgfy, lumen-iptv, saas-tributario).
 Regras Invariantes:
+- Template Oficial OrgFy + Spec-Kit Obrigatório (FAIL-CLOSED): NUNCA crie issues com 'buzz issues create' direto nem markdown improvisado. Toda nova tarefa exige: (1) spec no Spec-Kit ('specs/.../spec.md' com 'Plan Gate: Passed' para 'gate:implementacao'), (2) geração pelo template canônico ('./ferramentas/orgfy-card-new'), (3) validação com './ferramentas/card-lint.sh <card.md>' (exit 0) e (4) publicação exclusivamente via './ferramentas/buzz-issue-guard.sh'.
 - L-01 a L-90: Qualquer modificação de código deve ser estritamente rastreada e validada pela esteira determinística.
 - L-22: O comando de aceite é imutável e blindado por hash SHA-256 no momento do despacho. Nunca afrouxe critérios de aceite.
 - L-90: Regras probatórias RSI em .scratch/regras-probatorias.json são avaliadas contra o FPY histórico (First Pass Yield).
 - Hard Cap Orçamentário (80% alerta / 100% bloqueio): Despachos são bloqueados ao atingir 100% do teto diário salvo board_override=true.
-- Checkout Lock Atômico: Nenhum card pode ser executado em paralelo por dois agentes; adquira lock antes de atuar.
+- Checkout Lock Atômico (Nostr 64-hex): Nenhum card pode ser executado em paralelo por dois agentes; adquira lock passando SEMPRE o issue_id Nostr completo (64 hex) + title, revisor, acceptance_command e branch.
 - DSAP Backtracking: Na 2ª recusa consecutiva com similaridade >= 0.70, o card entra em backtracking para o COO re-escopar.
 - Atribuição de Issues (FERR-ASSIGN-AUTH): NUNCA execute 'buzz issues assign' diretamente (falha com auth_error Kind 1 em chamadores locais); use sempre 'python3 ferramentas/assign_issue.py' na raiz do REPOS/orgfy.
 - Decisor Híbrido v12: orgfy_lint_card usa Decisions API com fallback determinístico offline automático (ferramentas/esteira/decisor_fallback.py) em caso de falta de saldo ou timeout.
 Ferramentas nativas disponíveis neste plugin:
 1. orgfy_status({ empresa? }): Consulta o placar de 20h, FPY, CPI de tokens, contagem de aceites, merged e raias da esteira.
-2. orgfy_kanban_read({ stage?, empresa? }): Lê a matriz Kanban completa (triagem, despachado, execucao, revisao, feito) incluindo worktrees e locks ativos.
-3. orgfy_despachar({ issue_id, executor, revisor, empresa?, board_override? }): Despacha card em worktree isolado respeitando Hard Cap orçamentário e lock atômico.
+2. orgfy_kanban_read({ stage?, empresa? }): Lê a matriz Kanban completa (triagem, despachado, execucao, revisao, feito) apenas com cards vinculados a Issues Nostr reais (64 hex).
+3. orgfy_despachar({ issue_id, executor, revisor, empresa?, board_override? }): Despacha card em worktree isolado respeitando Hard Cap orçamentário, template OrgFy/Spec-Kit e lock atômico.
 4. orgfy_gate({ pr_id, decisao, motivo, revisor, empresa? }): Aplica o Gate Caixa-Preta (aceito/recusado) com probes de validação.
 5. orgfy_porteiro_sync({ empresa? }): Dispara sincronização determinística de eventos Nostr e ciclo de execução.
 6. orgfy_kpis({ recalcular? }): Lê os KPIs reais de Fluxo, Qualidade, Economia e Higiene (kpis-esteira.json) e opcionalmente recalcula via script Python.
-7. orgfy_checkout_lock({ action, issue_id?, agent_id?, ttl_minutes? }): Gerencia lock atômico de checkout (acquire, release, list) com persistência garantida em ~/.buzz/.scratch/orgfy-locks.json.
+7. orgfy_checkout_lock({ action, issue_id?, agent_id?, ttl_minutes?, title?, revisor?, acceptance_command?, branch? }): Gerencia lock atômico de checkout (acquire, release, list) com resolução automática para 64-hex Nostr.
 8. orgfy_governanca_avaliar({ dry_run?, auto_wake? }): Avalia orçamento, fila de revisão, WIP órfão e estagnação nível 3, disparando alertas/wakes com cooldown anti-spam.
-9. orgfy_lint_card({ title, objective?, done_when?, acceptance_command?, executor?, revisor? }): Audita qualidade semântica (Decisions API + fallback offline) e regras L-01/L-22 antes do despacho.
+9. orgfy_lint_card({ title, objective?, done_when?, acceptance_command?, executor?, revisor?, card_markdown?, spec_path? }): Audita template OrgFy/Spec-Kit, qualidade semântica e regras L-01/L-22 antes do despacho.
 10. orgfy_bind_context({ conversation_id, issue_id, worktree_path?, title?, acceptance_command?, acceptance_hash?, executor?, revisor? }): Vincula o worktree e injeta regras vivas L-22/L-90 direto na conversa do agente.
 Consulte sempre orgfy_status, orgfy_kpis ou orgfy_kanban_read para inspecionar métricas reais antes de agir.`
       });
@@ -5703,14 +5704,19 @@ Consulte sempre orgfy_status, orgfy_kpis ou orgfy_kanban_read para inspecionar m
       // ── ONDA 3: LOCK ATÔMICO DE CHECKOUT ──
       (ctx.agents as any).addTool({
         name: "orgfy_checkout_lock",
-        description: "Gerencia locks atômicos de checkout por issue_id para evitar execução duplicada entre agentes (action: 'acquire' | 'release' | 'list').",
+        description: "Gerencia locks atômicos de checkout por issue_id Nostr (64 hex) para evitar execução duplicada entre agentes (action: 'acquire' | 'release' | 'list').",
         inputSchema: {
           type: "object",
           properties: {
             action: { type: "string", enum: ["acquire", "release", "list"], description: "Ação de lock desejada" },
-            issue_id: { type: "string", description: "Identificador da issue (obrigatório para acquire/release)" },
+            issue_id: { type: "string", description: "ID Nostr completo da issue (64 hex; prefixos de 8 chars são resolvidos automaticamente quando conhecidos)" },
             agent_id: { type: "string", description: "Nome ou ID do agente solicitante (obrigatório para acquire)" },
             ttl_minutes: { type: "number", description: "Tempo de expiração do lock em minutos (default: 60)" },
+            title: { type: "string", description: "Título real da issue Nostr para exibição no Kanban" },
+            owner: { type: "string", description: "Pubkey hex 64 do dono do repositório Nostr" },
+            revisor: { type: "string", description: "Nome do agente revisor independente (L-01)" },
+            acceptance_command: { type: "string", description: "Comando de aceite L-22 congelado" },
+            branch: { type: "string", description: "Branch da worktree (ex: feat/slug ou card/slug)" },
           },
           required: ["action"],
         },
@@ -5724,7 +5730,13 @@ Consulte sempre orgfy_status, orgfy_kpis ou orgfy_kanban_read para inspecionar m
             if (!args?.issue_id || !args?.agent_id) {
               return JSON.stringify({ ok: false, code: "MISSING_FIELDS", message: "issue_id e agent_id são obrigatórios" }, null, 2);
             }
-            const res = await acquireCheckoutLock(ctx, args.issue_id, args.agent_id, args?.ttl_minutes || 60);
+            const res = await acquireCheckoutLock(ctx, args.issue_id, args.agent_id, args?.ttl_minutes || 60, Date.now(), {
+              title: args?.title,
+              owner: args?.owner,
+              revisor: args?.revisor,
+              acceptanceCommand: args?.acceptance_command,
+              branch: args?.branch,
+            });
             return JSON.stringify(res, null, 2);
           }
           if (action === "release") {
@@ -5758,10 +5770,10 @@ Consulte sempre orgfy_status, orgfy_kpis ou orgfy_kanban_read para inspecionar m
         },
       });
 
-      // ── ONDA 3: LINTER SEMÂNTICO + L-01/L-22 DE CARDS ──
+      // ── ONDA 3: LINTER SEMÂNTICO + L-01/L-22 + TEMPLATE ORGFY/SPEC-KIT ──
       (ctx.agents as any).addTool({
         name: "orgfy_lint_card",
-        description: "Audita um card antes do despacho validando regras determinísticas L-01/L-22 (segregação executor/revisor, comando de aceite verificável) e revisão semântica via ctx.decisions.decide.",
+        description: "Audita um card antes do despacho validando template oficial OrgFy/Spec-Kit, regras determinísticas L-01/L-22 (segregação executor/revisor, comando de aceite verificável) e revisão semântica.",
         inputSchema: {
           type: "object",
           properties: {
@@ -5771,6 +5783,8 @@ Consulte sempre orgfy_status, orgfy_kpis ou orgfy_kanban_read para inspecionar m
             acceptance_command: { type: "string", description: "Comando determinístico de aceite (L-22)" },
             executor: { type: "string", description: "Agente executor proposto" },
             revisor: { type: "string", description: "Agente revisor proposto" },
+            card_markdown: { type: "string", description: "Corpo Markdown completo do card para validação fail-closed do template OrgFy + Spec-Kit" },
+            spec_path: { type: "string", description: "Caminho da spec no Spec-Kit (ex: specs/planned/0011/spec.md)" },
           },
           required: ["title"],
         },
@@ -5782,6 +5796,8 @@ Consulte sempre orgfy_status, orgfy_kpis ou orgfy_kanban_read para inspecionar m
             acceptanceCommand: args.acceptance_command,
             executor: args.executor,
             revisor: args.revisor,
+            cardMarkdown: args.card_markdown,
+            specPath: args.spec_path,
           });
           return JSON.stringify(lintRes, null, 2);
         },

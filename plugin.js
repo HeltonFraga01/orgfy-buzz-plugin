@@ -118,7 +118,7 @@ async function fetchLiveEsteiraState(ctx, empresa) {
   };
 }
 async function fetchLiveKanbanSnapshot(ctx, filter) {
-  var _a, _b, _c, _d, _e, _f, _g, _h;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i;
   const [live, canvasText] = await Promise.all([
     fetchLiveEsteiraState(ctx, filter == null ? void 0 : filter.empresa),
     readOrgfyText(ctx, ".scratch/canvas_atual.md")
@@ -263,8 +263,71 @@ async function fetchLiveKanbanSnapshot(ctx, filter) {
       });
     }
   }
+  const DEFAULT_ORGFY_OWNER = "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20";
+  const short8ToFull64 = /* @__PURE__ */ new Map();
+  for (const fullK of Object.keys(aceites)) {
+    if (/^[0-9a-f]{64}$/i.test(fullK)) short8ToFull64.set(fullK.slice(0, 8).toLowerCase(), fullK.toLowerCase());
+  }
+  for (const [, item] of Object.entries(aceiteCache)) {
+    if ((item == null ? void 0 : item.issue_id) && /^[0-9a-f]{64}$/i.test(item.issue_id)) {
+      short8ToFull64.set(item.issue_id.slice(0, 8).toLowerCase(), item.issue_id.toLowerCase());
+    }
+  }
   try {
     if ((_f = ctx == null ? void 0 : ctx.host) == null ? void 0 : _f.readFile) {
+      const rawTrans = await ctx.host.readFile("/Users/heltonfraga/.buzz/.scratch/esteira-transicoes.jsonl");
+      const transTxt = typeof rawTrans === "string" ? rawTrans : rawTrans instanceof Uint8Array ? new TextDecoder("utf-8").decode(rawTrans) : String(rawTrans ?? "");
+      for (const line of transTxt.split("\n")) {
+        const m = line.match(/"issue_id"\s*:\s*"([0-9a-f]{64})"/i);
+        if (m) {
+          const full = m[1].toLowerCase();
+          short8ToFull64.set(full.slice(0, 8), full);
+        }
+      }
+    }
+  } catch {
+  }
+  const resolveIssueMetadataFromRelay = async (fullId) => {
+    var _a2;
+    if (!((_a2 = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a2.spawn) || !/^[0-9a-f]{64}$/i.test(fullId)) return null;
+    try {
+      let out = "";
+      const p = await ctx.host.spawn("buzz", {
+        args: ["issues", "get", "--event", fullId],
+        onStdout: (c) => {
+          out += c;
+        }
+      });
+      const code = await p.exited;
+      if (code !== 0 || !out.trim()) return null;
+      const parsed = JSON.parse(out);
+      const ev = Array.isArray(parsed) ? parsed[0] : parsed;
+      if (!ev || typeof ev !== "object") return null;
+      const tags = Array.isArray(ev.tags) ? ev.tags : [];
+      const subjectTag = tags.find((t) => Array.isArray(t) && t[0] === "subject" && typeof t[1] === "string");
+      const aTag = tags.find((t) => Array.isArray(t) && t[0] === "a" && typeof t[1] === "string");
+      let owner;
+      if (aTag) {
+        const parts = String(aTag[1]).split(":");
+        if (parts.length >= 2 && /^[0-9a-f]{64}$/i.test(parts[1])) owner = parts[1].toLowerCase();
+      }
+      const content = String(ev.content || "");
+      const revM = content.match(/(?:-\s+)?(?:\*\*)?Revisor(?:\*\*)?:\s*([^\n\r|]+)/i);
+      const branchM = content.match(/(?:-\s+)?(?:\*\*)?Branch(?:\*\*)?:\s*`?([a-zA-Z0-9._/-]+)`?/i);
+      const acM = content.match(/##\s*(?:Comando de aceite|Aceite)[\s\S]*?```(?:bash|sh)?\s*\n([^\n`]+)/i);
+      return {
+        title: subjectTag ? String(subjectTag[1]).trim() : void 0,
+        owner: owner || DEFAULT_ORGFY_OWNER,
+        revisor: revM ? revM[1].replace(/\*/g, "").trim() : void 0,
+        branch: branchM ? branchM[1].trim() : void 0,
+        acceptanceCommand: acM ? acM[1].trim() : void 0
+      };
+    } catch {
+      return null;
+    }
+  };
+  try {
+    if ((_g = ctx == null ? void 0 : ctx.host) == null ? void 0 : _g.readFile) {
       const rawLocks = await ctx.host.readFile("/Users/heltonfraga/.buzz/.scratch/orgfy-locks.json");
       const lockTxt = typeof rawLocks === "string" ? rawLocks : rawLocks instanceof Uint8Array ? new TextDecoder("utf-8").decode(rawLocks) : String(rawLocks ?? "");
       const parsedLocks = JSON.parse(lockTxt);
@@ -272,19 +335,34 @@ async function fetchLiveKanbanSnapshot(ctx, filter) {
       if (parsedLocks && typeof parsedLocks === "object" && !Array.isArray(parsedLocks)) {
         for (const [lockIssueId, rec] of Object.entries(parsedLocks)) {
           if (!rec || typeof rec.expiresAt !== "number" || rec.expiresAt <= nowMs) continue;
-          const shortLockId = lockIssueId.slice(0, 8);
+          const cleanLock = String(lockIssueId || "").replace(/^#/, "").trim().toLowerCase();
+          const fullLockId = /^[0-9a-f]{64}$/i.test(cleanLock) ? cleanLock : short8ToFull64.get(cleanLock.slice(0, 8));
+          if (!fullLockId) continue;
+          const shortLockId = fullLockId.slice(0, 8);
           if (cardMap.has(shortLockId)) continue;
+          const aceiteRecord = aceites[fullLockId] || aceites[shortLockId] || null;
+          const cachedAceite = aceiteCacheByIssue.get(fullLockId) || aceiteCacheByIssue.get(shortLockId) || null;
+          const relayMeta = !rec.title || !rec.acceptanceCommand ? await resolveIssueMetadataFromRelay(fullLockId) : null;
+          const resolvedTitle = typeof rec.title === "string" && rec.title.trim() || (relayMeta == null ? void 0 : relayMeta.title) || `Issue Nostr #${shortLockId}`;
+          const resolvedOwner = typeof rec.owner === "string" && /^[0-9a-f]{64}$/i.test(rec.owner) && rec.owner.toLowerCase() || (relayMeta == null ? void 0 : relayMeta.owner) || DEFAULT_ORGFY_OWNER;
+          const resolvedAcceptanceCmd = typeof rec.acceptanceCommand === "string" && rec.acceptanceCommand.trim() || typeof aceiteRecord === "object" && (aceiteRecord == null ? void 0 : aceiteRecord.comando) || (cachedAceite == null ? void 0 : cachedAceite.comando) || (relayMeta == null ? void 0 : relayMeta.acceptanceCommand) || void 0;
+          const resolvedAcceptanceHash = typeof aceiteRecord === "object" && (aceiteRecord == null ? void 0 : aceiteRecord.hash_comando) || (cachedAceite == null ? void 0 : cachedAceite.hash_comando) || void 0;
           cardMap.set(shortLockId, {
             id: `lock-${shortLockId}`,
             issueId: shortLockId,
-            fullIssueId: lockIssueId.length === 64 ? lockIssueId : void 0,
-            title: `Card em execução (#${shortLockId})`,
+            fullIssueId: fullLockId,
+            owner: resolvedOwner,
+            title: resolvedTitle,
             empresa: (filter == null ? void 0 : filter.empresa) && filter.empresa !== "all" ? filter.empresa : "orgfy",
             executor: String(rec.agentKey || "Agente OrgFy"),
-            revisor: "Revisão pendente",
+            revisor: typeof rec.revisor === "string" && rec.revisor.trim() || (relayMeta == null ? void 0 : relayMeta.revisor) || "Revisão pendente",
+            decisor: "OrgFy Iris",
             tier: "tier_1_exec_barato",
             stage: "execucao",
             priority: "P1",
+            branch: typeof rec.branch === "string" && rec.branch.trim() || (relayMeta == null ? void 0 : relayMeta.branch) || void 0,
+            acceptanceCommand: resolvedAcceptanceCmd,
+            acceptanceHash: resolvedAcceptanceHash,
             worktreePath: `.worktrees/${shortLockId}`,
             updatedAt: Number(rec.acquiredAt || nowMs)
           });
@@ -294,7 +372,7 @@ async function fetchLiveKanbanSnapshot(ctx, filter) {
   } catch {
   }
   try {
-    if ((_g = ctx == null ? void 0 : ctx.host) == null ? void 0 : _g.spawn) {
+    if ((_h = ctx == null ? void 0 : ctx.host) == null ? void 0 : _h.spawn) {
       let wtOut = "";
       const proc = await ctx.host.spawn("git", {
         args: ["-C", ORGFY_ABS_PATH, "worktree", "list", "--porcelain"],
@@ -352,7 +430,7 @@ async function fetchLiveKanbanSnapshot(ctx, filter) {
             }
           } catch {
           }
-          if (!resolvedFullIssueId && ((_h = ctx == null ? void 0 : ctx.host) == null ? void 0 : _h.spawn)) {
+          if (!resolvedFullIssueId && ((_i = ctx == null ? void 0 : ctx.host) == null ? void 0 : _i.spawn)) {
             try {
               let grepOut = "";
               const gProc = await ctx.host.spawn("git", {
@@ -387,17 +465,21 @@ async function fetchLiveKanbanSnapshot(ctx, filter) {
             } catch {
             }
           }
-          cardMap.set(`wt-${slug}`, {
+          if (!resolvedFullIssueId) continue;
+          const shortWtIssue = resolvedFullIssueId.slice(0, 8);
+          if (cardMap.has(shortWtIssue)) continue;
+          cardMap.set(shortWtIssue, {
             id: `wt-${slug}`,
-            issueId: resolvedFullIssueId ? resolvedFullIssueId.slice(0, 8) : slug.toUpperCase().slice(0, 18),
+            issueId: shortWtIssue,
             fullIssueId: resolvedFullIssueId,
-            owner: resolvedOwner,
+            owner: resolvedOwner || DEFAULT_ORGFY_OWNER,
             title: `${slug.toUpperCase()} (${branchName})`,
             objetivo: resolvedObjetivo || `${slug.toUpperCase()} em execução na branch ${branchName}`,
             acceptanceCommand: resolvedAceite,
             empresa: (filter == null ? void 0 : filter.empresa) && filter.empresa !== "all" ? filter.empresa : "orgfy",
             executor: "Em execução (worktree)",
             revisor: "Revisão pendente",
+            decisor: "OrgFy Iris",
             tier: "tier_1_exec_barato",
             stage: "execucao",
             priority: "P1",
@@ -2293,6 +2375,35 @@ function createChannelPulsePanel(ctx, fetchKpis) {
     );
   };
 }
+async function resolveFullNostrIssueId(ctx, rawId) {
+  const clean = String(rawId || "").replace(/^#/, "").trim().toLowerCase();
+  if (/^[0-9a-f]{64}$/i.test(clean)) return clean;
+  if (!/^[0-9a-f]{6,63}$/i.test(clean)) return rawId.trim();
+  const host = ctx.host;
+  if (!(host == null ? void 0 : host.readFile)) return clean;
+  const decode = (raw) => typeof raw === "string" ? raw : raw instanceof Uint8Array ? new TextDecoder("utf-8").decode(raw) : String(raw ?? "");
+  try {
+    const rawT = await host.readFile("/Users/heltonfraga/.buzz/.scratch/esteira-transicoes.jsonl");
+    const lines = decode(rawT).split("\n");
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (!lines[i].includes(clean)) continue;
+      const m = lines[i].match(new RegExp(`"issue_id"\\s*:\\s*"(${clean}[0-9a-f]{${64 - clean.length}})"`, "i"));
+      if (m) return m[1].toLowerCase();
+    }
+  } catch {
+  }
+  try {
+    const rawE = await host.readFile("/Users/heltonfraga/.buzz/REPOS/orgfy/.esteira/estado/esteira-minima-state.json");
+    const parsed = JSON.parse(decode(rawE));
+    for (const k of Object.keys((parsed == null ? void 0 : parsed.aceites) || {})) {
+      if (k.toLowerCase().startsWith(clean) && /^[0-9a-f]{64}$/i.test(k)) {
+        return k.toLowerCase();
+      }
+    }
+  } catch {
+  }
+  return clean;
+}
 const LOCKS_FILE_PATH = "/Users/heltonfraga/.buzz/.scratch/orgfy-locks.json";
 const DEFAULT_LOCK_TTL_MS = 30 * 60 * 1e3;
 const DEFAULT_COOLDOWN_MS = 15 * 60 * 1e3;
@@ -2321,7 +2432,12 @@ async function syncLocksFromDisk(ctx) {
               issueId: k,
               agentKey: v.agentKey,
               acquiredAt: Number(v.acquiredAt || now),
-              expiresAt: v.expiresAt
+              expiresAt: v.expiresAt,
+              title: typeof v.title === "string" ? v.title : void 0,
+              owner: typeof v.owner === "string" ? v.owner : void 0,
+              revisor: typeof v.revisor === "string" ? v.revisor : void 0,
+              acceptanceCommand: typeof v.acceptanceCommand === "string" ? v.acceptanceCommand : void 0,
+              branch: typeof v.branch === "string" ? v.branch : void 0
             });
           }
         }
@@ -2356,8 +2472,10 @@ async function persistLocksToDisk(ctx) {
     }
   }
 }
-async function acquireCheckoutLock(ctx, issueId, agentKey, ttlMs = DEFAULT_LOCK_TTL_MS, nowMs = Date.now()) {
-  const cleanIssue = String(issueId || "").trim();
+async function acquireCheckoutLock(ctx, issueId, agentKey, ttlMs = DEFAULT_LOCK_TTL_MS, nowMs = Date.now(), meta) {
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
+  const rawIssue = String(issueId || "").trim();
+  const cleanIssue = await resolveFullNostrIssueId(ctx, rawIssue);
   const cleanAgent = String(agentKey || "").trim();
   const normalizedTtlMs = typeof ttlMs === "number" && Number.isFinite(ttlMs) && ttlMs > 0 ? ttlMs <= 1440 ? ttlMs * 60 * 1e3 : ttlMs : DEFAULT_LOCK_TTL_MS;
   if (!cleanIssue || !cleanAgent) {
@@ -2369,14 +2487,23 @@ async function acquireCheckoutLock(ctx, issueId, agentKey, ttlMs = DEFAULT_LOCK_
   }
   await syncLocksFromDisk(ctx);
   purgeExpiredLocks(nowMs);
-  const existing = memoryLocks.get(cleanIssue);
+  const shortKey = cleanIssue.slice(0, 8);
+  const existing = memoryLocks.get(cleanIssue) || (cleanIssue.length === 64 ? memoryLocks.get(shortKey) : void 0);
   if (existing && existing.expiresAt > nowMs) {
     if (existing.agentKey === cleanAgent) {
+      if (existing.issueId !== cleanIssue) {
+        memoryLocks.delete(existing.issueId);
+      }
       const renewed = {
         issueId: cleanIssue,
         agentKey: cleanAgent,
         acquiredAt: existing.acquiredAt,
-        expiresAt: nowMs + normalizedTtlMs
+        expiresAt: nowMs + normalizedTtlMs,
+        title: ((_a = meta == null ? void 0 : meta.title) == null ? void 0 : _a.trim()) || existing.title,
+        owner: ((_b = meta == null ? void 0 : meta.owner) == null ? void 0 : _b.trim()) || existing.owner,
+        revisor: ((_c = meta == null ? void 0 : meta.revisor) == null ? void 0 : _c.trim()) || existing.revisor,
+        acceptanceCommand: ((_d = meta == null ? void 0 : meta.acceptanceCommand) == null ? void 0 : _d.trim()) || existing.acceptanceCommand,
+        branch: ((_e = meta == null ? void 0 : meta.branch) == null ? void 0 : _e.trim()) || existing.branch
       };
       memoryLocks.set(cleanIssue, renewed);
       await persistLocksToDisk(ctx);
@@ -2399,7 +2526,12 @@ async function acquireCheckoutLock(ctx, issueId, agentKey, ttlMs = DEFAULT_LOCK_
     issueId: cleanIssue,
     agentKey: cleanAgent,
     acquiredAt: nowMs,
-    expiresAt: nowMs + normalizedTtlMs
+    expiresAt: nowMs + normalizedTtlMs,
+    title: ((_f = meta == null ? void 0 : meta.title) == null ? void 0 : _f.trim()) || void 0,
+    owner: ((_g = meta == null ? void 0 : meta.owner) == null ? void 0 : _g.trim()) || void 0,
+    revisor: ((_h = meta == null ? void 0 : meta.revisor) == null ? void 0 : _h.trim()) || void 0,
+    acceptanceCommand: ((_i = meta == null ? void 0 : meta.acceptanceCommand) == null ? void 0 : _i.trim()) || void 0,
+    branch: ((_j = meta == null ? void 0 : meta.branch) == null ? void 0 : _j.trim()) || void 0
   };
   memoryLocks.set(cleanIssue, created);
   await persistLocksToDisk(ctx);
@@ -2411,10 +2543,12 @@ async function acquireCheckoutLock(ctx, issueId, agentKey, ttlMs = DEFAULT_LOCK_
   };
 }
 async function releaseCheckoutLock(ctx, issueId, agentKey, force = false) {
-  const cleanIssue = String(issueId || "").trim();
+  const rawIssue = String(issueId || "").trim();
+  const cleanIssue = await resolveFullNostrIssueId(ctx, rawIssue);
   await syncLocksFromDisk(ctx);
   purgeExpiredLocks(Date.now());
-  const existing = memoryLocks.get(cleanIssue);
+  const shortKey = cleanIssue.slice(0, 8);
+  const existing = memoryLocks.get(cleanIssue) || memoryLocks.get(rawIssue) || memoryLocks.get(shortKey);
   if (!existing) {
     return {
       ok: true,
@@ -2430,12 +2564,12 @@ async function releaseCheckoutLock(ctx, issueId, agentKey, force = false) {
       message: `Lock de ${cleanIssue} pertence a ${existing.agentKey}, não a ${agentKey}.`
     };
   }
-  memoryLocks.delete(cleanIssue);
+  memoryLocks.delete(existing.issueId);
   await persistLocksToDisk(ctx);
   return {
     ok: true,
     code: "RELEASED",
-    message: `Lock de ${cleanIssue} liberado com sucesso.`
+    message: `Lock de ${existing.issueId} liberado com sucesso.`
   };
 }
 async function listActiveLocks(ctx, nowMs = Date.now()) {
@@ -2599,11 +2733,12 @@ function classifyFallbackRiskAndSurface(titulo, descricao) {
   return { riskLevel: "Z2", requiresHumanApproval: false, surface };
 }
 async function lintCardForDispatch(ctx, input) {
-  var _a;
+  var _a, _b;
   const issues = [];
   const titulo = String(input.titulo || "").trim();
   const cmd = String(input.acceptanceCommand || "").trim();
   const desc = String(input.descricao || "").trim();
+  const md = String(input.cardMarkdown || "").trim();
   if (!titulo || titulo.length < 10) {
     issues.push("Título muito curto ou ausente (mínimo 10 caracteres).");
   }
@@ -2614,6 +2749,20 @@ async function lintCardForDispatch(ctx, input) {
   }
   if (input.executor && input.revisor && input.executor.trim() === input.revisor.trim()) {
     issues.push("Regra L-01 violada: executor e revisor não podem ser o mesmo agente.");
+  }
+  if (md) {
+    if (!/<!--\s*orgfy:card\s+(?:v3|v4|v7\.1|v7\.2)\s*-->/i.test(md)) {
+      issues.push("Template OrgFy ausente: marcador '<!-- orgfy:card v4 -->' ou '<!-- orgfy:card v3 -->' obrigatório (use ./ferramentas/orgfy-card-new).");
+    }
+    if (!/(specs\/[a-z0-9_/-]+|SPEC-\d{4}|\*\*Autoridade:\*\*)/i.test(md) && !((_a = input.specPath) == null ? void 0 : _a.trim())) {
+      issues.push("Spec-Kit obrigatório: informe referência à spec ('specs/.../spec.md' ou 'SPEC-NNNN') e Autoridade.");
+    }
+    if (!/(?:\*\*Leitura:\*\*|Leitura:)/i.test(md) || !/(?:\*\*Escrita\s+exclusiva:\*\*|Escrita\s+exclusiva:)/i.test(md)) {
+      issues.push("Paths obrigatórios ausentes: preencha 'Leitura:' e 'Escrita exclusiva:' conforme contratos/card.md.");
+    }
+    if (!/##\s+Pap[eé]is\s+e\s+ambiente/i.test(md)) {
+      issues.push("Seção obrigatória ausente: '## Papéis e ambiente' (com Executor, Revisor, Decisor e Workspace).");
+    }
   }
   const fallbackCls = classifyFallbackRiskAndSurface(titulo, desc);
   let usedDecisionsApi = false;
@@ -2642,7 +2791,7 @@ async function lintCardForDispatch(ctx, input) {
       usedDecisionsApi = true;
       decisionSource = "decisions_api";
       fallbackReason = null;
-      const ans = ((_a = decisionRes == null ? void 0 : decisionRes.answers) == null ? void 0 : _a.atomic_scope) ?? (decisionRes == null ? void 0 : decisionRes.atomic_scope);
+      const ans = ((_b = decisionRes == null ? void 0 : decisionRes.answers) == null ? void 0 : _b.atomic_scope) ?? (decisionRes == null ? void 0 : decisionRes.atomic_scope);
       if (ans === false || ans === "no") {
         issues.push("Avaliação semântica (ctx.decisions): escopo amplo demais ou pouco verificável.");
         score = 0.55;
@@ -8223,27 +8372,28 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
     try {
       ctx.agents.addInstructions({
         id: "orgfy-governance-v11",
-        text: `Esteira OrgFy v11 (Holding Cortexx) — Governança Determinística & Ciclo Fechado:
+        text: `Esteira OrgFy v12 (Holding Cortexx) — Governança Determinística & Ciclo Fechado:
 Você opera sobre a fábrica de software agêntica da holding Cortexx (empresas: orgfy, lumen-iptv, saas-tributario).
 Regras Invariantes:
+- Template Oficial OrgFy + Spec-Kit Obrigatório (FAIL-CLOSED): NUNCA crie issues com 'buzz issues create' direto nem markdown improvisado. Toda nova tarefa exige: (1) spec no Spec-Kit ('specs/.../spec.md' com 'Plan Gate: Passed' para 'gate:implementacao'), (2) geração pelo template canônico ('./ferramentas/orgfy-card-new'), (3) validação com './ferramentas/card-lint.sh <card.md>' (exit 0) e (4) publicação exclusivamente via './ferramentas/buzz-issue-guard.sh'.
 - L-01 a L-90: Qualquer modificação de código deve ser estritamente rastreada e validada pela esteira determinística.
 - L-22: O comando de aceite é imutável e blindado por hash SHA-256 no momento do despacho. Nunca afrouxe critérios de aceite.
 - L-90: Regras probatórias RSI em .scratch/regras-probatorias.json são avaliadas contra o FPY histórico (First Pass Yield).
 - Hard Cap Orçamentário (80% alerta / 100% bloqueio): Despachos são bloqueados ao atingir 100% do teto diário salvo board_override=true.
-- Checkout Lock Atômico: Nenhum card pode ser executado em paralelo por dois agentes; adquira lock antes de atuar.
+- Checkout Lock Atômico (Nostr 64-hex): Nenhum card pode ser executado em paralelo por dois agentes; adquira lock passando SEMPRE o issue_id Nostr completo (64 hex) + title, revisor, acceptance_command e branch.
 - DSAP Backtracking: Na 2ª recusa consecutiva com similaridade >= 0.70, o card entra em backtracking para o COO re-escopar.
 - Atribuição de Issues (FERR-ASSIGN-AUTH): NUNCA execute 'buzz issues assign' diretamente (falha com auth_error Kind 1 em chamadores locais); use sempre 'python3 ferramentas/assign_issue.py' na raiz do REPOS/orgfy.
 - Decisor Híbrido v12: orgfy_lint_card usa Decisions API com fallback determinístico offline automático (ferramentas/esteira/decisor_fallback.py) em caso de falta de saldo ou timeout.
 Ferramentas nativas disponíveis neste plugin:
 1. orgfy_status({ empresa? }): Consulta o placar de 20h, FPY, CPI de tokens, contagem de aceites, merged e raias da esteira.
-2. orgfy_kanban_read({ stage?, empresa? }): Lê a matriz Kanban completa (triagem, despachado, execucao, revisao, feito) incluindo worktrees e locks ativos.
-3. orgfy_despachar({ issue_id, executor, revisor, empresa?, board_override? }): Despacha card em worktree isolado respeitando Hard Cap orçamentário e lock atômico.
+2. orgfy_kanban_read({ stage?, empresa? }): Lê a matriz Kanban completa (triagem, despachado, execucao, revisao, feito) apenas com cards vinculados a Issues Nostr reais (64 hex).
+3. orgfy_despachar({ issue_id, executor, revisor, empresa?, board_override? }): Despacha card em worktree isolado respeitando Hard Cap orçamentário, template OrgFy/Spec-Kit e lock atômico.
 4. orgfy_gate({ pr_id, decisao, motivo, revisor, empresa? }): Aplica o Gate Caixa-Preta (aceito/recusado) com probes de validação.
 5. orgfy_porteiro_sync({ empresa? }): Dispara sincronização determinística de eventos Nostr e ciclo de execução.
 6. orgfy_kpis({ recalcular? }): Lê os KPIs reais de Fluxo, Qualidade, Economia e Higiene (kpis-esteira.json) e opcionalmente recalcula via script Python.
-7. orgfy_checkout_lock({ action, issue_id?, agent_id?, ttl_minutes? }): Gerencia lock atômico de checkout (acquire, release, list) com persistência garantida em ~/.buzz/.scratch/orgfy-locks.json.
+7. orgfy_checkout_lock({ action, issue_id?, agent_id?, ttl_minutes?, title?, revisor?, acceptance_command?, branch? }): Gerencia lock atômico de checkout (acquire, release, list) com resolução automática para 64-hex Nostr.
 8. orgfy_governanca_avaliar({ dry_run?, auto_wake? }): Avalia orçamento, fila de revisão, WIP órfão e estagnação nível 3, disparando alertas/wakes com cooldown anti-spam.
-9. orgfy_lint_card({ title, objective?, done_when?, acceptance_command?, executor?, revisor? }): Audita qualidade semântica (Decisions API + fallback offline) e regras L-01/L-22 antes do despacho.
+9. orgfy_lint_card({ title, objective?, done_when?, acceptance_command?, executor?, revisor?, card_markdown?, spec_path? }): Audita template OrgFy/Spec-Kit, qualidade semântica e regras L-01/L-22 antes do despacho.
 10. orgfy_bind_context({ conversation_id, issue_id, worktree_path?, title?, acceptance_command?, acceptance_hash?, executor?, revisor? }): Vincula o worktree e injeta regras vivas L-22/L-90 direto na conversa do agente.
 Consulte sempre orgfy_status, orgfy_kpis ou orgfy_kanban_read para inspecionar métricas reais antes de agir.`
       });
@@ -8434,14 +8584,19 @@ Consulte sempre orgfy_status, orgfy_kpis ou orgfy_kanban_read para inspecionar m
       });
       ctx.agents.addTool({
         name: "orgfy_checkout_lock",
-        description: "Gerencia locks atômicos de checkout por issue_id para evitar execução duplicada entre agentes (action: 'acquire' | 'release' | 'list').",
+        description: "Gerencia locks atômicos de checkout por issue_id Nostr (64 hex) para evitar execução duplicada entre agentes (action: 'acquire' | 'release' | 'list').",
         inputSchema: {
           type: "object",
           properties: {
             action: { type: "string", enum: ["acquire", "release", "list"], description: "Ação de lock desejada" },
-            issue_id: { type: "string", description: "Identificador da issue (obrigatório para acquire/release)" },
+            issue_id: { type: "string", description: "ID Nostr completo da issue (64 hex; prefixos de 8 chars são resolvidos automaticamente quando conhecidos)" },
             agent_id: { type: "string", description: "Nome ou ID do agente solicitante (obrigatório para acquire)" },
-            ttl_minutes: { type: "number", description: "Tempo de expiração do lock em minutos (default: 60)" }
+            ttl_minutes: { type: "number", description: "Tempo de expiração do lock em minutos (default: 60)" },
+            title: { type: "string", description: "Título real da issue Nostr para exibição no Kanban" },
+            owner: { type: "string", description: "Pubkey hex 64 do dono do repositório Nostr" },
+            revisor: { type: "string", description: "Nome do agente revisor independente (L-01)" },
+            acceptance_command: { type: "string", description: "Comando de aceite L-22 congelado" },
+            branch: { type: "string", description: "Branch da worktree (ex: feat/slug ou card/slug)" }
           },
           required: ["action"]
         },
@@ -8455,7 +8610,13 @@ Consulte sempre orgfy_status, orgfy_kpis ou orgfy_kanban_read para inspecionar m
             if (!(args == null ? void 0 : args.issue_id) || !(args == null ? void 0 : args.agent_id)) {
               return JSON.stringify({ ok: false, code: "MISSING_FIELDS", message: "issue_id e agent_id são obrigatórios" }, null, 2);
             }
-            const res = await acquireCheckoutLock(ctx, args.issue_id, args.agent_id, (args == null ? void 0 : args.ttl_minutes) || 60);
+            const res = await acquireCheckoutLock(ctx, args.issue_id, args.agent_id, (args == null ? void 0 : args.ttl_minutes) || 60, Date.now(), {
+              title: args == null ? void 0 : args.title,
+              owner: args == null ? void 0 : args.owner,
+              revisor: args == null ? void 0 : args.revisor,
+              acceptanceCommand: args == null ? void 0 : args.acceptance_command,
+              branch: args == null ? void 0 : args.branch
+            });
             return JSON.stringify(res, null, 2);
           }
           if (action === "release") {
@@ -8488,7 +8649,7 @@ Consulte sempre orgfy_status, orgfy_kpis ou orgfy_kanban_read para inspecionar m
       });
       ctx.agents.addTool({
         name: "orgfy_lint_card",
-        description: "Audita um card antes do despacho validando regras determinísticas L-01/L-22 (segregação executor/revisor, comando de aceite verificável) e revisão semântica via ctx.decisions.decide.",
+        description: "Audita um card antes do despacho validando template oficial OrgFy/Spec-Kit, regras determinísticas L-01/L-22 (segregação executor/revisor, comando de aceite verificável) e revisão semântica.",
         inputSchema: {
           type: "object",
           properties: {
@@ -8497,7 +8658,9 @@ Consulte sempre orgfy_status, orgfy_kpis ou orgfy_kanban_read para inspecionar m
             done_when: { type: "string", description: "Critério objetivo de pronto (Feito Quando)" },
             acceptance_command: { type: "string", description: "Comando determinístico de aceite (L-22)" },
             executor: { type: "string", description: "Agente executor proposto" },
-            revisor: { type: "string", description: "Agente revisor proposto" }
+            revisor: { type: "string", description: "Agente revisor proposto" },
+            card_markdown: { type: "string", description: "Corpo Markdown completo do card para validação fail-closed do template OrgFy + Spec-Kit" },
+            spec_path: { type: "string", description: "Caminho da spec no Spec-Kit (ex: specs/planned/0011/spec.md)" }
           },
           required: ["title"]
         },
@@ -8508,7 +8671,9 @@ Consulte sempre orgfy_status, orgfy_kpis ou orgfy_kanban_read para inspecionar m
             descricao: descricao || void 0,
             acceptanceCommand: args.acceptance_command,
             executor: args.executor,
-            revisor: args.revisor
+            revisor: args.revisor,
+            cardMarkdown: args.card_markdown,
+            specPath: args.spec_path
           });
           return JSON.stringify(lintRes, null, 2);
         }
