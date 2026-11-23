@@ -726,7 +726,7 @@ async function openSystemUri(ctx, uri) {
   return opened;
 }
 async function openIssueInBuzz(ctx, issue) {
-  var _a;
+  var _a, _b;
   const DEFAULT_OWNER = "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20";
   let owner = (issue.owner || DEFAULT_OWNER).toLowerCase().trim();
   if (!/^[0-9a-f]{64}$/i.test(owner)) {
@@ -744,22 +744,31 @@ async function openIssueInBuzz(ctx, issue) {
   const uri = `buzz://issue?id=${rawId}&owner=${owner}&d=${dtag}`;
   if ((_a = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a.open) {
     try {
-      await ctx.navigation.open({
-        version: 1,
-        kind: "page",
-        pluginId: "buzz.repos",
-        pageId: "repos",
-        route: {
+      const snap = typeof ctx.navigation.snapshot === "function" ? ctx.navigation.snapshot() : null;
+      const currentTarget = (_b = snap == null ? void 0 : snap.entry) == null ? void 0 : _b.target;
+      const activeScope = (currentTarget == null ? void 0 : currentTarget.scope) && typeof currentTarget.scope === "object" ? currentTarget.scope : void 0;
+      if (activeScope) {
+        const res = await ctx.navigation.open({
           version: 1,
-          params: {
-            type: "issue",
-            owner,
-            dtag,
-            id: rawId
+          kind: "page",
+          pluginId: "buzz.repos",
+          pageId: "repos",
+          scope: activeScope,
+          route: {
+            version: 1,
+            params: {
+              type: "issue",
+              owner,
+              dtag,
+              id: rawId
+            }
           }
+        });
+        if (!res || res.status === "opened") {
+          return true;
         }
-      });
-      return true;
+        console.warn("[OrgFy Bridge] ctx.navigation.open retornou status != opened:", res);
+      }
     } catch (err) {
       console.warn("[OrgFy Bridge] ctx.navigation.open falhou, tentando openSystemUri:", err);
     }

@@ -975,31 +975,44 @@ export async function openIssueInBuzz(
 
   const uri = `buzz://issue?id=${rawId}&owner=${owner}&d=${dtag}`;
 
-  // 1. Tenta navegação interna nativa primeiro (mais rápida e sem flash)
+  // 1. Tenta navegação interna nativa SOMENTE quando há scope de comunidade ativo no snapshot
+  //    (sem scope, buzz.repos abre no Personal space e cai em "This page isn't available").
   if (ctx?.navigation?.open) {
     try {
-      await ctx.navigation.open({
-        version: 1,
-        kind: "page",
-        pluginId: "buzz.repos",
-        pageId: "repos",
-        route: {
+      const snap = typeof ctx.navigation.snapshot === "function" ? ctx.navigation.snapshot() : null;
+      const currentTarget = snap?.entry?.target as any;
+      const activeScope = currentTarget?.scope && typeof currentTarget.scope === "object"
+        ? currentTarget.scope
+        : undefined;
+
+      if (activeScope) {
+        const res = await ctx.navigation.open({
           version: 1,
-          params: {
-            type: "issue",
-            owner,
-            dtag,
-            id: rawId,
+          kind: "page",
+          pluginId: "buzz.repos",
+          pageId: "repos",
+          scope: activeScope,
+          route: {
+            version: 1,
+            params: {
+              type: "issue",
+              owner,
+              dtag,
+              id: rawId,
+            },
           },
-        },
-      });
-      return true;
+        });
+        if (!res || res.status === "opened") {
+          return true;
+        }
+        console.warn("[OrgFy Bridge] ctx.navigation.open retornou status != opened:", res);
+      }
     } catch (err) {
       console.warn("[OrgFy Bridge] ctx.navigation.open falhou, tentando openSystemUri:", err);
     }
   }
 
-  // 2. Fallback: deep-link buzz://issue via protocolo do SO
+  // 2. Fallback: deep-link buzz://issue via protocolo do SO (ingress nativo do Buzz)
   return openSystemUri(ctx, uri);
 }
 
