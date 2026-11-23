@@ -113,7 +113,7 @@ export interface KpiReadResult {
 }
 
 export const KPI_SNAPSHOT_PATH = "/Users/heltonfraga/.buzz/.scratch/kpis-esteira.json";
-export const KPI_SCRIPT_PATH = "/Users/heltonfraga/.buzz/REPOS/orgfy-buzz-plugin/scripts/gerar_kpis_esteira.py";
+export const KPI_SCRIPT_PATH = "/Users/heltonfraga/.buzz/REPOS/orgfy/ferramentas/esteira/gerar_kpis_esteira.py";
 const ARTIFACT_COLLECTION = "orgfy_kpi_history_v1";
 const LOCAL_STORAGE_KEY = "orgfy_kpi_history_v1";
 const MAX_HISTORY_POINTS = 60;

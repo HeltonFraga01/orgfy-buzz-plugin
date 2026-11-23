@@ -1617,7 +1617,7 @@ async function compileProbationaryRule(ctx, options) {
   }
 }
 const KPI_SNAPSHOT_PATH = "/Users/heltonfraga/.buzz/.scratch/kpis-esteira.json";
-const KPI_SCRIPT_PATH = "/Users/heltonfraga/.buzz/REPOS/orgfy-buzz-plugin/scripts/gerar_kpis_esteira.py";
+const KPI_SCRIPT_PATH = "/Users/heltonfraga/.buzz/REPOS/orgfy/ferramentas/esteira/gerar_kpis_esteira.py";
 const ARTIFACT_COLLECTION = "orgfy_kpi_history_v1";
 const LOCAL_STORAGE_KEY = "orgfy_kpi_history_v1";
 const MAX_HISTORY_POINTS = 60;
@@ -4224,28 +4224,19 @@ function apply(ctx) {
       try {
         const res = await executeDespachar(ctx, {
           empresa: selectedTenant === "all" ? "orgfy" : selectedTenant,
-          issueId: dispatchIssueId.replace("#", ""),
+          issueId: dispatchIssueId.replace("#", "").trim(),
           executor: dispatchExecutor,
           revisor: dispatchRevisor,
           onOutput: appendLiveLog
         });
-        const newCard = {
-          id: `card-${Date.now()}`,
-          issueId: dispatchIssueId.replace("#", ""),
-          title: `Despacho: ${dispatchIssueId} via ${dispatchExecutor}`,
-          priority: "P1",
-          empresa: selectedTenant === "all" ? "orgfy" : selectedTenant,
-          executor: dispatchExecutor,
-          revisor: dispatchRevisor,
-          tier: dispatchExecutor === "OrgFy Bento Arquiteto" ? "tier_3_arquiteto" : dispatchExecutor === "OrgFy Otto" ? "tier_2_revisor" : "tier_1_exec_barato",
-          stage: "despachado",
-          elapsedTime: "agora"
-        };
-        const updated = [newCard, ...pipelineCards];
-        setPipelineCards(updated);
-        localStorage.setItem("orgfy_pipeline_cards_v11", JSON.stringify(updated));
+        if (res.code !== 0) {
+          const errLine = res.output.split("\n").find((l) => l.includes("DESPACHO RECUSADO") || l.includes("ERRO")) || `Despacho recusado (exit ${res.code}). Verifique o console de logs.`;
+          showNotification("warning", errLine.trim().slice(0, 180));
+          return;
+        }
         setIsDispatchModalOpen(false);
         setDispatchIssueId("");
+        await loadRealState();
         showNotification("success", `Card ${dispatchIssueId} despachado com sucesso via CLI!`);
         if (desktopNotificationsEnabled) {
           sendDesktopNotification(ctx, "OrgFy: Novo Despacho", `Card ${dispatchIssueId} despachado para ${dispatchExecutor} com sucesso.`);

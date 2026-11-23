@@ -989,30 +989,25 @@ export function apply(ctx: Context) {
       try {
         const res = await executeDespachar(ctx, {
           empresa: selectedTenant === "all" ? "orgfy" : selectedTenant,
-          issueId: dispatchIssueId.replace("#", ""),
+          issueId: dispatchIssueId.replace("#", "").trim(),
           executor: dispatchExecutor,
           revisor: dispatchRevisor,
           onOutput: appendLiveLog,
         });
 
-        const newCard: PipelineCard = {
-          id: `card-${Date.now()}`,
-          issueId: dispatchIssueId.replace("#", ""),
-          title: `Despacho: ${dispatchIssueId} via ${dispatchExecutor}`,
-          priority: "P1",
-          empresa: selectedTenant === "all" ? "orgfy" : selectedTenant,
-          executor: dispatchExecutor,
-          revisor: dispatchRevisor,
-          tier: dispatchExecutor === "OrgFy Bento Arquiteto" ? "tier_3_arquiteto" : dispatchExecutor === "OrgFy Otto" ? "tier_2_revisor" : "tier_1_exec_barato",
-          stage: "despachado",
-          elapsedTime: "agora",
-        };
+        if (res.code !== 0) {
+          const errLine =
+            res.output
+              .split("\n")
+              .find((l) => l.includes("DESPACHO RECUSADO") || l.includes("ERRO")) ||
+            `Despacho recusado (exit ${res.code}). Verifique o console de logs.`;
+          showNotification("warning", errLine.trim().slice(0, 180));
+          return;
+        }
 
-        const updated = [newCard, ...pipelineCards];
-        setPipelineCards(updated);
-        localStorage.setItem("orgfy_pipeline_cards_v11", JSON.stringify(updated));
         setIsDispatchModalOpen(false);
         setDispatchIssueId("");
+        await loadRealState();
         showNotification("success", `Card ${dispatchIssueId} despachado com sucesso via CLI!`);
         if (desktopNotificationsEnabled) {
           sendDesktopNotification(ctx, "OrgFy: Novo Despacho", `Card ${dispatchIssueId} despachado para ${dispatchExecutor} com sucesso.`);
