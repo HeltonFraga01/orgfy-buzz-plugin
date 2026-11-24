@@ -33,6 +33,7 @@ import {
 import { executeSmartModelFailover } from "../services/model-failover";
 import { fetchResolvedArchive, searchResolvedArchive } from "../services/resolved-archive";
 import { createCanonicalCard } from "../services/card-creator";
+import { executeCardProgress } from "../services/card-progress";
 import {
   triageCardWithDecisions,
   triageDiffWithDecisions,
@@ -634,9 +635,37 @@ export function buildUnifiedOrgfyTools(ctx: Context | any): UnifiedOrgfyTool[] {
         return { text: JSON.stringify(res, null, 2), isError: !res.ok };
       },
     },
+    {
+      name: "orgfy_card_progress",
+      description:
+        "Lê ou atualiza o checklist vivo de etapas (P1..Pn) em cards/<SLUG>.md e colore automaticamente o grafo Mermaid '## Fluxo'. Permite retomada determinística após queda, compactação ou failover de modelo.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          slug: { type: "string", description: "Slug do card (ex.: 'SPEC-0006-T020' ou 'wave4-attention')" },
+          action: { type: "string", enum: ["read", "update"], description: "'read' para inspecionar progresso/próxima etapa ou 'update' para marcar etapa" },
+          step_id: { type: "string", description: "ID da etapa (ex.: 'P1', 'P2', 'P3')" },
+          status: { type: "string", enum: ["todo", "in_progress", "done", "blocked"] },
+          note: { type: "string", description: "Nota curta de evidência ou commit SHA" },
+          agent: { type: "string", description: "Nome do agente que atualizou a etapa" },
+        },
+        required: ["slug"],
+      },
+      execute: async (args) => {
+        const res = await executeCardProgress(ctx, {
+          slug: String(args?.slug || ""),
+          action: args?.action,
+          step_id: args?.step_id,
+          status: args?.status,
+          note: args?.note,
+          agent: args?.agent,
+        });
+        return { text: JSON.stringify(res, null, 2), isError: !res.ok };
+      },
+    },
   ];
 
-  // Instrumentação OTel GenAI automática (execute_tool) em todas as 16 tools
+  // Instrumentação OTel GenAI automática (execute_tool) em todas as 17 tools
   return rawTools.map((tool) => ({
     ...tool,
     execute: async (args: any) => {

@@ -108,7 +108,7 @@ function makeHarness(failReads = false) {
 
 // 1. Testes Originais (Kanban & Status Positivo/Negativo + MCP)
 const h1 = makeHarness(false);
-assert.equal(h1.tools.size, 16, "devem existir exatamente 16 agentTools registradas");
+assert.equal(h1.tools.size, 17, "devem existir exatamente 17 agentTools registradas");
 assert.ok(h1.panels.has("orgfy-channel-pulse"), "sidebar panel orgfy-channel-pulse deve ser registrado");
 assert.ok(h1.hooks.length >= 1, "hooks de governança devem ser registrados");
 
@@ -791,5 +791,48 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     totalSpans: snap.totalSpans,
     tokensSaved: snap.decisionsSavings.estimatedTokensSaved,
     retryCascadeAlerts: snap.retryCascadeAlerts.length,
+  }));
+}
+
+// 15. v13.1: Checklist Vivo & Progresso no Card (orgfy_card_progress + colorização Mermaid)
+{
+  const sampleCard = await orgfyMod.createCanonicalCard({}, {
+    slug: "progress-demo",
+    titulo: "Validar checklist vivo no card",
+    autoridade: "DECIDIDO Iris",
+    decisao: "Usar checklist P1..Pn",
+    executor: "OrgFy Atlas",
+    revisor: "OrgFy Bento",
+    escrita_exclusiva: ["src/demo.ts"],
+    passos: ["Implementar funcao", "Adicionar teste", "Rodar aceite L-22"],
+    feito_quando: "exit 0",
+    acceptance_command: "pytest -q",
+  });
+  assert.equal(sampleCard.ok, true);
+  assert.ok(sampleCard.markdown.includes("- [ ] **P1:** Implementar funcao"));
+
+  const p0 = orgfyMod.parseCardProgress(sampleCard.markdown);
+  assert.equal(p0.total, 3);
+  assert.equal(p0.done, 0);
+  assert.equal(p0.pct, 0);
+  assert.equal(p0.nextPendingStepId, "P1");
+
+  const step1 = orgfyMod.applyStepUpdateToMarkdown(sampleCard.markdown, "P1", "done", "commit abc1234", "OrgFy Atlas");
+  assert.equal(step1.matched, true);
+  assert.equal(step1.progress.done, 1);
+  assert.equal(step1.progress.pct, 33);
+  assert.equal(step1.progress.nextPendingStepId, "P2");
+  assert.ok(step1.updatedMarkdown.includes("- [x] **P1:** Implementar funcao"));
+  assert.ok(step1.updatedMarkdown.includes("style P1 fill:#064e3b,stroke:#10b981,color:#d1fae5"));
+
+  const step2 = orgfyMod.applyStepUpdateToMarkdown(step1.updatedMarkdown, "P2", "in_progress", "escrevendo pytest", "OrgFy Atlas");
+  assert.equal(step2.progress.inProgress, 1);
+  assert.ok(step2.updatedMarkdown.includes("- [/] **P2:** Adicionar teste"));
+  assert.ok(step2.updatedMarkdown.includes("style P2 fill:#451a03,stroke:#f59e0b,color:#fef3c7"));
+  console.log("[v13.1 CARD PROGRESS CHECKLIST + MERMAID OK]", JSON.stringify({
+    done: step2.progress.done,
+    total: step2.progress.total,
+    pct: step2.progress.pct,
+    next: step2.progress.nextPendingStepId,
   }));
 }

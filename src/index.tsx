@@ -98,6 +98,11 @@ import {
   createCanonicalCard,
 } from "./services/card-creator";
 import {
+  parseCardProgress,
+  applyStepUpdateToMarkdown,
+  executeCardProgress,
+} from "./services/card-progress";
+import {
   triageCardWithDecisions,
   triageDiffWithDecisions,
   buildBuzzAttentionContract,
@@ -109,6 +114,9 @@ export {
   resetThreadWakeGuardForTests,
   hydrateIssueDetail,
   createCanonicalCard,
+  parseCardProgress,
+  applyStepUpdateToMarkdown,
+  executeCardProgress,
   triageCardWithDecisions,
   triageDiffWithDecisions,
   buildBuzzAttentionContract,
@@ -3684,6 +3692,124 @@ export function apply(ctx: Context) {
                     )
                 ),
 
+                // 1.5 Progresso & Checklist Vivo (Checkpoint Persistente em cards/<SLUG>.md)
+                hydratedIssueDetail?.progress &&
+                  hydratedIssueDetail.progress.total > 0 &&
+                  h(
+                    "div",
+                    {
+                      style: {
+                        borderRadius: "8px",
+                        backgroundColor: "rgba(255, 255, 255, 0.025)",
+                        border: "1px solid rgba(16, 185, 129, 0.25)",
+                        padding: "12px 14px",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "8px",
+                      },
+                    },
+                    h(
+                      "div",
+                      { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" } },
+                      h(
+                        "span",
+                        { style: { fontSize: "10px", fontWeight: "700", color: "#10b981", textTransform: "uppercase", letterSpacing: "0.5px" } },
+                        "Progresso & Checklist de Execução"
+                      ),
+                      h(
+                        "span",
+                        { style: { fontSize: "10.5px", fontFamily: "monospace", fontWeight: "700", color: hydratedIssueDetail.progress.pct === 100 ? "#10b981" : "#38bdf8" } },
+                        `${hydratedIssueDetail.progress.done}/${hydratedIssueDetail.progress.total} concluídas (${hydratedIssueDetail.progress.pct}%)`
+                      )
+                    ),
+                    h(
+                      "div",
+                      {
+                        style: {
+                          height: "6px",
+                          width: "100%",
+                          borderRadius: "9999px",
+                          backgroundColor: "rgba(255, 255, 255, 0.08)",
+                          overflow: "hidden",
+                        },
+                      },
+                      h("div", {
+                        style: {
+                          height: "100%",
+                          width: `${hydratedIssueDetail.progress.pct}%`,
+                          backgroundColor: hydratedIssueDetail.progress.blocked > 0 ? "#ef4444" : hydratedIssueDetail.progress.pct === 100 ? "#10b981" : "#38bdf8",
+                          transition: "width 0.25s ease",
+                        },
+                      })
+                    ),
+                    h(
+                      "div",
+                      { style: { display: "flex", flexDirection: "column", gap: "5px" } },
+                      hydratedIssueDetail.progress.steps.map((st) => {
+                        const badge =
+                          st.status === "done"
+                            ? { icon: "✓", color: "#10b981", bg: "rgba(16, 185, 129, 0.14)" }
+                            : st.status === "in_progress"
+                            ? { icon: "▶", color: "#f59e0b", bg: "rgba(245, 158, 11, 0.14)" }
+                            : st.status === "blocked"
+                            ? { icon: "!", color: "#ef4444", bg: "rgba(239, 68, 68, 0.14)" }
+                            : { icon: "○", color: "#6b7280", bg: "rgba(255, 255, 255, 0.05)" };
+                        return h(
+                          "div",
+                          {
+                            key: st.id,
+                            style: {
+                              display: "flex",
+                              alignItems: "flex-start",
+                              gap: "8px",
+                              padding: "5px 8px",
+                              borderRadius: "6px",
+                              backgroundColor: "rgba(0, 0, 0, 0.28)",
+                              fontSize: "11px",
+                            },
+                          },
+                          h(
+                            "span",
+                            {
+                              style: {
+                                fontFamily: "monospace",
+                                fontWeight: "700",
+                                fontSize: "10px",
+                                padding: "1px 6px",
+                                borderRadius: "4px",
+                                backgroundColor: badge.bg,
+                                color: badge.color,
+                                flexShrink: 0,
+                              },
+                            },
+                            `${badge.icon} ${st.id}`
+                          ),
+                          h(
+                            "div",
+                            { style: { display: "flex", flexDirection: "column", gap: "2px", minWidth: 0 } },
+                            h(
+                              "span",
+                              {
+                                style: {
+                                  color: st.status === "done" ? "#9ca3af" : "#f3f4f6",
+                                  textDecoration: st.status === "done" ? "line-through" : "none",
+                                  lineHeight: "1.4",
+                                },
+                              },
+                              st.text
+                            ),
+                            st.note &&
+                              h(
+                                "span",
+                                { style: { fontSize: "10px", fontFamily: "monospace", color: "#38bdf8" } },
+                                st.note
+                              )
+                          )
+                        );
+                      })
+                    )
+                  ),
+
                 // 2. Estado & Autoridade Decisória (100% real, sem fallback genérico)
                 h(
                   "div",
@@ -5720,6 +5846,7 @@ Ferramentas nativas disponíveis neste plugin:
 14. orgfy_model_failover({ agente?, agent_pubkey?, failed_model?, prefer_free?, apply?, retrigger?, channel_id?, thread_root?, retrigger_text? }): Integração OrgFy ↔ NexusMind Gateway — faz ping real nos modelos mais inteligentes disponíveis no NexusMind, elege o melhor online (inteligência + menor latência real em ms), atualiza o modelo do agente via ctx.agents.save() e re-dispara na thread original.
 15. orgfy_card_create({ slug, titulo, autoridade, decisao, executor, revisor, escrita_exclusiva, feito_quando, acceptance_command, ... }): Abertura schema-first de card OrgFy com triagem em cascata via Decisions API (risco, tier modelo, política Attention), hash L-22 SHA-256 congelado, contrato nativo Buzz Attention/Watch (interest_set + watch_add) e validação opcional via card-lint.sh.
 16. orgfy_decision_triage({ mode: 'card' | 'diff', ... }): Classificação rápida em batch via Buzz Decisions API (yes_no + score + choice) com fallback determinístico offline para triagem de card ou pre-flight de diff/entrega (Escrita exclusiva + L-24).
+17. orgfy_card_progress({ slug, action?: 'read' | 'update', step_id?, status?, note?, agent? }): Lê ou atualiza o checklist vivo P1..Pn em cards/<SLUG>.md e colore automaticamente o grafo Mermaid '## Fluxo'. Use ao iniciar/concluir cada etapa para retomada determinística pós-queda.
 Consulte sempre orgfy_status, orgfy_kpis, orgfy_loop_radar ou orgfy_kanban_read para inspecionar métricas reais antes de agir. Ao abrir novos cards, prefira sempre orgfy_card_create em vez de redigir Markdown livre.`
       });
       console.log("[ORGFY] ctx.agents.addInstructions registrado com sucesso.");

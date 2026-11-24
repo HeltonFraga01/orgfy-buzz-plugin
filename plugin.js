@@ -3172,7 +3172,7 @@ function renderCanonicalCardMarkdown(params) {
     "- Proibido: Alterar o comando de aceite L-22 congelado",
     "",
     "## O que fazer",
-    ...passos.map((p, idx) => `${idx + 1}. ${p}`),
+    ...passos.map((p, idx) => `- [ ] **P${idx + 1}:** ${p}`),
     "",
     "## Fluxo",
     "```mermaid",
@@ -3205,6 +3205,7 @@ function renderCanonicalCardMarkdown(params) {
     "",
     "## Contrato comum",
     "- Escreva arquivos com a ferramenta de escrita de arquivos, não com heredoc, cat ou echo.",
+    "- Checkpoint contínuo: ao iniciar ou concluir cada etapa P1..Pn, chame `orgfy_card_progress({ slug, action: 'update', step_id: 'P1', status: 'done', note: '<evidência>' })` para atualizar o checklist e colorir o grafo Mermaid. Se cair ou compactar contexto, leia `orgfy_card_progress({ slug, action: 'read' })` e retome da próxima etapa pendente.",
     "- Concluir: publicar ENTREGUE_PARA_REVISAO no canal com comando, exit code e saída real (L-22) e mencionar o revisor com `@Nome Exato`.",
     "- Bloquear: publicar no canal `BLOQUEADO | por: <perfil> | motivo: ... | falta: ... | resolve: <perfil>` e mencionar quem resolve.",
     '- Sem prova não há entrega. Proibido escrever "PASS", "pronto" ou "100%" (L-24).',
@@ -4441,6 +4442,241 @@ async function searchResolvedArchive(ctx, options = {}) {
     resultados: matched.slice(0, limit)
   };
 }
+const MARK_TO_STATUS = {
+  " ": "todo",
+  "/": "in_progress",
+  "x": "done",
+  "X": "done",
+  "!": "blocked"
+};
+const STATUS_TO_MARK = {
+  todo: " ",
+  in_progress: "/",
+  done: "x",
+  blocked: "!"
+};
+function decodeBytes$1(raw) {
+  if (typeof raw === "string") return raw;
+  if (raw instanceof Uint8Array) return new TextDecoder("utf-8").decode(raw);
+  if (raw instanceof ArrayBuffer) return new TextDecoder("utf-8").decode(new Uint8Array(raw));
+  return String(raw ?? "");
+}
+function summarizeSteps(steps) {
+  const total = steps.length;
+  const done = steps.filter((s) => s.status === "done").length;
+  const inProgress = steps.filter((s) => s.status === "in_progress").length;
+  const blocked = steps.filter((s) => s.status === "blocked").length;
+  const pct = total > 0 ? Math.round(done / total * 100) : 0;
+  const nextPending = steps.find((s) => s.status === "in_progress") || steps.find((s) => s.status === "todo") || steps.find((s) => s.status === "blocked") || null;
+  return {
+    total,
+    done,
+    inProgress,
+    blocked,
+    pct,
+    steps,
+    nextPendingStepId: nextPending ? nextPending.id : null
+  };
+}
+function parseCardProgress(markdown) {
+  if (!markdown) return null;
+  const secMatch = markdown.match(/##\s*O que fazer\s*\n([\s\S]*?)(?=\n##\s+|$)/i);
+  if (!(secMatch == null ? void 0 : secMatch[1])) return null;
+  const lines = secMatch[1].split("\n");
+  const steps = [];
+  let seq = 0;
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const cb = line.match(/^-\s+\[([ xX\/!])\]\s+(?:\*\*)?(P\d+)(?::)?(?:\*\*)?:?\s*(.+)$/);
+    if (cb) {
+      seq += 1;
+      const status = MARK_TO_STATUS[cb[1]] || "todo";
+      const id = cb[2].toUpperCase();
+      const rest = cb[3].trim();
+      const noteSplit = rest.split(/\s+—\s+`?\[/);
+      const text = noteSplit[0].trim();
+      const note = noteSplit.length > 1 ? rest.slice(text.length).replace(/^\s*—\s*/, "").trim() : void 0;
+      steps.push({ id, text, status, note });
+      continue;
+    }
+    const cbSimple = line.match(/^-\s+\[([ xX\/!])\]\s+(.+)$/);
+    if (cbSimple) {
+      seq += 1;
+      steps.push({
+        id: `P${seq}`,
+        text: cbSimple[2].trim(),
+        status: MARK_TO_STATUS[cbSimple[1]] || "todo"
+      });
+      continue;
+    }
+    const num = line.match(/^(\d+)\.\s+(.+)$/);
+    if (num) {
+      seq += 1;
+      steps.push({
+        id: `P${num[1]}`,
+        text: num[2].trim(),
+        status: "todo"
+      });
+    }
+  }
+  return steps.length > 0 ? summarizeSteps(steps) : null;
+}
+function applyStepUpdateToMarkdown(markdown, stepId, status, note, agent) {
+  const targetId = String(stepId || "").trim().toUpperCase();
+  const parsed = parseCardProgress(markdown);
+  if (!parsed) {
+    return { updatedMarkdown: markdown, progress: null, matched: false };
+  }
+  let matched = false;
+  const noteTag = note ? `[${agent ? `${agent}: ` : ""}${note.replace(/\n/g, " ").trim().slice(0, 120)}]` : void 0;
+  const updatedSteps = parsed.steps.map((s) => {
+    if (s.id.toUpperCase() === targetId) {
+      matched = true;
+      return {
+        ...s,
+        status,
+        note: noteTag ?? s.note
+      };
+    }
+    return s;
+  });
+  if (!matched) {
+    return { updatedMarkdown: markdown, progress: parsed, matched: false };
+  }
+  const newSectionBody = updatedSteps.map((s) => {
+    const mark = STATUS_TO_MARK[s.status];
+    const suffix = s.note ? ` — ${s.note}` : "";
+    return `- [${mark}] **${s.id}:** ${s.text}${suffix}`;
+  }).join("\n");
+  let nextMd = markdown.replace(
+    /(##\s*O que fazer\s*\n)([\s\S]*?)(?=\n##\s+|$)/i,
+    `$1${newSectionBody}
+`
+  );
+  const mermaidMatch = nextMd.match(/(##\s*Fluxo\s*\n```mermaid\s*\n)([\s\S]*?)(```)/i);
+  if (mermaidMatch) {
+    const cleanMermaidLines = mermaidMatch[2].split("\n").filter((l) => !/^\s*style\s+P\d+\s+/i.test(l)).join("\n").trimEnd();
+    const styleLines = [];
+    for (const s of updatedSteps) {
+      if (s.status === "done") {
+        styleLines.push(`    style ${s.id} fill:#064e3b,stroke:#10b981,color:#d1fae5`);
+      } else if (s.status === "in_progress") {
+        styleLines.push(`    style ${s.id} fill:#451a03,stroke:#f59e0b,color:#fef3c7`);
+      } else if (s.status === "blocked") {
+        styleLines.push(`    style ${s.id} fill:#450a0a,stroke:#ef4444,color:#fee2e2`);
+      }
+    }
+    const rebuiltMermaid = styleLines.length > 0 ? `${cleanMermaidLines}
+${styleLines.join("\n")}
+` : `${cleanMermaidLines}
+`;
+    nextMd = nextMd.replace(
+      /(##\s*Fluxo\s*\n```mermaid\s*\n)([\s\S]*?)(```)/i,
+      `$1${rebuiltMermaid}$3`
+    );
+  }
+  return {
+    updatedMarkdown: nextMd,
+    progress: summarizeSteps(updatedSteps),
+    matched: true
+  };
+}
+async function executeCardProgress(ctx, input) {
+  const rawSlug = String(input.slug || "").trim().replace(/^cards\//i, "").replace(/\.md$/i, "");
+  if (!rawSlug) {
+    return {
+      ok: false,
+      code: "MISSING_SLUG",
+      message: "Informe o 'slug' do card (ex.: SPEC-0006-T020).",
+      cardPath: "",
+      progress: null,
+      writtenToDisk: false
+    };
+  }
+  const host = ctx == null ? void 0 : ctx.host;
+  if (!(host == null ? void 0 : host.readFile)) {
+    return {
+      ok: false,
+      code: "HOST_READ_UNAVAILABLE",
+      message: "ctx.host.readFile indisponível neste ambiente.",
+      cardPath: `cards/${rawSlug.toUpperCase()}.md`,
+      progress: null,
+      writtenToDisk: false
+    };
+  }
+  const candidates = Array.from(
+    /* @__PURE__ */ new Set([`cards/${rawSlug.toUpperCase()}.md`, `cards/${rawSlug}.md`, `cards/${rawSlug.toLowerCase()}.md`])
+  );
+  let foundPath = null;
+  let content = null;
+  for (const rel of candidates) {
+    try {
+      const raw = await host.readFile(`${ORGFY_ABS_PATH}/${rel}`);
+      content = decodeBytes$1(raw);
+      foundPath = rel;
+      break;
+    } catch {
+    }
+  }
+  if (!foundPath || !content) {
+    return {
+      ok: false,
+      code: "CARD_NOT_FOUND",
+      message: `Card não encontrado em ${ORGFY_ABS_PATH}/cards/ (tentativas: ${candidates.join(", ")}).`,
+      cardPath: candidates[0],
+      progress: null,
+      writtenToDisk: false
+    };
+  }
+  const action = input.action || (input.step_id && input.status ? "update" : "read");
+  if (action === "read") {
+    const progress = parseCardProgress(content);
+    return {
+      ok: Boolean(progress),
+      code: progress ? "OK" : "NO_STEPS_FOUND",
+      message: progress ? `Progresso de ${foundPath}: ${progress.done}/${progress.total} concluídas (${progress.pct}%). Próxima etapa: ${progress.nextPendingStepId || "nenhuma (concluído)"}.` : `Nenhuma etapa encontrada na seção '## O que fazer' de ${foundPath}.`,
+      cardPath: foundPath,
+      progress,
+      writtenToDisk: false
+    };
+  }
+  if (!input.step_id || !input.status) {
+    return {
+      ok: false,
+      code: "MISSING_STEP_OR_STATUS",
+      message: "Para action='update', informe 'step_id' (ex.: 'P1') e 'status' ('todo' | 'in_progress' | 'done' | 'blocked').",
+      cardPath: foundPath,
+      progress: parseCardProgress(content),
+      writtenToDisk: false
+    };
+  }
+  const applied = applyStepUpdateToMarkdown(content, input.step_id, input.status, input.note, input.agent);
+  if (!applied.matched || !applied.progress) {
+    return {
+      ok: false,
+      code: "STEP_NOT_FOUND",
+      message: `Etapa '${input.step_id}' não encontrada em ${foundPath}.`,
+      cardPath: foundPath,
+      progress: applied.progress,
+      writtenToDisk: false
+    };
+  }
+  let writtenToDisk = false;
+  if (typeof host.writeFile === "function") {
+    await host.writeFile(`${ORGFY_ABS_PATH}/${foundPath}`, applied.updatedMarkdown);
+    writtenToDisk = true;
+  }
+  return {
+    ok: true,
+    code: "UPDATED",
+    message: `Etapa ${input.step_id.toUpperCase()} marcada como '${input.status}' em ${foundPath} (${applied.progress.done}/${applied.progress.total} · ${applied.progress.pct}%).`,
+    cardPath: foundPath,
+    progress: applied.progress,
+    updatedStepId: input.step_id.toUpperCase(),
+    writtenToDisk
+  };
+}
 function buildUnifiedOrgfyTools(ctx) {
   const rawTools = [
     {
@@ -5004,6 +5240,33 @@ function buildUnifiedOrgfyTools(ctx) {
           escrita_exclusiva: Array.isArray(args == null ? void 0 : args.escrita_exclusiva) ? args.escrita_exclusiva : [],
           acceptance_command: args == null ? void 0 : args.acceptance_command,
           passos: Array.isArray(args == null ? void 0 : args.passos) ? args.passos : []
+        });
+        return { text: JSON.stringify(res, null, 2), isError: !res.ok };
+      }
+    },
+    {
+      name: "orgfy_card_progress",
+      description: "Lê ou atualiza o checklist vivo de etapas (P1..Pn) em cards/<SLUG>.md e colore automaticamente o grafo Mermaid '## Fluxo'. Permite retomada determinística após queda, compactação ou failover de modelo.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          slug: { type: "string", description: "Slug do card (ex.: 'SPEC-0006-T020' ou 'wave4-attention')" },
+          action: { type: "string", enum: ["read", "update"], description: "'read' para inspecionar progresso/próxima etapa ou 'update' para marcar etapa" },
+          step_id: { type: "string", description: "ID da etapa (ex.: 'P1', 'P2', 'P3')" },
+          status: { type: "string", enum: ["todo", "in_progress", "done", "blocked"] },
+          note: { type: "string", description: "Nota curta de evidência ou commit SHA" },
+          agent: { type: "string", description: "Nome do agente que atualizou a etapa" }
+        },
+        required: ["slug"]
+      },
+      execute: async (args) => {
+        const res = await executeCardProgress(ctx, {
+          slug: String((args == null ? void 0 : args.slug) || ""),
+          action: args == null ? void 0 : args.action,
+          step_id: args == null ? void 0 : args.step_id,
+          status: args == null ? void 0 : args.status,
+          note: args == null ? void 0 : args.note,
+          agent: args == null ? void 0 : args.agent
         });
         return { text: JSON.stringify(res, null, 2), isError: !res.ok };
       }
@@ -7771,7 +8034,8 @@ async function hydrateIssueDetail(ctx, card) {
     probes,
     probesSource,
     transitions: transitions.slice(-6),
-    rejectionsCount
+    rejectionsCount,
+    progress: parseCardProgress(cardMd)
   };
 }
 function renderResolvedArchiveTab(props) {
@@ -12153,6 +12417,113 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
                   `Fonte real: ${hydratedIssueDetail.cardFileFound}`
                 )
               ),
+              // 1.5 Progresso & Checklist Vivo (Checkpoint Persistente em cards/<SLUG>.md)
+              (hydratedIssueDetail == null ? void 0 : hydratedIssueDetail.progress) && hydratedIssueDetail.progress.total > 0 && h(
+                "div",
+                {
+                  style: {
+                    borderRadius: "8px",
+                    backgroundColor: "rgba(255, 255, 255, 0.025)",
+                    border: "1px solid rgba(16, 185, 129, 0.25)",
+                    padding: "12px 14px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "8px"
+                  }
+                },
+                h(
+                  "div",
+                  { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" } },
+                  h(
+                    "span",
+                    { style: { fontSize: "10px", fontWeight: "700", color: "#10b981", textTransform: "uppercase", letterSpacing: "0.5px" } },
+                    "Progresso & Checklist de Execução"
+                  ),
+                  h(
+                    "span",
+                    { style: { fontSize: "10.5px", fontFamily: "monospace", fontWeight: "700", color: hydratedIssueDetail.progress.pct === 100 ? "#10b981" : "#38bdf8" } },
+                    `${hydratedIssueDetail.progress.done}/${hydratedIssueDetail.progress.total} concluídas (${hydratedIssueDetail.progress.pct}%)`
+                  )
+                ),
+                h(
+                  "div",
+                  {
+                    style: {
+                      height: "6px",
+                      width: "100%",
+                      borderRadius: "9999px",
+                      backgroundColor: "rgba(255, 255, 255, 0.08)",
+                      overflow: "hidden"
+                    }
+                  },
+                  h("div", {
+                    style: {
+                      height: "100%",
+                      width: `${hydratedIssueDetail.progress.pct}%`,
+                      backgroundColor: hydratedIssueDetail.progress.blocked > 0 ? "#ef4444" : hydratedIssueDetail.progress.pct === 100 ? "#10b981" : "#38bdf8",
+                      transition: "width 0.25s ease"
+                    }
+                  })
+                ),
+                h(
+                  "div",
+                  { style: { display: "flex", flexDirection: "column", gap: "5px" } },
+                  hydratedIssueDetail.progress.steps.map((st) => {
+                    const badge = st.status === "done" ? { icon: "✓", color: "#10b981", bg: "rgba(16, 185, 129, 0.14)" } : st.status === "in_progress" ? { icon: "▶", color: "#f59e0b", bg: "rgba(245, 158, 11, 0.14)" } : st.status === "blocked" ? { icon: "!", color: "#ef4444", bg: "rgba(239, 68, 68, 0.14)" } : { icon: "○", color: "#6b7280", bg: "rgba(255, 255, 255, 0.05)" };
+                    return h(
+                      "div",
+                      {
+                        key: st.id,
+                        style: {
+                          display: "flex",
+                          alignItems: "flex-start",
+                          gap: "8px",
+                          padding: "5px 8px",
+                          borderRadius: "6px",
+                          backgroundColor: "rgba(0, 0, 0, 0.28)",
+                          fontSize: "11px"
+                        }
+                      },
+                      h(
+                        "span",
+                        {
+                          style: {
+                            fontFamily: "monospace",
+                            fontWeight: "700",
+                            fontSize: "10px",
+                            padding: "1px 6px",
+                            borderRadius: "4px",
+                            backgroundColor: badge.bg,
+                            color: badge.color,
+                            flexShrink: 0
+                          }
+                        },
+                        `${badge.icon} ${st.id}`
+                      ),
+                      h(
+                        "div",
+                        { style: { display: "flex", flexDirection: "column", gap: "2px", minWidth: 0 } },
+                        h(
+                          "span",
+                          {
+                            style: {
+                              color: st.status === "done" ? "#9ca3af" : "#f3f4f6",
+                              textDecoration: st.status === "done" ? "line-through" : "none",
+                              lineHeight: "1.4"
+                            }
+                          },
+                          st.text
+                        ),
+                        st.note && h(
+                          "span",
+                          { style: { fontSize: "10px", fontFamily: "monospace", color: "#38bdf8" } },
+                          st.note
+                        )
+                      )
+                    );
+                  })
+                )
+              ),
               // 2. Estado & Autoridade Decisória (100% real, sem fallback genérico)
               h(
                 "div",
@@ -14050,6 +14421,7 @@ Ferramentas nativas disponíveis neste plugin:
 14. orgfy_model_failover({ agente?, agent_pubkey?, failed_model?, prefer_free?, apply?, retrigger?, channel_id?, thread_root?, retrigger_text? }): Integração OrgFy ↔ NexusMind Gateway — faz ping real nos modelos mais inteligentes disponíveis no NexusMind, elege o melhor online (inteligência + menor latência real em ms), atualiza o modelo do agente via ctx.agents.save() e re-dispara na thread original.
 15. orgfy_card_create({ slug, titulo, autoridade, decisao, executor, revisor, escrita_exclusiva, feito_quando, acceptance_command, ... }): Abertura schema-first de card OrgFy com triagem em cascata via Decisions API (risco, tier modelo, política Attention), hash L-22 SHA-256 congelado, contrato nativo Buzz Attention/Watch (interest_set + watch_add) e validação opcional via card-lint.sh.
 16. orgfy_decision_triage({ mode: 'card' | 'diff', ... }): Classificação rápida em batch via Buzz Decisions API (yes_no + score + choice) com fallback determinístico offline para triagem de card ou pre-flight de diff/entrega (Escrita exclusiva + L-24).
+17. orgfy_card_progress({ slug, action?: 'read' | 'update', step_id?, status?, note?, agent? }): Lê ou atualiza o checklist vivo P1..Pn em cards/<SLUG>.md e colore automaticamente o grafo Mermaid '## Fluxo'. Use ao iniciar/concluir cada etapa para retomada determinística pós-queda.
 Consulte sempre orgfy_status, orgfy_kpis, orgfy_loop_radar ou orgfy_kanban_read para inspecionar métricas reais antes de agir. Ao abrir novos cards, prefira sempre orgfy_card_create em vez de redigir Markdown livre.`
       });
       console.log("[ORGFY] ctx.agents.addInstructions registrado com sucesso.");
@@ -14101,15 +14473,18 @@ export {
   TENANTS,
   THEME,
   apply,
+  applyStepUpdateToMarkdown,
   buildBuzzAttentionContract,
   buildUnifiedOrgfyTools,
   checkMentionTargetIdentity,
   checkThreadWakeAntiLoop,
   createCanonicalCard,
+  executeCardProgress,
   getBuzzNativeState,
   getTelemetrySnapshot,
   hydrateIssueDetail,
   inject,
+  parseCardProgress,
   registerBuzzNativeIntegrations,
   resetTelemetryForTests,
   resetThreadWakeGuardForTests,

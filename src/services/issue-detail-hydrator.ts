@@ -1,5 +1,6 @@
 import type { Context } from "@buzz/author";
 import type { PipelineCard } from "../types/orgfy";
+import { parseCardProgress, type CardProgressSummary } from "./card-progress";
 
 export interface HydratedProbeItem {
   label: string;
@@ -42,6 +43,7 @@ export interface HydratedIssueDetail {
   probesSource: string;
   transitions: HydratedTransitionItem[];
   rejectionsCount: number;
+  progress: CardProgressSummary | null;
 }
 
 const ORGFY_REPO_ROOT = "/Users/heltonfraga/.buzz/REPOS/orgfy";
@@ -323,5 +325,6 @@ export async function hydrateIssueDetail(
     probesSource,
     transitions: transitions.slice(-6),
     rejectionsCount,
+    progress: parseCardProgress(cardMd),
   };
 }
