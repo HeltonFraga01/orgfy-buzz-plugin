@@ -6132,7 +6132,7 @@ const INITIAL_PIPELINE_CARDS = [
     estimatedCost: "0.002",
     recommendedModel: "Gemini 3.8 Flash",
     acceptanceCommand: "python3 ferramentas/esteira/lint_card.py",
-    acceptanceHash: "7b88aa12c5596489b91e92051dc73ff539e6a0082f42a5482329dc3309aef411",
+    acceptanceHash: void 0,
     worktreePath: ".worktrees/fef9b85e",
     modoBuzz: "goal",
     goalMaxTurns: 20,
