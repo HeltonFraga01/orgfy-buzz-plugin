@@ -115,10 +115,12 @@ const DEFAULT_COOLDOWN_MS = 15 * 60 * 1000; // 15 min
 // Estado em memória (determinístico para runtime + testes unitários)
 const memoryLocks = new Map<string, CheckoutLockRecord>();
 const alertCooldowns = new Map<string, number>();
+const lastHealedProviderErrorTs = new Map<string, number>();
 
 export function resetGovernanceMemoryStateForTests(): void {
   memoryLocks.clear();
   alertCooldowns.clear();
+  lastHealedProviderErrorTs.clear();
 }
 
 function purgeExpiredLocks(now: number): number {
@@ -665,14 +667,15 @@ export async function evaluateGovernanceAndReact(
       if (radar.ok && Array.isArray(radar.sessoes)) {
         const healedSessionIds = new Set<string>();
 
-        // Auto-failover autônomo direto para sessões ativas em tempestade 5xx/429 (sem depender de wake manual da Iris)
+        // Auto-failover autônomo imediato no 1º erro fatal de provider/LLM (503/502/504/429/404/400/malformed_function_call)
         if (!options.dryRun && options.autoWake !== false) {
           const providerStormSessions = radar.sessoes.filter((s) => {
             const isActive = typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15;
-            if (!isActive || s.ultima_atualizacao_min > 10) return false;
+            if (!isActive || s.ultima_atualizacao_min > 12) return false;
+            const lastIsErr = Boolean(s.last_msg_is_provider_error);
             const recentErrs = Number(s.recent_provider_errors ?? 0);
             const hasStormFlag = Array.isArray(s.flags) && s.flags.includes("TEMPESTADE_5XX");
-            return recentErrs >= 2 || (hasStormFlag && Number(s.errors_5xx ?? 0) >= 2);
+            return lastIsErr || recentErrs >= 2 || (hasStormFlag && Number(s.errors_5xx ?? 0) >= 1);
           });
 
           const seenAgentsForFailover = new Set<string>();
@@ -681,10 +684,20 @@ export async function evaluateGovernanceAndReact(
             if (!agentDedupKey || seenAgentsForFailover.has(agentDedupKey)) continue;
             seenAgentsForFailover.add(agentDedupKey);
 
+            const errTs = typeof s.last_provider_error_ts === "number" ? s.last_provider_error_ts : null;
+            const prevHealedTs = lastHealedProviderErrorTs.get(agentDedupKey);
+            if (!options.bypassCooldown && errTs !== null && prevHealedTs !== undefined && errTs <= prevHealedTs) {
+              skippedByCooldown.push(`auto_failover_already_healed:${s.agente}`);
+              continue;
+            }
+
             const failCooldownKey = `auto_model_failover:${agentDedupKey}`;
-            if (!options.bypassCooldown && !canTriggerWithCooldown(failCooldownKey, nowMs, true, 90 * 1000)) {
+            if (!options.bypassCooldown && !canTriggerWithCooldown(failCooldownKey, nowMs, true, 30 * 1000)) {
               skippedByCooldown.push(`auto_failover:${s.agente}`);
               continue;
+            }
+            if (errTs !== null) {
+              lastHealedProviderErrorTs.set(agentDedupKey, errTs);
             }
 
             try {
@@ -1531,9 +1544,17 @@ export function isRateLimitOrProviderError(text: string): boolean {
     "too many requests",
     "429",
     "no available accounts",
+    "service temporarily unavailable",
     "503 service unavailable",
     "502 bad gateway",
     "504 gateway timeout",
+    "resource not found (404)",
+    "[404]:",
+    "bad request (400): upstream",
+    "upstream request failed",
+    "upstream_malformed_function_call",
+    "overloaded_error",
+    "model is overloaded",
   ].some((marker) => low.includes(marker));
 }
 

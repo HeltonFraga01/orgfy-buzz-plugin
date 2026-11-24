@@ -189,10 +189,7 @@ function inferProviderId(modelId: string): string {
   if (
     m.includes("gemini") ||
     m.includes("antigravity") ||
-    m.includes("thinking") ||
-    m.includes("-high") ||
-    m.includes("-medium") ||
-    m.includes("-low")
+    m.includes("thinking")
   ) {
     return "nexusmind_antigravity";
   }
@@ -619,7 +616,7 @@ export async function executeSmartModelFailover(
         // Primeiro candidato mais bem ranqueado que respondeu HTTP 200 vence imediatamente
         break;
       } else {
-        if (res.error && /^HTTP\s+(429|502|503|504)/.test(res.error)) {
+        if (res.error && /^HTTP\s+(400|404|429|502|503|504)/.test(res.error)) {
           await quarantineFailedModel(ctx, cand.model, res.error);
         }
         verifiedShared.push({
@@ -637,9 +634,10 @@ export async function executeSmartModelFailover(
     }
   }
 
-  // 2. Se não houver ranking compartilhado, descobre catálogo direto e faz probe ao vivo
+  // 2. Se não houver ranking compartilhado OU se nenhum dos top candidatos respondeu HTTP 200, descobre catálogo direto e faz probe ao vivo
   let probed: ModelCandidateScore[] = [];
-  if (sharedRanking.length === 0) {
+  const hasVerifiedOnline = verifiedShared.some((v) => v.online);
+  if (sharedRanking.length === 0 || (verifiedShared.length > 0 && !hasVerifiedOnline)) {
     const catalog = await discoverNexusMindCatalog(ctx);
     let pool = catalog.filter((c) => !excludeSet.has(c.id.toLowerCase()));
     if (preferFree) {
@@ -659,7 +657,7 @@ export async function executeSmartModelFailover(
       probed = await Promise.all(
         preRanked.map(async (cand) => {
           const res = await probeModelLive(ctx, cand.id, cand.provider);
-          if (!res.online && res.error && /^HTTP\s+(429|502|503|504)/.test(res.error)) {
+          if (!res.online && res.error && /^HTTP\s+(400|404|429|502|503|504)/.test(res.error)) {
             await quarantineFailedModel(ctx, cand.id, res.error);
           }
           const combinedScore = res.online
@@ -687,7 +685,11 @@ export async function executeSmartModelFailover(
   }
 
   const finalRanking =
-    verifiedShared.length > 0
+    verifiedShared.some((v) => v.online)
+      ? verifiedShared
+      : probed.some((p) => p.online)
+      ? probed
+      : verifiedShared.length > 0
       ? verifiedShared
       : sharedRanking.length > 0
       ? sharedRanking

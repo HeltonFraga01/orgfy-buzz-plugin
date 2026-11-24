@@ -1474,7 +1474,7 @@ function decodeHostBytes$2(raw) {
 function inferProviderId(modelId) {
   const m = String(modelId || "").toLowerCase();
   if (m.includes("grok")) return "nexusmind_grok";
-  if (m.includes("gemini") || m.includes("antigravity") || m.includes("thinking") || m.includes("-high") || m.includes("-medium") || m.includes("-low")) {
+  if (m.includes("gemini") || m.includes("antigravity") || m.includes("thinking")) {
     return "nexusmind_antigravity";
   }
   if (m.includes("claude")) return "nexusmind_anthropic";
@@ -1799,7 +1799,7 @@ async function executeSmartModelFailover(ctx, input = {}) {
         });
         break;
       } else {
-        if (res.error && /^HTTP\s+(429|502|503|504)/.test(res.error)) {
+        if (res.error && /^HTTP\s+(400|404|429|502|503|504)/.test(res.error)) {
           await quarantineFailedModel(ctx, cand.model, res.error);
         }
         verifiedShared.push({
@@ -1816,7 +1816,8 @@ async function executeSmartModelFailover(ctx, input = {}) {
     }
   }
   let probed = [];
-  if (sharedRanking.length === 0) {
+  const hasVerifiedOnline = verifiedShared.some((v) => v.online);
+  if (sharedRanking.length === 0 || verifiedShared.length > 0 && !hasVerifiedOnline) {
     const catalog = await discoverNexusMindCatalog(ctx);
     let pool = catalog.filter((c) => !excludeSet.has(c.id.toLowerCase()));
     if (preferFree) {
@@ -1831,7 +1832,7 @@ async function executeSmartModelFailover(ctx, input = {}) {
       probed = await Promise.all(
         preRanked.map(async (cand) => {
           const res = await probeModelLive(ctx, cand.id, cand.provider);
-          if (!res.online && res.error && /^HTTP\s+(429|502|503|504)/.test(res.error)) {
+          if (!res.online && res.error && /^HTTP\s+(400|404|429|502|503|504)/.test(res.error)) {
             await quarantineFailedModel(ctx, cand.id, res.error);
           }
           const combinedScore = res.online ? computeCombinedModelScore(cand.intelligenceScore, res.latencyMs) : -1;
@@ -1855,7 +1856,7 @@ async function executeSmartModelFailover(ctx, input = {}) {
       });
     }
   }
-  const finalRanking = verifiedShared.length > 0 ? verifiedShared : sharedRanking.length > 0 ? sharedRanking : probed;
+  const finalRanking = verifiedShared.some((v) => v.online) ? verifiedShared : probed.some((p) => p.online) ? probed : verifiedShared.length > 0 ? verifiedShared : sharedRanking.length > 0 ? sharedRanking : probed;
   const winner = finalRanking.find((p) => p.online) || null;
   if (!winner) {
     return {
@@ -2005,6 +2006,7 @@ const DEFAULT_LOCK_TTL_MS = 30 * 60 * 1e3;
 const DEFAULT_COOLDOWN_MS = 15 * 60 * 1e3;
 const memoryLocks = /* @__PURE__ */ new Map();
 const alertCooldowns = /* @__PURE__ */ new Map();
+const lastHealedProviderErrorTs = /* @__PURE__ */ new Map();
 function purgeExpiredLocks(now) {
   let removed = 0;
   for (const [key, rec] of memoryLocks.entries()) {
@@ -2417,20 +2419,30 @@ async function evaluateGovernanceAndReact(ctx, options = {}) {
         if (!options.dryRun && options.autoWake !== false) {
           const providerStormSessions = radar.sessoes.filter((s) => {
             const isActive = typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15;
-            if (!isActive || s.ultima_atualizacao_min > 10) return false;
+            if (!isActive || s.ultima_atualizacao_min > 12) return false;
+            const lastIsErr = Boolean(s.last_msg_is_provider_error);
             const recentErrs = Number(s.recent_provider_errors ?? 0);
             const hasStormFlag = Array.isArray(s.flags) && s.flags.includes("TEMPESTADE_5XX");
-            return recentErrs >= 2 || hasStormFlag && Number(s.errors_5xx ?? 0) >= 2;
+            return lastIsErr || recentErrs >= 2 || hasStormFlag && Number(s.errors_5xx ?? 0) >= 1;
           });
           const seenAgentsForFailover = /* @__PURE__ */ new Set();
           for (const s of providerStormSessions) {
             const agentDedupKey = String(s.agent_pubkey || s.agente || "").trim().toLowerCase();
             if (!agentDedupKey || seenAgentsForFailover.has(agentDedupKey)) continue;
             seenAgentsForFailover.add(agentDedupKey);
+            const errTs = typeof s.last_provider_error_ts === "number" ? s.last_provider_error_ts : null;
+            const prevHealedTs = lastHealedProviderErrorTs.get(agentDedupKey);
+            if (!options.bypassCooldown && errTs !== null && prevHealedTs !== void 0 && errTs <= prevHealedTs) {
+              skippedByCooldown.push(`auto_failover_already_healed:${s.agente}`);
+              continue;
+            }
             const failCooldownKey = `auto_model_failover:${agentDedupKey}`;
-            if (!options.bypassCooldown && !canTriggerWithCooldown(failCooldownKey, nowMs, true, 90 * 1e3)) {
+            if (!options.bypassCooldown && !canTriggerWithCooldown(failCooldownKey, nowMs, true, 30 * 1e3)) {
               skippedByCooldown.push(`auto_failover:${s.agente}`);
               continue;
+            }
+            if (errTs !== null) {
+              lastHealedProviderErrorTs.set(agentDedupKey, errTs);
             }
             try {
               const agentsApi = ctx.agents;
@@ -3031,9 +3043,17 @@ function isRateLimitOrProviderError(text) {
     "too many requests",
     "429",
     "no available accounts",
+    "service temporarily unavailable",
     "503 service unavailable",
     "502 bad gateway",
-    "504 gateway timeout"
+    "504 gateway timeout",
+    "resource not found (404)",
+    "[404]:",
+    "bad request (400): upstream",
+    "upstream request failed",
+    "upstream_malformed_function_call",
+    "overloaded_error",
+    "model is overloaded"
   ].some((marker) => low.includes(marker));
 }
 function pickNextHealthyModel(currentProvider, currentModel) {
@@ -5828,8 +5848,13 @@ function createAgentOrgfyTabComponent(ctx) {
         style: {
           display: "flex",
           flexDirection: "column",
-          gap: "14px",
-          padding: "12px 2px",
+          gap: "12px",
+          padding: "10px 0",
+          width: "100%",
+          maxWidth: "100%",
+          minWidth: 0,
+          boxSizing: "border-box",
+          overflowX: "hidden",
           color: "#f3f4f6",
           fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
           fontSize: "12px"
@@ -5840,24 +5865,38 @@ function createAgentOrgfyTabComponent(ctx) {
         "div",
         {
           style: {
-            padding: "14px 16px",
+            padding: "12px",
             borderRadius: "10px",
             backgroundColor: CARD_BG$3,
             border: "1px solid rgba(16, 185, 129, 0.28)",
             display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            flexWrap: "wrap",
-            gap: "10px"
+            flexDirection: "column",
+            gap: "10px",
+            width: "100%",
+            maxWidth: "100%",
+            minWidth: 0,
+            boxSizing: "border-box"
           }
         },
         h(
           "div",
-          { style: { display: "flex", flexDirection: "column", gap: "4px" } },
+          { style: { display: "flex", flexDirection: "column", gap: "4px", minWidth: 0, width: "100%" } },
           h(
             "div",
-            { style: { display: "flex", alignItems: "center", gap: "8px" } },
-            h("span", { style: { fontSize: "14px", fontWeight: "700", color: "#10b981" } }, `OrgFy Control Plane · ${agentName}`),
+            { style: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: "6px", minWidth: 0 } },
+            h(
+              "span",
+              {
+                style: {
+                  fontSize: "13px",
+                  fontWeight: "700",
+                  color: "#10b981",
+                  overflowWrap: "anywhere",
+                  wordBreak: "break-word"
+                }
+              },
+              `OrgFy Control Plane · ${agentName}`
+            ),
             (agentMetric == null ? void 0 : agentMetric.retryCascadeRisk) && h(
               "span",
               {
@@ -5867,7 +5906,8 @@ function createAgentOrgfyTabComponent(ctx) {
                   padding: "2px 7px",
                   borderRadius: "9999px",
                   backgroundColor: "rgba(239, 68, 68, 0.2)",
-                  color: "#f87171"
+                  color: "#f87171",
+                  flexShrink: 0
                 }
               },
               "RISCO RETRY CASCADE"
@@ -5875,30 +5915,40 @@ function createAgentOrgfyTabComponent(ctx) {
           ),
           h(
             "div",
-            { style: { fontSize: "11px", color: "#9ca3af", fontFamily: "monospace" } },
+            {
+              style: {
+                fontSize: "11px",
+                color: "#9ca3af",
+                fontFamily: "monospace",
+                lineHeight: "1.45",
+                overflowWrap: "anywhere",
+                wordBreak: "break-word"
+              }
+            },
             `Harness: ${currentHarness} · Provider: ${currentProvider} · Modelo: ${currentModel}${agentPubkey ? ` · pk: ${agentPubkey.slice(0, 10)}…` : ""}`
           )
         ),
         h(
           "div",
-          { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
+          { style: { display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap", width: "100%" } },
           h(
             "button",
             {
               onClick: handleFailover,
               disabled: failoverBusy,
               style: {
-                padding: "6px 12px",
+                padding: "6px 10px",
                 borderRadius: "6px",
                 border: "1px solid rgba(56, 189, 248, 0.45)",
                 backgroundColor: "rgba(56, 189, 248, 0.14)",
                 color: "#38bdf8",
                 fontSize: "11px",
                 fontWeight: "700",
-                cursor: failoverBusy ? "wait" : "pointer"
+                cursor: failoverBusy ? "wait" : "pointer",
+                maxWidth: "100%"
               }
             },
-            failoverBusy ? "Testando NexusMind..." : "⚡ Melhor Modelo (NexusMind)"
+            failoverBusy ? "Testando NexusMind..." : "⚡ Melhor Modelo"
           ),
           h(
             "button",
@@ -5922,7 +5972,7 @@ function createAgentOrgfyTabComponent(ctx) {
             {
               onClick: handleOpenCockpit,
               style: {
-                padding: "6px 12px",
+                padding: "6px 10px",
                 borderRadius: "6px",
                 border: "none",
                 backgroundColor: "#10b981",
@@ -5946,15 +5996,28 @@ function createAgentOrgfyTabComponent(ctx) {
             border: statusBanner.ok ? "1px solid rgba(16, 185, 129, 0.35)" : "1px solid rgba(245, 158, 11, 0.35)",
             color: statusBanner.ok ? "#a7f3d0" : "#fde68a",
             fontSize: "11px",
-            fontFamily: "monospace"
+            fontFamily: "monospace",
+            overflowWrap: "anywhere",
+            wordBreak: "break-word",
+            boxSizing: "border-box",
+            width: "100%"
           }
         },
         statusBanner.text
       ),
-      // 4 KPIs do Agente
+      // 4 KPIs do Agente (2x2 em drawers estreitos, 4x1 em telas largas)
       h(
         "div",
-        { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "8px" } },
+        {
+          style: {
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(115px, 1fr))",
+            gap: "8px",
+            width: "100%",
+            minWidth: 0,
+            boxSizing: "border-box"
+          }
+        },
         [
           { label: "Cards Ativos", value: String(activeCards.length), color: "#38bdf8" },
           { label: "Cards Concluídos", value: String(doneCards.length), color: "#10b981" },
@@ -5963,25 +6026,49 @@ function createAgentOrgfyTabComponent(ctx) {
         ].map(
           (k) => h(
             "div",
-            { key: k.label, style: { padding: "10px 12px", borderRadius: "8px", backgroundColor: CARD_BG$3, border: BORDER$3 } },
-            h("div", { style: { fontSize: "10px", color: "#9ca3af", textTransform: "uppercase" } }, k.label),
-            h("div", { style: { fontSize: "16px", fontWeight: "700", color: k.color, fontFamily: "monospace", marginTop: "3px" } }, k.value)
+            {
+              key: k.label,
+              style: {
+                padding: "9px 10px",
+                borderRadius: "8px",
+                backgroundColor: CARD_BG$3,
+                border: BORDER$3,
+                minWidth: 0,
+                boxSizing: "border-box"
+              }
+            },
+            h("div", { style: { fontSize: "9.5px", color: "#9ca3af", textTransform: "uppercase", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, k.label),
+            h("div", { style: { fontSize: "15px", fontWeight: "700", color: k.color, fontFamily: "monospace", marginTop: "3px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, k.value)
           )
         )
       ),
       // Cards Atribuídos na Esteira
       h(
         "div",
-        { style: { padding: "12px 14px", borderRadius: "10px", backgroundColor: CARD_BG$3, border: BORDER$3, display: "flex", flexDirection: "column", gap: "8px" } },
+        {
+          style: {
+            padding: "12px",
+            borderRadius: "10px",
+            backgroundColor: CARD_BG$3,
+            border: BORDER$3,
+            display: "flex",
+            flexDirection: "column",
+            gap: "8px",
+            width: "100%",
+            maxWidth: "100%",
+            minWidth: 0,
+            boxSizing: "border-box"
+          }
+        },
         h(
           "div",
-          { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+          { style: { display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "4px", minWidth: 0 } },
           h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, `Cards OrgFy Atribuídos (${cards.length})`),
           h("span", { style: { fontSize: "10px", color: "#9ca3af", fontFamily: "monospace" } }, "Executor / Revisor / Decisor")
         ),
         loading ? h("div", { style: { fontSize: "11px", color: "#9ca3af" } }, "Carregando cards da esteira...") : cards.length === 0 ? h("div", { style: { fontSize: "11px", color: "#9ca3af" } }, `Nenhum card ativo ou recente vinculado a ${agentName} no Kanban atual.`) : h(
           "div",
-          { style: { display: "flex", flexDirection: "column", gap: "6px", maxHeight: "220px", overflowY: "auto" } },
+          { style: { display: "flex", flexDirection: "column", gap: "6px", maxHeight: "220px", overflowY: "auto", overflowX: "hidden", minWidth: 0 } },
           cards.slice(0, 12).map((c) => {
             const role = normName(c.executor) === targetLower ? "EXECUTOR" : normName(c.revisor) === targetLower ? "REVISOR" : "DECISOR";
             return h(
@@ -5992,24 +6079,43 @@ function createAgentOrgfyTabComponent(ctx) {
                   display: "flex",
                   justifyContent: "space-between",
                   alignItems: "center",
-                  gap: "10px",
+                  gap: "8px",
                   padding: "8px 10px",
                   borderRadius: "6px",
                   backgroundColor: "rgba(0,0,0,0.28)",
-                  border: BORDER$3
+                  border: BORDER$3,
+                  minWidth: 0,
+                  width: "100%",
+                  boxSizing: "border-box"
                 }
               },
               h(
                 "div",
-                { style: { display: "flex", flexDirection: "column", gap: "2px", minWidth: 0, flex: 1 } },
+                { style: { display: "flex", flexDirection: "column", gap: "3px", minWidth: 0, flex: 1, overflow: "hidden" } },
                 h(
                   "div",
-                  { style: { display: "flex", alignItems: "center", gap: "6px" } },
+                  { style: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: "5px", minWidth: 0 } },
                   h("span", { style: { fontFamily: "monospace", fontSize: "10px", color: "#38bdf8", fontWeight: "700" } }, `#${c.issueId.slice(0, 8)}`),
                   h("span", { style: { fontSize: "9px", fontWeight: "700", padding: "1px 5px", borderRadius: "4px", backgroundColor: role === "EXECUTOR" ? "rgba(16,185,129,0.18)" : "rgba(192,132,252,0.18)", color: role === "EXECUTOR" ? "#34d399" : "#d8b4fe" } }, role),
                   h("span", { style: { fontSize: "9px", fontWeight: "700", padding: "1px 5px", borderRadius: "4px", backgroundColor: "rgba(255,255,255,0.08)", color: "#cbd5e1", textTransform: "uppercase" } }, c.stage)
                 ),
-                h("span", { style: { fontSize: "11.5px", fontWeight: "600", color: "#f3f4f6", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, c.title)
+                h(
+                  "span",
+                  {
+                    title: c.title,
+                    style: {
+                      fontSize: "11.5px",
+                      fontWeight: "600",
+                      color: "#f3f4f6",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      display: "block",
+                      maxWidth: "100%"
+                    }
+                  },
+                  c.title
+                )
               ),
               c.fullIssueId && h(
                 "button",
@@ -6033,14 +6139,36 @@ function createAgentOrgfyTabComponent(ctx) {
           })
         )
       ),
-      // Sessões Goose & OTel Spans em 2 colunas
+      // Sessões Goose & OTel Spans (empilha em 1 coluna no drawer estreito, 2 colunas em telas largas)
       h(
         "div",
-        { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" } },
+        {
+          style: {
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            gap: "10px",
+            width: "100%",
+            minWidth: 0,
+            boxSizing: "border-box"
+          }
+        },
         // Sessões Goose
         h(
           "div",
-          { style: { padding: "12px 14px", borderRadius: "10px", backgroundColor: CARD_BG$3, border: BORDER$3, display: "flex", flexDirection: "column", gap: "6px" } },
+          {
+            style: {
+              padding: "12px",
+              borderRadius: "10px",
+              backgroundColor: CARD_BG$3,
+              border: BORDER$3,
+              display: "flex",
+              flexDirection: "column",
+              gap: "6px",
+              minWidth: 0,
+              boxSizing: "border-box",
+              overflow: "hidden"
+            }
+          },
           h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, "Sessões Goose Recentes (3h)"),
           sessions.length === 0 ? h("div", { style: { fontSize: "11px", color: "#9ca3af" } }, "Nenhuma sessão recente no radar Goose.") : sessions.map(
             (s) => h(
@@ -6056,23 +6184,42 @@ function createAgentOrgfyTabComponent(ctx) {
                   fontFamily: "monospace",
                   display: "flex",
                   flexDirection: "column",
-                  gap: "2px"
+                  gap: "2px",
+                  minWidth: 0,
+                  overflow: "hidden"
                 }
               },
               h(
                 "div",
-                { style: { display: "flex", justifyContent: "space-between" } },
-                h("span", { style: { color: s.ativa ? "#34d399" : "#9ca3af", fontWeight: "700" } }, `${s.ativa ? "ATIVA" : "HIST"} · ${s.session_id}`),
-                h("span", { style: { color: "#cbd5e1" } }, `${s.duracao_min.toFixed(0)}m · ${s.shells} shells`)
+                { style: { display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "4px", minWidth: 0 } },
+                h("span", { style: { color: s.ativa ? "#34d399" : "#9ca3af", fontWeight: "700", overflowWrap: "anywhere" } }, `${s.ativa ? "ATIVA" : "HIST"} · ${s.session_id}`),
+                h("span", { style: { color: "#cbd5e1", flexShrink: 0 } }, `${s.duracao_min.toFixed(0)}m · ${s.shells} shells`)
               ),
-              h("span", { style: { color: s.flags.length > 0 ? "#fbbf24" : "#10b981" } }, s.flags.length > 0 ? s.flags.join(" · ") : "OK")
+              h(
+                "span",
+                { style: { color: s.flags.length > 0 ? "#fbbf24" : "#10b981", overflowWrap: "anywhere", wordBreak: "break-word" } },
+                s.flags.length > 0 ? s.flags.join(" · ") : "OK"
+              )
             )
           )
         ),
         // Spans OTel GenAI
         h(
           "div",
-          { style: { padding: "12px 14px", borderRadius: "10px", backgroundColor: CARD_BG$3, border: BORDER$3, display: "flex", flexDirection: "column", gap: "6px" } },
+          {
+            style: {
+              padding: "12px",
+              borderRadius: "10px",
+              backgroundColor: CARD_BG$3,
+              border: BORDER$3,
+              display: "flex",
+              flexDirection: "column",
+              gap: "6px",
+              minWidth: 0,
+              boxSizing: "border-box",
+              overflow: "hidden"
+            }
+          },
           h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, "Spans OTel GenAI deste Agente"),
           agentSpans.length === 0 ? h("div", { style: { fontSize: "11px", color: "#9ca3af" } }, "Nenhum span OTel capturado ainda nesta sessão do Buzz.") : agentSpans.map(
             (sp) => h(
@@ -6083,16 +6230,18 @@ function createAgentOrgfyTabComponent(ctx) {
                   display: "flex",
                   justifyContent: "space-between",
                   alignItems: "center",
+                  flexWrap: "wrap",
                   gap: "6px",
                   padding: "5px 8px",
                   borderRadius: "6px",
                   backgroundColor: "rgba(0,0,0,0.28)",
                   fontSize: "10px",
-                  fontFamily: "monospace"
+                  fontFamily: "monospace",
+                  minWidth: 0
                 }
               },
-              h("span", { style: { color: "#38bdf8", fontWeight: "600" } }, sp.toolName || sp.operationName),
-              h("span", { style: { color: sp.status === "error" ? "#f87171" : "#10b981", fontWeight: "700" } }, `${sp.status.toUpperCase()} · ${sp.durationMs}ms`)
+              h("span", { style: { color: "#38bdf8", fontWeight: "600", overflowWrap: "anywhere", minWidth: 0 } }, sp.toolName || sp.operationName),
+              h("span", { style: { color: sp.status === "error" ? "#f87171" : "#10b981", fontWeight: "700", flexShrink: 0 } }, `${sp.status.toUpperCase()} · ${sp.durationMs}ms`)
             )
           )
         )

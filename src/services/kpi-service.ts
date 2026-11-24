@@ -302,6 +302,7 @@ export interface GooseLoopSession {
   recent_provider_errors?: number;
   last_provider_error_ts?: number | null;
   last_provider_error_text?: string | null;
+  last_msg_is_provider_error?: boolean;
   duracao_min: number;
   thread_lifetime_min?: number;
   ultima_atualizacao_min: number;

@@ -984,3 +984,112 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     probed: probedModels,
   }));
 }
+
+// 17. Auto-Failover Imediato no 1º Erro Fatal de LLM (last_msg_is_provider_error=true, ex.: 404 Resource not found no OrgFy Cron)
+{
+  const cronTools = new Map();
+  const cronSaves = [];
+  const cronWakes = [];
+  let cronModel = "nous-research/stepfun/step-3.7-flash:free-high";
+  const errTs = Math.floor(Date.now() / 1000);
+
+  const fakeKpis = JSON.stringify({
+    schema_version: "1.0.0",
+    gerado_em: new Date().toISOString(),
+    janela_dias: 30,
+    fluxo: { vazao_total_feito: 10, fila_revisao_atual: 0 },
+    qualidade: { fpy_real_pct: 100 },
+    economia: { status_orcamento: "OK", uso_teto_diario_pct: 5 },
+    higiene: { wip_total_ativo: 1, orphan_wip_count: 0, estagnados_nivel_3: 0 },
+    alertas_ativos: [],
+  });
+  const fakeRadarSingle404 = JSON.stringify({
+    ok: true,
+    gerado_em: new Date().toISOString(),
+    resumo: { criticos: 1, criticos_ativos: 1, avisos: 0, duplicadas: 0 },
+    sessoes: [
+      {
+        session_id: "20261124_cron404",
+        agente: "OrgFy Cron",
+        agent_pubkey: "c09b31023b060000000000000000000000000000000000000000000000000000",
+        severidade: "critical",
+        ativa: true,
+        ultima_atualizacao_min: 1.5,
+        duracao_min: 2.0,
+        shells: 0,
+        errors_5xx: 1,
+        recent_provider_errors: 1,
+        last_msg_is_provider_error: true,
+        last_provider_error_ts: errTs,
+        last_provider_error_text: "Request failed: Resource not found (404): Model requires available accounts",
+        flags: ["TEMPESTADE_5XX"],
+        channel_id: "e445491d-2fb3-4ebd-8e2e-f6813c33fb03",
+        thread_root: "9988776655443322110099887766554433221100998877665544332211009988",
+      },
+    ],
+  });
+  const fakeRanking = JSON.stringify({
+    version: 2,
+    policy: { strategy: "balanced", forceFree: false, autoAssignBlocked: [] },
+    models: [
+      { rank: 1, model: "claude-sonnet-5-5", group: "nexusmind_anthropic", score: 92, online: true },
+      { rank: 2, model: "gpt-6.1-terra", group: "nexusmind_openai", score: 88, online: true },
+    ],
+  });
+
+  orgfyMod.apply({
+    react: { createElement: () => null },
+    pages: { register: () => {} },
+    settingsCards: { register: () => {} },
+    panels: { register: () => {} },
+    navigation: { open: async () => ({ status: "opened" }) },
+    notifications: { notify: async () => {} },
+    agents: {
+      addInstructions: () => {},
+      addTool: (t) => cronTools.set(t.name, t),
+      registerHook: () => {},
+      snapshot: () => ({
+        agents: [
+          {
+            key: "local:orgfy-cron",
+            pubkey: "c09b31023b060000000000000000000000000000000000000000000000000000",
+            name: "OrgFy Cron",
+            place: "here",
+            config: { model: cronModel, provider: "nexusmind_openai" },
+          },
+        ],
+        running: [],
+      }),
+      session: async () => {},
+      save: async (agentKey, change) => {
+        cronSaves.push({ agentKey, change });
+        cronModel = change.config.model;
+      },
+      wake: async (agentKey, payload) => cronWakes.push({ agentKey, payload }),
+    },
+    host: {
+      request: async () => ({ status: 200, body: JSON.stringify({ content: [{ type: "text", text: "ok" }] }) }),
+      readFile: async (p) => {
+        if (p.endsWith("kpis-esteira.json")) return new TextEncoder().encode(fakeKpis);
+        if (p.endsWith("goose-loop-radar.json")) return new TextEncoder().encode(fakeRadarSingle404);
+        if (p.endsWith("nexusmind-model-ranking.json")) return new TextEncoder().encode(fakeRanking);
+        if (p.endsWith("orgfy-model-quarantine.json")) return new TextEncoder().encode("{}");
+        return new Uint8Array(fs.readFileSync(p));
+      },
+      writeFile: async () => {},
+      serveMcp: async () => ({ url: "mcp://test-cron404", close: () => {} }),
+    },
+  });
+
+  const govCron = cronTools.get("orgfy_governanca_avaliar");
+  const r1 = JSON.parse(await govCron.call({}, {}, { dry_run: false, auto_wake: true }));
+  assert.equal(r1.ok, true);
+  assert.equal(cronSaves.length, 1, "deve trocar modelo imediatamente no 1º erro fatal (last_msg_is_provider_error=true)");
+  assert.equal(cronSaves[0].change.config.model, "claude-sonnet-5-5");
+  assert.equal(cronWakes.length, 1, "deve re-disparar OrgFy Cron automaticamente");
+
+  const r2 = JSON.parse(await govCron.call({}, {}, { dry_run: false, auto_wake: true }));
+  assert.equal(cronSaves.length, 1, "mesmo timestamp de erro não deve disparar failover duplicado");
+  assert.ok(r2.skippedByCooldown.some((s) => s.includes("auto_failover_already_healed:OrgFy Cron")));
+  console.log("[AUTO-FAILOVER 1ST CRASH 404 + DEDUP OK]", JSON.stringify({ switchedTo: cronSaves[0].change.config.model }));
+}

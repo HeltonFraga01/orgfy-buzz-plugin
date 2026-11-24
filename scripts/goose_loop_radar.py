@@ -275,30 +275,43 @@ def main() -> int:
             recent_provider_errors = 0
             last_provider_error_ts = None
             last_provider_error_text = ""
+            last_msg_is_provider_error = False
             now_epoch = now.timestamp()
+
+            PROVIDER_ERR_MARKERS = (
+                "503 service unavailable",
+                "502 bad gateway",
+                "504 gateway timeout",
+                "no available accounts",
+                "service temporarily unavailable",
+                "rate limit exceeded",
+                "upstream rate limit",
+                "too many requests",
+                "http 429",
+                "(429 ",
+                "resource not found (404)",
+                "[404]:",
+                "bad request (400): upstream",
+                "upstream request failed",
+                "upstream_malformed_function_call",
+                "overloaded_error",
+                "model is overloaded",
+            )
 
             for idx, (role, ts, cj) in enumerate(msgs):
                 raw_cj = cj or ""
                 if "Your context was compacted" in raw_cj:
                     compactions += 1
-                # Conta erros de provider (502/503/504/429/rate limit/no available accounts) ignorando notas de memória
+                # Conta erros reais de provider (ignora citações em <thread-context>/<mention> e notas buzz__mem_)
                 low_cj = raw_cj.lower()
-                has_provider_err_marker = any(
-                    mk in low_cj
-                    for mk in (
-                        "503 service unavailable",
-                        "502 bad gateway",
-                        "504 gateway timeout",
-                        "no available accounts",
-                        "rate limit exceeded",
-                        "upstream rate limit",
-                        "too many requests",
-                        "http 429",
-                        "(429 ",
-                    )
+                is_context_quote = (
+                    "<thread-context>" in low_cj
+                    or "<mention>" in low_cj
+                    or "buzz__mem_" in low_cj
                 )
+                has_provider_err_marker = any(mk in low_cj for mk in PROVIDER_ERR_MARKERS)
                 is_real_provider_err = False
-                if has_provider_err_marker and "buzz__mem_" not in raw_cj:
+                if not is_context_quote and (has_provider_err_marker or '"type":"error"' in raw_cj or '"type": "error"' in raw_cj):
                     try:
                         cj_items = json.loads(raw_cj)
                     except Exception:
@@ -309,32 +322,30 @@ def main() -> int:
                                 continue
                             it_type = it.get("type")
                             if it_type == "error":
-                                is_real_provider_err = True
-                                last_provider_error_text = str(it.get("message") or "")[:180]
-                                break
-                            if it_type == "toolResponse" and _is_error_response([it]):
+                                err_msg = str(it.get("message") or it.get("error") or "")
+                                err_low = err_msg.lower()
+                                if has_provider_err_marker or any(
+                                    k in err_low
+                                    for k in ("server error", "request failed", "provider", "upstream", "rate limit", "unavailable", "404", "429", "502", "503", "504")
+                                ):
+                                    is_real_provider_err = True
+                                    last_provider_error_text = err_msg[:180]
+                                    break
+                            if it_type == "toolResponse" and has_provider_err_marker and _is_error_response([it]):
                                 is_real_provider_err = True
                                 last_provider_error_text = str(it.get("toolResult") or "")[:180]
                                 break
-                            if it_type == "text" and role != "assistant":
-                                txt_low = str(it.get("text") or "").lower()
-                                if (
-                                    "503 service unavailable" in txt_low
-                                    or "no available accounts" in txt_low
-                                    or "rate limit exceeded" in txt_low
-                                ) and "version:" not in txt_low:
-                                    is_real_provider_err = True
-                                    last_provider_error_text = str(it.get("text") or "")[:180]
-                                    break
                     if is_real_provider_err:
                         errors_5xx += 1
-                        if isinstance(ts, (int, float)) and (now_epoch - ts) <= 600:
+                        if isinstance(ts, (int, float)) and (now_epoch - ts) <= 720:
                             recent_provider_errors += 1
                             last_provider_error_ts = int(ts)
-                elif role == "assistant" and not is_real_provider_err:
+                            last_msg_is_provider_error = True
+                elif role == "assistant":
                     # Resposta bem-sucedida do assistente zera a sequência de erros recentes do provider
                     if '"type":"text"' in raw_cj or '"type":"toolRequest"' in raw_cj:
                         recent_provider_errors = 0
+                        last_msg_is_provider_error = False
 
                 if role == "user":
                     # Ancora APENAS em <mention> real (ignora <turn-context> de compactação/retry)
@@ -473,6 +484,7 @@ def main() -> int:
                 "recent_provider_errors": recent_provider_errors,
                 "last_provider_error_ts": last_provider_error_ts,
                 "last_provider_error_text": last_provider_error_text,
+                "last_msg_is_provider_error": last_msg_is_provider_error,
                 "turno_min": turno_min,
                 "thread_lifetime_min": thread_lifetime_min,
                 "age_upd_min": age_upd_min,
@@ -545,10 +557,10 @@ def main() -> int:
                 flags.append("COLISAO_WORKTREE")
                 severidade = "critical"
 
-            # 8. Tempestade de erros de provider (502/503/504/429/No available accounts)
-            if item["recent_provider_errors"] >= 2 or item["errors_5xx"] >= 3:
+            # 8. Erro fatal de provider (502/503/504/429/404/400/malformed_function_call/No available accounts)
+            if item["last_msg_is_provider_error"] or item["recent_provider_errors"] >= 2 or item["errors_5xx"] >= 3:
                 flags.append("TEMPESTADE_5XX")
-                if item["recent_provider_errors"] >= 2 or item["errors_5xx"] >= 4:
+                if item["last_msg_is_provider_error"] or item["recent_provider_errors"] >= 2 or item["errors_5xx"] >= 4:
                     severidade = "critical"
                 elif severidade == "ok":
                     severidade = "warn"
@@ -595,6 +607,7 @@ def main() -> int:
                     "recent_provider_errors": item["recent_provider_errors"],
                     "last_provider_error_ts": item["last_provider_error_ts"],
                     "last_provider_error_text": item["last_provider_error_text"],
+                    "last_msg_is_provider_error": item["last_msg_is_provider_error"],
                     "duracao_min": item["turno_min"],
                     "thread_lifetime_min": item["thread_lifetime_min"],
                     "ultima_atualizacao_min": item["age_upd_min"],
