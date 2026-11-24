@@ -2295,6 +2295,131 @@ function startGovernanceRadarWatchdog(ctx, options = {}) {
   }
   return true;
 }
+const MODEL_FAILOVER_CHAIN = [
+  { provider: "nexusmind_openai", model: "antigravity/gemini-3.8-flash-medium" },
+  { provider: "nexusmind_openai", model: "gpt-6.1-terra" },
+  { provider: "nexusmind_anthropic", model: "claude-sonnet-5-5" },
+  { provider: "nexusmind_grok", model: "grok-4.1-fast" }
+];
+const AGENT_STATE_DIR_DEFAULT = "/Users/heltonfraga/Library/Application Support/xyz.block.buzz.desktop/agents/state";
+const FAILOVER_COOLDOWN_MS = 5 * 60 * 1e3;
+function isRateLimitOrProviderError(text) {
+  const low = String(text || "").toLowerCase();
+  return [
+    "rate limit exceeded",
+    "upstream rate limit",
+    "too many requests",
+    "429",
+    "no available accounts",
+    "503 service unavailable",
+    "502 bad gateway",
+    "504 gateway timeout"
+  ].some((marker) => low.includes(marker));
+}
+function pickNextHealthyModel(currentProvider, currentModel) {
+  const p = String(currentProvider || "").trim();
+  const m = String(currentModel || "").trim();
+  const idx = MODEL_FAILOVER_CHAIN.findIndex(
+    (entry) => entry.provider === p && entry.model === m
+  );
+  if (idx >= 0) {
+    return MODEL_FAILOVER_CHAIN[(idx + 1) % MODEL_FAILOVER_CHAIN.length];
+  }
+  return MODEL_FAILOVER_CHAIN[0];
+}
+async function executeAgentModelFailover(ctx, options) {
+  const agentKey = options.agentName || options.agentPubkey;
+  const nowMs = options.nowMs ?? Date.now();
+  if (!isRateLimitOrProviderError(options.errorText)) {
+    return {
+      ok: false,
+      switched: false,
+      code: "NOT_RATE_LIMIT",
+      agentKey,
+      previous: null,
+      current: null,
+      wokeAgent: false,
+      message: "Erro informado não é rate limit/indisponibilidade transitória de provedor."
+    };
+  }
+  const cooldownKey = `model_failover:${options.agentPubkey}`;
+  if (!canTriggerWithCooldown(cooldownKey, nowMs, true, FAILOVER_COOLDOWN_MS)) {
+    return {
+      ok: true,
+      switched: false,
+      code: "COOLDOWN_ACTIVE",
+      agentKey,
+      previous: null,
+      current: null,
+      wokeAgent: false,
+      message: `Failover de modelo em cooldown (5 min) para ${agentKey}.`
+    };
+  }
+  const host = ctx.host;
+  const dir = options.stateDir || AGENT_STATE_DIR_DEFAULT;
+  const statePath = `${dir}/buzz.agent.v1%3A${options.agentPubkey}`;
+  try {
+    const raw = await host.readFile(statePath);
+    const text = typeof raw === "string" ? raw : raw instanceof Uint8Array ? new TextDecoder("utf-8").decode(raw) : raw instanceof ArrayBuffer ? new TextDecoder("utf-8").decode(new Uint8Array(raw)) : String(raw ?? "");
+    const parsed = JSON.parse(text);
+    const cfg = parsed.config = parsed.config || {};
+    const previous = {
+      provider: String(cfg.provider || ""),
+      model: String(cfg.model || "")
+    };
+    const next = pickNextHealthyModel(previous.provider, previous.model);
+    cfg.provider = next.provider;
+    cfg.model = next.model;
+    if (host == null ? void 0 : host.writeFile) {
+      await host.writeFile(statePath, JSON.stringify(parsed, null, 2));
+    }
+    try {
+      const notifApi = ctx.notifications;
+      if (notifApi == null ? void 0 : notifApi.notify) {
+        await notifApi.notify({
+          title: `OrgFy Failover [${agentKey}]`,
+          body: `Rate limit detectado. Modelo trocado de ${previous.model || "vazio"} para ${next.provider}/${next.model}.`
+        });
+      }
+    } catch {
+    }
+    let wokeAgent = false;
+    if (options.autoWake !== false) {
+      try {
+        const agentsApi = ctx.agents;
+        if (agentsApi == null ? void 0 : agentsApi.wake) {
+          await agentsApi.wake(options.agentName || options.agentPubkey, {
+            channel: options.channel || "#esteira-orgfy",
+            text: `[ORGFY FAILOVER 429] Modelo rotacionado para ${next.provider}/${next.model} após rate limit upstream. Retome o turno anterior.`
+          });
+          wokeAgent = true;
+        }
+      } catch {
+      }
+    }
+    return {
+      ok: true,
+      switched: true,
+      code: "SWITCHED",
+      agentKey,
+      previous,
+      current: next,
+      wokeAgent,
+      message: `Modelo de ${agentKey} rotacionado: ${previous.model || "vazio"} -> ${next.provider}/${next.model}.`
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      switched: false,
+      code: "STATE_NOT_FOUND",
+      agentKey,
+      previous: null,
+      current: null,
+      wokeAgent: false,
+      message: `Falha ao ler/atualizar state do agente: ${(err == null ? void 0 : err.message) || err}`
+    };
+  }
+}
 function registerGovernanceAgentHooks(ctx) {
   const agentsApi = ctx.agents;
   let registered = false;
@@ -2304,8 +2429,37 @@ function registerGovernanceAgentHooks(ctx) {
         id: "orgfy-post-turn-governance",
         harness: "all",
         event: "turn.completed",
-        run: async () => {
+        run: async (payload) => {
+          const errText = String((payload == null ? void 0 : payload.error) || (payload == null ? void 0 : payload.output) || (payload == null ? void 0 : payload.message) || "");
+          const agentPubkey = String((payload == null ? void 0 : payload.agentPubkey) || (payload == null ? void 0 : payload.pubkey) || "");
+          if (agentPubkey && isRateLimitOrProviderError(errText)) {
+            await executeAgentModelFailover(ctx, {
+              agentPubkey,
+              agentName: payload == null ? void 0 : payload.agentName,
+              errorText: errText,
+              channel: payload == null ? void 0 : payload.channel,
+              autoWake: true
+            });
+          }
           await evaluateGovernanceAndReact(ctx, { dryRun: false, autoWake: true, includeRadar: true });
+        }
+      });
+      agentsApi.registerHook({
+        id: "orgfy-turn-failed-model-failover",
+        harness: "all",
+        event: "turn.failed",
+        run: async (payload) => {
+          const errText = String((payload == null ? void 0 : payload.error) || (payload == null ? void 0 : payload.reason) || (payload == null ? void 0 : payload.message) || "");
+          const agentPubkey = String((payload == null ? void 0 : payload.agentPubkey) || (payload == null ? void 0 : payload.pubkey) || "");
+          if (agentPubkey && isRateLimitOrProviderError(errText)) {
+            await executeAgentModelFailover(ctx, {
+              agentPubkey,
+              agentName: payload == null ? void 0 : payload.agentName,
+              errorText: errText,
+              channel: payload == null ? void 0 : payload.channel,
+              autoWake: true
+            });
+          }
         }
       });
       registered = true;

@@ -1359,6 +1359,185 @@ export function startGovernanceRadarWatchdog(
   return true;
 }
 
+export interface ModelFailoverEntry {
+  provider: string;
+  model: string;
+}
+
+export interface ModelFailoverResult {
+  ok: boolean;
+  switched: boolean;
+  code:
+    | "SWITCHED"
+    | "NOT_RATE_LIMIT"
+    | "COOLDOWN_ACTIVE"
+    | "STATE_NOT_FOUND"
+    | "WRITE_FAILED";
+  agentKey: string;
+  previous: ModelFailoverEntry | null;
+  current: ModelFailoverEntry | null;
+  wokeAgent: boolean;
+  message: string;
+}
+
+export const MODEL_FAILOVER_CHAIN: ModelFailoverEntry[] = [
+  { provider: "nexusmind_openai", model: "antigravity/gemini-3.8-flash-medium" },
+  { provider: "nexusmind_openai", model: "gpt-6.1-terra" },
+  { provider: "nexusmind_anthropic", model: "claude-sonnet-5-5" },
+  { provider: "nexusmind_grok", model: "grok-4.1-fast" },
+];
+
+const AGENT_STATE_DIR_DEFAULT =
+  "/Users/heltonfraga/Library/Application Support/xyz.block.buzz.desktop/agents/state";
+const FAILOVER_COOLDOWN_MS = 5 * 60 * 1000;
+
+export function isRateLimitOrProviderError(text: string): boolean {
+  const low = String(text || "").toLowerCase();
+  return [
+    "rate limit exceeded",
+    "upstream rate limit",
+    "too many requests",
+    "429",
+    "no available accounts",
+    "503 service unavailable",
+    "502 bad gateway",
+    "504 gateway timeout",
+  ].some((marker) => low.includes(marker));
+}
+
+export function pickNextHealthyModel(
+  currentProvider: string,
+  currentModel: string
+): ModelFailoverEntry {
+  const p = String(currentProvider || "").trim();
+  const m = String(currentModel || "").trim();
+  const idx = MODEL_FAILOVER_CHAIN.findIndex(
+    (entry) => entry.provider === p && entry.model === m
+  );
+  if (idx >= 0) {
+    return MODEL_FAILOVER_CHAIN[(idx + 1) % MODEL_FAILOVER_CHAIN.length];
+  }
+  return MODEL_FAILOVER_CHAIN[0];
+}
+
+export async function executeAgentModelFailover(
+  ctx: Context,
+  options: {
+    agentPubkey: string;
+    agentName?: string;
+    errorText: string;
+    channel?: string;
+    autoWake?: boolean;
+    stateDir?: string;
+    nowMs?: number;
+  }
+): Promise<ModelFailoverResult> {
+  const agentKey = options.agentName || options.agentPubkey;
+  const nowMs = options.nowMs ?? Date.now();
+
+  if (!isRateLimitOrProviderError(options.errorText)) {
+    return {
+      ok: false,
+      switched: false,
+      code: "NOT_RATE_LIMIT",
+      agentKey,
+      previous: null,
+      current: null,
+      wokeAgent: false,
+      message: "Erro informado não é rate limit/indisponibilidade transitória de provedor.",
+    };
+  }
+
+  const cooldownKey = `model_failover:${options.agentPubkey}`;
+  if (!canTriggerWithCooldown(cooldownKey, nowMs, true, FAILOVER_COOLDOWN_MS)) {
+    return {
+      ok: true,
+      switched: false,
+      code: "COOLDOWN_ACTIVE",
+      agentKey,
+      previous: null,
+      current: null,
+      wokeAgent: false,
+      message: `Failover de modelo em cooldown (5 min) para ${agentKey}.`,
+    };
+  }
+
+  const host = (ctx as any).host;
+  const dir = options.stateDir || AGENT_STATE_DIR_DEFAULT;
+  const statePath = `${dir}/buzz.agent.v1%3A${options.agentPubkey}`;
+
+  try {
+    const raw = await host.readFile(statePath);
+    const text =
+      typeof raw === "string"
+        ? raw
+        : raw instanceof Uint8Array
+        ? new TextDecoder("utf-8").decode(raw)
+        : raw instanceof ArrayBuffer
+        ? new TextDecoder("utf-8").decode(new Uint8Array(raw))
+        : String(raw ?? "");
+    const parsed = JSON.parse(text);
+    const cfg = (parsed.config = parsed.config || {});
+    const previous: ModelFailoverEntry = {
+      provider: String(cfg.provider || ""),
+      model: String(cfg.model || ""),
+    };
+    const next = pickNextHealthyModel(previous.provider, previous.model);
+    cfg.provider = next.provider;
+    cfg.model = next.model;
+
+    if (host?.writeFile) {
+      await host.writeFile(statePath, JSON.stringify(parsed, null, 2));
+    }
+
+    try {
+      const notifApi = (ctx as any).notifications;
+      if (notifApi?.notify) {
+        await notifApi.notify({
+          title: `OrgFy Failover [${agentKey}]`,
+          body: `Rate limit detectado. Modelo trocado de ${previous.model || "vazio"} para ${next.provider}/${next.model}.`,
+        });
+      }
+    } catch {}
+
+    let wokeAgent = false;
+    if (options.autoWake !== false) {
+      try {
+        const agentsApi = (ctx as any).agents;
+        if (agentsApi?.wake) {
+          await agentsApi.wake(options.agentName || options.agentPubkey, {
+            channel: options.channel || "#esteira-orgfy",
+            text: `[ORGFY FAILOVER 429] Modelo rotacionado para ${next.provider}/${next.model} após rate limit upstream. Retome o turno anterior.`,
+          });
+          wokeAgent = true;
+        }
+      } catch {}
+    }
+
+    return {
+      ok: true,
+      switched: true,
+      code: "SWITCHED",
+      agentKey,
+      previous,
+      current: next,
+      wokeAgent,
+      message: `Modelo de ${agentKey} rotacionado: ${previous.model || "vazio"} -> ${next.provider}/${next.model}.`,
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      switched: false,
+      code: "STATE_NOT_FOUND",
+      agentKey,
+      previous: null,
+      current: null,
+      wokeAgent: false,
+      message: `Falha ao ler/atualizar state do agente: ${err?.message || err}`,
+    };
+  }
+}
+
 export function registerGovernanceAgentHooks(ctx: Context): boolean {
   const agentsApi = (ctx as any).agents;
   let registered = false;
@@ -1368,8 +1547,37 @@ export function registerGovernanceAgentHooks(ctx: Context): boolean {
         id: "orgfy-post-turn-governance",
         harness: "all",
         event: "turn.completed",
-        run: async () => {
+        run: async (payload?: any) => {
+          const errText = String(payload?.error || payload?.output || payload?.message || "");
+          const agentPubkey = String(payload?.agentPubkey || payload?.pubkey || "");
+          if (agentPubkey && isRateLimitOrProviderError(errText)) {
+            await executeAgentModelFailover(ctx, {
+              agentPubkey,
+              agentName: payload?.agentName,
+              errorText: errText,
+              channel: payload?.channel,
+              autoWake: true,
+            });
+          }
           await evaluateGovernanceAndReact(ctx, { dryRun: false, autoWake: true, includeRadar: true });
+        },
+      });
+      agentsApi.registerHook({
+        id: "orgfy-turn-failed-model-failover",
+        harness: "all",
+        event: "turn.failed",
+        run: async (payload?: any) => {
+          const errText = String(payload?.error || payload?.reason || payload?.message || "");
+          const agentPubkey = String(payload?.agentPubkey || payload?.pubkey || "");
+          if (agentPubkey && isRateLimitOrProviderError(errText)) {
+            await executeAgentModelFailover(ctx, {
+              agentPubkey,
+              agentName: payload?.agentName,
+              errorText: errText,
+              channel: payload?.channel,
+              autoWake: true,
+            });
+          }
         },
       });
       registered = true;
