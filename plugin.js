@@ -1478,6 +1478,13 @@ async function acquireCheckoutLock(ctx, issueId, agentKey, ttlMs = DEFAULT_LOCK_
       message: "issueId e agentKey são obrigatórios para checkout atômico."
     };
   }
+  if (/^([0-9a-f]{4,16})\1+$/i.test(cleanIssue)) {
+    return {
+      ok: false,
+      code: "LOCK_CONFLICT",
+      message: `INVALID_SYNTHETIC_ID: issueId '${cleanIssue}' parece um prefixo repetido artificialmente. Informe o ID Nostr real (64 hex) ou apenas o prefixo de 8 chars para resolução automática.`
+    };
+  }
   await syncLocksFromDisk(ctx);
   purgeExpiredLocks(nowMs);
   const shortKey = cleanIssue.slice(0, 8);
@@ -1622,7 +1629,7 @@ function canTriggerWithCooldown(key, nowMs, commit = true, cooldownMs = DEFAULT_
   }
   return true;
 }
-const DEFAULT_ORGFY_CHANNEL = "e445491d-2fb3-4ebd-8e2e-f6813c33fb03";
+const DEFAULT_ORGFY_CHANNEL$1 = "e445491d-2fb3-4ebd-8e2e-f6813c33fb03";
 function resolveAgentKeyFromSnapshot(agentsApi, query) {
   const clean = String(query).trim();
   if (!clean || !(agentsApi == null ? void 0 : agentsApi.snapshot)) return clean;
@@ -1676,7 +1683,7 @@ async function evaluateGovernanceAndReact(ctx, options = {}) {
             codigo: "GOOSE_ACTIVE_LOOP",
             severidade: "critical",
             mensagem: `${activeCrit.length} sessão(ões) ativa(s) em loop no Goose: ${top}.`,
-            acao_sugerida: "Executar Ciclo Fechado de Auto-Cura: (1) chamar orgfy_loop_radar({ apenas_ativos: true }) e INTERROMPER imediatamente via orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', release_issue_id?, reason }); (2) diagnosticar a causa-raiz (ITEM_JA_FECHADO, ESCOPO_ABERTO, COMPACTACAO_LOOP, COLISAO_WORKTREE, ERRO_REPETIDO); (3) agir sem deixar o agente parado no vácuo — se já estiver na main, encerrar sem relançar; se ainda for demanda aberta (ex.: escopo aberto), relançar limpo com ESCOPO FECHADO (1-3 arquivos exatos + comando de aceite L-22 + limite de 10 shells) e registrar 'AUTO-CURA | agente | causa-raiz | ação' no #OrgFy."
+            acao_sugerida: "Executar Ciclo Fechado de Auto-Cura: (1) chamar orgfy_loop_radar({ apenas_ativos: true }) e INTERROMPER imediatamente via orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', release_issue_id?, reason }); (2) diagnosticar a causa-raiz (ITEM_JA_FECHADO, ESCOPO_ABERTO, COMPACTACAO_LOOP, COLISAO_WORKTREE, ERRO_REPETIDO, TEMPESTADE_5XX); (3) se a causa for erro de API/provider (502/503/No available accounts), chamar orgfy_model_failover({ agente, agent_pubkey, channel_id, thread_root, prefer_free: true, apply: true, retrigger: true }) para migrar ao melhor modelo free online no NexusMind e re-disparar; se for escopo aberto, relançar com ESCOPO FECHADO (1-3 arquivos + aceite L-22 + limite 10 shells); se já estiver na main, encerrar sem relançar. Registrar 'AUTO-CURA | agente | causa-raiz | ação' no #OrgFy."
           });
         }
         if (activeDup.length >= 2) {
@@ -1720,7 +1727,7 @@ async function evaluateGovernanceAndReact(ctx, options = {}) {
           const agentsApi = ctx.agents;
           if (agentsApi == null ? void 0 : agentsApi.wake) {
             const targetAgentKey = resolveAgentKeyFromSnapshot(agentsApi, wakeKey);
-            const wakeChannel = isRadarAlert && radarChannelId || options.channel || DEFAULT_ORGFY_CHANNEL;
+            const wakeChannel = isRadarAlert && radarChannelId || options.channel || DEFAULT_ORGFY_CHANNEL$1;
             const wakeRoot = isRadarAlert && radarThreadRoot ? radarThreadRoot : void 0;
             await agentsApi.wake(targetAgentKey, {
               channel: wakeChannel,
@@ -1975,7 +1982,7 @@ async function bindConversationContextForCard(ctx, input) {
 async function stopAgentSession(ctx, input) {
   const agentsApi = ctx.agents;
   const action = input.action === "new" || input.action === "compact" ? input.action : "interrupt";
-  const channelId = String(input.channel_id || DEFAULT_ORGFY_CHANNEL).trim() || DEFAULT_ORGFY_CHANNEL;
+  const channelId = String(input.channel_id || DEFAULT_ORGFY_CHANNEL$1).trim() || DEFAULT_ORGFY_CHANNEL$1;
   const root = input.thread_root ? String(input.thread_root).trim() : void 0;
   const place = root ? { channelId, root } : { channelId };
   if (!(agentsApi == null ? void 0 : agentsApi.snapshot) || !(agentsApi == null ? void 0 : agentsApi.session) && !(agentsApi == null ? void 0 : agentsApi.interrupt)) {
@@ -2853,7 +2860,7 @@ function renderBudgetGaugeSvg(h, pct, status) {
   );
 }
 function renderIntelligenceTab(props) {
-  const { h, kpis, history, error, isRecalculating, onRecalculate, onRunGovernanceEval, governanceSummary, loopRadar, onRefreshLoopRadar, onWakeIrisForLoops, onStopLoopSession, stoppingSessionId } = props;
+  const { h, kpis, history, error, isRecalculating, onRecalculate, onRunGovernanceEval, governanceSummary, loopRadar, onRefreshLoopRadar, onWakeIrisForLoops, onStopLoopSession, stoppingSessionId, onFailoverModelSession, failingOverSessionId } = props;
   if (!kpis) {
     return h(
       "div",
@@ -3312,6 +3319,25 @@ function renderIntelligenceTab(props) {
                     { style: { color: isActive && s.severidade === "critical" ? "#f87171" : s.severidade === "warn" ? "#fbbf24" : "#cbd5e1", fontWeight: "600" } },
                     `${formatMin(s.duracao_min)} · ${s.shells} shells`
                   ),
+                  isActive && onFailoverModelSession && h(
+                    "button",
+                    {
+                      onClick: () => onFailoverModelSession(s),
+                      disabled: failingOverSessionId === s.session_id,
+                      title: "Consultar NexusMind Ping Real, migrar este agente para o melhor modelo FREE online e re-disparar",
+                      style: {
+                        padding: "2px 8px",
+                        borderRadius: "5px",
+                        border: "1px solid rgba(56, 189, 248, 0.5)",
+                        backgroundColor: failingOverSessionId === s.session_id ? "rgba(56, 189, 248, 0.35)" : "rgba(56, 189, 248, 0.16)",
+                        color: "#bae6fd",
+                        fontSize: "9.5px",
+                        fontWeight: "700",
+                        cursor: failingOverSessionId === s.session_id ? "wait" : "pointer"
+                      }
+                    },
+                    failingOverSessionId === s.session_id ? "Migrando..." : "⚡ Failover Free"
+                  ),
                   isActive && onStopLoopSession && h(
                     "button",
                     {
@@ -3547,6 +3573,352 @@ function createChannelPulsePanel(ctx, fetchKpis) {
         )
       )
     );
+  };
+}
+const NEXUSMIND_PROVIDERS = [
+  {
+    id: "nexusmind_openai",
+    apiKey: "sk-2ee0581e607d02f3485e0efcad2ff686e2b889720f63497813b8fb45eb9d0f08",
+    baseUrl: "https://api.nexusmind.digital/v1",
+    isAnthropic: false
+  },
+  {
+    id: "nexusmind_antigravity",
+    apiKey: "sk-cf8ffed3d96eff9ca80093aee98c589dcf67cf6932c76cd45e223429204051a0",
+    baseUrl: "https://api.nexusmind.digital/v1",
+    isAnthropic: false
+  },
+  {
+    id: "nexusmind_grok",
+    apiKey: "sk-f37b255eada36a40a2520cc43700e6583e9773d16b3543a77a147ce87043a3df",
+    baseUrl: "https://api.nexusmind.digital/v1",
+    isAnthropic: false
+  },
+  {
+    id: "nexusmind_anthropic",
+    apiKey: "sk-bd4137aa79f121bbf4e110d788a7f587b68b49432d333ad9abd88051ba393b1c",
+    baseUrl: "https://api.nexusmind.digital",
+    isAnthropic: true
+  }
+];
+const DEFAULT_ORGFY_CHANNEL = "e445491d-2fb3-4ebd-8e2e-f6813c33fb03";
+function isFreeModelId(modelId) {
+  const lower = String(modelId || "").toLowerCase();
+  return lower.includes(":free") || lower.includes("-free") || lower.includes("/free") || lower.endsWith("free");
+}
+function estimateModelIntelligence(modelId) {
+  const m = String(modelId || "").toLowerCase();
+  let score = 50;
+  if (/(opus|o3|gpt-5|gpt-6|claude-sonnet-4-6|claude-sonnet-5|gemini-3\.?5?-pro|gemini-2\.5-pro|deepseek-r1|deepseek-v3|qwen3-coder|mistral-large|grok-4)/.test(m)) {
+    score += 32;
+  } else if (/(sonnet|pro|large|coder|r1|reasoning|thinking|v3|nemotron-ultra|llama-4|glm-4\.5|kimi-k2)/.test(m)) {
+    score += 22;
+  } else if (/(flash|haiku|medium|70b|72b|32b|devstral|codestral)/.test(m)) {
+    score += 12;
+  }
+  if (/(nano|tiny|1b|3b|7b|8b|fast-free|lite)/.test(m)) {
+    score -= 12;
+  }
+  if (/(thinking|reasoning|high)/.test(m)) {
+    score += 6;
+  }
+  return Math.max(10, Math.min(100, score));
+}
+function computeCombinedModelScore(intelligenceScore, latencyMs) {
+  if (latencyMs === null || !Number.isFinite(latencyMs)) return -1;
+  const latencyPenalty = Math.min(35, latencyMs / 1e3 * 4);
+  return Number((intelligenceScore - latencyPenalty).toFixed(2));
+}
+function getDisabledModelsFromLocalStorage() {
+  var _a, _b;
+  try {
+    const raw = (_b = (_a = globalThis == null ? void 0 : globalThis.localStorage) == null ? void 0 : _a.getItem) == null ? void 0 : _b.call(_a, "nexusmind_disabled_models");
+    if (!raw) return /* @__PURE__ */ new Set();
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? new Set(parsed.map((x) => String(x))) : /* @__PURE__ */ new Set();
+  } catch {
+    return /* @__PURE__ */ new Set();
+  }
+}
+async function discoverNexusMindCatalog(ctx) {
+  var _a, _b, _c;
+  const hostReq = (_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.request;
+  const disabled = getDisabledModelsFromLocalStorage();
+  const seen = /* @__PURE__ */ new Map();
+  if (typeof hostReq === "function") {
+    await Promise.all(
+      NEXUSMIND_PROVIDERS.map(async (prov) => {
+        try {
+          const res = await hostReq({
+            url: "https://api.nexusmind.digital/v1/models",
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${prov.apiKey}`,
+              "User-Agent": "BuzzDesktop/OrgFyFailover"
+            },
+            timeoutMs: 8e3
+          });
+          if ((res == null ? void 0 : res.status) >= 200 && (res == null ? void 0 : res.status) < 300 && (res == null ? void 0 : res.body)) {
+            const parsed = JSON.parse(res.body);
+            const list = Array.isArray(parsed == null ? void 0 : parsed.data) ? parsed.data : [];
+            for (const m of list) {
+              const mid = String((m == null ? void 0 : m.id) || "").trim();
+              if (!mid || disabled.has(mid) || seen.has(mid)) continue;
+              seen.set(mid, { id: mid, provider: prov });
+            }
+          }
+        } catch {
+        }
+      })
+    );
+  }
+  if (seen.size === 0) {
+    try {
+      const raw = (_c = (_b = globalThis == null ? void 0 : globalThis.localStorage) == null ? void 0 : _b.getItem) == null ? void 0 : _c.call(_b, "nexusmind_cached_models");
+      if (raw) {
+        const cached = JSON.parse(raw);
+        if (Array.isArray(cached)) {
+          for (const m of cached) {
+            const mid = String((m == null ? void 0 : m.id) || "").trim();
+            if (!mid || disabled.has(mid) || seen.has(mid)) continue;
+            const prov = NEXUSMIND_PROVIDERS.find((p) => p.id === (m == null ? void 0 : m.primaryGroup)) || NEXUSMIND_PROVIDERS[0];
+            seen.set(mid, { id: mid, provider: prov });
+          }
+        }
+      }
+    } catch {
+    }
+  }
+  return Array.from(seen.values());
+}
+async function probeModelLive(ctx, modelId, prov) {
+  var _a;
+  const hostReq = (_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.request;
+  if (typeof hostReq !== "function") {
+    return { online: false, latencyMs: null, error: "ctx.host.request indisponível" };
+  }
+  const url = prov.isAnthropic ? "https://api.nexusmind.digital/v1/messages" : "https://api.nexusmind.digital/v1/chat/completions";
+  const headers = prov.isAnthropic ? {
+    "x-api-key": prov.apiKey,
+    Authorization: `Bearer ${prov.apiKey}`,
+    "anthropic-version": "2023-06-01",
+    "Content-Type": "application/json",
+    "User-Agent": "BuzzDesktop/OrgFyFailover"
+  } : {
+    Authorization: `Bearer ${prov.apiKey}`,
+    "Content-Type": "application/json",
+    "User-Agent": "BuzzDesktop/OrgFyFailover"
+  };
+  const t0 = Date.now();
+  try {
+    const res = await hostReq({
+      url,
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model: modelId,
+        messages: [{ role: "user", content: "ok" }],
+        max_tokens: prov.isAnthropic ? 16 : 5
+      }),
+      timeoutMs: 9e3
+    });
+    const latencyMs = Date.now() - t0;
+    if ((res == null ? void 0 : res.status) >= 200 && (res == null ? void 0 : res.status) < 300) {
+      return { online: true, latencyMs };
+    }
+    return { online: false, latencyMs, error: `HTTP ${(res == null ? void 0 : res.status) ?? "erro"}` };
+  } catch (err) {
+    return { online: false, latencyMs: Date.now() - t0, error: String((err == null ? void 0 : err.message) || err).slice(0, 100) };
+  }
+}
+function findAgentInSnapshot(agentsApi, query, pubkey) {
+  if (!(agentsApi == null ? void 0 : agentsApi.snapshot)) return void 0;
+  const snap = agentsApi.snapshot() || {};
+  const pool = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const list of [snap.running, snap.agents]) {
+    if (!Array.isArray(list)) continue;
+    for (const a of list) {
+      if (!a || !a.key || seen.has(a.key)) continue;
+      seen.add(a.key);
+      pool.push(a);
+    }
+  }
+  const qLower = String(query || "").trim().toLowerCase();
+  const pkLower = String(pubkey || "").trim().toLowerCase();
+  return pkLower && pool.find((a) => String(a.pubkey || "").toLowerCase() === pkLower) || qLower && pool.find((a) => String(a.key || "").toLowerCase() === qLower) || qLower && pool.find((a) => String(a.name || "").toLowerCase() === qLower) || (qLower ? pool.find((a) => String(a.name || "").toLowerCase().includes(qLower)) : void 0);
+}
+async function executeSmartModelFailover(ctx, input = {}) {
+  const preferFree = input.prefer_free !== false;
+  const applyChange = Boolean(input.apply);
+  const retrigger = input.retrigger !== false;
+  const maxProbes = Math.max(1, Math.min(10, Number(input.max_probes || 6)));
+  const failedNorm = String(input.failed_model || "").trim().toLowerCase();
+  const agentsApi = ctx.agents;
+  const matchedAgent = input.agente || input.agent_pubkey ? findAgentInSnapshot(agentsApi, input.agente, input.agent_pubkey) : void 0;
+  const previousModel = ((matchedAgent == null ? void 0 : matchedAgent.config) && typeof matchedAgent.config === "object" ? String(matchedAgent.config.model || "") : "") || (input.failed_model || null);
+  const catalog = await discoverNexusMindCatalog(ctx);
+  if (catalog.length === 0) {
+    return {
+      ok: false,
+      mode: applyChange ? "applied" : "dry_run",
+      agentName: (matchedAgent == null ? void 0 : matchedAgent.name) || input.agente || null,
+      agentKey: (matchedAgent == null ? void 0 : matchedAgent.key) || null,
+      previousModel,
+      selectedModel: null,
+      selectedProvider: null,
+      selectedLatencyMs: null,
+      selectedIntelligenceScore: null,
+      retriggered: false,
+      candidatesTested: 0,
+      ranking: [],
+      message: "Nenhum modelo retornado pelo NexusMind Gateway (/v1/models indisponível e sem cache local)."
+    };
+  }
+  const excludeSet = /* @__PURE__ */ new Set();
+  if (failedNorm) excludeSet.add(failedNorm);
+  if (previousModel) excludeSet.add(previousModel.toLowerCase());
+  let pool = catalog.filter((c) => !excludeSet.has(c.id.toLowerCase()));
+  if (preferFree) {
+    const freeOnly = pool.filter((c) => isFreeModelId(c.id));
+    if (freeOnly.length > 0) {
+      pool = freeOnly;
+    }
+  }
+  const preRanked = pool.map((c) => ({ ...c, intelligenceScore: estimateModelIntelligence(c.id) })).sort((a, b) => b.intelligenceScore - a.intelligenceScore).slice(0, maxProbes);
+  const probed = await Promise.all(
+    preRanked.map(async (cand) => {
+      const res = await probeModelLive(ctx, cand.id, cand.provider);
+      const combinedScore = res.online ? computeCombinedModelScore(cand.intelligenceScore, res.latencyMs) : -1;
+      return {
+        model: cand.id,
+        provider: cand.provider.id,
+        isFree: isFreeModelId(cand.id),
+        intelligenceScore: cand.intelligenceScore,
+        latencyMs: res.latencyMs,
+        combinedScore,
+        online: res.online,
+        error: res.error
+      };
+    })
+  );
+  probed.sort((a, b) => {
+    if (a.online !== b.online) return a.online ? -1 : 1;
+    if (b.combinedScore !== a.combinedScore) return b.combinedScore - a.combinedScore;
+    return (a.latencyMs ?? 999999) - (b.latencyMs ?? 999999);
+  });
+  const winner = probed.find((p) => p.online) || null;
+  if (!winner) {
+    return {
+      ok: false,
+      mode: applyChange ? "applied" : "dry_run",
+      agentName: (matchedAgent == null ? void 0 : matchedAgent.name) || input.agente || null,
+      agentKey: (matchedAgent == null ? void 0 : matchedAgent.key) || null,
+      previousModel,
+      selectedModel: null,
+      selectedProvider: null,
+      selectedLatencyMs: null,
+      selectedIntelligenceScore: null,
+      retriggered: false,
+      candidatesTested: probed.length,
+      ranking: probed,
+      message: `Nenhum dos ${probed.length} modelos testados respondeu HTTP 200 no ping real do NexusMind.`
+    };
+  }
+  let appliedOk = false;
+  let retriggered = false;
+  let applyNote = "";
+  if (applyChange) {
+    if (!matchedAgent) {
+      return {
+        ok: false,
+        mode: "applied",
+        agentName: input.agente || null,
+        agentKey: null,
+        previousModel,
+        selectedModel: winner.model,
+        selectedProvider: winner.provider,
+        selectedLatencyMs: winner.latencyMs,
+        selectedIntelligenceScore: winner.intelligenceScore,
+        retriggered: false,
+        candidatesTested: probed.length,
+        ranking: probed,
+        message: `Melhor modelo eleito (${winner.model}, ${winner.latencyMs}ms), mas agente '${input.agente || input.agent_pubkey || ""}' não encontrado no Buzz Desktop.`
+      };
+    }
+    if (typeof (agentsApi == null ? void 0 : agentsApi.save) !== "function") {
+      return {
+        ok: false,
+        mode: "applied",
+        agentName: matchedAgent.name || matchedAgent.key,
+        agentKey: matchedAgent.key,
+        previousModel,
+        selectedModel: winner.model,
+        selectedProvider: winner.provider,
+        selectedLatencyMs: winner.latencyMs,
+        selectedIntelligenceScore: winner.intelligenceScore,
+        retriggered: false,
+        candidatesTested: probed.length,
+        ranking: probed,
+        message: `Melhor modelo eleito (${winner.model}, ${winner.latencyMs}ms), mas ctx.agents.save indisponível neste host.`
+      };
+    }
+    const currentCfg = matchedAgent.config && typeof matchedAgent.config === "object" ? { ...matchedAgent.config } : {};
+    currentCfg.model = winner.model;
+    if ("provider" in currentCfg || winner.provider) {
+      currentCfg.provider = winner.provider;
+    }
+    try {
+      await agentsApi.save(matchedAgent.key, { config: currentCfg });
+      appliedOk = true;
+      applyNote = `Modelo de ${matchedAgent.name || matchedAgent.key} atualizado de '${previousModel || "padrão"}' para '${winner.model}' (${winner.provider}, ${winner.latencyMs}ms, score ${winner.combinedScore}).`;
+    } catch (err) {
+      return {
+        ok: false,
+        mode: "applied",
+        agentName: matchedAgent.name || matchedAgent.key,
+        agentKey: matchedAgent.key,
+        previousModel,
+        selectedModel: winner.model,
+        selectedProvider: winner.provider,
+        selectedLatencyMs: winner.latencyMs,
+        selectedIntelligenceScore: winner.intelligenceScore,
+        retriggered: false,
+        candidatesTested: probed.length,
+        ranking: probed,
+        message: `Falha ao salvar novo modelo '${winner.model}' em ${matchedAgent.name || matchedAgent.key}: ${(err == null ? void 0 : err.message) || err}`
+      };
+    }
+    if (appliedOk && retrigger && typeof (agentsApi == null ? void 0 : agentsApi.wake) === "function") {
+      try {
+        const channel = String(input.channel_id || DEFAULT_ORGFY_CHANNEL).trim() || DEFAULT_ORGFY_CHANNEL;
+        const root = input.thread_root ? String(input.thread_root).trim() : void 0;
+        await agentsApi.wake(matchedAgent.key, {
+          channel,
+          ...root ? { root } : {},
+          text: input.retrigger_text || `[ORGFY FAILOVER AUTOMÁTICO] Seu modelo foi migrado para '${winner.model}' (${winner.latencyMs}ms online via NexusMind) após erro de API no modelo anterior. Retome imediatamente o último passo da tarefa com escopo fechado.`
+        });
+        retriggered = true;
+        applyNote += " Agente re-disparado automaticamente.";
+      } catch (wErr) {
+        applyNote += ` (Aviso: falha no re-disparo wake: ${(wErr == null ? void 0 : wErr.message) || wErr})`;
+      }
+    }
+  }
+  return {
+    ok: true,
+    mode: applyChange ? "applied" : "dry_run",
+    agentName: (matchedAgent == null ? void 0 : matchedAgent.name) || input.agente || null,
+    agentKey: (matchedAgent == null ? void 0 : matchedAgent.key) || null,
+    previousModel,
+    selectedModel: winner.model,
+    selectedProvider: winner.provider,
+    selectedLatencyMs: winner.latencyMs,
+    selectedIntelligenceScore: winner.intelligenceScore,
+    retriggered,
+    candidatesTested: probed.length,
+    ranking: probed,
+    message: applyNote || `Melhor modelo disponível (${preferFree ? "FREE" : "ALL"}): ${winner.model} (${winner.provider} · ${winner.latencyMs}ms · inteligência ${winner.intelligenceScore}/100 · score ${winner.combinedScore}).`
   };
 }
 const RESOLVED_ARCHIVE_PATH = "/Users/heltonfraga/.buzz/.scratch/resolved-issues-archive.json";
@@ -5597,6 +5969,7 @@ function apply(ctx) {
     const [governanceSummary, setGovernanceSummary] = React.useState(null);
     const [loopRadar, setLoopRadar] = React.useState(null);
     const [stoppingSessionId, setStoppingSessionId] = React.useState(null);
+    const [failingOverSessionId, setFailingOverSessionId] = React.useState(null);
     const [resolvedItems, setResolvedItems] = React.useState([]);
     const [resolvedError, setResolvedError] = React.useState(null);
     const [resolvedSearch, setResolvedSearch] = React.useState("");
@@ -5678,6 +6051,27 @@ function apply(ctx) {
         }, 800);
       } finally {
         setStoppingSessionId(null);
+      }
+    }, [loadLoopRadar]);
+    const handleFailoverModelSession = React.useCallback(async (session) => {
+      setFailingOverSessionId(session.session_id);
+      try {
+        const res = await executeSmartModelFailover(ctx, {
+          agente: session.agente,
+          agent_pubkey: session.agent_pubkey,
+          prefer_free: true,
+          apply: true,
+          retrigger: true,
+          channel_id: session.channel_id,
+          thread_root: session.thread_root
+        });
+        setGovernanceSummary(res.message);
+        showNotification(res.ok ? "success" : "warning", res.message);
+        setTimeout(() => {
+          loadLoopRadar();
+        }, 1e3);
+      } finally {
+        setFailingOverSessionId(null);
       }
     }, [loadLoopRadar]);
     const [isExecutingDispatch, setIsExecutingDispatch] = React.useState(false);
@@ -7035,7 +7429,9 @@ function apply(ctx) {
             onRefreshLoopRadar: loadLoopRadar,
             onWakeIrisForLoops: handleWakeIrisForLoops,
             onStopLoopSession: handleStopLoopSession,
-            stoppingSessionId
+            stoppingSessionId,
+            onFailoverModelSession: handleFailoverModelSession,
+            failingOverSessionId
           }) : activeCentralTab === "resolvidas" ? renderResolvedArchiveTab({
             h,
             items: resolvedItems,
@@ -10022,8 +10418,9 @@ Regras Invariantes:
 - Freio Anti-Loop (Máximo 12 'shell's): NUNCA ultrapasse 12 comandos 'shell' sem commit nem repita o mesmo erro 2 vezes seguidas. Ao bater 2 falhas consecutivas no mesmo passo ou 12 'shell's sem avanço, PARE imediatamente e publique 'BLOQUEADO | por: <seu perfil> | motivo: ... | falta: ... | resolve: <perfil>'.
 - Regra Anti-Escopo Aberto (Iris / Despachos ao COO e Executores): PROIBIDO delegar ao Bento (COO) ou a executores com pedido aberto (ex.: 'escolha o próximo item da auditoria', 'veja o que falta'). Todo acionamento DEVE declarar: (a) alvo concreto (slug/bug + 1 a 3 arquivos exatos), (b) critério de pronto / comando de aceite L-22 esperado e (c) o que NÃO refazer.
 - Orçamento de Exploração do COO (Bento): ao receber acionamento para emitir card, limite a leitura exploratória a no máximo 10 comandos 'shell' (<= 5 min). Se o escopo chegar aberto ou ambíguo, NÃO varra o repositório inteiro — responda em 1 turno pedindo à Iris o alvo fechado (ou proponha 1 candidato concreto para aprovação).
+- Limite de Turno para Revisores (Teo, Bento Arquiteto, Vera, QA Sentinel — Máximo 15 'shell's): em uma revisão, rode o comando de aceite L-22, confira o diff/escopo e emita imediatamente 'GATE: aceito' ou 'GATE: recusado' (e encerre). PROIBIDO abrir sessões longas de debug de 'porteiro.py'/'esteira_minima.py' durante uma revisão — se o merge atrasar, reporte em 1 linha e saia.
 - Isolamento Estrito de Worktree (Proibido git checkout na raiz): NUNCA execute 'git checkout --detach' ou troque de branch dentro da raiz '/Users/heltonfraga/.buzz/REPOS/orgfy' (isso corrompe o estado compartilhado para todos os agentes). Para revisar ou comparar BASE_VS_AGORA, crie SEMPRE uma worktree isolada e remova-a ao final.
-- Protocolo de Auto-Cura em Ciclo Fechado (Bento, Iris, Cron e Revisores): ANTES de despachar um card ou cobrar um agente (e SEMPRE que acordada pelo Radar), chame 'orgfy_loop_radar({ apenas_ativos: true })'. NUNCA espere indefinidamente uma sessão queimando tokens em loop (>20m ou >25 shells sem commit, compactação repetida, grep em loop, --help repetido ou PR já fechado). Ao detectar loop/travamento ativo, execute obrigatoriamente os 3 passos: (1) PARAR: chame 'orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: "interrupt", release_issue_id?, reason })'; (2) DIAGNOSTICAR CAUSA-RAIZ: classifique a causa pelos campos 'flags', 'gatilho_resumo' e 'ultimo_shell' (ITEM_JA_FECHADO, ESCOPO_ABERTO, COMPACTACAO_LOOP, COLISAO_WORKTREE, ERRO_REPETIDO, TEMPESTADE_5XX); (3) AGIR (nunca deixar o agente parado no vácuo): se ITEM_JA_FECHADO, confirme merge na main e encerre sem relançar; se demanda ainda aberta (ex.: ESCOPO_ABERTO ou COMPACTACAO_LOOP), relance limpo com ESCOPO FECHADO (1-3 arquivos exatos + comando de aceite L-22 + limite de 10 shells) ou reatribua na 2ª falha, e publique no #OrgFy 'AUTO-CURA | agente | causa-raiz | ação tomada'. Em 'SESSAO_DUPLICADA', encerre a sessão obsoleta com 'orgfy_session_stop' em vez de re-mencionar.
+- Protocolo de Auto-Cura em Ciclo Fechado (Bento, Iris, Cron e Revisores): ANTES de despachar um card ou cobrar um agente (e SEMPRE que acordada pelo Radar), chame 'orgfy_loop_radar({ apenas_ativos: true })'. NUNCA espere indefinidamente uma sessão queimando tokens em loop (>20m ou >25 shells sem commit, compactação repetida, grep em loop, --help repetido ou PR já fechado). Ao detectar loop/travamento ativo, execute obrigatoriamente os 3 passos: (1) PARAR: chame 'orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: "interrupt", release_issue_id?, reason })'; (2) DIAGNOSTICAR CAUSA-RAIZ: classifique a causa pelos campos 'flags', 'gatilho_resumo' e 'ultimo_shell' (ITEM_JA_FECHADO, ESCOPO_ABERTO, COMPACTACAO_LOOP, COLISAO_WORKTREE, ERRO_REPETIDO, TEMPESTADE_5XX); (3) AGIR (nunca deixar o agente parado no vácuo): se erro de API/provider (502/503/No available accounts), chame 'orgfy_model_failover({ agente, agent_pubkey, channel_id, thread_root, prefer_free: true, apply: true, retrigger: true })' para consultar o NexusMind Ping Real, migrar para o melhor modelo free online e re-disparar; se ITEM_JA_FECHADO, confirme merge na main e encerre sem relançar; se demanda ainda aberta (ex.: ESCOPO_ABERTO ou COMPACTACAO_LOOP), relance limpo com ESCOPO FECHADO (1-3 arquivos exatos + comando de aceite L-22 + limite de 10 shells) ou reatribua na 2ª falha, e publique no #OrgFy 'AUTO-CURA | agente | causa-raiz | ação tomada'. Em 'SESSAO_DUPLICADA', encerre a sessão obsoleta com 'orgfy_session_stop' em vez de re-mencionar.
 - Decisor Híbrido v12: orgfy_lint_card usa Decisions API com fallback determinístico offline automático (ferramentas/esteira/decisor_fallback.py) em caso de falta de saldo ou timeout.
 Ferramentas nativas disponíveis neste plugin:
 1. orgfy_status({ empresa? }): Consulta o placar de 20h, FPY, CPI de tokens, contagem de aceites, merged e raias da esteira.
@@ -10039,6 +10436,7 @@ Ferramentas nativas disponíveis neste plugin:
 11. orgfy_historico_buscar({ query?, spec?, limit? }): Busca just-in-time no Arquivo de Issues Resolvidas por código, causa raiz, arquivo ou SHA.
 12. orgfy_loop_radar({ apenas_ativos?, agente? }): Inspeciona o Radar de Loops & Sessões Zumbis do Goose em tempo real (LOOP_SUSPEITO, STALLED_THINKING, SESSAO_DUPLICADA, EXPLORACAO_CLI_HELP) com channel_id, thread_root, agent_pubkey, ultimo_shell e acao_sugerida.
 13. orgfy_session_stop({ agente, agent_pubkey?, channel_id?, thread_root?, action?, release_issue_id?, reason? }): Interrompe (Stop) ou reinicia imediatamente o turno de um agente travado ou em trabalho inútil via API nativa do Buzz Desktop (action: 'interrupt' | 'new' | 'compact'), com liberação opcional de lock.
+14. orgfy_model_failover({ agente?, agent_pubkey?, failed_model?, prefer_free?, apply?, retrigger?, channel_id?, thread_root?, retrigger_text? }): Integração OrgFy ↔ NexusMind Gateway — faz ping real nos modelos free (ou pagos) mais inteligentes disponíveis no NexusMind, elege o melhor online (inteligência + menor latência real em ms), atualiza o modelo do agente via ctx.agents.save() e re-dispara na thread original.
 Consulte sempre orgfy_status, orgfy_kpis, orgfy_loop_radar ou orgfy_kanban_read para inspecionar métricas reais antes de agir.`
       });
       console.log("[ORGFY] ctx.agents.addInstructions registrado com sucesso.");
@@ -10425,7 +10823,41 @@ Consulte sempre orgfy_status, orgfy_kpis, orgfy_loop_radar ou orgfy_kanban_read 
           return JSON.stringify(res, null, 2);
         }
       });
-      console.log("[ORGFY] 13 agentTools registradas com sucesso no harness do Buzz (Ondas 1, 2, 3 + Arquivo + Radar de Loops + Session Stop).");
+      ctx.agents.addTool({
+        name: "orgfy_model_failover",
+        description: "Integração OrgFy ↔ NexusMind Gateway: consulta os modelos disponíveis no NexusMind, faz ping real nos candidatos FREE (ou pagos) mais inteligentes, elege o melhor online (maior inteligência + menor latência ms), opcionalmente atualiza o agente via ctx.agents.save() e re-dispara na thread original.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            agente: { type: "string", description: "Nome, key ou pubkey do agente afetado (ex: 'OrgFy Cron')" },
+            agent_pubkey: { type: "string", description: "Pubkey 64-hex do agente (opcional)" },
+            failed_model: { type: "string", description: "ID do modelo em falha para excluir do ranking (ex: 'kilocode-fast-free')" },
+            prefer_free: { type: "boolean", description: "Se true (padrão), prioriza modelos FREE disponíveis no NexusMind" },
+            apply: { type: "boolean", description: "Se true, salva o novo modelo no agente via ctx.agents.save(); se false, apenas simula e retorna o ranking" },
+            retrigger: { type: "boolean", description: "Se true (padrão quando apply=true), re-dispara o agente via ctx.agents.wake() na thread original" },
+            channel_id: { type: "string", description: "UUID do canal para re-disparo (default: #OrgFy)" },
+            thread_root: { type: "string", description: "Event ID 64-hex da thread original para re-disparo" },
+            retrigger_text: { type: "string", description: "Texto opcional de retomada após a troca de modelo" },
+            max_probes: { type: "number", description: "Número máximo de candidatos testados com ping real (1..10, default: 6)" }
+          }
+        },
+        call: async (_client, _context, args) => {
+          const res = await executeSmartModelFailover(ctx, {
+            agente: args == null ? void 0 : args.agente,
+            agent_pubkey: args == null ? void 0 : args.agent_pubkey,
+            failed_model: args == null ? void 0 : args.failed_model,
+            prefer_free: args == null ? void 0 : args.prefer_free,
+            apply: args == null ? void 0 : args.apply,
+            retrigger: args == null ? void 0 : args.retrigger,
+            channel_id: args == null ? void 0 : args.channel_id,
+            thread_root: args == null ? void 0 : args.thread_root,
+            retrigger_text: args == null ? void 0 : args.retrigger_text,
+            max_probes: args == null ? void 0 : args.max_probes
+          });
+          return JSON.stringify(res, null, 2);
+        }
+      });
+      console.log("[ORGFY] 14 agentTools registradas com sucesso no harness do Buzz (Ondas 1, 2, 3 + Arquivo + Radar de Loops + Session Stop + Model Failover NexusMind).");
     } catch (err) {
       console.warn("[ORGFY] Falha ao registrar agentTools:", err);
     }

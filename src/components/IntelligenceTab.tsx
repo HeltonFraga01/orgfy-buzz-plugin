@@ -21,6 +21,8 @@ export interface IntelligenceTabProps {
   onWakeIrisForLoops?: () => void;
   onStopLoopSession?: (session: GooseLoopSession) => void;
   stoppingSessionId?: string | null;
+  onFailoverModelSession?: (session: GooseLoopSession) => void;
+  failingOverSessionId?: string | null;
 }
 
 const CARD_BG = "rgba(0, 0, 0, 0.28)";
@@ -217,7 +219,7 @@ function renderBudgetGaugeSvg(h: any, pct: number, status: string) {
 }
 
 export function renderIntelligenceTab(props: IntelligenceTabProps) {
-  const { h, kpis, history, error, isRecalculating, onRecalculate, onRunGovernanceEval, governanceSummary, loopRadar, onRefreshLoopRadar, onWakeIrisForLoops, onStopLoopSession, stoppingSessionId } = props;
+  const { h, kpis, history, error, isRecalculating, onRecalculate, onRunGovernanceEval, governanceSummary, loopRadar, onRefreshLoopRadar, onWakeIrisForLoops, onStopLoopSession, stoppingSessionId, onFailoverModelSession, failingOverSessionId } = props;
 
   if (!kpis) {
     return h(
@@ -730,6 +732,27 @@ export function renderIntelligenceTab(props: IntelligenceTabProps) {
                           { style: { color: isActive && s.severidade === "critical" ? "#f87171" : s.severidade === "warn" ? "#fbbf24" : "#cbd5e1", fontWeight: "600" } },
                           `${formatMin(s.duracao_min)} · ${s.shells} shells`
                         ),
+                        isActive &&
+                          onFailoverModelSession &&
+                          h(
+                            "button",
+                            {
+                              onClick: () => onFailoverModelSession(s),
+                              disabled: failingOverSessionId === s.session_id,
+                              title: "Consultar NexusMind Ping Real, migrar este agente para o melhor modelo FREE online e re-disparar",
+                              style: {
+                                padding: "2px 8px",
+                                borderRadius: "5px",
+                                border: "1px solid rgba(56, 189, 248, 0.5)",
+                                backgroundColor: failingOverSessionId === s.session_id ? "rgba(56, 189, 248, 0.35)" : "rgba(56, 189, 248, 0.16)",
+                                color: "#bae6fd",
+                                fontSize: "9.5px",
+                                fontWeight: "700",
+                                cursor: failingOverSessionId === s.session_id ? "wait" : "pointer",
+                              },
+                            },
+                            failingOverSessionId === s.session_id ? "Migrando..." : "⚡ Failover Free"
+                          ),
                         isActive &&
                           onStopLoopSession &&
                           h(

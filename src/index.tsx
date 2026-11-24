@@ -70,6 +70,9 @@ import {
   registerGovernanceAgentHooks,
 } from "./services/governance-engine";
 import {
+  executeSmartModelFailover,
+} from "./services/model-failover";
+import {
   fetchResolvedArchive,
   searchResolvedArchive,
   type ResolvedIssueItem,
@@ -684,6 +687,7 @@ export function apply(ctx: Context) {
     const [governanceSummary, setGovernanceSummary] = React.useState<string | null>(null);
     const [loopRadar, setLoopRadar] = React.useState<GooseLoopRadarPayload | null>(null);
     const [stoppingSessionId, setStoppingSessionId] = React.useState<string | null>(null);
+    const [failingOverSessionId, setFailingOverSessionId] = React.useState<string | null>(null);
 
     // Estado do Arquivo Pesquisável de Issues Resolvidas (Just-in-Time Context)
     const [resolvedItems, setResolvedItems] = React.useState<ResolvedIssueItem[]>([]);
@@ -774,6 +778,26 @@ export function apply(ctx: Context) {
         setTimeout(() => { loadLoopRadar(); }, 800);
       } finally {
         setStoppingSessionId(null);
+      }
+    }, [loadLoopRadar]);
+
+    const handleFailoverModelSession = React.useCallback(async (session: GooseLoopSession) => {
+      setFailingOverSessionId(session.session_id);
+      try {
+        const res = await executeSmartModelFailover(ctx, {
+          agente: session.agente,
+          agent_pubkey: session.agent_pubkey,
+          prefer_free: true,
+          apply: true,
+          retrigger: true,
+          channel_id: session.channel_id,
+          thread_root: session.thread_root,
+        });
+        setGovernanceSummary(res.message);
+        showNotification(res.ok ? "success" : "warning", res.message);
+        setTimeout(() => { loadLoopRadar(); }, 1000);
+      } finally {
+        setFailingOverSessionId(null);
       }
     }, [loadLoopRadar]);
 
@@ -2275,6 +2299,8 @@ export function apply(ctx: Context) {
           onWakeIrisForLoops: handleWakeIrisForLoops,
           onStopLoopSession: handleStopLoopSession,
           stoppingSessionId,
+          onFailoverModelSession: handleFailoverModelSession,
+          failingOverSessionId,
         })
       : activeCentralTab === "resolvidas"
       ? renderResolvedArchiveTab({
@@ -5439,8 +5465,9 @@ Regras Invariantes:
 - Freio Anti-Loop (Máximo 12 'shell's): NUNCA ultrapasse 12 comandos 'shell' sem commit nem repita o mesmo erro 2 vezes seguidas. Ao bater 2 falhas consecutivas no mesmo passo ou 12 'shell's sem avanço, PARE imediatamente e publique 'BLOQUEADO | por: <seu perfil> | motivo: ... | falta: ... | resolve: <perfil>'.
 - Regra Anti-Escopo Aberto (Iris / Despachos ao COO e Executores): PROIBIDO delegar ao Bento (COO) ou a executores com pedido aberto (ex.: 'escolha o próximo item da auditoria', 'veja o que falta'). Todo acionamento DEVE declarar: (a) alvo concreto (slug/bug + 1 a 3 arquivos exatos), (b) critério de pronto / comando de aceite L-22 esperado e (c) o que NÃO refazer.
 - Orçamento de Exploração do COO (Bento): ao receber acionamento para emitir card, limite a leitura exploratória a no máximo 10 comandos 'shell' (<= 5 min). Se o escopo chegar aberto ou ambíguo, NÃO varra o repositório inteiro — responda em 1 turno pedindo à Iris o alvo fechado (ou proponha 1 candidato concreto para aprovação).
+- Limite de Turno para Revisores (Teo, Bento Arquiteto, Vera, QA Sentinel — Máximo 15 'shell's): em uma revisão, rode o comando de aceite L-22, confira o diff/escopo e emita imediatamente 'GATE: aceito' ou 'GATE: recusado' (e encerre). PROIBIDO abrir sessões longas de debug de 'porteiro.py'/'esteira_minima.py' durante uma revisão — se o merge atrasar, reporte em 1 linha e saia.
 - Isolamento Estrito de Worktree (Proibido git checkout na raiz): NUNCA execute 'git checkout --detach' ou troque de branch dentro da raiz '/Users/heltonfraga/.buzz/REPOS/orgfy' (isso corrompe o estado compartilhado para todos os agentes). Para revisar ou comparar BASE_VS_AGORA, crie SEMPRE uma worktree isolada e remova-a ao final.
-- Protocolo de Auto-Cura em Ciclo Fechado (Bento, Iris, Cron e Revisores): ANTES de despachar um card ou cobrar um agente (e SEMPRE que acordada pelo Radar), chame 'orgfy_loop_radar({ apenas_ativos: true })'. NUNCA espere indefinidamente uma sessão queimando tokens em loop (>20m ou >25 shells sem commit, compactação repetida, grep em loop, --help repetido ou PR já fechado). Ao detectar loop/travamento ativo, execute obrigatoriamente os 3 passos: (1) PARAR: chame 'orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: "interrupt", release_issue_id?, reason })'; (2) DIAGNOSTICAR CAUSA-RAIZ: classifique a causa pelos campos 'flags', 'gatilho_resumo' e 'ultimo_shell' (ITEM_JA_FECHADO, ESCOPO_ABERTO, COMPACTACAO_LOOP, COLISAO_WORKTREE, ERRO_REPETIDO, TEMPESTADE_5XX); (3) AGIR (nunca deixar o agente parado no vácuo): se ITEM_JA_FECHADO, confirme merge na main e encerre sem relançar; se demanda ainda aberta (ex.: ESCOPO_ABERTO ou COMPACTACAO_LOOP), relance limpo com ESCOPO FECHADO (1-3 arquivos exatos + comando de aceite L-22 + limite de 10 shells) ou reatribua na 2ª falha, e publique no #OrgFy 'AUTO-CURA | agente | causa-raiz | ação tomada'. Em 'SESSAO_DUPLICADA', encerre a sessão obsoleta com 'orgfy_session_stop' em vez de re-mencionar.
+- Protocolo de Auto-Cura em Ciclo Fechado (Bento, Iris, Cron e Revisores): ANTES de despachar um card ou cobrar um agente (e SEMPRE que acordada pelo Radar), chame 'orgfy_loop_radar({ apenas_ativos: true })'. NUNCA espere indefinidamente uma sessão queimando tokens em loop (>20m ou >25 shells sem commit, compactação repetida, grep em loop, --help repetido ou PR já fechado). Ao detectar loop/travamento ativo, execute obrigatoriamente os 3 passos: (1) PARAR: chame 'orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: "interrupt", release_issue_id?, reason })'; (2) DIAGNOSTICAR CAUSA-RAIZ: classifique a causa pelos campos 'flags', 'gatilho_resumo' e 'ultimo_shell' (ITEM_JA_FECHADO, ESCOPO_ABERTO, COMPACTACAO_LOOP, COLISAO_WORKTREE, ERRO_REPETIDO, TEMPESTADE_5XX); (3) AGIR (nunca deixar o agente parado no vácuo): se erro de API/provider (502/503/No available accounts), chame 'orgfy_model_failover({ agente, agent_pubkey, channel_id, thread_root, prefer_free: true, apply: true, retrigger: true })' para consultar o NexusMind Ping Real, migrar para o melhor modelo free online e re-disparar; se ITEM_JA_FECHADO, confirme merge na main e encerre sem relançar; se demanda ainda aberta (ex.: ESCOPO_ABERTO ou COMPACTACAO_LOOP), relance limpo com ESCOPO FECHADO (1-3 arquivos exatos + comando de aceite L-22 + limite de 10 shells) ou reatribua na 2ª falha, e publique no #OrgFy 'AUTO-CURA | agente | causa-raiz | ação tomada'. Em 'SESSAO_DUPLICADA', encerre a sessão obsoleta com 'orgfy_session_stop' em vez de re-mencionar.
 - Decisor Híbrido v12: orgfy_lint_card usa Decisions API com fallback determinístico offline automático (ferramentas/esteira/decisor_fallback.py) em caso de falta de saldo ou timeout.
 Ferramentas nativas disponíveis neste plugin:
 1. orgfy_status({ empresa? }): Consulta o placar de 20h, FPY, CPI de tokens, contagem de aceites, merged e raias da esteira.
@@ -5456,6 +5483,7 @@ Ferramentas nativas disponíveis neste plugin:
 11. orgfy_historico_buscar({ query?, spec?, limit? }): Busca just-in-time no Arquivo de Issues Resolvidas por código, causa raiz, arquivo ou SHA.
 12. orgfy_loop_radar({ apenas_ativos?, agente? }): Inspeciona o Radar de Loops & Sessões Zumbis do Goose em tempo real (LOOP_SUSPEITO, STALLED_THINKING, SESSAO_DUPLICADA, EXPLORACAO_CLI_HELP) com channel_id, thread_root, agent_pubkey, ultimo_shell e acao_sugerida.
 13. orgfy_session_stop({ agente, agent_pubkey?, channel_id?, thread_root?, action?, release_issue_id?, reason? }): Interrompe (Stop) ou reinicia imediatamente o turno de um agente travado ou em trabalho inútil via API nativa do Buzz Desktop (action: 'interrupt' | 'new' | 'compact'), com liberação opcional de lock.
+14. orgfy_model_failover({ agente?, agent_pubkey?, failed_model?, prefer_free?, apply?, retrigger?, channel_id?, thread_root?, retrigger_text? }): Integração OrgFy ↔ NexusMind Gateway — faz ping real nos modelos free (ou pagos) mais inteligentes disponíveis no NexusMind, elege o melhor online (inteligência + menor latência real em ms), atualiza o modelo do agente via ctx.agents.save() e re-dispara na thread original.
 Consulte sempre orgfy_status, orgfy_kpis, orgfy_loop_radar ou orgfy_kanban_read para inspecionar métricas reais antes de agir.`
       });
       console.log("[ORGFY] ctx.agents.addInstructions registrado com sucesso.");
@@ -5867,7 +5895,43 @@ Consulte sempre orgfy_status, orgfy_kpis, orgfy_loop_radar ou orgfy_kanban_read 
         },
       });
 
-      console.log("[ORGFY] 13 agentTools registradas com sucesso no harness do Buzz (Ondas 1, 2, 3 + Arquivo + Radar de Loops + Session Stop).");
+      // ── AUTO-FAILOVER DE MODELO VIA NEXUSMIND PING REAL (INTEGRAÇÃO ORGFY ↔ NEXUSMIND) ──
+      (ctx.agents as any).addTool({
+        name: "orgfy_model_failover",
+        description: "Integração OrgFy ↔ NexusMind Gateway: consulta os modelos disponíveis no NexusMind, faz ping real nos candidatos FREE (ou pagos) mais inteligentes, elege o melhor online (maior inteligência + menor latência ms), opcionalmente atualiza o agente via ctx.agents.save() e re-dispara na thread original.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            agente: { type: "string", description: "Nome, key ou pubkey do agente afetado (ex: 'OrgFy Cron')" },
+            agent_pubkey: { type: "string", description: "Pubkey 64-hex do agente (opcional)" },
+            failed_model: { type: "string", description: "ID do modelo em falha para excluir do ranking (ex: 'kilocode-fast-free')" },
+            prefer_free: { type: "boolean", description: "Se true (padrão), prioriza modelos FREE disponíveis no NexusMind" },
+            apply: { type: "boolean", description: "Se true, salva o novo modelo no agente via ctx.agents.save(); se false, apenas simula e retorna o ranking" },
+            retrigger: { type: "boolean", description: "Se true (padrão quando apply=true), re-dispara o agente via ctx.agents.wake() na thread original" },
+            channel_id: { type: "string", description: "UUID do canal para re-disparo (default: #OrgFy)" },
+            thread_root: { type: "string", description: "Event ID 64-hex da thread original para re-disparo" },
+            retrigger_text: { type: "string", description: "Texto opcional de retomada após a troca de modelo" },
+            max_probes: { type: "number", description: "Número máximo de candidatos testados com ping real (1..10, default: 6)" },
+          },
+        },
+        call: async (_client: any, _context: any, args: any) => {
+          const res = await executeSmartModelFailover(ctx, {
+            agente: args?.agente,
+            agent_pubkey: args?.agent_pubkey,
+            failed_model: args?.failed_model,
+            prefer_free: args?.prefer_free,
+            apply: args?.apply,
+            retrigger: args?.retrigger,
+            channel_id: args?.channel_id,
+            thread_root: args?.thread_root,
+            retrigger_text: args?.retrigger_text,
+            max_probes: args?.max_probes,
+          });
+          return JSON.stringify(res, null, 2);
+        },
+      });
+
+      console.log("[ORGFY] 14 agentTools registradas com sucesso no harness do Buzz (Ondas 1, 2, 3 + Arquivo + Radar de Loops + Session Stop + Model Failover NexusMind).");
     } catch (err) {
       console.warn("[ORGFY] Falha ao registrar agentTools:", err);
     }

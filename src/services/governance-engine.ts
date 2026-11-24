@@ -232,6 +232,13 @@ export async function acquireCheckoutLock(
       message: "issueId e agentKey são obrigatórios para checkout atômico.",
     };
   }
+  if (/^([0-9a-f]{4,16})\1+$/i.test(cleanIssue)) {
+    return {
+      ok: false,
+      code: "LOCK_CONFLICT",
+      message: `INVALID_SYNTHETIC_ID: issueId '${cleanIssue}' parece um prefixo repetido artificialmente. Informe o ID Nostr real (64 hex) ou apenas o prefixo de 8 chars para resolução automática.`,
+    };
+  }
 
   await syncLocksFromDisk(ctx);
   purgeExpiredLocks(nowMs);
@@ -486,7 +493,7 @@ export async function evaluateGovernanceAndReact(
             severidade: "critical",
             mensagem: `${activeCrit.length} sessão(ões) ativa(s) em loop no Goose: ${top}.`,
             acao_sugerida:
-              "Executar Ciclo Fechado de Auto-Cura: (1) chamar orgfy_loop_radar({ apenas_ativos: true }) e INTERROMPER imediatamente via orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', release_issue_id?, reason }); (2) diagnosticar a causa-raiz (ITEM_JA_FECHADO, ESCOPO_ABERTO, COMPACTACAO_LOOP, COLISAO_WORKTREE, ERRO_REPETIDO); (3) agir sem deixar o agente parado no vácuo — se já estiver na main, encerrar sem relançar; se ainda for demanda aberta (ex.: escopo aberto), relançar limpo com ESCOPO FECHADO (1-3 arquivos exatos + comando de aceite L-22 + limite de 10 shells) e registrar 'AUTO-CURA | agente | causa-raiz | ação' no #OrgFy.",
+              "Executar Ciclo Fechado de Auto-Cura: (1) chamar orgfy_loop_radar({ apenas_ativos: true }) e INTERROMPER imediatamente via orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', release_issue_id?, reason }); (2) diagnosticar a causa-raiz (ITEM_JA_FECHADO, ESCOPO_ABERTO, COMPACTACAO_LOOP, COLISAO_WORKTREE, ERRO_REPETIDO, TEMPESTADE_5XX); (3) se a causa for erro de API/provider (502/503/No available accounts), chamar orgfy_model_failover({ agente, agent_pubkey, channel_id, thread_root, prefer_free: true, apply: true, retrigger: true }) para migrar ao melhor modelo free online no NexusMind e re-disparar; se for escopo aberto, relançar com ESCOPO FECHADO (1-3 arquivos + aceite L-22 + limite 10 shells); se já estiver na main, encerrar sem relançar. Registrar 'AUTO-CURA | agente | causa-raiz | ação' no #OrgFy.",
           });
         }
         if (activeDup.length >= 2) {
