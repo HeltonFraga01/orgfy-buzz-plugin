@@ -78,11 +78,24 @@ import {
   type HydratedIssueDetail,
 } from "./services/issue-detail-hydrator";
 
+import {
+  createCanonicalCard,
+} from "./services/card-creator";
+import {
+  triageCardWithDecisions,
+  triageDiffWithDecisions,
+  buildBuzzAttentionContract,
+} from "./services/decision-router";
+
 export {
   checkMentionTargetIdentity,
   checkThreadWakeAntiLoop,
   resetThreadWakeGuardForTests,
   hydrateIssueDetail,
+  createCanonicalCard,
+  triageCardWithDecisions,
+  triageDiffWithDecisions,
+  buildBuzzAttentionContract,
 };
 import {
   executeSmartModelFailover,
@@ -5586,8 +5599,10 @@ Ferramentas nativas disponíveis neste plugin:
 11. orgfy_historico_buscar({ query?, spec?, limit? }): Busca just-in-time no Arquivo de Issues Resolvidas por código, causa raiz, arquivo ou SHA.
 12. orgfy_loop_radar({ apenas_ativos?, agente? }): Inspeciona o Radar de Loops & Sessões Zumbis do Goose em tempo real (LOOP_SUSPEITO, STALLED_THINKING, SESSAO_DUPLICADA, EXPLORACAO_CLI_HELP) com channel_id, thread_root, agent_pubkey, ultimo_shell e acao_sugerida.
 13. orgfy_session_stop({ agente, agent_pubkey?, channel_id?, thread_root?, action?, release_issue_id?, reason? }): Interrompe (Stop) ou reinicia imediatamente o turno de um agente travado ou em trabalho inútil via API nativa do Buzz Desktop (action: 'interrupt' | 'new' | 'compact'), com liberação opcional de lock.
-14. orgfy_model_failover({ agente?, agent_pubkey?, failed_model?, prefer_free?, apply?, retrigger?, channel_id?, thread_root?, retrigger_text? }): Integração OrgFy ↔ NexusMind Gateway — faz ping real nos modelos free (ou pagos) mais inteligentes disponíveis no NexusMind, elege o melhor online (inteligência + menor latência real em ms), atualiza o modelo do agente via ctx.agents.save() e re-dispara na thread original.
-Consulte sempre orgfy_status, orgfy_kpis, orgfy_loop_radar ou orgfy_kanban_read para inspecionar métricas reais antes de agir.`
+14. orgfy_model_failover({ agente?, agent_pubkey?, failed_model?, prefer_free?, apply?, retrigger?, channel_id?, thread_root?, retrigger_text? }): Integração OrgFy ↔ NexusMind Gateway — faz ping real nos modelos mais inteligentes disponíveis no NexusMind, elege o melhor online (inteligência + menor latência real em ms), atualiza o modelo do agente via ctx.agents.save() e re-dispara na thread original.
+15. orgfy_card_create({ slug, titulo, autoridade, decisao, executor, revisor, escrita_exclusiva, feito_quando, acceptance_command, ... }): Abertura schema-first de card OrgFy com triagem em cascata via Decisions API (risco, tier modelo, política Attention), hash L-22 SHA-256 congelado, contrato nativo Buzz Attention/Watch (interest_set + watch_add) e validação opcional via card-lint.sh.
+16. orgfy_decision_triage({ mode: 'card' | 'diff', ... }): Classificação rápida em batch via Buzz Decisions API (yes_no + score + choice) com fallback determinístico offline para triagem de card ou pre-flight de diff/entrega (Escrita exclusiva + L-24).
+Consulte sempre orgfy_status, orgfy_kpis, orgfy_loop_radar ou orgfy_kanban_read para inspecionar métricas reais antes de agir. Ao abrir novos cards, prefira sempre orgfy_card_create em vez de redigir Markdown livre.`
       });
       console.log("[ORGFY] ctx.agents.addInstructions registrado com sucesso.");
     } catch (err) {
@@ -5700,12 +5715,20 @@ Consulte sempre orgfy_status, orgfy_kpis, orgfy_loop_radar ou orgfy_kanban_read 
           if (res.code !== 0) {
             await releaseCheckoutLock(ctx, args.issue_id, args.executor, true);
           }
+          const attentionContract = buildBuzzAttentionContract({
+            slug: String(args.issue_id || "card").slice(0, 24),
+            titulo: `Issue ${args.issue_id}`,
+            executor: args.executor,
+            revisor: args.revisor,
+            policy: "event_driven",
+          });
           return JSON.stringify({
             status: res.code === 0 ? "ok" : "error",
             exitCode: res.code,
             budgetGate,
             lock: res.code === 0 ? lockRes.lock : null,
             lockReleasedOnFailure: res.code !== 0,
+            attentionContract: res.code === 0 ? attentionContract : null,
             output: res.output,
           }, null, 2);
         },
@@ -6046,7 +6069,97 @@ Consulte sempre orgfy_status, orgfy_kpis, orgfy_loop_radar ou orgfy_kanban_read 
         },
       });
 
-      console.log("[ORGFY] 14 agentTools registradas com sucesso no harness do Buzz (Ondas 1, 2, 3 + Arquivo + Radar de Loops + Session Stop + Model Failover NexusMind).");
+      // ── ONDA 4: ABERTURA SCHEMA-FIRST DE CARDS + BUZZ ATTENTION + L-22 SHA-256 ──
+      (ctx.agents as any).addTool({
+        name: "orgfy_card_create",
+        description: "Abertura schema-first de card OrgFy: valida L-01 (executor !== revisor), executa triagem em cascata via Decisions API (risco, tier modelo, política Attention), congela SHA-256 (L-22), gera contrato nativo Buzz Attention/Watch (interest_set + watch_add) e opcionalmente grava em cards/<SLUG>.md + roda card-lint.sh.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            slug: { type: "string", description: "Slug único do card (ex: spec-0010-t001)" },
+            id_tarefa: { type: "string", description: "ID formal da tarefa (ex: SPEC-0010 T001)" },
+            titulo: { type: "string", description: "Título objetivo em verbo imperativo" },
+            objetivo: { type: "string", description: "Objetivo detalhado do card" },
+            contexto: { type: "string", description: "Contexto operacional" },
+            autoridade: { type: "string", description: "Spec de origem ou diretiva DECIDIDO" },
+            decisao: { type: "string", description: "Decisão executiva/técnica registrada" },
+            tipo: { type: "string", enum: ["execucao", "revisao", "infraestrutura", "seguranca", "spec", "pesquisa"] },
+            executor: { type: "string", description: "Perfil executor (L-01: diferente do revisor)" },
+            revisor: { type: "string", description: "Perfil revisor independente (L-01)" },
+            decisor: { type: "string", description: "Decisor executivo (default: OrgFy Iris)" },
+            escrita_exclusiva: { type: "array", items: { type: "string" }, description: "Arquivos/paths autorizados para escrita" },
+            leitura: { type: "array", items: { type: "string" }, description: "Arquivos/paths autorizados para leitura" },
+            passos: { type: "array", items: { type: "string" }, description: "Passos ordenados de execução" },
+            fora_escopo: { type: "array", items: { type: "string" }, description: "Itens fora de escopo" },
+            feito_quando: { type: "string", description: "Critério objetivo de conclusão" },
+            prova_positiva: { type: "string", description: "Comando e saída esperada positiva" },
+            prova_negativa: { type: "string", description: "Comando e saída esperada negativa" },
+            acceptance_command: { type: "string", description: "Comando executável de aceite L-22" },
+            attention_policy: { type: "string", enum: ["timer_curto", "event_driven", "watchdog_longo"] },
+            channel_id: { type: "string", description: "UUID do canal Buzz para o Watch" },
+            thread_root: { type: "string", description: "Event ID 64-hex da thread para Watch de evento" },
+            write_file: { type: "boolean", description: "Se true, grava em cards/<SLUG>.md" },
+            run_lint: { type: "boolean", description: "Se true e write_file=true, valida com ./ferramentas/card-lint.sh" },
+            empresa: { type: "string", description: "Slug da empresa (default: orgfy)" },
+          },
+          required: ["slug", "titulo", "autoridade", "decisao", "executor", "revisor", "escrita_exclusiva", "feito_quando", "acceptance_command"],
+        },
+        call: async (_client: any, _context: any, args: any) => {
+          const res = await createCanonicalCard(ctx, args || {});
+          return JSON.stringify(res, null, 2);
+        },
+      });
+
+      // ── ONDA 4: TRIAGEM EM CASCATA VIA BUZZ DECISIONS API (BATCH YES_NO + SCORE + CHOICE) ──
+      (ctx.agents as any).addTool({
+        name: "orgfy_decision_triage",
+        description: "Classificador rápido em batch via ctx.decisions.decide (yes_no + score + choice) com fallback determinístico offline. Modo 'card' avalia escopo atômico, risco 1-5, tier de modelo e política Attention; modo 'diff' audita vazamento de Escrita exclusiva, alegação sem prova L-24 e ação de Gate.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            mode: { type: "string", enum: ["card", "diff"], description: "Modo de triagem: 'card' ou 'diff'" },
+            slug: { type: "string" },
+            issue_id: { type: "string" },
+            titulo: { type: "string" },
+            objetivo: { type: "string" },
+            tipo: { type: "string" },
+            escrita_exclusiva: { type: "array", items: { type: "string" } },
+            arquivos_alterados: { type: "array", items: { type: "string" } },
+            acceptance_command: { type: "string" },
+            passos: { type: "array", items: { type: "string" } },
+            resumo_entrega: { type: "string" },
+            saida_aceite: { type: "string" },
+            recusas_anteriores: { type: "number" },
+          },
+          required: ["mode"],
+        },
+        call: async (_client: any, _context: any, args: any) => {
+          const mode = String(args?.mode || "card");
+          const res =
+            mode === "diff"
+              ? await triageDiffWithDecisions(ctx, {
+                  issue_id: args?.issue_id,
+                  titulo: args?.titulo,
+                  escrita_exclusiva: Array.isArray(args?.escrita_exclusiva) ? args.escrita_exclusiva : [],
+                  arquivos_alterados: Array.isArray(args?.arquivos_alterados) ? args.arquivos_alterados : [],
+                  resumo_entrega: args?.resumo_entrega,
+                  saida_aceite: args?.saida_aceite,
+                  recusas_anteriores: args?.recusas_anteriores,
+                })
+              : await triageCardWithDecisions(ctx, {
+                  slug: args?.slug,
+                  titulo: String(args?.titulo || ""),
+                  objetivo: args?.objetivo,
+                  tipo: args?.tipo,
+                  escrita_exclusiva: Array.isArray(args?.escrita_exclusiva) ? args.escrita_exclusiva : [],
+                  acceptance_command: args?.acceptance_command,
+                  passos: Array.isArray(args?.passos) ? args.passos : [],
+                });
+          return JSON.stringify(res, null, 2);
+        },
+      });
+
+      console.log("[ORGFY] 16 agentTools registradas com sucesso no harness do Buzz (Ondas 1-4: Card Schema-First, Decisions Router, Buzz Attention, Radar de Loops, Session Stop, Model Failover).");
     } catch (err) {
       console.warn("[ORGFY] Falha ao registrar agentTools:", err);
     }

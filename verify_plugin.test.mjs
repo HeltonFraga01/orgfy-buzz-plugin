@@ -108,7 +108,7 @@ function makeHarness(failReads = false) {
 
 // 1. Testes Originais (Kanban & Status Positivo/Negativo + MCP)
 const h1 = makeHarness(false);
-assert.equal(h1.tools.size, 14, "devem existir exatamente 14 agentTools registradas");
+assert.equal(h1.tools.size, 16, "devem existir exatamente 16 agentTools registradas");
 assert.ok(h1.panels.has("orgfy-channel-pulse"), "sidebar panel orgfy-channel-pulse deve ser registrado");
 assert.ok(h1.hooks.length >= 1, "hooks de governança devem ser registrados");
 
@@ -658,5 +658,71 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     executorModel: `${hydrated.executorProvider}/${hydrated.executorModel}`,
     acceptanceFrozenValid: hydrated.acceptanceFrozenValid,
     probes: hydrated.probes.map((p) => `${p.label}:${p.status}`),
+  }));
+}
+
+// 13. Onda 4: Schema-First Card Creator + Buzz Attention + Decision Router
+{
+  const badCard = await orgfyMod.createCanonicalCard({}, {
+    slug: "bad-l01",
+    titulo: "Teste L-01",
+    autoridade: "DECIDIDO Iris",
+    decisao: "Teste",
+    executor: "OrgFy Val",
+    revisor: "OrgFy Val",
+    escrita_exclusiva: ["src/a.ts"],
+    feito_quando: "exit 0",
+    acceptance_command: "pytest",
+  });
+  assert.equal(badCard.ok, false);
+  assert.equal(badCard.code, "L01_SEGREGATION_VIOLATION");
+
+  const mockDecCtx = {
+    decisions: {
+      decide: async () => ({
+        outcome: "answered",
+        backend: "nexusmind-fast",
+        model: "gemini-3.8-flash-medium",
+        answers: {
+          escopo_atomico: { type: "yes_no", probability: 0.93 },
+          risco_tier: { type: "score", score: 3, confidence: 0.9, probabilities: {} },
+          modelo_tier: { type: "choice", choice: "tier3_frontier", confidence: 0.89, probabilities: {} },
+          politica_attention: { type: "choice", choice: "event_driven", confidence: 0.92, probabilities: {} },
+        },
+      }),
+    },
+  };
+  const goodCard = await orgfyMod.createCanonicalCard(mockDecCtx, {
+    slug: "wave4-attention",
+    titulo: "Integrar Attention nativo no despacho",
+    autoridade: "DECIDIDO Iris",
+    decisao: "Substituir goal por Attention",
+    executor: "OrgFy Val",
+    revisor: "OrgFy Teo",
+    escrita_exclusiva: ["src/services/decision-router.ts"],
+    feito_quando: "node --test passa",
+    acceptance_command: "node --test verify_plugin.test.mjs",
+  });
+  assert.equal(goodCard.ok, true);
+  assert.equal(goodCard.acceptanceHashSha256.length, 64);
+  assert.equal(goodCard.triage.decisionSource, "decisions_api");
+  assert.equal(goodCard.triage.modeloTier, "tier3_frontier");
+  assert.ok(goodCard.attentionContract.event_watch_payload, "event_driven deve gerar event_watch_payload com classifier");
+  assert.ok(goodCard.markdown.includes("Modo:** attention (event_driven)"));
+
+  const diffCheck = await orgfyMod.triageDiffWithDecisions({}, {
+    escrita_exclusiva: ["src/services/decision-router.ts"],
+    arquivos_alterados: ["src/services/decision-router.ts", "src/fora.ts"],
+    resumo_entrega: "100% pronto",
+    saida_aceite: "",
+  });
+  assert.equal(diffCheck.escopoRespeitado, false);
+  assert.equal(diffCheck.alegacaoSemProvaL24, true);
+  assert.equal(diffCheck.acaoRecomendada, "pedir_ajuste_executor");
+  console.log("[ONDA 4 SCHEMA-FIRST + ATTENTION + DECISIONS OK]", JSON.stringify({
+    slug: goodCard.slug,
+    tier: goodCard.triage.modeloTier,
+    policy: goodCard.attentionContract.policy,
+    diffOutOfScope: diffCheck.arquivosForaEscopo,
   }));
 }

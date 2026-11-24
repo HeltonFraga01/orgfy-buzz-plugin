@@ -17,6 +17,14 @@ import {
 import {
   stopAgentSession,
 } from "./governance-engine";
+import {
+  createCanonicalCard,
+} from "./card-creator";
+import {
+  triageCardWithDecisions,
+  triageDiffWithDecisions,
+  buildBuzzAttentionContract,
+} from "./decision-router";
 
 export interface McpServerStatus {
   active: boolean;
@@ -173,6 +181,59 @@ export async function startOrgfyMcpServer(
           max_shells: { type: "number", description: "Teto de shells (default: 10)" },
         },
         required: ["agente"],
+      },
+    },
+    {
+      name: "orgfy_card_create",
+      description: "Abertura schema-first de card OrgFy com triagem em cascata via Decisions API (risco, tier modelo, política Attention), congelamento L-22 SHA-256, contrato nativo Buzz Attention/Watch (interest_set + watch_add) e card-lint.sh opcional.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          slug: { type: "string", description: "Slug único do card (ex: spec-0010-t001)" },
+          id_tarefa: { type: "string", description: "ID formal da tarefa (ex: SPEC-0010 T001)" },
+          titulo: { type: "string", description: "Título objetivo em verbo imperativo" },
+          objetivo: { type: "string", description: "Descrição detalhada do objetivo" },
+          contexto: { type: "string", description: "Contexto operacional do card" },
+          autoridade: { type: "string", description: "Spec de origem ou diretiva DECIDIDO" },
+          decisao: { type: "string", description: "Decisão executiva/técnica registrada" },
+          tipo: { type: "string", enum: ["execucao", "revisao", "infraestrutura", "seguranca", "spec", "pesquisa"] },
+          executor: { type: "string", description: "Perfil executor (L-01: diferente do revisor)" },
+          revisor: { type: "string", description: "Perfil revisor independente (L-01)" },
+          decisor: { type: "string", description: "Decisor executivo (default: OrgFy Iris)" },
+          escrita_exclusiva: { type: "array", items: { type: "string" }, description: "Lista exata de arquivos/paths autorizados para escrita" },
+          leitura: { type: "array", items: { type: "string" }, description: "Arquivos/paths autorizados para leitura" },
+          passos: { type: "array", items: { type: "string" }, description: "Passos ordenados de execução" },
+          fora_escopo: { type: "array", items: { type: "string" }, description: "Itens explicitamente fora de escopo" },
+          feito_quando: { type: "string", description: "Critério objetivo de conclusão" },
+          prova_positiva: { type: "string", description: "Comando e saída esperada positiva" },
+          prova_negativa: { type: "string", description: "Comando e saída esperada negativa" },
+          acceptance_command: { type: "string", description: "Comando executável de aceite L-22" },
+          attention_policy: { type: "string", enum: ["timer_curto", "event_driven", "watchdog_longo"] },
+          write_file: { type: "boolean", description: "Se true, grava em cards/<SLUG>.md" },
+          run_lint: { type: "boolean", description: "Se true e write_file=true, valida com ./ferramentas/card-lint.sh" },
+          empresa: { type: "string", description: "Slug da empresa (default: orgfy)" },
+        },
+        required: ["slug", "titulo", "autoridade", "decisao", "executor", "revisor", "escrita_exclusiva", "feito_quando", "acceptance_command"],
+      },
+    },
+    {
+      name: "orgfy_decision_triage",
+      description: "Executa classificação rápida em batch via Buzz Decisions API (yes_no + score + choice) com fallback determinístico offline para triagem de card (mode='card') ou pre-flight de diff/entrega (mode='diff').",
+      inputSchema: {
+        type: "object",
+        properties: {
+          mode: { type: "string", enum: ["card", "diff"], description: "Modo de triagem: 'card' ou 'diff'" },
+          titulo: { type: "string" },
+          objetivo: { type: "string" },
+          tipo: { type: "string" },
+          escrita_exclusiva: { type: "array", items: { type: "string" } },
+          arquivos_alterados: { type: "array", items: { type: "string" } },
+          acceptance_command: { type: "string" },
+          resumo_entrega: { type: "string" },
+          saida_aceite: { type: "string" },
+          recusas_anteriores: { type: "number" },
+        },
+        required: ["mode"],
       },
     },
   ];
@@ -414,6 +475,50 @@ export async function startOrgfyMcpServer(
             acceptance_command: args?.acceptance_command,
             max_shells: typeof args?.max_shells === "number" ? args.max_shells : undefined,
           });
+          return {
+            jsonrpc: "2.0",
+            id,
+            result: {
+              content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
+              isError: !res.ok,
+            },
+          };
+        }
+
+        if (name === "orgfy_card_create") {
+          const res = await createCanonicalCard(ctx, args || {});
+          return {
+            jsonrpc: "2.0",
+            id,
+            result: {
+              content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
+              isError: !res.ok,
+            },
+          };
+        }
+
+        if (name === "orgfy_decision_triage") {
+          const mode = String(args?.mode || "card");
+          const res =
+            mode === "diff"
+              ? await triageDiffWithDecisions(ctx, {
+                  issue_id: args?.issue_id,
+                  titulo: args?.titulo,
+                  escrita_exclusiva: Array.isArray(args?.escrita_exclusiva) ? args.escrita_exclusiva : [],
+                  arquivos_alterados: Array.isArray(args?.arquivos_alterados) ? args.arquivos_alterados : [],
+                  resumo_entrega: args?.resumo_entrega,
+                  saida_aceite: args?.saida_aceite,
+                  recusas_anteriores: args?.recusas_anteriores,
+                })
+              : await triageCardWithDecisions(ctx, {
+                  slug: args?.slug,
+                  titulo: String(args?.titulo || ""),
+                  objetivo: args?.objetivo,
+                  tipo: args?.tipo,
+                  escrita_exclusiva: Array.isArray(args?.escrita_exclusiva) ? args.escrita_exclusiva : [],
+                  acceptance_command: args?.acceptance_command,
+                  passos: Array.isArray(args?.passos) ? args.passos : [],
+                });
           return {
             jsonrpc: "2.0",
             id,

@@ -1629,7 +1629,7 @@ function canTriggerWithCooldown(key, nowMs, commit = true, cooldownMs = DEFAULT_
   }
   return true;
 }
-const DEFAULT_ORGFY_CHANNEL$1 = "e445491d-2fb3-4ebd-8e2e-f6813c33fb03";
+const DEFAULT_ORGFY_CHANNEL$2 = "e445491d-2fb3-4ebd-8e2e-f6813c33fb03";
 const EMPRESAS_DIR = "/Users/heltonfraga/.buzz/REPOS/orgfy/empresas";
 const KNOWN_COMPANY_SLUGS = ["orgfy", "lumen-iptv", "saas-tributario"];
 const radarEscalationCounts = /* @__PURE__ */ new Map();
@@ -1779,7 +1779,7 @@ async function evaluateGovernanceAndReact(ctx, options = {}) {
         radarLoopingAgents = Array.from(
           new Set([...activeCrit, ...activeDup].map((s) => String(s.agente || "").trim()).filter(Boolean))
         );
-        radarIncidentKey = `${radarChannelId || DEFAULT_ORGFY_CHANNEL$1}:${activeCrit.map((s) => s.session_id).sort().join(",")}`;
+        radarIncidentKey = `${radarChannelId || DEFAULT_ORGFY_CHANNEL$2}:${activeCrit.map((s) => s.session_id).sort().join(",")}`;
         if (activeCrit.length > 0) {
           const top = activeCrit.slice(0, 4).map((s) => `${s.agente} (${s.session_id}, ${s.shells} shells, ${s.duracao_min}m, flags=${(s.flags || []).join("+")})`).join("; ");
           alerts.push({
@@ -1823,7 +1823,7 @@ async function evaluateGovernanceAndReact(ctx, options = {}) {
       notificationsSent.push(al.codigo);
     }
     if (options.autoWake && !options.dryRun && (al.codigo === "REVIEW_QUEUE_BOTTLENECK" || al.codigo === "STAGNATION_LEVEL_3" || isRadarAlert)) {
-      const wakeChannel = isRadarAlert && radarChannelId || options.channel || DEFAULT_ORGFY_CHANNEL$1;
+      const wakeChannel = isRadarAlert && radarChannelId || options.channel || DEFAULT_ORGFY_CHANNEL$2;
       const attempt = isRadarAlert && radarIncidentKey ? (radarEscalationCounts.get(radarIncidentKey) || 0) + 1 : 1;
       const escalation = isRadarAlert ? await resolveEscalationTargetForChannel(ctx, wakeChannel, radarLoopingAgents, attempt) : null;
       const wakeKey = options.reviewerAgentKey || (escalation == null ? void 0 : escalation.targetAgent) || "OrgFy Bento";
@@ -2101,7 +2101,7 @@ async function bindConversationContextForCard(ctx, input) {
 async function stopAgentSession(ctx, input) {
   const agentsApi = ctx.agents;
   const action = input.action === "new" || input.action === "compact" ? input.action : "interrupt";
-  const channelId = String(input.channel_id || DEFAULT_ORGFY_CHANNEL$1).trim() || DEFAULT_ORGFY_CHANNEL$1;
+  const channelId = String(input.channel_id || DEFAULT_ORGFY_CHANNEL$2).trim() || DEFAULT_ORGFY_CHANNEL$2;
   const root = input.thread_root ? String(input.thread_root).trim() : void 0;
   const place = root ? { channelId, root } : { channelId };
   if (!(agentsApi == null ? void 0 : agentsApi.snapshot) || !(agentsApi == null ? void 0 : agentsApi.session) && !(agentsApi == null ? void 0 : agentsApi.interrupt)) {
@@ -2547,6 +2547,676 @@ function registerGovernanceAgentHooks(ctx) {
   const watchdogStarted = startGovernanceRadarWatchdog(ctx);
   return registered || watchdogStarted;
 }
+const DEFAULT_ORGFY_CHANNEL$1 = "e445491d-2fb3-4ebd-8e2e-f6813c33fb03";
+const RISCO_LABELS = [
+  "muito_baixo",
+  "baixo",
+  "medio",
+  "alto",
+  "critico"
+];
+const TIER_MODEL_HINTS = {
+  tier1_fast: "gemini-3.8-flash-medium (NexusMind Anti-Gravity — rápido e enxuto)",
+  tier2_balanced: "claude-sonnet-4-6 (NexusMind Anthropic — balanceado para código/revisão)",
+  tier3_frontier: "claude-opus-4-6-thinking / grok-4.5 (NexusMind Frontier — arquitetura/risco alto)"
+};
+function sanitizeSlug$1(raw) {
+  return String(raw || "card").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "card";
+}
+function deterministicCardTriage(input) {
+  var _a;
+  const texto = `${input.titulo || ""} ${input.objetivo || ""} ${input.tipo || ""} ${input.risco_declarado || ""}`.toLowerCase();
+  const arquivos = Array.isArray(input.escrita_exclusiva) ? input.escrita_exclusiva.filter(Boolean) : [];
+  const passos = Array.isArray(input.passos) ? input.passos.filter(Boolean) : [];
+  const alertas = [];
+  const escopoAmplo = arquivos.length > 6 || passos.length > 8 || /\b(refatorar tudo|reescrever sistema|todo o repositorio|geral)\b/.test(texto);
+  const escopoAtomico = !escopoAmplo && Boolean((input.titulo || "").trim());
+  if (escopoAmplo) {
+    alertas.push("Escopo amplo detectado (>6 arquivos ou >8 passos); considere fatiar o card.");
+  }
+  if (!((_a = input.acceptance_command) == null ? void 0 : _a.trim())) {
+    alertas.push("Comando de aceite L-22 ausente — obrigatório antes do despacho.");
+  }
+  let riscoScore = 2;
+  if (/\b(seguranca|auth|rls|migration|banco|producao|billing|pagamento|chave|secret|deploy|infra)\b/.test(texto)) {
+    riscoScore = 5;
+  } else if (/\b(arquitetura|protocolo|gate|porteiro|concorrencia|lock|failover|mcp|plugin)\b/.test(texto)) {
+    riscoScore = 4;
+  } else if (arquivos.length >= 4 || passos.length >= 5) {
+    riscoScore = 3;
+  } else if (/\b(doc|readme|typo|comentario|fixture|teste unitario|badge|css)\b/.test(texto)) {
+    riscoScore = 1;
+  }
+  const modeloTier = riscoScore >= 4 ? "tier3_frontier" : riscoScore === 3 ? "tier2_balanced" : "tier1_fast";
+  const attentionPolicy = /\b(monitor|watch|revisao|gate|pr|aguardar|ci|deploy)\b/.test(texto) ? "event_driven" : riscoScore >= 4 ? "watchdog_longo" : "timer_curto";
+  return {
+    ok: true,
+    escopoAtomico,
+    escopoAtomicoProb: escopoAtomico ? 0.88 : 0.25,
+    riscoScore,
+    riscoNivel: RISCO_LABELS[Math.max(0, Math.min(4, riscoScore - 1))],
+    modeloTier,
+    modeloRecomendadoHint: TIER_MODEL_HINTS[modeloTier],
+    attentionPolicy,
+    alertas
+  };
+}
+async function triageCardWithDecisions(ctx, input) {
+  const baseline = deterministicCardTriage(input);
+  const decisionsApi = ctx == null ? void 0 : ctx.decisions;
+  if (!(decisionsApi == null ? void 0 : decisionsApi.decide)) {
+    return {
+      ...baseline,
+      decisionSource: "deterministic_fallback",
+      backend: null,
+      model: null,
+      fallbackReason: "decisions_api_not_available"
+    };
+  }
+  const statePayload = [
+    `Título: ${input.titulo || "(vazio)"}`,
+    `Objetivo: ${input.objetivo || "(não informado)"}`,
+    `Tipo: ${input.tipo || "execucao"}`,
+    `Escrita exclusiva (${(input.escrita_exclusiva || []).length}): ${(input.escrita_exclusiva || []).join(", ") || "(não informada)"}`,
+    `Passos (${(input.passos || []).length}): ${(input.passos || []).join(" | ") || "(não informados)"}`,
+    `Comando de aceite L-22: ${input.acceptance_command || "(ausente)"}`,
+    `Risco declarado: ${input.risco_declarado || "(não informado)"}`
+  ].join("\n");
+  try {
+    const res = await decisionsApi.decide({
+      state: statePayload,
+      timeoutMs: 8e3,
+      questions: {
+        escopo_atomico: {
+          type: "yes_no",
+          instructions: "O card tem escopo fechado, atômico (1 a 6 arquivos) e critério de aceite verificável para execução em um único ciclo de engenharia?"
+        },
+        risco_tier: {
+          type: "score",
+          instructions: "Classifique o risco técnico e arquitetural desta tarefa (segurança, banco/migrations, concorrência, núcleo da esteira ou infra crítica).",
+          levels: ["muito_baixo", "baixo", "medio", "alto", "critico"]
+        },
+        modelo_tier: {
+          type: "choice",
+          instructions: "Qual tier de modelo LLM oferece melhor custo-benefício (RouteLLM) para executar este card com alta taxa de acerto na primeira passagem?",
+          options: {
+            tier1_fast: "Tarefa simples, cirúrgica, fixture, ajuste pontual ou documentação.",
+            tier2_balanced: "Implementação padrão de feature, serviço, testes ou revisão de código.",
+            tier3_frontier: "Arquitetura complexa, segurança, concorrência, multi-serviço ou bug crítico."
+          }
+        },
+        politica_attention: {
+          type: "choice",
+          instructions: "Qual política de Buzz Attention/Watch é mais adequada para acompanhar a execução deste card sem desperdício de turnos?",
+          options: {
+            timer_curto: "Execução rápida local (revisitar a cada 10 min, máx 3 ocorrências, janela 1h).",
+            event_driven: "Depende de revisão, PR, CI ou resposta em thread (watch de evento com classifier).",
+            watchdog_longo: "Tarefa complexa ou multi-etapa (revisitar a cada 20 min, máx 5 ocorrências, janela 3h)."
+          }
+        }
+      }
+    });
+    if ((res == null ? void 0 : res.outcome) === "answered" && res.answers) {
+      const ansAtomico = res.answers.escopo_atomico;
+      const ansRisco = res.answers.risco_tier;
+      const ansModelo = res.answers.modelo_tier;
+      const ansAttention = res.answers.politica_attention;
+      const escopoAtomicoProb = (ansAtomico == null ? void 0 : ansAtomico.type) === "yes_no" ? Number(ansAtomico.probability) : baseline.escopoAtomicoProb;
+      const escopoAtomico = escopoAtomicoProb >= 0.5;
+      const rawScore = (ansRisco == null ? void 0 : ansRisco.type) === "score" ? Math.round(Number(ansRisco.score)) + 1 : baseline.riscoScore;
+      const riscoScore = Math.max(1, Math.min(5, rawScore));
+      const modeloTier = (ansModelo == null ? void 0 : ansModelo.type) === "choice" && (ansModelo.choice === "tier1_fast" || ansModelo.choice === "tier2_balanced" || ansModelo.choice === "tier3_frontier") ? ansModelo.choice : baseline.modeloTier;
+      const attentionPolicy = (ansAttention == null ? void 0 : ansAttention.type) === "choice" && (ansAttention.choice === "timer_curto" || ansAttention.choice === "event_driven" || ansAttention.choice === "watchdog_longo") ? ansAttention.choice : baseline.attentionPolicy;
+      const alertas = [...baseline.alertas];
+      if (!escopoAtomico) {
+        alertas.push(
+          `Decisions API (${res.model}): escopo avaliado como pouco atômico (p=${escopoAtomicoProb.toFixed(2)}).`
+        );
+      }
+      return {
+        ok: true,
+        decisionSource: "decisions_api",
+        backend: res.backend || null,
+        model: res.model || null,
+        fallbackReason: null,
+        escopoAtomico,
+        escopoAtomicoProb,
+        riscoScore,
+        riscoNivel: RISCO_LABELS[riscoScore - 1],
+        modeloTier,
+        modeloRecomendadoHint: TIER_MODEL_HINTS[modeloTier],
+        attentionPolicy,
+        alertas: Array.from(new Set(alertas))
+      };
+    }
+    return {
+      ...baseline,
+      decisionSource: "deterministic_fallback",
+      backend: (res == null ? void 0 : res.backend) || null,
+      model: null,
+      fallbackReason: `decisions_api_failed:${(res == null ? void 0 : res.reason) || "unknown"}`
+    };
+  } catch (err) {
+    return {
+      ...baseline,
+      decisionSource: "deterministic_fallback",
+      backend: null,
+      model: null,
+      fallbackReason: `decisions_api_exception:${String((err == null ? void 0 : err.message) || err).slice(0, 80)}`
+    };
+  }
+}
+function findOutOfScopeFiles(escritaExclusiva, arquivosAlterados) {
+  const allowed = (escritaExclusiva || []).map((p) => String(p || "").trim().replace(/^\.\//, "")).filter(Boolean);
+  if (allowed.length === 0) return [];
+  return (arquivosAlterados || []).map((f) => String(f || "").trim().replace(/^\.\//, "")).filter(Boolean).filter((file) => {
+    return !allowed.some((rule) => {
+      if (rule === file) return true;
+      if (rule.endsWith("/") && file.startsWith(rule)) return true;
+      if (rule.endsWith("/**") && file.startsWith(rule.slice(0, -3))) return true;
+      if (rule.endsWith("/*") && file.startsWith(rule.slice(0, -2))) return true;
+      return false;
+    });
+  });
+}
+async function triageDiffWithDecisions(ctx, input) {
+  const arquivosForaEscopo = findOutOfScopeFiles(input.escrita_exclusiva, input.arquivos_alterados);
+  const escopoRespeitadoMecanico = arquivosForaEscopo.length === 0;
+  const textoEntrega = `${input.resumo_entrega || ""}
+${input.saida_aceite || ""}`;
+  const temSaidaReal = /exit\s*0|passed|ok|sha256|build|pytest|test/i.test(input.saida_aceite || "");
+  const alegaProntoSemProva = !temSaidaReal && /\b(100%|pronto|passou tudo|concluido|resolvido)\b/i.test(input.resumo_entrega || "");
+  const motivos = [];
+  if (!escopoRespeitadoMecanico) {
+    motivos.push(`Arquivos alterados fora da Escrita exclusiva: ${arquivosForaEscopo.join(", ")}`);
+  }
+  if (alegaProntoSemProva) {
+    motivos.push("Regra L-24: entrega alega conclusão sem saída executável comprovada.");
+  }
+  const recusas = Number(input.recusas_anteriores || 0);
+  const baselineAcao = recusas >= 2 ? "escalar_coo" : !escopoRespeitadoMecanico || alegaProntoSemProva ? "pedir_ajuste_executor" : "prosseguir_gate";
+  const baselineSeveridade = !escopoRespeitadoMecanico ? 4 : alegaProntoSemProva ? 3 : 1;
+  const decisionsApi = ctx == null ? void 0 : ctx.decisions;
+  if (!(decisionsApi == null ? void 0 : decisionsApi.decide) || !textoEntrega.trim()) {
+    return {
+      ok: true,
+      decisionSource: "deterministic_fallback",
+      backend: null,
+      model: null,
+      fallbackReason: !(decisionsApi == null ? void 0 : decisionsApi.decide) ? "decisions_api_not_available" : "empty_delivery_text",
+      escopoRespeitado: escopoRespeitadoMecanico,
+      arquivosForaEscopo,
+      alegacaoSemProvaL24: alegaProntoSemProva,
+      severidadeDesvio: baselineSeveridade,
+      acaoRecomendada: baselineAcao,
+      motivos
+    };
+  }
+  const statePayload = [
+    `Issue: ${input.issue_id || "(n/a)"} — ${input.titulo || ""}`,
+    `Escrita exclusiva: ${(input.escrita_exclusiva || []).join(", ") || "(não informada)"}`,
+    `Arquivos alterados: ${(input.arquivos_alterados || []).join(", ") || "(nenhum)"}`,
+    `Fora de escopo (mecânico): ${arquivosForaEscopo.join(", ") || "nenhum"}`,
+    `Recusas anteriores: ${recusas}`,
+    `Resumo entrega: ${(input.resumo_entrega || "").slice(0, 1200)}`,
+    `Saída aceite L-22: ${(input.saida_aceite || "").slice(0, 1200)}`
+  ].join("\n");
+  try {
+    const res = await decisionsApi.decide({
+      state: statePayload,
+      timeoutMs: 8e3,
+      questions: {
+        alegacao_sem_prova: {
+          type: "yes_no",
+          instructions: "A entrega afirma que está pronta/aprovada/100% sem apresentar evidência concreta de execução (comando + exit 0 ou saída de teste real)?"
+        },
+        severidade_desvio: {
+          type: "score",
+          instructions: "Qual a severidade de desvio de contrato nesta entrega (vazamento de escopo, falta de prova, risco de regressão)?",
+          levels: ["nenhum", "leve", "moderado", "alto", "bloqueante"]
+        },
+        acao_gate: {
+          type: "choice",
+          instructions: "Qual ação imediata o revisor/gate deve tomar?",
+          options: {
+            prosseguir_gate: "Entrega íntegra, dentro do escopo e com prova executável; seguir para GATE: aceito.",
+            pedir_ajuste_executor: "Há desvio pontual ou falta de prova; devolver ao executor com pedido objetivo.",
+            escalar_coo: "Reincidência (>=2 recusas) ou quebra grave de escopo; escalar ao COO para re-escopo."
+          }
+        }
+      }
+    });
+    if ((res == null ? void 0 : res.outcome) === "answered" && res.answers) {
+      const ansL24 = res.answers.alegacao_sem_prova;
+      const ansSev = res.answers.severidade_desvio;
+      const ansAcao = res.answers.acao_gate;
+      const l24Prob = (ansL24 == null ? void 0 : ansL24.type) === "yes_no" ? Number(ansL24.probability) : 0;
+      const alegacaoSemProvaL24 = alegaProntoSemProva || l24Prob >= 0.65;
+      if (l24Prob >= 0.65 && !alegaProntoSemProva) {
+        motivos.push(`Decisions API (${res.model}): suspeita de alegação sem prova L-24 (p=${l24Prob.toFixed(2)}).`);
+      }
+      const severidadeDesvio = Math.max(
+        baselineSeveridade,
+        (ansSev == null ? void 0 : ansSev.type) === "score" ? Math.min(5, Math.max(1, Math.round(Number(ansSev.score)) + 1)) : baselineSeveridade
+      );
+      let acaoRecomendada = (ansAcao == null ? void 0 : ansAcao.type) === "choice" && (ansAcao.choice === "prosseguir_gate" || ansAcao.choice === "pedir_ajuste_executor" || ansAcao.choice === "escalar_coo") ? ansAcao.choice : baselineAcao;
+      if (!escopoRespeitadoMecanico && acaoRecomendada === "prosseguir_gate") {
+        acaoRecomendada = recusas >= 2 ? "escalar_coo" : "pedir_ajuste_executor";
+      }
+      return {
+        ok: true,
+        decisionSource: "decisions_api",
+        backend: res.backend || null,
+        model: res.model || null,
+        fallbackReason: null,
+        escopoRespeitado: escopoRespeitadoMecanico,
+        arquivosForaEscopo,
+        alegacaoSemProvaL24,
+        severidadeDesvio,
+        acaoRecomendada,
+        motivos: Array.from(new Set(motivos))
+      };
+    }
+    return {
+      ok: true,
+      decisionSource: "deterministic_fallback",
+      backend: (res == null ? void 0 : res.backend) || null,
+      model: null,
+      fallbackReason: `decisions_api_failed:${(res == null ? void 0 : res.reason) || "unknown"}`,
+      escopoRespeitado: escopoRespeitadoMecanico,
+      arquivosForaEscopo,
+      alegacaoSemProvaL24: alegaProntoSemProva,
+      severidadeDesvio: baselineSeveridade,
+      acaoRecomendada: baselineAcao,
+      motivos
+    };
+  } catch (err) {
+    return {
+      ok: true,
+      decisionSource: "deterministic_fallback",
+      backend: null,
+      model: null,
+      fallbackReason: `decisions_api_exception:${String((err == null ? void 0 : err.message) || err).slice(0, 80)}`,
+      escopoRespeitado: escopoRespeitadoMecanico,
+      arquivosForaEscopo,
+      alegacaoSemProvaL24: alegaProntoSemProva,
+      severidadeDesvio: baselineSeveridade,
+      acaoRecomendada: baselineAcao,
+      motivos
+    };
+  }
+}
+function buildBuzzAttentionContract(params) {
+  const slug = sanitizeSlug$1(params.slug || params.titulo);
+  const interestId = `orgfy-card-${slug}`.slice(0, 64);
+  const now = typeof params.nowUnixSecs === "number" ? params.nowUnixSecs : Math.floor(Date.now() / 1e3);
+  const channel = (params.channel || DEFAULT_ORGFY_CHANNEL$1).trim();
+  const presets = {
+    timer_curto: { intervalSecs: 600, maxOccurrences: 3, windowSecs: 3600, label: "Timer curto (10m x 3, janela 1h)" },
+    event_driven: { intervalSecs: 900, maxOccurrences: 4, windowSecs: 7200, label: "Event-driven + Watchdog (15m x 4, janela 2h)" },
+    watchdog_longo: { intervalSecs: 1200, maxOccurrences: 5, windowSecs: 10800, label: "Watchdog longo (20m x 5, janela 3h)" }
+  };
+  const preset = presets[params.policy] || presets.timer_curto;
+  const expiresAt = now + preset.windowSecs;
+  const contract = {
+    policy: params.policy,
+    interest_id: interestId,
+    interest_set_payload: {
+      id: interestId,
+      title: `Card ${slug}: ${params.titulo}`.slice(0, 90),
+      summary: `Execução/revisão do card ${slug} (${params.executor} → ${params.revisor}) com política ${preset.label}.`,
+      instructions: `Acompanhe o card '${params.titulo}' (${slug}). Executor: ${params.executor}; Revisor: ${params.revisor}. Se o card já tiver ENTREGUE_PARA_REVISAO, GATE: aceito ou MERGED na main, remova os watches (watch_remove) e este Interest (interest_remove) imediatamente para zero desperdício.`,
+      expected_state: "object-v1:absent"
+    },
+    timer_watch_payload: {
+      interest: interestId,
+      id: `timer-${slug}`.slice(0, 64),
+      type: "timer",
+      expected_state: "object-v1:absent",
+      channel,
+      ...params.threadRoot ? { root: params.threadRoot } : {},
+      prompt: `Check-in de progresso do card ${slug}: verifique status na worktree/PR. Se concluído ou aguardando outro perfil, chame watch_remove e encerre com [SILENT].`,
+      interval_secs: preset.intervalSecs,
+      max_occurrences: preset.maxOccurrences,
+      expires_at: expiresAt
+    },
+    cleanup_rule: "Auto-limpeza obrigatória: ao publicar ENTREGUE_PARA_REVISAO, GATE: aceito ou detectar merge na main, chamar watch_remove e interest_remove."
+  };
+  if (params.policy === "event_driven") {
+    contract.event_watch_payload = {
+      interest: interestId,
+      id: `ev-${slug}`.slice(0, 64),
+      type: "event",
+      expected_state: "object-v1:absent",
+      channels: [channel],
+      channel,
+      ...params.threadRoot ? { root: params.threadRoot } : {},
+      since: "now",
+      is_reply: Boolean(params.threadRoot),
+      classifier: {
+        questions: {
+          handoff_ou_gate_card: {
+            question: `A mensagem contém uma entrega real (ENTREGUE_PARA_REVISAO com prova), bloqueio (BLOQUEADO) ou veredito (GATE: aceito/recusado) especificamente sobre o card ${slug}?`,
+            true: "Reporta entrega com comando/exit code, novo commit/PR, bloqueio formal ou decisão de Gate para este card.",
+            false: "Conversa paralela, outro card, status rotineiro sem ação ou duplicata.",
+            threshold: 0.3
+          }
+        }
+      }
+    };
+  }
+  return contract;
+}
+function sanitizeSlug(raw) {
+  return String(raw || "").trim().toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 50) || "card";
+}
+async function computeSha256Hex(text) {
+  var _a;
+  const normalized = String(text || "").trim();
+  try {
+    if (typeof globalThis !== "undefined" && ((_a = globalThis.crypto) == null ? void 0 : _a.subtle)) {
+      const data = new TextEncoder().encode(normalized);
+      const buf = await globalThis.crypto.subtle.digest("SHA-256", data);
+      return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+    }
+  } catch {
+  }
+  let h1 = 2166136261;
+  let h2 = 2654435769;
+  for (let i = 0; i < normalized.length; i++) {
+    const ch = normalized.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 16777619) >>> 0;
+    h2 = Math.imul(h2 ^ ch + i, 2246822507) >>> 0;
+  }
+  const part = h1.toString(16).padStart(8, "0") + h2.toString(16).padStart(8, "0");
+  return part.repeat(4);
+}
+function renderCanonicalCardMarkdown(params) {
+  const { input, slug, branch, worktreePath, idempotencyKey, acceptanceHash, triage, attention } = params;
+  const formato = input.formato || "v3";
+  const idPrefix = input.id_tarefa ? `${input.id_tarefa} — ` : `${slug.toUpperCase()} — `;
+  const tituloCompleto = `${idPrefix}${input.titulo}`.slice(0, 100);
+  const passos = Array.isArray(input.passos) && input.passos.length > 0 ? input.passos : [
+    "Ler arquivos autorizados e validar pré-condições",
+    "Implementar alteração estritamente em Escrita exclusiva",
+    "Executar comando de aceite L-22 e registrar prova real"
+  ];
+  const foraEscopo = Array.isArray(input.fora_escopo) && input.fora_escopo.length > 0 ? input.fora_escopo : [
+    "Não refatorar arquivos fora de Escrita exclusiva",
+    "Não alterar o comando de aceite L-22 nem suprimir testes existentes"
+  ];
+  const leituraStr = Array.isArray(input.leitura) && input.leitura.length > 0 ? input.leitura.join(", ") : input.escrita_exclusiva.join(", ");
+  const escritaStr = input.escrita_exclusiva.join(", ");
+  const decisor = input.decisor || "OrgFy Iris";
+  const tempoMax = input.tempo_maximo || "3600s";
+  const skills = input.skills || "esteira-v4-metodo";
+  const tipo = input.tipo || "execucao";
+  const provaLinhas = [];
+  if (input.prova_positiva) {
+    provaLinhas.push(`  Positivo: ${input.prova_positiva.replace(/^positivo:\s*/i, "")}`);
+  } else {
+    provaLinhas.push(`  Positivo: ${input.acceptance_command} -> exit 0`);
+  }
+  if (input.prova_negativa) {
+    provaLinhas.push(`  Negativo: ${input.prova_negativa.replace(/^negativo:\s*/i, "")}`);
+  }
+  const lines = [
+    `<!-- orgfy:card ${formato} -->`,
+    `# ${tituloCompleto}`,
+    "",
+    "## Objetivo",
+    input.objetivo || input.titulo,
+    "",
+    "## Estado",
+    `- **Contexto:** ${input.contexto || "Card gerado de forma determinística via orgfy_card_create (schema-first)."}`,
+    `- **Autoridade:** ${input.autoridade}`,
+    `- **Decisão:** ${input.decisao}`,
+    "",
+    "## Papéis e ambiente",
+    `- **Tipo:** ${tipo}`,
+    `- **Executor:** ${input.executor}`,
+    `- **Revisor:** ${input.revisor}`,
+    `- **Decisor:** ${decisor}`,
+    `- **Workspace:** worktree:${worktreePath}`,
+    `- **Skills:** ${skills}`,
+    `- **Processos:** nenhum`,
+    `- **Tempo máximo:** ${tempoMax}`,
+    "",
+    "## Execucao Buzz",
+    `- **Modo:** attention (${attention.policy})`,
+    `- **Interest ID:** ${attention.interest_id}`,
+    `- **Watch Timer:** intervalo ${attention.timer_watch_payload.interval_secs}s · max_occurrences ${attention.timer_watch_payload.max_occurrences} · expires_at ${attention.timer_watch_payload.expires_at}`,
+    `- **Watch Event Classifier:** ${attention.event_watch_payload ? "ativo (Decisions API pre-wake)" : "não aplicável (timer enxuto)"}`,
+    `- **Auto-cleanup Attention:** ${attention.cleanup_rule}`,
+    `- **Roteamento Decision Model:** ${triage.modeloTier} (risco ${triage.riscoScore}/5 · ${triage.riscoNivel} · fonte: ${triage.decisionSource})`,
+    `- **Modelo sugerido:** ${triage.modeloRecomendadoHint}`,
+    `- **Idempotency key:** ${idempotencyKey}`,
+    `- **Max retries:** ${tipo === "seguranca" ? "1" : "2"}`,
+    `- **Max runtime:** ${tempoMax}`,
+    `- **Completion contract:** local-only`,
+    `- **Projeto:** ${input.empresa || "orgfy"}`,
+    `- **Branch:** ${branch}`,
+    `- **Status inicial:** running`,
+    "",
+    "## Regras e Avisos",
+    "- Proibido: Push sem DECIDIDO",
+    "- Proibido: Escrita fora de Escrita exclusiva",
+    "- Proibido: Alterar o comando de aceite L-22 congelado",
+    "",
+    "## O que fazer",
+    ...passos.map((p, idx) => `${idx + 1}. ${p}`),
+    "",
+    "## Fluxo",
+    "```mermaid",
+    "flowchart TD",
+    ...passos.map((p, idx) => {
+      const id = `P${idx + 1}`;
+      const lbl = p.replace(/"/g, "'");
+      return idx < passos.length - 1 ? `    ${id}["${id}: ${lbl}"] --> P${idx + 2}` : `    ${id}["${id}: ${lbl}"]`;
+    }),
+    "```",
+    "",
+    "## Paths",
+    `- **Leitura:** ${leituraStr}`,
+    `- **Escrita exclusiva:** ${escritaStr}`,
+    "",
+    "## Feito quando",
+    `- **Feito quando:** ${input.feito_quando}`,
+    "",
+    "## Prova exigida",
+    "**Prova exigida:**",
+    ...provaLinhas,
+    "",
+    "## Fora de escopo / não precisa provar",
+    ...foraEscopo.map((f) => `- ${f}`),
+    "",
+    "## Paralelismo e Entrega",
+    "- **Subagentes:** permitido por padrao (L-111)",
+    "- **Isolamento:** Worktree próprio e isolamento de banco de testes",
+    "- **Entrega:** Status ENTREGUE_PARA_REVISAO para o revisor independente",
+    "",
+    "## Contrato comum",
+    "- Escreva arquivos com a ferramenta de escrita de arquivos, não com heredoc, cat ou echo.",
+    "- Concluir: publicar ENTREGUE_PARA_REVISAO no canal com comando, exit code e saída real (L-22) e mencionar o revisor com `@Nome Exato`.",
+    "- Bloquear: publicar no canal `BLOQUEADO | por: <perfil> | motivo: ... | falta: ... | resolve: <perfil>` e mencionar quem resolve.",
+    '- Sem prova não há entrega. Proibido escrever "PASS", "pronto" ou "100%" (L-24).',
+    "- Ao concluir ou transferir para revisão, chame `watch_remove` e `interest_remove` para encerrar o Attention deste card.",
+    "",
+    "## Sucessor",
+    `- **Sucessor:** Revisão independente por ${input.revisor}`,
+    "",
+    "## Commit e push obrigatórios no fim de todo turno, mesmo parcial",
+    "- Commit e push obrigatórios no encerramento de todo turno de trabalho, mesmo parcial.",
+    "- Nunca encerrar turno com alterações não commitadas na worktree ou sem registro de handoff.",
+    "",
+    "## Comando de aceite",
+    `<!-- l22-sha256: ${acceptanceHash} -->`,
+    "```bash",
+    input.acceptance_command.trim(),
+    "```",
+    "Deve retornar exit 0. O revisor também confere o diff contra os paths autorizados em Escrita exclusiva.",
+    ""
+  ];
+  return lines.join("\n");
+}
+async function createCanonicalCard(ctx, input) {
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i;
+  const slug = sanitizeSlug(input.slug || input.id_tarefa || input.titulo);
+  const branch = `feat/${slug}`;
+  const worktreePath = `.worktrees/${slug}`;
+  const idempotencyKey = slug;
+  const cardPath = `cards/${slug.toUpperCase()}.md`;
+  const makeError = (code, message) => {
+    const fallbackTriage = {
+      ok: false,
+      decisionSource: "deterministic_fallback",
+      backend: null,
+      model: null,
+      fallbackReason: code,
+      escopoAtomico: false,
+      escopoAtomicoProb: 0,
+      riscoScore: 3,
+      riscoNivel: "medio",
+      modeloTier: "tier2_balanced",
+      modeloRecomendadoHint: "claude-sonnet-4-6",
+      attentionPolicy: "timer_curto",
+      alertas: [message]
+    };
+    const attention = buildBuzzAttentionContract({
+      slug,
+      titulo: input.titulo || slug,
+      executor: input.executor || "(indefinido)",
+      revisor: input.revisor || "(indefinido)",
+      policy: "timer_curto",
+      channel: input.channel_id,
+      threadRoot: input.thread_root
+    });
+    return {
+      ok: false,
+      code,
+      message,
+      slug,
+      branch,
+      worktreePath,
+      idempotencyKey,
+      cardPath,
+      acceptanceHashSha256: "",
+      triage: fallbackTriage,
+      attentionContract: attention,
+      markdown: "",
+      writtenToDisk: false,
+      lintPassed: null,
+      lintOutput: null,
+      publishCommand: ""
+    };
+  };
+  if (!((_a = input.titulo) == null ? void 0 : _a.trim())) {
+    return makeError("MISSING_TITULO", "Campo obrigatório 'titulo' ausente.");
+  }
+  if (!((_b = input.executor) == null ? void 0 : _b.trim()) || !((_c = input.revisor) == null ? void 0 : _c.trim())) {
+    return makeError("MISSING_ROLES", "Campos obrigatórios 'executor' e 'revisor' devem ser informados.");
+  }
+  if (input.executor.trim().toLowerCase() === input.revisor.trim().toLowerCase()) {
+    return makeError(
+      "L01_SEGREGATION_VIOLATION",
+      `Regra L-01 violada: executor ('${input.executor}') e revisor ('${input.revisor}') não podem ser o mesmo perfil.`
+    );
+  }
+  if (!Array.isArray(input.escrita_exclusiva) || input.escrita_exclusiva.filter(Boolean).length === 0) {
+    return makeError("MISSING_ESCRITA_EXCLUSIVA", "Informe ao menos 1 arquivo/path em 'escrita_exclusiva'.");
+  }
+  if (!((_d = input.acceptance_command) == null ? void 0 : _d.trim())) {
+    return makeError("MISSING_ACCEPTANCE_COMMAND", "Comando de aceite L-22 ('acceptance_command') é obrigatório.");
+  }
+  if (!((_e = input.autoridade) == null ? void 0 : _e.trim()) || !((_f = input.decisao) == null ? void 0 : _f.trim())) {
+    return makeError("MISSING_AUTHORITY", "Campos 'autoridade' e 'decisao' são obrigatórios (evita placeholder recusado pelo lint).");
+  }
+  if (!((_g = input.feito_quando) == null ? void 0 : _g.trim())) {
+    return makeError("MISSING_FEITO_QUANDO", "Campo 'feito_quando' é obrigatório.");
+  }
+  const triage = await triageCardWithDecisions(ctx, {
+    titulo: input.titulo,
+    objetivo: input.objetivo,
+    tipo: input.tipo,
+    escrita_exclusiva: input.escrita_exclusiva,
+    acceptance_command: input.acceptance_command,
+    passos: input.passos,
+    executor: input.executor,
+    revisor: input.revisor
+  });
+  const effectivePolicy = input.attention_policy || triage.attentionPolicy;
+  const attentionContract = buildBuzzAttentionContract({
+    slug,
+    titulo: input.titulo,
+    executor: input.executor,
+    revisor: input.revisor,
+    policy: effectivePolicy,
+    channel: input.channel_id,
+    threadRoot: input.thread_root
+  });
+  const acceptanceHashSha256 = await computeSha256Hex(input.acceptance_command);
+  const markdown = renderCanonicalCardMarkdown({
+    input,
+    slug,
+    branch,
+    worktreePath,
+    idempotencyKey,
+    acceptanceHash: acceptanceHashSha256,
+    triage,
+    attention: attentionContract
+  });
+  let writtenToDisk = false;
+  let lintPassed = null;
+  let lintOutput = null;
+  const absCardPath = `${ORGFY_ABS_PATH}/${cardPath}`;
+  if (input.write_file && ((_h = ctx == null ? void 0 : ctx.host) == null ? void 0 : _h.writeFile)) {
+    try {
+      await ctx.host.writeFile(absCardPath, markdown);
+      writtenToDisk = true;
+    } catch (err) {
+      lintOutput = `Falha ao gravar ${absCardPath}: ${(err == null ? void 0 : err.message) || err}`;
+    }
+  }
+  if (input.run_lint && writtenToDisk && ((_i = ctx == null ? void 0 : ctx.host) == null ? void 0 : _i.spawn)) {
+    try {
+      let combined = "";
+      const proc = await ctx.host.spawn("bash", {
+        args: [`cd "${ORGFY_ABS_PATH}" && ./ferramentas/card-lint.sh "${cardPath}"`],
+        onStdout: (chunk) => {
+          combined += chunk;
+        },
+        onStderr: (chunk) => {
+          combined += chunk;
+        }
+      });
+      const exitCode = await proc.exited;
+      lintPassed = exitCode === 0;
+      lintOutput = combined.trim() || (exitCode === 0 ? "card-lint OK (exit 0)" : `card-lint falhou (exit ${exitCode})`);
+    } catch (err) {
+      lintPassed = false;
+      lintOutput = `Erro ao rodar card-lint.sh: ${(err == null ? void 0 : err.message) || err}`;
+    }
+  }
+  const publishCommand = `cd "${ORGFY_ABS_PATH}" && ./ferramentas/buzz-issue-guard.sh "${cardPath}"`;
+  return {
+    ok: lintPassed !== false,
+    code: lintPassed === false ? "CARD_LINT_FAILED" : "OK",
+    message: lintPassed === false ? `Card gerado em ${cardPath}, mas reprovado pelo card-lint.sh.` : `Card '${slug}' gerado com sucesso (L-22 SHA-256 congelado, modelo ${triage.modeloTier}, Attention ${effectivePolicy}).`,
+    slug,
+    branch,
+    worktreePath,
+    idempotencyKey,
+    cardPath,
+    acceptanceHashSha256,
+    triage,
+    attentionContract,
+    markdown,
+    writtenToDisk,
+    lintPassed,
+    lintOutput,
+    publishCommand
+  };
+}
 async function sendDesktopNotification(ctx, title, body) {
   var _a;
   if (typeof window !== "undefined" && "Notification" in window) {
@@ -2682,6 +3352,59 @@ async function startOrgfyMcpServer(ctx, onStatusChange) {
           max_shells: { type: "number", description: "Teto de shells (default: 10)" }
         },
         required: ["agente"]
+      }
+    },
+    {
+      name: "orgfy_card_create",
+      description: "Abertura schema-first de card OrgFy com triagem em cascata via Decisions API (risco, tier modelo, política Attention), congelamento L-22 SHA-256, contrato nativo Buzz Attention/Watch (interest_set + watch_add) e card-lint.sh opcional.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          slug: { type: "string", description: "Slug único do card (ex: spec-0010-t001)" },
+          id_tarefa: { type: "string", description: "ID formal da tarefa (ex: SPEC-0010 T001)" },
+          titulo: { type: "string", description: "Título objetivo em verbo imperativo" },
+          objetivo: { type: "string", description: "Descrição detalhada do objetivo" },
+          contexto: { type: "string", description: "Contexto operacional do card" },
+          autoridade: { type: "string", description: "Spec de origem ou diretiva DECIDIDO" },
+          decisao: { type: "string", description: "Decisão executiva/técnica registrada" },
+          tipo: { type: "string", enum: ["execucao", "revisao", "infraestrutura", "seguranca", "spec", "pesquisa"] },
+          executor: { type: "string", description: "Perfil executor (L-01: diferente do revisor)" },
+          revisor: { type: "string", description: "Perfil revisor independente (L-01)" },
+          decisor: { type: "string", description: "Decisor executivo (default: OrgFy Iris)" },
+          escrita_exclusiva: { type: "array", items: { type: "string" }, description: "Lista exata de arquivos/paths autorizados para escrita" },
+          leitura: { type: "array", items: { type: "string" }, description: "Arquivos/paths autorizados para leitura" },
+          passos: { type: "array", items: { type: "string" }, description: "Passos ordenados de execução" },
+          fora_escopo: { type: "array", items: { type: "string" }, description: "Itens explicitamente fora de escopo" },
+          feito_quando: { type: "string", description: "Critério objetivo de conclusão" },
+          prova_positiva: { type: "string", description: "Comando e saída esperada positiva" },
+          prova_negativa: { type: "string", description: "Comando e saída esperada negativa" },
+          acceptance_command: { type: "string", description: "Comando executável de aceite L-22" },
+          attention_policy: { type: "string", enum: ["timer_curto", "event_driven", "watchdog_longo"] },
+          write_file: { type: "boolean", description: "Se true, grava em cards/<SLUG>.md" },
+          run_lint: { type: "boolean", description: "Se true e write_file=true, valida com ./ferramentas/card-lint.sh" },
+          empresa: { type: "string", description: "Slug da empresa (default: orgfy)" }
+        },
+        required: ["slug", "titulo", "autoridade", "decisao", "executor", "revisor", "escrita_exclusiva", "feito_quando", "acceptance_command"]
+      }
+    },
+    {
+      name: "orgfy_decision_triage",
+      description: "Executa classificação rápida em batch via Buzz Decisions API (yes_no + score + choice) com fallback determinístico offline para triagem de card (mode='card') ou pre-flight de diff/entrega (mode='diff').",
+      inputSchema: {
+        type: "object",
+        properties: {
+          mode: { type: "string", enum: ["card", "diff"], description: "Modo de triagem: 'card' ou 'diff'" },
+          titulo: { type: "string" },
+          objetivo: { type: "string" },
+          tipo: { type: "string" },
+          escrita_exclusiva: { type: "array", items: { type: "string" } },
+          arquivos_alterados: { type: "array", items: { type: "string" } },
+          acceptance_command: { type: "string" },
+          resumo_entrega: { type: "string" },
+          saida_aceite: { type: "string" },
+          recusas_anteriores: { type: "number" }
+        },
+        required: ["mode"]
       }
     }
   ];
@@ -2903,6 +3626,45 @@ async function startOrgfyMcpServer(ctx, onStatusChange) {
             target_files: Array.isArray(args == null ? void 0 : args.target_files) ? args.target_files : void 0,
             acceptance_command: args == null ? void 0 : args.acceptance_command,
             max_shells: typeof (args == null ? void 0 : args.max_shells) === "number" ? args.max_shells : void 0
+          });
+          return {
+            jsonrpc: "2.0",
+            id,
+            result: {
+              content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
+              isError: !res.ok
+            }
+          };
+        }
+        if (name === "orgfy_card_create") {
+          const res = await createCanonicalCard(ctx, args || {});
+          return {
+            jsonrpc: "2.0",
+            id,
+            result: {
+              content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
+              isError: !res.ok
+            }
+          };
+        }
+        if (name === "orgfy_decision_triage") {
+          const mode = String((args == null ? void 0 : args.mode) || "card");
+          const res = mode === "diff" ? await triageDiffWithDecisions(ctx, {
+            issue_id: args == null ? void 0 : args.issue_id,
+            titulo: args == null ? void 0 : args.titulo,
+            escrita_exclusiva: Array.isArray(args == null ? void 0 : args.escrita_exclusiva) ? args.escrita_exclusiva : [],
+            arquivos_alterados: Array.isArray(args == null ? void 0 : args.arquivos_alterados) ? args.arquivos_alterados : [],
+            resumo_entrega: args == null ? void 0 : args.resumo_entrega,
+            saida_aceite: args == null ? void 0 : args.saida_aceite,
+            recusas_anteriores: args == null ? void 0 : args.recusas_anteriores
+          }) : await triageCardWithDecisions(ctx, {
+            slug: args == null ? void 0 : args.slug,
+            titulo: String((args == null ? void 0 : args.titulo) || ""),
+            objetivo: args == null ? void 0 : args.objetivo,
+            tipo: args == null ? void 0 : args.tipo,
+            escrita_exclusiva: Array.isArray(args == null ? void 0 : args.escrita_exclusiva) ? args.escrita_exclusiva : [],
+            acceptance_command: args == null ? void 0 : args.acceptance_command,
+            passos: Array.isArray(args == null ? void 0 : args.passos) ? args.passos : []
           });
           return {
             jsonrpc: "2.0",
@@ -11097,8 +11859,10 @@ Ferramentas nativas disponíveis neste plugin:
 11. orgfy_historico_buscar({ query?, spec?, limit? }): Busca just-in-time no Arquivo de Issues Resolvidas por código, causa raiz, arquivo ou SHA.
 12. orgfy_loop_radar({ apenas_ativos?, agente? }): Inspeciona o Radar de Loops & Sessões Zumbis do Goose em tempo real (LOOP_SUSPEITO, STALLED_THINKING, SESSAO_DUPLICADA, EXPLORACAO_CLI_HELP) com channel_id, thread_root, agent_pubkey, ultimo_shell e acao_sugerida.
 13. orgfy_session_stop({ agente, agent_pubkey?, channel_id?, thread_root?, action?, release_issue_id?, reason? }): Interrompe (Stop) ou reinicia imediatamente o turno de um agente travado ou em trabalho inútil via API nativa do Buzz Desktop (action: 'interrupt' | 'new' | 'compact'), com liberação opcional de lock.
-14. orgfy_model_failover({ agente?, agent_pubkey?, failed_model?, prefer_free?, apply?, retrigger?, channel_id?, thread_root?, retrigger_text? }): Integração OrgFy ↔ NexusMind Gateway — faz ping real nos modelos free (ou pagos) mais inteligentes disponíveis no NexusMind, elege o melhor online (inteligência + menor latência real em ms), atualiza o modelo do agente via ctx.agents.save() e re-dispara na thread original.
-Consulte sempre orgfy_status, orgfy_kpis, orgfy_loop_radar ou orgfy_kanban_read para inspecionar métricas reais antes de agir.`
+14. orgfy_model_failover({ agente?, agent_pubkey?, failed_model?, prefer_free?, apply?, retrigger?, channel_id?, thread_root?, retrigger_text? }): Integração OrgFy ↔ NexusMind Gateway — faz ping real nos modelos mais inteligentes disponíveis no NexusMind, elege o melhor online (inteligência + menor latência real em ms), atualiza o modelo do agente via ctx.agents.save() e re-dispara na thread original.
+15. orgfy_card_create({ slug, titulo, autoridade, decisao, executor, revisor, escrita_exclusiva, feito_quando, acceptance_command, ... }): Abertura schema-first de card OrgFy com triagem em cascata via Decisions API (risco, tier modelo, política Attention), hash L-22 SHA-256 congelado, contrato nativo Buzz Attention/Watch (interest_set + watch_add) e validação opcional via card-lint.sh.
+16. orgfy_decision_triage({ mode: 'card' | 'diff', ... }): Classificação rápida em batch via Buzz Decisions API (yes_no + score + choice) com fallback determinístico offline para triagem de card ou pre-flight de diff/entrega (Escrita exclusiva + L-24).
+Consulte sempre orgfy_status, orgfy_kpis, orgfy_loop_radar ou orgfy_kanban_read para inspecionar métricas reais antes de agir. Ao abrir novos cards, prefira sempre orgfy_card_create em vez de redigir Markdown livre.`
       });
       console.log("[ORGFY] ctx.agents.addInstructions registrado com sucesso.");
     } catch (err) {
@@ -11205,12 +11969,20 @@ Consulte sempre orgfy_status, orgfy_kpis, orgfy_loop_radar ou orgfy_kanban_read 
           if (res.code !== 0) {
             await releaseCheckoutLock(ctx, args.issue_id, args.executor, true);
           }
+          const attentionContract = buildBuzzAttentionContract({
+            slug: String(args.issue_id || "card").slice(0, 24),
+            titulo: `Issue ${args.issue_id}`,
+            executor: args.executor,
+            revisor: args.revisor,
+            policy: "event_driven"
+          });
           return JSON.stringify({
             status: res.code === 0 ? "ok" : "error",
             exitCode: res.code,
             budgetGate,
             lock: res.code === 0 ? lockRes.lock : null,
             lockReleasedOnFailure: res.code !== 0,
+            attentionContract: res.code === 0 ? attentionContract : null,
             output: res.output
           }, null, 2);
         }
@@ -11530,7 +12302,90 @@ Consulte sempre orgfy_status, orgfy_kpis, orgfy_loop_radar ou orgfy_kanban_read 
           return JSON.stringify(res, null, 2);
         }
       });
-      console.log("[ORGFY] 14 agentTools registradas com sucesso no harness do Buzz (Ondas 1, 2, 3 + Arquivo + Radar de Loops + Session Stop + Model Failover NexusMind).");
+      ctx.agents.addTool({
+        name: "orgfy_card_create",
+        description: "Abertura schema-first de card OrgFy: valida L-01 (executor !== revisor), executa triagem em cascata via Decisions API (risco, tier modelo, política Attention), congela SHA-256 (L-22), gera contrato nativo Buzz Attention/Watch (interest_set + watch_add) e opcionalmente grava em cards/<SLUG>.md + roda card-lint.sh.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            slug: { type: "string", description: "Slug único do card (ex: spec-0010-t001)" },
+            id_tarefa: { type: "string", description: "ID formal da tarefa (ex: SPEC-0010 T001)" },
+            titulo: { type: "string", description: "Título objetivo em verbo imperativo" },
+            objetivo: { type: "string", description: "Objetivo detalhado do card" },
+            contexto: { type: "string", description: "Contexto operacional" },
+            autoridade: { type: "string", description: "Spec de origem ou diretiva DECIDIDO" },
+            decisao: { type: "string", description: "Decisão executiva/técnica registrada" },
+            tipo: { type: "string", enum: ["execucao", "revisao", "infraestrutura", "seguranca", "spec", "pesquisa"] },
+            executor: { type: "string", description: "Perfil executor (L-01: diferente do revisor)" },
+            revisor: { type: "string", description: "Perfil revisor independente (L-01)" },
+            decisor: { type: "string", description: "Decisor executivo (default: OrgFy Iris)" },
+            escrita_exclusiva: { type: "array", items: { type: "string" }, description: "Arquivos/paths autorizados para escrita" },
+            leitura: { type: "array", items: { type: "string" }, description: "Arquivos/paths autorizados para leitura" },
+            passos: { type: "array", items: { type: "string" }, description: "Passos ordenados de execução" },
+            fora_escopo: { type: "array", items: { type: "string" }, description: "Itens fora de escopo" },
+            feito_quando: { type: "string", description: "Critério objetivo de conclusão" },
+            prova_positiva: { type: "string", description: "Comando e saída esperada positiva" },
+            prova_negativa: { type: "string", description: "Comando e saída esperada negativa" },
+            acceptance_command: { type: "string", description: "Comando executável de aceite L-22" },
+            attention_policy: { type: "string", enum: ["timer_curto", "event_driven", "watchdog_longo"] },
+            channel_id: { type: "string", description: "UUID do canal Buzz para o Watch" },
+            thread_root: { type: "string", description: "Event ID 64-hex da thread para Watch de evento" },
+            write_file: { type: "boolean", description: "Se true, grava em cards/<SLUG>.md" },
+            run_lint: { type: "boolean", description: "Se true e write_file=true, valida com ./ferramentas/card-lint.sh" },
+            empresa: { type: "string", description: "Slug da empresa (default: orgfy)" }
+          },
+          required: ["slug", "titulo", "autoridade", "decisao", "executor", "revisor", "escrita_exclusiva", "feito_quando", "acceptance_command"]
+        },
+        call: async (_client, _context, args) => {
+          const res = await createCanonicalCard(ctx, args || {});
+          return JSON.stringify(res, null, 2);
+        }
+      });
+      ctx.agents.addTool({
+        name: "orgfy_decision_triage",
+        description: "Classificador rápido em batch via ctx.decisions.decide (yes_no + score + choice) com fallback determinístico offline. Modo 'card' avalia escopo atômico, risco 1-5, tier de modelo e política Attention; modo 'diff' audita vazamento de Escrita exclusiva, alegação sem prova L-24 e ação de Gate.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            mode: { type: "string", enum: ["card", "diff"], description: "Modo de triagem: 'card' ou 'diff'" },
+            slug: { type: "string" },
+            issue_id: { type: "string" },
+            titulo: { type: "string" },
+            objetivo: { type: "string" },
+            tipo: { type: "string" },
+            escrita_exclusiva: { type: "array", items: { type: "string" } },
+            arquivos_alterados: { type: "array", items: { type: "string" } },
+            acceptance_command: { type: "string" },
+            passos: { type: "array", items: { type: "string" } },
+            resumo_entrega: { type: "string" },
+            saida_aceite: { type: "string" },
+            recusas_anteriores: { type: "number" }
+          },
+          required: ["mode"]
+        },
+        call: async (_client, _context, args) => {
+          const mode = String((args == null ? void 0 : args.mode) || "card");
+          const res = mode === "diff" ? await triageDiffWithDecisions(ctx, {
+            issue_id: args == null ? void 0 : args.issue_id,
+            titulo: args == null ? void 0 : args.titulo,
+            escrita_exclusiva: Array.isArray(args == null ? void 0 : args.escrita_exclusiva) ? args.escrita_exclusiva : [],
+            arquivos_alterados: Array.isArray(args == null ? void 0 : args.arquivos_alterados) ? args.arquivos_alterados : [],
+            resumo_entrega: args == null ? void 0 : args.resumo_entrega,
+            saida_aceite: args == null ? void 0 : args.saida_aceite,
+            recusas_anteriores: args == null ? void 0 : args.recusas_anteriores
+          }) : await triageCardWithDecisions(ctx, {
+            slug: args == null ? void 0 : args.slug,
+            titulo: String((args == null ? void 0 : args.titulo) || ""),
+            objetivo: args == null ? void 0 : args.objetivo,
+            tipo: args == null ? void 0 : args.tipo,
+            escrita_exclusiva: Array.isArray(args == null ? void 0 : args.escrita_exclusiva) ? args.escrita_exclusiva : [],
+            acceptance_command: args == null ? void 0 : args.acceptance_command,
+            passos: Array.isArray(args == null ? void 0 : args.passos) ? args.passos : []
+          });
+          return JSON.stringify(res, null, 2);
+        }
+      });
+      console.log("[ORGFY] 16 agentTools registradas com sucesso no harness do Buzz (Ondas 1-4: Card Schema-First, Decisions Router, Buzz Attention, Radar de Loops, Session Stop, Model Failover).");
     } catch (err) {
       console.warn("[ORGFY] Falha ao registrar agentTools:", err);
     }
@@ -11560,9 +12415,13 @@ export {
   TENANTS,
   THEME,
   apply,
+  buildBuzzAttentionContract,
   checkMentionTargetIdentity,
   checkThreadWakeAntiLoop,
+  createCanonicalCard,
   hydrateIssueDetail,
   inject,
-  resetThreadWakeGuardForTests
+  resetThreadWakeGuardForTests,
+  triageCardWithDecisions,
+  triageDiffWithDecisions
 };
