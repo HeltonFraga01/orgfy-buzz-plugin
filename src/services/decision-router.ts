@@ -1,10 +1,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// ORGFY DECISION ROUTER & BUZZ ATTENTION CONTRACT ENGINE (ONDA 4)
+// ORGFY DECISION ROUTER & BUZZ ATTENTION CONTRACT ENGINE (ONDA 4 + v13 OTel)
 // Cascata SOTA com ctx.decisions.decide (batch yes_no + choice + score)
 // + Fallback determinístico offline + Contratos nativos Buzz Attention/Watch
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { Context } from "@buzz/author";
+import { recordDecisionTelemetry } from "./telemetry-otel";
 
 export type ModelTierChoice = "tier1_fast" | "tier2_balanced" | "tier3_frontier";
 export type AttentionPolicyChoice = "timer_curto" | "event_driven" | "watchdog_longo";
@@ -200,10 +201,17 @@ export async function triageCardWithDecisions(
   ctx: Context | any,
   input: CardTriageInput
 ): Promise<CardTriageResult> {
+  const t0 = Date.now();
   const baseline = deterministicCardTriage(input);
   const decisionsApi = ctx?.decisions;
 
   if (!decisionsApi?.decide) {
+    recordDecisionTelemetry({
+      mode: "card_triage",
+      source: "deterministic_fallback",
+      durationMs: Date.now() - t0,
+      preventedExpensiveWake: baseline.modeloTier === "tier1_fast",
+    });
     return {
       ...baseline,
       decisionSource: "deterministic_fallback",
@@ -299,6 +307,14 @@ export async function triageCardWithDecisions(
         );
       }
 
+      recordDecisionTelemetry({
+        mode: "card_triage",
+        source: "decisions_api",
+        model: res.model || null,
+        backend: res.backend || null,
+        durationMs: Date.now() - t0,
+        preventedExpensiveWake: modeloTier !== "tier3_frontier" || !escopoAtomico,
+      });
       return {
         ok: true,
         decisionSource: "decisions_api",

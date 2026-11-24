@@ -1,6 +1,6 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// ORGFY TEMPLATES & RSI HUB SERVICE (EXPANSÃO DO COCKPIT)
-// Telemetria de templates de cards, contratos e motor RSI de regras probatórias
+// ORGFY TEMPLATES & RSI HUB SERVICE (v13 — ZERO HARDCODES / ZERO MOCKS)
+// Telemetria real de templates em REPOS/orgfy/templates e motor RSI L-90
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { ORGFY_ABS_PATH, readOrgfyJson } from "./orgfy-bridge";
@@ -11,90 +11,23 @@ export interface CardTemplateItem {
   name: string;
   filename: string;
   path: string;
-  version: "v7.1" | "v3" | "v2" | "experience";
+  version: "v7.1" | "v4" | "v3" | "v2" | "experience";
   status: "canônico_v10" | "estável_v3" | "legado" | "especializado";
-  fpyHistorical: number; // Porcentagem de First-Pass Yield (ex: 100.0)
-  totalCardsProcessed: number;
+  fpyHistorical: number | null;
+  totalCardsProcessed: number | null;
   frequentErrorsBlocked: string[];
   description: string;
   sampleAcceptanceCommand: string;
 }
 
-export const CANONICAL_TEMPLATES: CardTemplateItem[] = [
-  {
-    id: "template-v7-1",
-    name: "Card v7.1 / v10 Soberano",
-    filename: "card-v7.1-template.md",
-    path: "templates/card-v7.1-template.md",
-    version: "v7.1",
-    status: "canônico_v10",
-    fpyHistorical: 100.0,
-    totalCardsProcessed: 320,
-    frequentErrorsBlocked: [
-      "Alteração indevida de testes pelo executor (blindada por hash de congelamento SHA-256)",
-      "Ausência de evidências visuais no Quality Gate (blindada por probe Playwright obrigatório)",
-      "Vazamento de contexto e ruído no chat (blindado por worktree isolada e ORGFY_SEM_CANVAS=1)",
-    ],
-    description: "Template oficial de engenharia determinística v10. Incorpora cabeçalho de triagem, comandos congelados e probes caixa-preta.",
-    sampleAcceptanceCommand: "python3 -m pytest -q testes/test_feature.py && python3 ferramentas/esteira/lint_card.py",
-  },
-  {
-    id: "template-v3",
-    name: "Card v3 Determinístico Canônico",
-    filename: "card-v3-template.md",
-    path: "templates/card-v3-template.md",
-    version: "v3",
-    status: "estável_v3",
-    fpyHistorical: 94.2,
-    totalCardsProcessed: 180,
-    frequentErrorsBlocked: [
-      "Ambiguidade na resolução de papéis de revisor independente",
-      "Execução sem declaração explícita de modelo no modo Buzz",
-    ],
-    description: "Template de transição estável v3 com blocos estritos de Contexto, Autoridade, Decisão e Papéis.",
-    sampleAcceptanceCommand: "python3 -m pytest -q testes/unit/",
-  },
-  {
-    id: "template-v2",
-    name: "Card v2 Enxuto Legado",
-    filename: "card-v2-template.md",
-    path: "templates/card-v2-template.md",
-    version: "v2",
-    status: "legado",
-    fpyHistorical: 82.5,
-    totalCardsProcessed: 95,
-    frequentErrorsBlocked: [
-      "Falta de validação de exit code de comandos secundários",
-      "Conflitos de concorrência em branch única sem worktree",
-    ],
-    description: "Template legado simplificado. Recomendado migrar para v7.1 para compliance total com o Gate Caixa-Preta.",
-    sampleAcceptanceCommand: "pytest testes/legacy/",
-  },
-  {
-    id: "template-experience",
-    name: "Laudo de Experiência & UX",
-    filename: "experience-template.md",
-    path: "templates/experience-template.md",
-    version: "experience",
-    status: "especializado",
-    fpyHistorical: 96.8,
-    totalCardsProcessed: 64,
-    frequentErrorsBlocked: [
-      "Laudos subjetivos sem evidência visual reproduzível (L-24)",
-      "Aprovação sem inspeção de console errors em navegadores reais",
-    ],
-    description: "Template obrigatório para cards de frontend, design system e interação de usuário com captura de screenshots.",
-    sampleAcceptanceCommand: "npx playwright test --headed && python3 ferramentas/esteira/probe_caixa_preta.py",
-  },
-];
-
 /**
- * Consulta o estado do Hub de Aprendizado Recursivo (RSI) e regras probatórias.
+ * Consulta o estado real do Hub de Aprendizado Recursivo (RSI) e regras probatórias
+ * diretamente do disco (.esteira/estado/regras-probatorias.json), sem números sintéticos.
  */
 export async function fetchRsiHubState(ctx: any): Promise<{
   regrasState: RegrasProbatoriasState | null;
   templates: CardTemplateItem[];
-  globalRsiFpy: number;
+  globalRsiFpy: number | null;
 }> {
   const regrasState = await readOrgfyJson<RegrasProbatoriasState | null>(
     ctx,
@@ -104,14 +37,13 @@ export async function fetchRsiHubState(ctx: any): Promise<{
 
   return {
     regrasState,
-    templates: CANONICAL_TEMPLATES,
-    globalRsiFpy: 100.0,
+    templates: [],
+    globalRsiFpy: null,
   };
 }
 
 /**
  * Compila uma nova regra probatória via `retro.py` usando `ctx.host.spawn`.
- * python3 ferramentas/esteira/retro.py --compilar-regra "<ERRO_ID>" --descricao "<DESC>" --comando-check "<CMD>"
  */
 export async function compileProbationaryRule(
   ctx: any,
@@ -131,8 +63,8 @@ export async function compileProbationaryRule(
   appendChunk(`[RSI COMPILER] Compilando regra probatória GUARD-${options.erroId.toUpperCase()}...\n`);
 
   if (!ctx?.host?.spawn) {
-    appendChunk("[SIMULADO] Regra GUARD-" + options.erroId.toUpperCase() + " compilada em janela probatória de 10 cards.\n");
-    return { success: true, output: combinedOutput };
+    appendChunk("[ERRO] ctx.host.spawn indisponível para compilar regra probatória.\n");
+    return { success: false, output: combinedOutput };
   }
 
   try {

@@ -39,11 +39,24 @@ import {
   type AgentMigrationItem,
 } from "./services/migration";
 import {
-  CANONICAL_TEMPLATES,
   fetchRsiHubState,
   compileProbationaryRule,
   type CardTemplateItem,
 } from "./services/templates-rsi";
+import {
+  buildUnifiedOrgfyTools,
+} from "./tools/registry";
+import {
+  registerBuzzNativeIntegrations,
+  updateOrgfySidebarCounts,
+  subscribeRelayUpdates,
+} from "./services/buzz-native";
+import {
+  getTelemetrySnapshot,
+  subscribeTelemetry,
+  resetTelemetryForTests,
+  type TelemetrySnapshot,
+} from "./services/telemetry-otel";
 import {
   fetchKpisEsteira,
   fetchGooseLoopRadar,
@@ -96,6 +109,10 @@ export {
   triageCardWithDecisions,
   triageDiffWithDecisions,
   buildBuzzAttentionContract,
+  buildUnifiedOrgfyTools,
+  registerBuzzNativeIntegrations,
+  getTelemetrySnapshot,
+  resetTelemetryForTests,
 };
 import {
   executeSmartModelFailover,
@@ -140,7 +157,12 @@ export const TENANTS = [
   { id: "saas-tributario", name: "SaaS Tributário", badge: "Subsidiária Fiscal", slug: "saas-tributario" },
 ];
 
-export const INITIAL_PIPELINE_CARDS: PipelineCard[] = [
+// Zero-Mock v13: zero cards/regras/agentes hardcoded — dados 100% vivos do Buzz e REPOS/orgfy
+export const INITIAL_PIPELINE_CARDS: PipelineCard[] = [];
+export const INITIAL_REGRAS_PROBATORIAS: RegraProbatoria[] = [];
+export const AVAILABLE_AGENTS: Array<{ id: string; name: string; role: string; tier: string; model: string }> = [];
+/* LEGACY_HARDCODES_REMOVED
+const _REMOVED_LEGACY_ = [
   {
     id: "card-104",
     issueId: "5c569a9e",
@@ -441,6 +463,7 @@ export const AVAILABLE_AGENTS = [
   { id: "OrgFy Otto", name: "OrgFy Otto", role: "Engenheiro de Testes", tier: "tier_2_revisor", model: "claude-sonnet-4-6" },
   { id: "QA Sentinel", name: "QA Sentinel", role: "Auditor de Qualidade", tier: "tier_2_revisor", model: "grok-4.5" },
 ];
+*/
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SVGs MINIMALISTAS GEOMÉTRICOS (ZERO EMOJIS FUNCIONAIS)
@@ -738,6 +761,37 @@ export function apply(ctx: Context) {
     const [isRecalculatingKpis, setIsRecalculatingKpis] = React.useState<boolean>(false);
     const [governanceSummary, setGovernanceSummary] = React.useState<string | null>(null);
     const [loopRadar, setLoopRadar] = React.useState<GooseLoopRadarPayload | null>(null);
+    const [telemetrySnap, setTelemetrySnap] = React.useState<TelemetrySnapshot>(() => getTelemetrySnapshot());
+    const liveAgents = React.useMemo(() => {
+      try {
+        const snap = (ctx as any)?.agents?.snapshot?.() || {};
+        const pool = [...(snap.running || []), ...(snap.agents || [])];
+        const seen = new Set<string>();
+        const list: Array<{ id: string; name: string; tier: string }> = [];
+        for (const a of pool) {
+          const name = String(a?.name || a?.key || "").trim();
+          if (!name || seen.has(name)) continue;
+          seen.add(name);
+          list.push({ id: String(a?.key || name), name, tier: "tier_1_exec_barato" });
+        }
+        return list;
+      } catch {
+        return [];
+      }
+    }, [holdingData]);
+    React.useEffect(() => {
+      const unsubTel = subscribeTelemetry(() => setTelemetrySnap(getTelemetrySnapshot()));
+      const unsubRelay = subscribeRelayUpdates(() => { loadRealState(); });
+      return () => { unsubTel(); unsubRelay(); };
+    }, []);
+    React.useEffect(() => {
+      updateOrgfySidebarCounts({
+        triagem: pipelineCards.filter((c) => c.stage === "triagem").length,
+        execucao: pipelineCards.filter((c) => c.stage === "execucao").length,
+        revisao: pipelineCards.filter((c) => c.stage === "revisao").length,
+        loopsAtivos: loopRadar?.resumo?.criticos_ativos ?? loopRadar?.resumo?.criticos ?? 0,
+      });
+    }, [pipelineCards, loopRadar]);
     const [stoppingSessionId, setStoppingSessionId] = React.useState<string | null>(null);
     const [failingOverSessionId, setFailingOverSessionId] = React.useState<string | null>(null);
 
@@ -1836,7 +1890,7 @@ export function apply(ctx: Context) {
                   },
                 },
                 h("option", { value: "all" }, "Todos os Responsáveis"),
-                AVAILABLE_AGENTS.map((a) => h("option", { key: a.id, value: a.name }, a.name))
+                liveAgents.map((a) => h("option", { key: a.id, value: a.name }, a.name))
               )
             ),
             h(
@@ -2347,6 +2401,7 @@ export function apply(ctx: Context) {
           onRunGovernanceEval: handleRunGovernanceEval,
           governanceSummary,
           loopRadar,
+          telemetry: telemetrySnap,
           onRefreshLoopRadar: loadLoopRadar,
           onWakeIrisForLoops: handleWakeIrisForLoops,
           onStopLoopSession: handleStopLoopSession,
@@ -2866,8 +2921,8 @@ export function apply(ctx: Context) {
                     outline: "none",
                   },
                 },
-                AVAILABLE_AGENTS.map((a) =>
-                  h("option", { key: a.id, value: a.name }, `${a.name} (${a.tier === "tier_1_exec_barato" ? "Tier 1: Barato" : a.tier === "tier_2_revisor" ? "Tier 2: Revisor" : "Tier 3: Arquiteto"})`)
+                liveAgents.map((a) =>
+                  h("option", { key: a.id, value: a.name }, a.name)
                 )
               )
             ),
@@ -2895,7 +2950,7 @@ export function apply(ctx: Context) {
                     outline: "none",
                   },
                 },
-                AVAILABLE_AGENTS.map((a) =>
+                liveAgents.map((a) =>
                   h(
                     "option",
                     {
@@ -5557,6 +5612,9 @@ export function apply(ctx: Context) {
   // ── ONDA 3: HOOKS DE GOVERNANÇA NO CICLO DOS AGENTES ──
   registerGovernanceAgentHooks(ctx);
 
+  // ── v13 FRONTIER: SINERGIA NATIVA BUZZ (RELAY, CHAT, SIDEBAR, SHORTCUTS, ATTENTION SOURCE, OTEL) ──
+  registerBuzzNativeIntegrations(ctx);
+
   // ── INJEÇÃO DE INSTRUÇÕES DETERMINÍSTICAS NO PROMPT DO AGENTE (<plugin-instructions>) ──
   if ((ctx.agents as any)?.addInstructions) {
     try {
@@ -5610,8 +5668,28 @@ Consulte sempre orgfy_status, orgfy_kpis, orgfy_loop_radar ou orgfy_kanban_read 
     }
   }
 
-  // ── REGISTRO DE AGENT TOOLS NATIVAS NO HARNESS DO BUZZ (ctx.agents.addTool) ──
+  // ── REGISTRO UNIFICADO DAS 16 AGENT TOOLS (v13 SINGLE SOURCE OF TRUTH + OTEL TRACING) ──
   if ((ctx.agents as any)?.addTool) {
+    try {
+      const unifiedTools = buildUnifiedOrgfyTools(ctx);
+      for (const tool of unifiedTools) {
+        (ctx.agents as any).addTool({
+          name: tool.name,
+          description: tool.description,
+          inputSchema: tool.inputSchema,
+          call: async (_client: any, _context: any, args: any) => {
+            const res = await tool.execute(args || {});
+            return res.text;
+          },
+        });
+      }
+      console.log(`[ORGFY v13] ${unifiedTools.length} agentTools registradas via Unified Tool Registry (OTel GenAI + Attention + Decisions API).`);
+    } catch (err) {
+      console.warn("[ORGFY] Falha ao registrar agentTools:", err);
+    }
+  }
+  /* LEGACY_DUPLICATE_AGENT_TOOLS_REMOVED
+  if (false) {
     try {
       (ctx.agents as any).addTool({
         name: "orgfy_status",
@@ -6159,11 +6237,12 @@ Consulte sempre orgfy_status, orgfy_kpis, orgfy_loop_radar ou orgfy_kanban_read 
         },
       });
 
-      console.log("[ORGFY] 16 agentTools registradas com sucesso no harness do Buzz (Ondas 1-4: Card Schema-First, Decisions Router, Buzz Attention, Radar de Loops, Session Stop, Model Failover).");
+      console.log("[ORGFY] legacy");
     } catch (err) {
-      console.warn("[ORGFY] Falha ao registrar agentTools:", err);
+      console.warn("[ORGFY] legacy:", err);
     }
   }
+  */
 
   // Inicialização do Servidor MCP Nativo (JSON-RPC 2.0 Loopback)
   let mcpServerInstance: any = null;

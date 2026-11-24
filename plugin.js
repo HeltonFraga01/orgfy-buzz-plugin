@@ -2547,6 +2547,159 @@ function registerGovernanceAgentHooks(ctx) {
   const watchdogStarted = startGovernanceRadarWatchdog(ctx);
   return registered || watchdogStarted;
 }
+const MAX_SPANS = 200;
+const spansBuffer = [];
+const listeners = /* @__PURE__ */ new Set();
+const decisionsStats = {
+  totalCalls: 0,
+  decisionsApiCalls: 0,
+  fallbackCalls: 0,
+  wakesOrEscalationsAvoided: 0,
+  estimatedTokensSaved: 0,
+  totalLatencyMs: 0,
+  byMode: {}
+};
+const agentCounters = /* @__PURE__ */ new Map();
+function randomHex(len) {
+  let out = "";
+  const chars = "0123456789abcdef";
+  for (let i = 0; i < len; i++) {
+    out += chars[Math.floor(Math.random() * 16)];
+  }
+  return out;
+}
+function notify() {
+  for (const fn of listeners) {
+    try {
+      fn();
+    } catch {
+    }
+  }
+}
+function subscribeTelemetry(listener) {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+function recordGenAISpan(input) {
+  const span = {
+    spanId: randomHex(16),
+    traceId: input.traceId || randomHex(32),
+    timestamp: input.timestamp || Date.now(),
+    operationName: input.operationName,
+    agentName: input.agentName || "orgfy-system",
+    model: input.model ?? null,
+    provider: input.provider ?? null,
+    toolName: input.toolName ?? null,
+    durationMs: Math.max(0, Math.round(input.durationMs || 0)),
+    status: input.status,
+    finishReason: input.finishReason,
+    attributes: input.attributes || {}
+  };
+  spansBuffer.unshift(span);
+  if (spansBuffer.length > MAX_SPANS) {
+    spansBuffer.length = MAX_SPANS;
+  }
+  if (span.operationName === "invoke_agent") {
+    const key = span.agentName;
+    const prev = agentCounters.get(key) || {
+      totalTurns: 0,
+      errorTurns: 0,
+      consecutiveErrors: 0,
+      totalDurationMs: 0,
+      lastActivityTs: span.timestamp
+    };
+    prev.totalTurns += 1;
+    prev.totalDurationMs += span.durationMs;
+    prev.lastActivityTs = span.timestamp;
+    if (span.status === "error") {
+      prev.errorTurns += 1;
+      prev.consecutiveErrors += 1;
+    } else {
+      prev.consecutiveErrors = 0;
+    }
+    agentCounters.set(key, prev);
+  }
+  notify();
+  return span;
+}
+function recordDecisionTelemetry(params) {
+  decisionsStats.totalCalls += 1;
+  if (params.source === "decisions_api") {
+    decisionsStats.decisionsApiCalls += 1;
+  } else {
+    decisionsStats.fallbackCalls += 1;
+  }
+  decisionsStats.totalLatencyMs += Math.max(0, params.durationMs);
+  decisionsStats.byMode[params.mode] = (decisionsStats.byMode[params.mode] || 0) + 1;
+  const saved = params.preventedExpensiveWake ? params.estimatedTokensSaved ?? 18e3 : 0;
+  if (params.preventedExpensiveWake) {
+    decisionsStats.wakesOrEscalationsAvoided += 1;
+    decisionsStats.estimatedTokensSaved += saved;
+  }
+  recordGenAISpan({
+    operationName: "decisions.evaluate",
+    agentName: "orgfy-decisions-router",
+    model: params.model || "deterministic_fallback",
+    provider: params.backend || params.source,
+    durationMs: params.durationMs,
+    status: params.preventedExpensiveWake ? "filtered_out" : "ok",
+    attributes: {
+      "gen_ai.operation.name": "decisions.evaluate",
+      "orgfy.decision.mode": params.mode,
+      "orgfy.decision.source": params.source,
+      "orgfy.tokens_saved_est": saved
+    }
+  });
+}
+function getTelemetrySnapshot() {
+  const agentMetrics = [];
+  const retryCascadeAlerts = [];
+  for (const [agentName, c] of agentCounters.entries()) {
+    const retryCascadeRisk = c.consecutiveErrors >= 2 || c.totalTurns >= 4 && c.errorTurns / c.totalTurns >= 0.5;
+    agentMetrics.push({
+      agentName,
+      totalTurns: c.totalTurns,
+      errorTurns: c.errorTurns,
+      consecutiveErrors: c.consecutiveErrors,
+      retryCascadeRisk,
+      avgDurationMs: c.totalTurns > 0 ? Math.round(c.totalDurationMs / c.totalTurns) : 0,
+      lastActivityTs: c.lastActivityTs
+    });
+    if (retryCascadeRisk) {
+      retryCascadeAlerts.push(
+        `${agentName}: ${c.consecutiveErrors} erro(s) consecutivo(s) (${c.errorTurns}/${c.totalTurns} turnos) — risco de retry cascade.`
+      );
+    }
+  }
+  agentMetrics.sort((a, b) => b.lastActivityTs - a.lastActivityTs);
+  return {
+    updatedAt: Date.now(),
+    totalSpans: spansBuffer.length,
+    recentSpans: spansBuffer.slice(0, 40),
+    decisionsSavings: {
+      totalCalls: decisionsStats.totalCalls,
+      decisionsApiCalls: decisionsStats.decisionsApiCalls,
+      fallbackCalls: decisionsStats.fallbackCalls,
+      wakesOrEscalationsAvoided: decisionsStats.wakesOrEscalationsAvoided,
+      estimatedTokensSaved: decisionsStats.estimatedTokensSaved,
+      avgLatencyMs: decisionsStats.totalCalls > 0 ? Math.round(decisionsStats.totalLatencyMs / decisionsStats.totalCalls) : 0,
+      byMode: { ...decisionsStats.byMode }
+    },
+    agentMetrics,
+    retryCascadeAlerts
+  };
+}
+function resetTelemetryForTests() {
+  spansBuffer.length = 0;
+  agentCounters.clear();
+  decisionsStats.totalCalls = 0;
+  decisionsStats.decisionsApiCalls = 0;
+  decisionsStats.fallbackCalls = 0;
+  decisionsStats.wakesOrEscalationsAvoided = 0;
+  decisionsStats.estimatedTokensSaved = 0;
+  decisionsStats.totalLatencyMs = 0;
+  decisionsStats.byMode = {};
+}
 const DEFAULT_ORGFY_CHANNEL$1 = "e445491d-2fb3-4ebd-8e2e-f6813c33fb03";
 const RISCO_LABELS = [
   "muito_baixo",
@@ -2602,9 +2755,16 @@ function deterministicCardTriage(input) {
   };
 }
 async function triageCardWithDecisions(ctx, input) {
+  const t0 = Date.now();
   const baseline = deterministicCardTriage(input);
   const decisionsApi = ctx == null ? void 0 : ctx.decisions;
   if (!(decisionsApi == null ? void 0 : decisionsApi.decide)) {
+    recordDecisionTelemetry({
+      mode: "card_triage",
+      source: "deterministic_fallback",
+      durationMs: Date.now() - t0,
+      preventedExpensiveWake: baseline.modeloTier === "tier1_fast"
+    });
     return {
       ...baseline,
       decisionSource: "deterministic_fallback",
@@ -2673,6 +2833,14 @@ async function triageCardWithDecisions(ctx, input) {
           `Decisions API (${res.model}): escopo avaliado como pouco atômico (p=${escopoAtomicoProb.toFixed(2)}).`
         );
       }
+      recordDecisionTelemetry({
+        mode: "card_triage",
+        source: "decisions_api",
+        model: res.model || null,
+        backend: res.backend || null,
+        durationMs: Date.now() - t0,
+        preventedExpensiveWake: modeloTier !== "tier3_frontier" || !escopoAtomico
+      });
       return {
         ok: true,
         decisionSource: "decisions_api",
@@ -3819,8 +3987,8 @@ async function compileProbationaryRule(ctx, options) {
   appendChunk(`[RSI COMPILER] Compilando regra probatória GUARD-${options.erroId.toUpperCase()}...
 `);
   if (!((_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.spawn)) {
-    appendChunk("[SIMULADO] Regra GUARD-" + options.erroId.toUpperCase() + " compilada em janela probatória de 10 cards.\n");
-    return { success: true, output: combinedOutput };
+    appendChunk("[ERRO] ctx.host.spawn indisponível para compilar regra probatória.\n");
+    return { success: false, output: combinedOutput };
   }
   try {
     const cmd = `cd "${ORGFY_ABS_PATH}" && python3 ferramentas/esteira/retro.py --compilar-regra "${options.erroId}" --descricao "${options.descricao}" --comando-check "${options.comandoCheck}"`;
@@ -3840,6 +4008,1301 @@ async function compileProbationaryRule(ctx, options) {
 `);
     return { success: false, output: combinedOutput };
   }
+}
+const NEXUSMIND_PROVIDERS = [
+  {
+    id: "nexusmind_openai",
+    apiKey: "sk-2ee0581e607d02f3485e0efcad2ff686e2b889720f63497813b8fb45eb9d0f08",
+    baseUrl: "https://api.nexusmind.digital/v1",
+    isAnthropic: false
+  },
+  {
+    id: "nexusmind_antigravity",
+    apiKey: "sk-cf8ffed3d96eff9ca80093aee98c589dcf67cf6932c76cd45e223429204051a0",
+    baseUrl: "https://api.nexusmind.digital/v1",
+    isAnthropic: false
+  },
+  {
+    id: "nexusmind_grok",
+    apiKey: "sk-f37b255eada36a40a2520cc43700e6583e9773d16b3543a77a147ce87043a3df",
+    baseUrl: "https://api.nexusmind.digital/v1",
+    isAnthropic: false
+  },
+  {
+    id: "nexusmind_anthropic",
+    apiKey: "sk-bd4137aa79f121bbf4e110d788a7f587b68b49432d333ad9abd88051ba393b1c",
+    baseUrl: "https://api.nexusmind.digital",
+    isAnthropic: true
+  }
+];
+const DEFAULT_ORGFY_CHANNEL = "e445491d-2fb3-4ebd-8e2e-f6813c33fb03";
+function isFreeModelId(modelId) {
+  const lower = String(modelId || "").toLowerCase();
+  return lower.includes(":free") || lower.includes("-free") || lower.includes("/free") || lower.endsWith("free");
+}
+function estimateModelIntelligence(modelId) {
+  const m = String(modelId || "").toLowerCase();
+  let score = 50;
+  if (/(opus|o3|gpt-5|gpt-6|claude-sonnet-4-6|claude-sonnet-5|gemini-3\.?5?-pro|gemini-2\.5-pro|deepseek-r1|deepseek-v3|qwen3-coder|mistral-large|grok-4)/.test(m)) {
+    score += 32;
+  } else if (/(sonnet|pro|large|coder|r1|reasoning|thinking|v3|nemotron-ultra|llama-4|glm-4\.5|kimi-k2)/.test(m)) {
+    score += 22;
+  } else if (/(flash|haiku|medium|70b|72b|32b|devstral|codestral)/.test(m)) {
+    score += 12;
+  }
+  if (/(nano|tiny|1b|3b|7b|8b|fast-free|lite)/.test(m)) {
+    score -= 12;
+  }
+  if (/(thinking|reasoning|high)/.test(m)) {
+    score += 6;
+  }
+  return Math.max(10, Math.min(100, score));
+}
+function computeCombinedModelScore(intelligenceScore, latencyMs) {
+  if (latencyMs === null || !Number.isFinite(latencyMs)) return -1;
+  const latencyPenalty = Math.min(35, latencyMs / 1e3 * 4);
+  return Number((intelligenceScore - latencyPenalty).toFixed(2));
+}
+function getDisabledModelsFromLocalStorage() {
+  var _a, _b;
+  try {
+    const raw = (_b = (_a = globalThis == null ? void 0 : globalThis.localStorage) == null ? void 0 : _a.getItem) == null ? void 0 : _b.call(_a, "nexusmind_disabled_models");
+    if (!raw) return /* @__PURE__ */ new Set();
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? new Set(parsed.map((x) => String(x))) : /* @__PURE__ */ new Set();
+  } catch {
+    return /* @__PURE__ */ new Set();
+  }
+}
+async function discoverNexusMindCatalog(ctx) {
+  var _a, _b, _c;
+  const hostReq = (_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.request;
+  const disabled = getDisabledModelsFromLocalStorage();
+  const seen = /* @__PURE__ */ new Map();
+  if (typeof hostReq === "function") {
+    await Promise.all(
+      NEXUSMIND_PROVIDERS.map(async (prov) => {
+        try {
+          const res = await hostReq({
+            url: "https://api.nexusmind.digital/v1/models",
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${prov.apiKey}`,
+              "User-Agent": "BuzzDesktop/OrgFyFailover"
+            },
+            timeoutMs: 8e3
+          });
+          if ((res == null ? void 0 : res.status) >= 200 && (res == null ? void 0 : res.status) < 300 && (res == null ? void 0 : res.body)) {
+            const parsed = JSON.parse(res.body);
+            const list = Array.isArray(parsed == null ? void 0 : parsed.data) ? parsed.data : [];
+            for (const m of list) {
+              const mid = String((m == null ? void 0 : m.id) || "").trim();
+              if (!mid || disabled.has(mid) || seen.has(mid)) continue;
+              seen.set(mid, { id: mid, provider: prov });
+            }
+          }
+        } catch {
+        }
+      })
+    );
+  }
+  if (seen.size === 0) {
+    try {
+      const raw = (_c = (_b = globalThis == null ? void 0 : globalThis.localStorage) == null ? void 0 : _b.getItem) == null ? void 0 : _c.call(_b, "nexusmind_cached_models");
+      if (raw) {
+        const cached = JSON.parse(raw);
+        if (Array.isArray(cached)) {
+          for (const m of cached) {
+            const mid = String((m == null ? void 0 : m.id) || "").trim();
+            if (!mid || disabled.has(mid) || seen.has(mid)) continue;
+            const prov = NEXUSMIND_PROVIDERS.find((p) => p.id === (m == null ? void 0 : m.primaryGroup)) || NEXUSMIND_PROVIDERS[0];
+            seen.set(mid, { id: mid, provider: prov });
+          }
+        }
+      }
+    } catch {
+    }
+  }
+  return Array.from(seen.values());
+}
+async function probeModelLive(ctx, modelId, prov) {
+  var _a;
+  const hostReq = (_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.request;
+  if (typeof hostReq !== "function") {
+    return { online: false, latencyMs: null, error: "ctx.host.request indisponível" };
+  }
+  const url = prov.isAnthropic ? "https://api.nexusmind.digital/v1/messages" : "https://api.nexusmind.digital/v1/chat/completions";
+  const headers = prov.isAnthropic ? {
+    "x-api-key": prov.apiKey,
+    Authorization: `Bearer ${prov.apiKey}`,
+    "anthropic-version": "2023-06-01",
+    "Content-Type": "application/json",
+    "User-Agent": "BuzzDesktop/OrgFyFailover"
+  } : {
+    Authorization: `Bearer ${prov.apiKey}`,
+    "Content-Type": "application/json",
+    "User-Agent": "BuzzDesktop/OrgFyFailover"
+  };
+  const t0 = Date.now();
+  try {
+    const res = await hostReq({
+      url,
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model: modelId,
+        messages: [{ role: "user", content: "ok" }],
+        max_tokens: prov.isAnthropic ? 16 : 5
+      }),
+      timeoutMs: 9e3
+    });
+    const latencyMs = Date.now() - t0;
+    if ((res == null ? void 0 : res.status) >= 200 && (res == null ? void 0 : res.status) < 300) {
+      return { online: true, latencyMs };
+    }
+    return { online: false, latencyMs, error: `HTTP ${(res == null ? void 0 : res.status) ?? "erro"}` };
+  } catch (err) {
+    return { online: false, latencyMs: Date.now() - t0, error: String((err == null ? void 0 : err.message) || err).slice(0, 100) };
+  }
+}
+function findAgentInSnapshot(agentsApi, query, pubkey) {
+  if (!(agentsApi == null ? void 0 : agentsApi.snapshot)) return void 0;
+  const snap = agentsApi.snapshot() || {};
+  const pool = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const list of [snap.running, snap.agents]) {
+    if (!Array.isArray(list)) continue;
+    for (const a of list) {
+      if (!a || !a.key || seen.has(a.key)) continue;
+      seen.add(a.key);
+      pool.push(a);
+    }
+  }
+  const qLower = String(query || "").trim().toLowerCase();
+  const pkLower = String(pubkey || "").trim().toLowerCase();
+  return pkLower && pool.find((a) => String(a.pubkey || "").toLowerCase() === pkLower) || qLower && pool.find((a) => String(a.key || "").toLowerCase() === qLower) || qLower && pool.find((a) => String(a.name || "").toLowerCase() === qLower) || (qLower ? pool.find((a) => String(a.name || "").toLowerCase().includes(qLower)) : void 0);
+}
+async function executeSmartModelFailover(ctx, input = {}) {
+  const preferFree = input.prefer_free !== false;
+  const applyChange = Boolean(input.apply);
+  const retrigger = input.retrigger !== false;
+  const maxProbes = Math.max(1, Math.min(10, Number(input.max_probes || 6)));
+  const failedNorm = String(input.failed_model || "").trim().toLowerCase();
+  const agentsApi = ctx.agents;
+  const matchedAgent = input.agente || input.agent_pubkey ? findAgentInSnapshot(agentsApi, input.agente, input.agent_pubkey) : void 0;
+  const previousModel = ((matchedAgent == null ? void 0 : matchedAgent.config) && typeof matchedAgent.config === "object" ? String(matchedAgent.config.model || "") : "") || (input.failed_model || null);
+  const catalog = await discoverNexusMindCatalog(ctx);
+  if (catalog.length === 0) {
+    return {
+      ok: false,
+      mode: applyChange ? "applied" : "dry_run",
+      agentName: (matchedAgent == null ? void 0 : matchedAgent.name) || input.agente || null,
+      agentKey: (matchedAgent == null ? void 0 : matchedAgent.key) || null,
+      previousModel,
+      selectedModel: null,
+      selectedProvider: null,
+      selectedLatencyMs: null,
+      selectedIntelligenceScore: null,
+      retriggered: false,
+      candidatesTested: 0,
+      ranking: [],
+      message: "Nenhum modelo retornado pelo NexusMind Gateway (/v1/models indisponível e sem cache local)."
+    };
+  }
+  const excludeSet = /* @__PURE__ */ new Set();
+  if (failedNorm) excludeSet.add(failedNorm);
+  if (previousModel) excludeSet.add(previousModel.toLowerCase());
+  let pool = catalog.filter((c) => !excludeSet.has(c.id.toLowerCase()));
+  if (preferFree) {
+    const freeOnly = pool.filter((c) => isFreeModelId(c.id));
+    if (freeOnly.length > 0) {
+      pool = freeOnly;
+    }
+  }
+  const preRanked = pool.map((c) => ({ ...c, intelligenceScore: estimateModelIntelligence(c.id) })).sort((a, b) => b.intelligenceScore - a.intelligenceScore).slice(0, maxProbes);
+  const probed = await Promise.all(
+    preRanked.map(async (cand) => {
+      const res = await probeModelLive(ctx, cand.id, cand.provider);
+      const combinedScore = res.online ? computeCombinedModelScore(cand.intelligenceScore, res.latencyMs) : -1;
+      return {
+        model: cand.id,
+        provider: cand.provider.id,
+        isFree: isFreeModelId(cand.id),
+        intelligenceScore: cand.intelligenceScore,
+        latencyMs: res.latencyMs,
+        combinedScore,
+        online: res.online,
+        error: res.error
+      };
+    })
+  );
+  probed.sort((a, b) => {
+    if (a.online !== b.online) return a.online ? -1 : 1;
+    if (b.combinedScore !== a.combinedScore) return b.combinedScore - a.combinedScore;
+    return (a.latencyMs ?? 999999) - (b.latencyMs ?? 999999);
+  });
+  const winner = probed.find((p) => p.online) || null;
+  if (!winner) {
+    return {
+      ok: false,
+      mode: applyChange ? "applied" : "dry_run",
+      agentName: (matchedAgent == null ? void 0 : matchedAgent.name) || input.agente || null,
+      agentKey: (matchedAgent == null ? void 0 : matchedAgent.key) || null,
+      previousModel,
+      selectedModel: null,
+      selectedProvider: null,
+      selectedLatencyMs: null,
+      selectedIntelligenceScore: null,
+      retriggered: false,
+      candidatesTested: probed.length,
+      ranking: probed,
+      message: `Nenhum dos ${probed.length} modelos testados respondeu HTTP 200 no ping real do NexusMind.`
+    };
+  }
+  let appliedOk = false;
+  let retriggered = false;
+  let applyNote = "";
+  if (applyChange) {
+    if (!matchedAgent) {
+      return {
+        ok: false,
+        mode: "applied",
+        agentName: input.agente || null,
+        agentKey: null,
+        previousModel,
+        selectedModel: winner.model,
+        selectedProvider: winner.provider,
+        selectedLatencyMs: winner.latencyMs,
+        selectedIntelligenceScore: winner.intelligenceScore,
+        retriggered: false,
+        candidatesTested: probed.length,
+        ranking: probed,
+        message: `Melhor modelo eleito (${winner.model}, ${winner.latencyMs}ms), mas agente '${input.agente || input.agent_pubkey || ""}' não encontrado no Buzz Desktop.`
+      };
+    }
+    if (typeof (agentsApi == null ? void 0 : agentsApi.save) !== "function") {
+      return {
+        ok: false,
+        mode: "applied",
+        agentName: matchedAgent.name || matchedAgent.key,
+        agentKey: matchedAgent.key,
+        previousModel,
+        selectedModel: winner.model,
+        selectedProvider: winner.provider,
+        selectedLatencyMs: winner.latencyMs,
+        selectedIntelligenceScore: winner.intelligenceScore,
+        retriggered: false,
+        candidatesTested: probed.length,
+        ranking: probed,
+        message: `Melhor modelo eleito (${winner.model}, ${winner.latencyMs}ms), mas ctx.agents.save indisponível neste host.`
+      };
+    }
+    const currentCfg = matchedAgent.config && typeof matchedAgent.config === "object" ? { ...matchedAgent.config } : {};
+    currentCfg.model = winner.model;
+    if ("provider" in currentCfg || winner.provider) {
+      currentCfg.provider = winner.provider;
+    }
+    try {
+      await agentsApi.save(matchedAgent.key, { config: currentCfg });
+      appliedOk = true;
+      applyNote = `Modelo de ${matchedAgent.name || matchedAgent.key} atualizado de '${previousModel || "padrão"}' para '${winner.model}' (${winner.provider}, ${winner.latencyMs}ms, score ${winner.combinedScore}).`;
+    } catch (err) {
+      return {
+        ok: false,
+        mode: "applied",
+        agentName: matchedAgent.name || matchedAgent.key,
+        agentKey: matchedAgent.key,
+        previousModel,
+        selectedModel: winner.model,
+        selectedProvider: winner.provider,
+        selectedLatencyMs: winner.latencyMs,
+        selectedIntelligenceScore: winner.intelligenceScore,
+        retriggered: false,
+        candidatesTested: probed.length,
+        ranking: probed,
+        message: `Falha ao salvar novo modelo '${winner.model}' em ${matchedAgent.name || matchedAgent.key}: ${(err == null ? void 0 : err.message) || err}`
+      };
+    }
+    if (appliedOk && retrigger && typeof (agentsApi == null ? void 0 : agentsApi.wake) === "function") {
+      try {
+        const channel = String(input.channel_id || DEFAULT_ORGFY_CHANNEL).trim() || DEFAULT_ORGFY_CHANNEL;
+        const root = input.thread_root ? String(input.thread_root).trim() : void 0;
+        await agentsApi.wake(matchedAgent.key, {
+          channel,
+          ...root ? { root } : {},
+          text: input.retrigger_text || `[ORGFY FAILOVER AUTOMÁTICO] Seu modelo foi migrado para '${winner.model}' (${winner.latencyMs}ms online via NexusMind) após erro de API no modelo anterior. Retome imediatamente o último passo da tarefa com escopo fechado.`
+        });
+        retriggered = true;
+        applyNote += " Agente re-disparado automaticamente.";
+      } catch (wErr) {
+        applyNote += ` (Aviso: falha no re-disparo wake: ${(wErr == null ? void 0 : wErr.message) || wErr})`;
+      }
+    }
+  }
+  return {
+    ok: true,
+    mode: applyChange ? "applied" : "dry_run",
+    agentName: (matchedAgent == null ? void 0 : matchedAgent.name) || input.agente || null,
+    agentKey: (matchedAgent == null ? void 0 : matchedAgent.key) || null,
+    previousModel,
+    selectedModel: winner.model,
+    selectedProvider: winner.provider,
+    selectedLatencyMs: winner.latencyMs,
+    selectedIntelligenceScore: winner.intelligenceScore,
+    retriggered,
+    candidatesTested: probed.length,
+    ranking: probed,
+    message: applyNote || `Melhor modelo disponível (${preferFree ? "FREE" : "ALL"}): ${winner.model} (${winner.provider} · ${winner.latencyMs}ms · inteligência ${winner.intelligenceScore}/100 · score ${winner.combinedScore}).`
+  };
+}
+const RESOLVED_ARCHIVE_PATH = "/Users/heltonfraga/.buzz/.scratch/resolved-issues-archive.json";
+function decodeHostBytes(raw) {
+  if (typeof raw === "string") return raw;
+  if (raw instanceof Uint8Array) return new TextDecoder("utf-8").decode(raw);
+  if (raw instanceof ArrayBuffer) return new TextDecoder("utf-8").decode(new Uint8Array(raw));
+  if (raw && typeof raw === "object") {
+    const obj = raw;
+    if (typeof obj.content === "string") return obj.content;
+    if (typeof obj.text === "string") return obj.text;
+    if (ArrayBuffer.isView(raw)) {
+      return new TextDecoder("utf-8").decode(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength));
+    }
+  }
+  return String(raw ?? "");
+}
+async function fetchResolvedArchive(ctx) {
+  const host = ctx.host;
+  if (!(host == null ? void 0 : host.readFile)) {
+    return {
+      disponivel: false,
+      error: "ctx.host.readFile indisponível.",
+      total: 0,
+      atualizado_em: null,
+      itens: []
+    };
+  }
+  try {
+    const raw = await host.readFile(RESOLVED_ARCHIVE_PATH);
+    const parsed = JSON.parse(decodeHostBytes(raw));
+    const itens = Array.isArray(parsed == null ? void 0 : parsed.itens) ? parsed.itens : [];
+    return {
+      disponivel: true,
+      error: null,
+      total: itens.length,
+      atualizado_em: (parsed == null ? void 0 : parsed.atualizado_em) || null,
+      itens
+    };
+  } catch (err) {
+    return {
+      disponivel: false,
+      error: (err == null ? void 0 : err.message) || "Arquivo resolved-issues-archive.json não encontrado.",
+      total: 0,
+      atualizado_em: null,
+      itens: []
+    };
+  }
+}
+async function searchResolvedArchive(ctx, options = {}) {
+  const loaded = await fetchResolvedArchive(ctx);
+  if (!loaded.disponivel) {
+    return {
+      disponivel: false,
+      error: loaded.error,
+      total_arquivo: 0,
+      total_encontrados: 0,
+      resultados: []
+    };
+  }
+  const q = String(options.query || "").trim().toLowerCase();
+  const specFilter = String(options.spec || "").trim().toLowerCase();
+  const limit = Math.max(1, Math.min(50, Number(options.limit || 10)));
+  const matched = loaded.itens.filter((item) => {
+    if (specFilter && specFilter !== "all" && item.spec.toLowerCase() !== specFilter) {
+      return false;
+    }
+    if (!q) return true;
+    const haystack = [
+      item.issueId,
+      item.fullIssueId,
+      item.code,
+      item.titulo,
+      item.spec,
+      item.commitSha || "",
+      item.causaRaiz,
+      ...item.arquivosAlterados || []
+    ].join(" ").toLowerCase();
+    return q.split(/\s+/).every((tok) => haystack.includes(tok));
+  });
+  return {
+    disponivel: true,
+    error: null,
+    total_arquivo: loaded.total,
+    total_encontrados: matched.length,
+    resultados: matched.slice(0, limit)
+  };
+}
+function buildUnifiedOrgfyTools(ctx) {
+  const rawTools = [
+    {
+      name: "orgfy_status",
+      description: "Retorna a telemetria em tempo real da esteira OrgFy com cards_por_raia derivados do Kanban real e métricas de placar/runtime separadas (sem fallbacks hardcoded).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          empresa: { type: "string", description: "Slug da empresa (default: 'orgfy')" }
+        }
+      },
+      execute: async (args) => {
+        const status = await buildOrgfyStatus(ctx, (args == null ? void 0 : args.empresa) || "orgfy");
+        return { text: JSON.stringify(status, null, 2) };
+      }
+    },
+    {
+      name: "orgfy_kanban_read",
+      description: "Lê a matriz Kanban real da esteira OrgFy categorizada pelas 5 raias determinísticas (triagem, despachado, execucao, revisao, feito), sem fallback para cards mockados.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          stage: { type: "string", description: "'triagem' | 'despachado' | 'execucao' | 'revisao' | 'feito' | 'all'" },
+          empresa: { type: "string", description: "Slug da empresa (default: 'orgfy')" }
+        }
+      },
+      execute: async (args) => {
+        const snapshot = await fetchLiveKanbanSnapshot(ctx, {
+          stage: (args == null ? void 0 : args.stage) || "all",
+          empresa: (args == null ? void 0 : args.empresa) || "orgfy"
+        });
+        const summarized = snapshot.cards.map((c) => ({
+          id: c.id,
+          issueId: c.issueId,
+          fullIssueId: c.fullIssueId,
+          title: c.title,
+          stage: c.stage,
+          priority: c.priority,
+          empresa: c.empresa,
+          executor: c.executor,
+          revisor: c.revisor ?? null,
+          decisor: c.decisor ?? null,
+          acceptanceCommand: c.acceptanceCommand ?? null,
+          acceptanceHash: c.acceptanceHash ?? null,
+          worktreePath: c.worktreePath ?? null,
+          objetivo: c.objetivo ?? null,
+          feitoQuando: c.feitoQuando ?? null,
+          provaExigida: c.provaExigida ?? null,
+          deepLink: `buzz://issue?id=${c.fullIssueId || c.issueId}&owner=${c.owner || "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20"}&d=${c.empresa || "orgfy"}`
+        }));
+        return {
+          text: JSON.stringify(
+            {
+              ok: snapshot.ok,
+              error: snapshot.error,
+              sources: snapshot.sources,
+              total: summarized.length,
+              cards: summarized
+            },
+            null,
+            2
+          ),
+          isError: !snapshot.ok
+        };
+      }
+    },
+    {
+      name: "orgfy_despachar",
+      description: "Despacha um card de issue para execução em worktree isolado, validando Hard Cap orçamentário (100%), checkout lock atômico e retornando o contrato nativo Buzz Attention/Watch.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          issue_id: { type: "string", description: "Identificador curto ou completo da issue (ex: '5c569a9e')" },
+          issueId: { type: "string", description: "Alias camelCase para issue_id" },
+          executor: { type: "string", description: "Nome do agente executor (ex: 'OrgFy Val')" },
+          revisor: { type: "string", description: "Nome do agente revisor independente (L-01)" },
+          empresa: { type: "string", description: "Slug da empresa (default: 'orgfy')" },
+          board_override: { type: "boolean", description: "Autorização explícita do board para ultrapassar 100% do teto" }
+        },
+        required: ["issue_id", "executor", "revisor"]
+      },
+      execute: async (args) => {
+        const issueId = String((args == null ? void 0 : args.issue_id) || (args == null ? void 0 : args.issueId) || "").trim();
+        const executor = String((args == null ? void 0 : args.executor) || "").trim();
+        const revisor = String((args == null ? void 0 : args.revisor) || "").trim();
+        if (!issueId || !executor || !revisor) {
+          return { text: "Erro: issue_id, executor e revisor são obrigatórios.", isError: true };
+        }
+        const kpiRes = await fetchKpisEsteira(ctx);
+        const budgetGate = evaluateBudgetGate(kpiRes.kpis, Boolean(args == null ? void 0 : args.board_override));
+        if (!budgetGate.allowed) {
+          return {
+            text: JSON.stringify({ status: "blocked", code: "BUDGET_HARD_CAP_REACHED", budgetGate }, null, 2),
+            isError: true
+          };
+        }
+        const lockRes = await acquireCheckoutLock(ctx, issueId, executor, 60);
+        if (!lockRes.ok) {
+          return {
+            text: JSON.stringify(
+              { status: "blocked", code: lockRes.code, message: lockRes.message, lock: lockRes.lock },
+              null,
+              2
+            ),
+            isError: true
+          };
+        }
+        const res = await executeDespachar(ctx, {
+          empresa: (args == null ? void 0 : args.empresa) || "orgfy",
+          issueId,
+          executor,
+          revisor
+        });
+        if (res.code !== 0) {
+          await releaseCheckoutLock(ctx, issueId, executor, true);
+        }
+        const attentionContract = buildBuzzAttentionContract({
+          slug: issueId.slice(0, 24),
+          titulo: `Issue ${issueId}`,
+          executor,
+          revisor,
+          policy: "event_driven"
+        });
+        return {
+          text: JSON.stringify(
+            {
+              status: res.code === 0 ? "ok" : "error",
+              exitCode: res.code,
+              budgetGate,
+              lock: res.code === 0 ? lockRes.lock : null,
+              lockReleasedOnFailure: res.code !== 0,
+              attentionContract: res.code === 0 ? attentionContract : null,
+              output: res.output
+            },
+            null,
+            2
+          ),
+          isError: res.code !== 0
+        };
+      }
+    },
+    {
+      name: "orgfy_gate",
+      description: "Aplica o Gate Caixa-Preta da esteira OrgFy a um PR (aceito ou recusado) com validação de probes e checagem DSAP.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          pr_id: { type: "string", description: "ID ou hash do PR" },
+          prId: { type: "string", description: "Alias camelCase para pr_id" },
+          decisao: { type: "string", enum: ["aceito", "recusado"] },
+          acao: { type: "string", enum: ["aceito", "recusado"] },
+          motivo: { type: "string", description: "Justificativa técnica" },
+          revisor: { type: "string", description: "Nome do revisor independente" },
+          empresa: { type: "string", description: "Slug da empresa (default: 'orgfy')" }
+        },
+        required: ["pr_id", "decisao"]
+      },
+      execute: async (args) => {
+        const prId = String((args == null ? void 0 : args.pr_id) || (args == null ? void 0 : args.prId) || "").trim();
+        const acao = String((args == null ? void 0 : args.decisao) || (args == null ? void 0 : args.acao) || "").trim();
+        if (!prId || acao !== "aceito" && acao !== "recusado") {
+          return { text: "Erro: pr_id e decisao ('aceito' | 'recusado') são obrigatórios.", isError: true };
+        }
+        const res = await executeGate(ctx, {
+          empresa: (args == null ? void 0 : args.empresa) || "orgfy",
+          prId,
+          acao,
+          motivo: (args == null ? void 0 : args.motivo) || "Decisão emitida via OrgFy Control Room",
+          revisor: (args == null ? void 0 : args.revisor) || "QA Sentinel"
+        });
+        return {
+          text: JSON.stringify({ status: res.code === 0 ? "ok" : "error", exitCode: res.code, output: res.output }, null, 2),
+          isError: res.code !== 0
+        };
+      }
+    },
+    {
+      name: "orgfy_porteiro_sync",
+      description: "Dispara uma rodada determinística do Porteiro (porteiro.py --uma-vez) para reconciliar eventos Nostr e PRs.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          empresa: { type: "string", description: "Slug da empresa (default: 'orgfy')" }
+        }
+      },
+      execute: async (args) => {
+        const res = await executePorteiroSync(ctx, { empresa: (args == null ? void 0 : args.empresa) || "orgfy" });
+        return {
+          text: JSON.stringify({ status: res.code === 0 ? "ok" : "error", exitCode: res.code, output: res.output }, null, 2),
+          isError: res.code !== 0
+        };
+      }
+    },
+    {
+      name: "orgfy_kpis",
+      description: "Retorna os KPIs determinísticos reais da esteira OrgFy (Fluxo, Qualidade, Economia, Higiene e Alertas) a partir de kpis-esteira.json.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          recalcular: { type: "boolean", description: "Se true, recalcula antes de ler" }
+        }
+      },
+      execute: async (args) => {
+        let recalcOutput = null;
+        if (args == null ? void 0 : args.recalcular) {
+          const recalc = await recalculateKpisNow(ctx);
+          recalcOutput = recalc.output;
+        }
+        const res = await fetchKpisEsteira(ctx);
+        return {
+          text: JSON.stringify(
+            {
+              disponivel: res.disponivel,
+              error: res.error,
+              recalcOutput,
+              kpis: res.kpis,
+              history_points: res.history.length
+            },
+            null,
+            2
+          ),
+          isError: !res.disponivel
+        };
+      }
+    },
+    {
+      name: "orgfy_checkout_lock",
+      description: "Gerencia locks atômicos de checkout por issue_id Nostr (64 hex): action 'acquire' | 'release' | 'list'.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          action: { type: "string", enum: ["acquire", "release", "list"] },
+          issue_id: { type: "string" },
+          agent_id: { type: "string" },
+          ttl_minutes: { type: "number" },
+          title: { type: "string" },
+          owner: { type: "string" },
+          revisor: { type: "string" },
+          acceptance_command: { type: "string" },
+          branch: { type: "string" }
+        },
+        required: ["action"]
+      },
+      execute: async (args) => {
+        const action = args == null ? void 0 : args.action;
+        if (action === "list") {
+          const locks = await listActiveLocks(ctx);
+          return { text: JSON.stringify({ ok: true, total: locks.length, locks }, null, 2) };
+        }
+        if (action === "acquire") {
+          if (!(args == null ? void 0 : args.issue_id) || !(args == null ? void 0 : args.agent_id)) {
+            return { text: JSON.stringify({ ok: false, code: "MISSING_FIELDS" }, null, 2), isError: true };
+          }
+          const res = await acquireCheckoutLock(ctx, args.issue_id, args.agent_id, (args == null ? void 0 : args.ttl_minutes) || 60, Date.now(), {
+            title: args == null ? void 0 : args.title,
+            owner: args == null ? void 0 : args.owner,
+            revisor: args == null ? void 0 : args.revisor,
+            acceptanceCommand: args == null ? void 0 : args.acceptance_command,
+            branch: args == null ? void 0 : args.branch
+          });
+          return { text: JSON.stringify(res, null, 2), isError: !res.ok };
+        }
+        if (action === "release") {
+          if (!(args == null ? void 0 : args.issue_id)) {
+            return { text: JSON.stringify({ ok: false, code: "MISSING_FIELDS" }, null, 2), isError: true };
+          }
+          const res = await releaseCheckoutLock(ctx, args.issue_id, args == null ? void 0 : args.agent_id);
+          return { text: JSON.stringify(res, null, 2), isError: !res.ok };
+        }
+        return { text: JSON.stringify({ ok: false, code: "INVALID_ACTION" }, null, 2), isError: true };
+      }
+    },
+    {
+      name: "orgfy_governanca_avaliar",
+      description: "Avalia orçamento, fila de revisão, WIP órfão e estagnação nível 3, disparando alertas/wakes com cooldown anti-spam.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          dry_run: { type: "boolean" },
+          auto_wake: { type: "boolean" }
+        }
+      },
+      execute: async (args) => {
+        const res = await evaluateGovernanceAndReact(ctx, {
+          dryRun: Boolean(args == null ? void 0 : args.dry_run),
+          autoWake: (args == null ? void 0 : args.auto_wake) !== false,
+          includeRadar: true
+        });
+        return { text: JSON.stringify(res, null, 2) };
+      }
+    },
+    {
+      name: "orgfy_lint_card",
+      description: "Audita template OrgFy/Spec-Kit, qualidade semântica e regras L-01/L-22 antes do despacho.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          objective: { type: "string" },
+          done_when: { type: "string" },
+          acceptance_command: { type: "string" },
+          executor: { type: "string" },
+          revisor: { type: "string" },
+          card_markdown: { type: "string" },
+          spec_path: { type: "string" }
+        },
+        required: ["title"]
+      },
+      execute: async (args) => {
+        const descParts = [args == null ? void 0 : args.objective, (args == null ? void 0 : args.done_when) ? `Feito quando: ${args.done_when}` : ""].filter(Boolean).join("\n");
+        const res = await lintCardForDispatch(ctx, {
+          titulo: (args == null ? void 0 : args.title) ?? (args == null ? void 0 : args.titulo),
+          descricao: (args == null ? void 0 : args.descricao) || descParts || void 0,
+          acceptanceCommand: (args == null ? void 0 : args.acceptance_command) ?? (args == null ? void 0 : args.acceptanceCommand),
+          executor: args == null ? void 0 : args.executor,
+          revisor: args == null ? void 0 : args.revisor,
+          cardMarkdown: (args == null ? void 0 : args.card_markdown) ?? (args == null ? void 0 : args.cardMarkdown),
+          specPath: (args == null ? void 0 : args.spec_path) ?? (args == null ? void 0 : args.specPath)
+        });
+        return { text: JSON.stringify(res, null, 2), isError: !res.approved };
+      }
+    },
+    {
+      name: "orgfy_bind_context",
+      description: "Vincula o worktree e injeta regras vivas L-22/L-90 direto na conversa do agente.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          conversation_id: { type: "string" },
+          issue_id: { type: "string" },
+          worktree_path: { type: "string" },
+          title: { type: "string" },
+          acceptance_command: { type: "string" },
+          acceptance_hash: { type: "string" },
+          executor: { type: "string" },
+          revisor: { type: "string" }
+        },
+        required: ["conversation_id", "issue_id"]
+      },
+      execute: async (args) => {
+        const res = await bindConversationContextForCard(ctx, {
+          conversationId: (args == null ? void 0 : args.conversation_id) ?? (args == null ? void 0 : args.conversationId),
+          issueId: (args == null ? void 0 : args.issue_id) ?? (args == null ? void 0 : args.issueId),
+          worktreePath: (args == null ? void 0 : args.worktree_path) ?? (args == null ? void 0 : args.worktreePath),
+          titulo: (args == null ? void 0 : args.title) ?? (args == null ? void 0 : args.titulo),
+          acceptanceCommand: (args == null ? void 0 : args.acceptance_command) ?? (args == null ? void 0 : args.acceptanceCommand),
+          acceptanceHash: (args == null ? void 0 : args.acceptance_hash) ?? (args == null ? void 0 : args.acceptanceHash),
+          executor: args == null ? void 0 : args.executor,
+          revisor: args == null ? void 0 : args.revisor
+        });
+        return { text: JSON.stringify(res, null, 2), isError: !res.ok };
+      }
+    },
+    {
+      name: "orgfy_historico_buscar",
+      description: "Busca just-in-time no Arquivo de Issues Resolvidas por código, causa raiz, arquivo ou SHA.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+          spec: { type: "string" },
+          limit: { type: "number" }
+        }
+      },
+      execute: async (args) => {
+        const res = await searchResolvedArchive(ctx, {
+          query: args == null ? void 0 : args.query,
+          spec: args == null ? void 0 : args.spec,
+          limit: Math.max(1, Math.min(50, Number((args == null ? void 0 : args.limit) || 10)))
+        });
+        return {
+          text: JSON.stringify(res, null, 2),
+          isError: !res.disponivel
+        };
+      }
+    },
+    {
+      name: "orgfy_loop_radar",
+      description: "Consulta o Radar de Loops & Sessões Zumbis do Goose em tempo real (mode=ro), identificando LOOP_SUSPEITO, STALLED_THINKING, SESSAO_DUPLICADA e EXPLORACAO_CLI_HELP.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          apenas_ativos: { type: "boolean" },
+          agente: { type: "string" }
+        }
+      },
+      execute: async (args) => {
+        const radar = await fetchGooseLoopRadar(ctx);
+        const filtered = filterGooseLoopRadar(radar, {
+          apenas_ativos: args == null ? void 0 : args.apenas_ativos,
+          agente: args == null ? void 0 : args.agente
+        });
+        return { text: JSON.stringify(filtered, null, 2), isError: !radar.ok };
+      }
+    },
+    {
+      name: "orgfy_session_stop",
+      description: "Interrompe (Stop) ou reinicia um turno/sessão de agente via API nativa do Buzz Desktop (interrupt/new/compact), com relaunch atômico opcional.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          agente: { type: "string" },
+          agent_pubkey: { type: "string" },
+          channel_id: { type: "string" },
+          thread_root: { type: "string" },
+          action: { type: "string", enum: ["interrupt", "new", "compact"] },
+          release_issue_id: { type: "string" },
+          reason: { type: "string" },
+          relaunch: { type: "boolean" },
+          reset_session_before_relaunch: { type: "boolean" },
+          relaunch_instruction: { type: "string" },
+          target_files: { type: "array", items: { type: "string" } },
+          acceptance_command: { type: "string" },
+          max_shells: { type: "number" }
+        },
+        required: ["agente"]
+      },
+      execute: async (args) => {
+        const agente = String((args == null ? void 0 : args.agente) || (args == null ? void 0 : args.agent_pubkey) || "").trim();
+        if (!agente) {
+          return { text: "Erro: 'agente' (ou 'agent_pubkey') é obrigatório.", isError: true };
+        }
+        const res = await stopAgentSession(ctx, {
+          agente,
+          agent_pubkey: args == null ? void 0 : args.agent_pubkey,
+          channel_id: args == null ? void 0 : args.channel_id,
+          thread_root: args == null ? void 0 : args.thread_root,
+          action: args == null ? void 0 : args.action,
+          release_issue_id: args == null ? void 0 : args.release_issue_id,
+          reason: args == null ? void 0 : args.reason,
+          relaunch: Boolean(args == null ? void 0 : args.relaunch),
+          reset_session_before_relaunch: Boolean(args == null ? void 0 : args.reset_session_before_relaunch),
+          relaunch_instruction: args == null ? void 0 : args.relaunch_instruction,
+          target_files: Array.isArray(args == null ? void 0 : args.target_files) ? args.target_files : void 0,
+          acceptance_command: args == null ? void 0 : args.acceptance_command,
+          max_shells: typeof (args == null ? void 0 : args.max_shells) === "number" ? args.max_shells : void 0
+        });
+        return { text: JSON.stringify(res, null, 2), isError: !res.ok };
+      }
+    },
+    {
+      name: "orgfy_model_failover",
+      description: "Integração OrgFy ↔ NexusMind Gateway: faz ping real nos candidatos mais inteligentes, elege o melhor online (inteligência + menor latência), atualiza via ctx.agents.save() e re-dispara na thread.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          agente: { type: "string" },
+          agent_pubkey: { type: "string" },
+          failed_model: { type: "string" },
+          prefer_free: { type: "boolean" },
+          apply: { type: "boolean" },
+          retrigger: { type: "boolean" },
+          channel_id: { type: "string" },
+          thread_root: { type: "string" },
+          retrigger_text: { type: "string" },
+          max_probes: { type: "number" }
+        }
+      },
+      execute: async (args) => {
+        const res = await executeSmartModelFailover(ctx, {
+          agente: args == null ? void 0 : args.agente,
+          agent_pubkey: args == null ? void 0 : args.agent_pubkey,
+          failed_model: args == null ? void 0 : args.failed_model,
+          prefer_free: args == null ? void 0 : args.prefer_free,
+          apply: args == null ? void 0 : args.apply,
+          retrigger: args == null ? void 0 : args.retrigger,
+          channel_id: args == null ? void 0 : args.channel_id,
+          thread_root: args == null ? void 0 : args.thread_root,
+          retrigger_text: args == null ? void 0 : args.retrigger_text,
+          max_probes: args == null ? void 0 : args.max_probes
+        });
+        return { text: JSON.stringify(res, null, 2), isError: !res.ok };
+      }
+    },
+    {
+      name: "orgfy_card_create",
+      description: "Abertura schema-first de card OrgFy: valida L-01, executa triagem em cascata via Decisions API (risco, tier modelo, política Attention), congela SHA-256 (L-22), gera contrato nativo Buzz Attention/Watch (interest_set + watch_add) e grava/valida opcionalmente.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          slug: { type: "string" },
+          id_tarefa: { type: "string" },
+          titulo: { type: "string" },
+          objetivo: { type: "string" },
+          contexto: { type: "string" },
+          autoridade: { type: "string" },
+          decisao: { type: "string" },
+          tipo: { type: "string", enum: ["execucao", "revisao", "infraestrutura", "seguranca", "spec", "pesquisa"] },
+          executor: { type: "string" },
+          revisor: { type: "string" },
+          decisor: { type: "string" },
+          escrita_exclusiva: { type: "array", items: { type: "string" } },
+          leitura: { type: "array", items: { type: "string" } },
+          passos: { type: "array", items: { type: "string" } },
+          fora_escopo: { type: "array", items: { type: "string" } },
+          feito_quando: { type: "string" },
+          prova_positiva: { type: "string" },
+          prova_negativa: { type: "string" },
+          acceptance_command: { type: "string" },
+          attention_policy: { type: "string", enum: ["timer_curto", "event_driven", "watchdog_longo"] },
+          channel_id: { type: "string" },
+          thread_root: { type: "string" },
+          write_file: { type: "boolean" },
+          run_lint: { type: "boolean" },
+          empresa: { type: "string" }
+        },
+        required: [
+          "slug",
+          "titulo",
+          "autoridade",
+          "decisao",
+          "executor",
+          "revisor",
+          "escrita_exclusiva",
+          "feito_quando",
+          "acceptance_command"
+        ]
+      },
+      execute: async (args) => {
+        const res = await createCanonicalCard(ctx, args || {});
+        return { text: JSON.stringify(res, null, 2), isError: !res.ok };
+      }
+    },
+    {
+      name: "orgfy_decision_triage",
+      description: "Classificador rápido em batch via ctx.decisions.decide (yes_no + score + choice) com fallback determinístico offline para triagem de card (mode='card') ou pre-flight de diff/entrega (mode='diff').",
+      inputSchema: {
+        type: "object",
+        properties: {
+          mode: { type: "string", enum: ["card", "diff"] },
+          slug: { type: "string" },
+          issue_id: { type: "string" },
+          titulo: { type: "string" },
+          objetivo: { type: "string" },
+          tipo: { type: "string" },
+          escrita_exclusiva: { type: "array", items: { type: "string" } },
+          arquivos_alterados: { type: "array", items: { type: "string" } },
+          acceptance_command: { type: "string" },
+          passos: { type: "array", items: { type: "string" } },
+          resumo_entrega: { type: "string" },
+          saida_aceite: { type: "string" },
+          recusas_anteriores: { type: "number" }
+        },
+        required: ["mode"]
+      },
+      execute: async (args) => {
+        const mode = String((args == null ? void 0 : args.mode) || "card");
+        const res = mode === "diff" ? await triageDiffWithDecisions(ctx, {
+          issue_id: args == null ? void 0 : args.issue_id,
+          titulo: args == null ? void 0 : args.titulo,
+          escrita_exclusiva: Array.isArray(args == null ? void 0 : args.escrita_exclusiva) ? args.escrita_exclusiva : [],
+          arquivos_alterados: Array.isArray(args == null ? void 0 : args.arquivos_alterados) ? args.arquivos_alterados : [],
+          resumo_entrega: args == null ? void 0 : args.resumo_entrega,
+          saida_aceite: args == null ? void 0 : args.saida_aceite,
+          recusas_anteriores: args == null ? void 0 : args.recusas_anteriores
+        }) : await triageCardWithDecisions(ctx, {
+          slug: args == null ? void 0 : args.slug,
+          titulo: String((args == null ? void 0 : args.titulo) || ""),
+          objetivo: args == null ? void 0 : args.objetivo,
+          tipo: args == null ? void 0 : args.tipo,
+          escrita_exclusiva: Array.isArray(args == null ? void 0 : args.escrita_exclusiva) ? args.escrita_exclusiva : [],
+          acceptance_command: args == null ? void 0 : args.acceptance_command,
+          passos: Array.isArray(args == null ? void 0 : args.passos) ? args.passos : []
+        });
+        return { text: JSON.stringify(res, null, 2), isError: !res.ok };
+      }
+    }
+  ];
+  return rawTools.map((tool) => ({
+    ...tool,
+    execute: async (args) => {
+      const t0 = Date.now();
+      try {
+        const out = await tool.execute(args);
+        recordGenAISpan({
+          operationName: "execute_tool",
+          agentName: "orgfy-tool-registry",
+          toolName: tool.name,
+          durationMs: Date.now() - t0,
+          status: out.isError ? "error" : "ok",
+          attributes: {
+            "gen_ai.operation.name": "execute_tool",
+            "gen_ai.tool.name": tool.name
+          }
+        });
+        return out;
+      } catch (err) {
+        recordGenAISpan({
+          operationName: "execute_tool",
+          agentName: "orgfy-tool-registry",
+          toolName: tool.name,
+          durationMs: Date.now() - t0,
+          status: "error",
+          finishReason: String((err == null ? void 0 : err.message) || err).slice(0, 120),
+          attributes: {
+            "gen_ai.operation.name": "execute_tool",
+            "gen_ai.tool.name": tool.name
+          }
+        });
+        throw err;
+      }
+    }
+  }));
+}
+let sidebarCounts = {
+  triagem: 0,
+  execucao: 0,
+  revisao: 0,
+  loopsAtivos: 0
+};
+const sidebarListeners = /* @__PURE__ */ new Set();
+const relayChangeListeners = /* @__PURE__ */ new Set();
+function updateOrgfySidebarCounts(next) {
+  sidebarCounts = { ...sidebarCounts, ...next };
+  for (const fn of sidebarListeners) {
+    try {
+      fn();
+    } catch {
+    }
+  }
+}
+function subscribeRelayUpdates(listener) {
+  relayChangeListeners.add(listener);
+  return () => relayChangeListeners.delete(listener);
+}
+function registerBuzzNativeIntegrations(ctx) {
+  var _a, _b, _c, _d, _e;
+  const state = {
+    relayConnected: false,
+    conversationRegistered: false,
+    sidebarRegistered: false,
+    shortcutsRegistered: false,
+    attentionSourceRegistered: false,
+    otelHookRegistered: false
+  };
+  try {
+    const relay = ctx == null ? void 0 : ctx.relay;
+    if ((relay == null ? void 0 : relay.subscribe) && typeof relay.subscribe === "function") {
+      let lastGen = ((_b = (_a = relay.snapshot) == null ? void 0 : _a.call(relay)) == null ? void 0 : _b.generation) ?? -1;
+      const unsub = relay.subscribe(() => {
+        var _a2;
+        const snap = (_a2 = relay.snapshot) == null ? void 0 : _a2.call(relay);
+        const gen = (snap == null ? void 0 : snap.generation) ?? -1;
+        if (gen !== lastGen) {
+          lastGen = gen;
+          recordGenAISpan({
+            operationName: "relay.event",
+            agentName: "buzz-relay",
+            durationMs: 0,
+            status: (snap == null ? void 0 : snap.status) === "error" ? "error" : "ok",
+            attributes: {
+              "buzz.relay.status": String((snap == null ? void 0 : snap.status) || "unknown"),
+              "buzz.relay.generation": gen
+            }
+          });
+          for (const fn of relayChangeListeners) {
+            try {
+              fn();
+            } catch {
+            }
+          }
+        }
+      });
+      if ((ctx == null ? void 0 : ctx.on) && typeof unsub === "function") {
+        ctx.on("dispose", unsub);
+      }
+      state.relayConnected = true;
+    }
+  } catch (err) {
+    console.warn("[ORGFY v13] Falha ao assinar ctx.relay:", err);
+  }
+  try {
+    const conv = ctx == null ? void 0 : ctx.conversation;
+    if (conv == null ? void 0 : conv.registerCompletion) {
+      conv.registerCompletion({
+        id: "orgfy-slash-commands",
+        trigger: "/",
+        complete: (query) => {
+          const text = String((query == null ? void 0 : query.text) || (query == null ? void 0 : query.query) || "").toLowerCase();
+          const commands = [
+            {
+              id: "orgfy-card",
+              label: "/orgfy-card",
+              description: "Abrir card OrgFy schema-first (L-22 + Buzz Attention)",
+              insertText: "Chame `orgfy_card_create` para abrir um novo card com escopo fechado, Escrita exclusiva e comando de aceite L-22."
+            },
+            {
+              id: "orgfy-despachar",
+              label: "/orgfy-despachar",
+              description: "Despachar issue para executor + revisor independente (L-01)",
+              insertText: "Chame `orgfy_despachar` passando issue_id, executor e revisor."
+            },
+            {
+              id: "orgfy-gate",
+              label: "/orgfy-gate",
+              description: "Emitir veredito de Gate Caixa-Preta (aceito/recusado)",
+              insertText: "Chame `orgfy_gate` com pr_id, decisao e motivo."
+            },
+            {
+              id: "orgfy-triage",
+              label: "/orgfy-triage",
+              description: "Rodar triagem rápida via Decisions API (card ou diff)",
+              insertText: "Chame `orgfy_decision_triage` (mode: 'card' ou 'diff') para avaliação rápida."
+            },
+            {
+              id: "orgfy-radar",
+              label: "/orgfy-radar",
+              description: "Inspecionar Radar de Loops & sessões travadas no Goose",
+              insertText: "Chame `orgfy_loop_radar({ apenas_ativos: true })` e reporte sessões críticas."
+            }
+          ];
+          const filtered = text ? commands.filter((c) => c.label.includes(text) || c.description.toLowerCase().includes(text)) : commands;
+          return { suggestions: filtered };
+        }
+      });
+      state.conversationRegistered = true;
+    }
+    if (conv == null ? void 0 : conv.registerMessageAction) {
+      conv.registerMessageAction({
+        id: "orgfy-open-control-room",
+        label: "Abrir no OrgFy Control Room",
+        run: () => {
+          var _a2, _b2;
+          try {
+            if ((_a2 = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a2.open) {
+              ctx.navigation.open({ version: 1, kind: "page", page: "orgfy" });
+            } else if ((_b2 = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _b2.navigate) {
+              ctx.navigation.navigate("orgfy");
+            }
+          } catch {
+          }
+        }
+      });
+      state.conversationRegistered = true;
+    }
+  } catch (err) {
+    console.warn("[ORGFY v13] Falha ao registrar extensões de conversa:", err);
+  }
+  try {
+    const sidebar = ((_d = (_c = ctx == null ? void 0 : ctx.reflect) == null ? void 0 : _c.get) == null ? void 0 : _d.call(_c, "sidebarSections")) || (ctx == null ? void 0 : ctx.sidebarSections);
+    if (sidebar == null ? void 0 : sidebar.register) {
+      const h = (_e = ctx == null ? void 0 : ctx.react) == null ? void 0 : _e.createElement;
+      sidebar.register({
+        version: 1,
+        id: "orgfy-live-pulse",
+        title: "OrgFy Esteira",
+        icon: h ? h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#10b981" } }, "◈") : null,
+        rows: {
+          snapshot: () => [
+            {
+              id: "orgfy-revisao",
+              label: "Em Revisão (Gate)",
+              count: sidebarCounts.revisao,
+              status: sidebarCounts.revisao > 0 ? "active" : "idle"
+            },
+            {
+              id: "orgfy-execucao",
+              label: "Em Execução",
+              count: sidebarCounts.execucao,
+              status: sidebarCounts.execucao > 0 ? "active" : "idle"
+            },
+            {
+              id: "orgfy-loops",
+              label: "Loops Ativos",
+              count: sidebarCounts.loopsAtivos,
+              badge: sidebarCounts.loopsAtivos > 0 ? "ALERTA" : void 0,
+              status: sidebarCounts.loopsAtivos > 0 ? "error" : "ok"
+            }
+          ],
+          subscribe: (listener) => {
+            sidebarListeners.add(listener);
+            return () => sidebarListeners.delete(listener);
+          }
+        },
+        select: () => ({ version: 1, kind: "page", page: "orgfy" })
+      });
+      state.sidebarRegistered = true;
+    }
+  } catch (err) {
+    console.warn("[ORGFY v13] Falha ao registrar sidebarSections:", err);
+  }
+  try {
+    const shortcuts = ctx == null ? void 0 : ctx.shortcuts;
+    if (shortcuts == null ? void 0 : shortcuts.register) {
+      shortcuts.register({
+        id: "orgfy-open-cockpit",
+        title: "Abrir OrgFy Control Room",
+        binding: "Mod+Shift+O",
+        run: () => {
+          var _a2, _b2;
+          try {
+            if ((_a2 = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a2.open) {
+              ctx.navigation.open({ version: 1, kind: "page", page: "orgfy" });
+            } else if ((_b2 = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _b2.navigate) {
+              ctx.navigation.navigate("orgfy");
+            }
+          } catch {
+          }
+        }
+      });
+      state.shortcutsRegistered = true;
+    }
+  } catch (err) {
+    console.warn("[ORGFY v13] Falha ao registrar shortcuts:", err);
+  }
+  try {
+    const agents = ctx == null ? void 0 : ctx.agents;
+    if (agents == null ? void 0 : agents.addAttentionSource) {
+      agents.addAttentionSource({
+        id: "orgfy.pipeline",
+        label: "OrgFy Esteira & Gate",
+        description: "Emite eventos estruturados da esteira OrgFy (card.ready_for_review, gate.rejected_dsap, loop.detected, budget.80pct) compatíveis com classifier pré-LLM.",
+        present: (watch, title) => {
+          var _a2;
+          return {
+            type: "OrgFy Esteira",
+            target: String(((_a2 = watch == null ? void 0 : watch.config) == null ? void 0 : _a2.empresa) || "orgfy"),
+            subtitle: title || "Monitoramento determinístico de cards, PRs e loops"
+          };
+        }
+      });
+      state.attentionSourceRegistered = true;
+    }
+  } catch (err) {
+    console.warn("[ORGFY v13] Falha ao registrar AttentionSource:", err);
+  }
+  try {
+    const agents = ctx == null ? void 0 : ctx.agents;
+    if (agents == null ? void 0 : agents.registerHook) {
+      const registerOtel = (event, status) => {
+        agents.registerHook({
+          id: `orgfy-otel-${event}`,
+          harness: "goose",
+          event,
+          run: (input, hookCtx) => {
+            const errMsg = (input == null ? void 0 : input.error) ? String(input.error).slice(0, 140) : void 0;
+            recordGenAISpan({
+              operationName: "invoke_agent",
+              agentName: String((hookCtx == null ? void 0 : hookCtx.agent) || (input == null ? void 0 : input.agent) || "unknown-agent"),
+              model: (input == null ? void 0 : input.model) ? String(input.model) : null,
+              provider: (input == null ? void 0 : input.provider) ? String(input.provider) : null,
+              durationMs: Number((input == null ? void 0 : input.durationMs) || (input == null ? void 0 : input.duration_ms) || 0),
+              status: errMsg ? "error" : status,
+              finishReason: errMsg || (status === "ok" ? "stop" : "error"),
+              attributes: {
+                "gen_ai.operation.name": "invoke_agent",
+                "buzz.hook.event": event,
+                "buzz.session.id": String((hookCtx == null ? void 0 : hookCtx.session) || "")
+              }
+            });
+            return void 0;
+          }
+        });
+      };
+      registerOtel("turn.completed", "ok");
+      registerOtel("turn.failed", "error");
+      state.otelHookRegistered = true;
+    }
+  } catch (err) {
+    console.warn("[ORGFY v13] Falha ao registrar OTel AgentHook:", err);
+  }
+  return state;
 }
 const CARD_BG = "rgba(0, 0, 0, 0.28)";
 const BORDER = "1px solid rgba(255, 255, 255, 0.08)";
@@ -4626,6 +6089,75 @@ function renderIntelligenceTab(props) {
             )
           )
         )
+      ),
+      // ── PAINEL FRONTIER v13: OPENTELEMETRY GENAI LIVE STREAM & ECONOMIA DECISIONS API ──
+      props.telemetry && h(
+        "div",
+        {
+          style: {
+            padding: "14px 16px",
+            borderRadius: "10px",
+            backgroundColor: CARD_BG,
+            border: "1px solid rgba(56, 189, 248, 0.25)",
+            display: "flex",
+            flexDirection: "column",
+            gap: "10px"
+          }
+        },
+        h(
+          "div",
+          { style: { display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" } },
+          h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#38bdf8" } }, "Observabilidade Frontier (OTel GenAI + Economia Decisions API)"),
+          h(
+            "span",
+            { style: { fontSize: "10px", color: "#9ca3af", fontFamily: "monospace" } },
+            `${props.telemetry.totalSpans} spans capturados · ${props.telemetry.decisionsSavings.totalCalls} avaliações Decisions`
+          )
+        ),
+        h(
+          "div",
+          { style: { display: "grid", gridTemplateColumns: "repeat(4, minmax(120px, 1fr))", gap: "8px" } },
+          [
+            { label: "Decisions API", value: `${props.telemetry.decisionsSavings.decisionsApiCalls} calls`, color: "#10b981" },
+            { label: "Wakes Evitados", value: String(props.telemetry.decisionsSavings.wakesOrEscalationsAvoided), color: "#38bdf8" },
+            { label: "Tokens Economizados", value: `~${Math.round(props.telemetry.decisionsSavings.estimatedTokensSaved / 1e3)}k`, color: "#c084fc" },
+            { label: "Alertas Retry Cascade", value: String(props.telemetry.retryCascadeAlerts.length), color: props.telemetry.retryCascadeAlerts.length > 0 ? "#f87171" : "#10b981" }
+          ].map(
+            (m) => h(
+              "div",
+              { key: m.label, style: { padding: "8px 10px", borderRadius: "8px", backgroundColor: "rgba(255,255,255,0.03)", border: BORDER } },
+              h("div", { style: { fontSize: "10px", color: "#9ca3af" } }, m.label),
+              h("div", { style: { fontSize: "14px", fontWeight: "700", color: m.color, fontFamily: "monospace", marginTop: "2px" } }, m.value)
+            )
+          )
+        ),
+        props.telemetry.recentSpans.length > 0 && h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: "4px", maxHeight: "150px", overflowY: "auto" } },
+          props.telemetry.recentSpans.slice(0, 8).map(
+            (sp) => h(
+              "div",
+              {
+                key: sp.spanId,
+                style: {
+                  display: "grid",
+                  gridTemplateColumns: "110px 1fr 75px 60px",
+                  gap: "8px",
+                  padding: "4px 8px",
+                  borderRadius: "6px",
+                  backgroundColor: "rgba(0,0,0,0.28)",
+                  fontSize: "10px",
+                  fontFamily: "monospace",
+                  alignItems: "center"
+                }
+              },
+              h("span", { style: { color: "#38bdf8", fontWeight: "600" } }, sp.operationName),
+              h("span", { style: { color: "#e5e7eb", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, `${sp.agentName}${sp.toolName ? ` · ${sp.toolName}` : ""}${sp.model ? ` (${sp.model})` : ""}`),
+              h("span", { style: { color: sp.status === "error" ? "#f87171" : sp.status === "filtered_out" ? "#c084fc" : "#10b981", fontWeight: "700" } }, sp.status.toUpperCase()),
+              h("span", { style: { color: "#9ca3af", textAlign: "right" } }, `${sp.durationMs}ms`)
+            )
+          )
+        )
       )
     )
   );
@@ -4942,438 +6474,6 @@ async function hydrateIssueDetail(ctx, card) {
     probesSource,
     transitions: transitions.slice(-6),
     rejectionsCount
-  };
-}
-const NEXUSMIND_PROVIDERS = [
-  {
-    id: "nexusmind_openai",
-    apiKey: "sk-2ee0581e607d02f3485e0efcad2ff686e2b889720f63497813b8fb45eb9d0f08",
-    baseUrl: "https://api.nexusmind.digital/v1",
-    isAnthropic: false
-  },
-  {
-    id: "nexusmind_antigravity",
-    apiKey: "sk-cf8ffed3d96eff9ca80093aee98c589dcf67cf6932c76cd45e223429204051a0",
-    baseUrl: "https://api.nexusmind.digital/v1",
-    isAnthropic: false
-  },
-  {
-    id: "nexusmind_grok",
-    apiKey: "sk-f37b255eada36a40a2520cc43700e6583e9773d16b3543a77a147ce87043a3df",
-    baseUrl: "https://api.nexusmind.digital/v1",
-    isAnthropic: false
-  },
-  {
-    id: "nexusmind_anthropic",
-    apiKey: "sk-bd4137aa79f121bbf4e110d788a7f587b68b49432d333ad9abd88051ba393b1c",
-    baseUrl: "https://api.nexusmind.digital",
-    isAnthropic: true
-  }
-];
-const DEFAULT_ORGFY_CHANNEL = "e445491d-2fb3-4ebd-8e2e-f6813c33fb03";
-function isFreeModelId(modelId) {
-  const lower = String(modelId || "").toLowerCase();
-  return lower.includes(":free") || lower.includes("-free") || lower.includes("/free") || lower.endsWith("free");
-}
-function estimateModelIntelligence(modelId) {
-  const m = String(modelId || "").toLowerCase();
-  let score = 50;
-  if (/(opus|o3|gpt-5|gpt-6|claude-sonnet-4-6|claude-sonnet-5|gemini-3\.?5?-pro|gemini-2\.5-pro|deepseek-r1|deepseek-v3|qwen3-coder|mistral-large|grok-4)/.test(m)) {
-    score += 32;
-  } else if (/(sonnet|pro|large|coder|r1|reasoning|thinking|v3|nemotron-ultra|llama-4|glm-4\.5|kimi-k2)/.test(m)) {
-    score += 22;
-  } else if (/(flash|haiku|medium|70b|72b|32b|devstral|codestral)/.test(m)) {
-    score += 12;
-  }
-  if (/(nano|tiny|1b|3b|7b|8b|fast-free|lite)/.test(m)) {
-    score -= 12;
-  }
-  if (/(thinking|reasoning|high)/.test(m)) {
-    score += 6;
-  }
-  return Math.max(10, Math.min(100, score));
-}
-function computeCombinedModelScore(intelligenceScore, latencyMs) {
-  if (latencyMs === null || !Number.isFinite(latencyMs)) return -1;
-  const latencyPenalty = Math.min(35, latencyMs / 1e3 * 4);
-  return Number((intelligenceScore - latencyPenalty).toFixed(2));
-}
-function getDisabledModelsFromLocalStorage() {
-  var _a, _b;
-  try {
-    const raw = (_b = (_a = globalThis == null ? void 0 : globalThis.localStorage) == null ? void 0 : _a.getItem) == null ? void 0 : _b.call(_a, "nexusmind_disabled_models");
-    if (!raw) return /* @__PURE__ */ new Set();
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? new Set(parsed.map((x) => String(x))) : /* @__PURE__ */ new Set();
-  } catch {
-    return /* @__PURE__ */ new Set();
-  }
-}
-async function discoverNexusMindCatalog(ctx) {
-  var _a, _b, _c;
-  const hostReq = (_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.request;
-  const disabled = getDisabledModelsFromLocalStorage();
-  const seen = /* @__PURE__ */ new Map();
-  if (typeof hostReq === "function") {
-    await Promise.all(
-      NEXUSMIND_PROVIDERS.map(async (prov) => {
-        try {
-          const res = await hostReq({
-            url: "https://api.nexusmind.digital/v1/models",
-            method: "GET",
-            headers: {
-              Authorization: `Bearer ${prov.apiKey}`,
-              "User-Agent": "BuzzDesktop/OrgFyFailover"
-            },
-            timeoutMs: 8e3
-          });
-          if ((res == null ? void 0 : res.status) >= 200 && (res == null ? void 0 : res.status) < 300 && (res == null ? void 0 : res.body)) {
-            const parsed = JSON.parse(res.body);
-            const list = Array.isArray(parsed == null ? void 0 : parsed.data) ? parsed.data : [];
-            for (const m of list) {
-              const mid = String((m == null ? void 0 : m.id) || "").trim();
-              if (!mid || disabled.has(mid) || seen.has(mid)) continue;
-              seen.set(mid, { id: mid, provider: prov });
-            }
-          }
-        } catch {
-        }
-      })
-    );
-  }
-  if (seen.size === 0) {
-    try {
-      const raw = (_c = (_b = globalThis == null ? void 0 : globalThis.localStorage) == null ? void 0 : _b.getItem) == null ? void 0 : _c.call(_b, "nexusmind_cached_models");
-      if (raw) {
-        const cached = JSON.parse(raw);
-        if (Array.isArray(cached)) {
-          for (const m of cached) {
-            const mid = String((m == null ? void 0 : m.id) || "").trim();
-            if (!mid || disabled.has(mid) || seen.has(mid)) continue;
-            const prov = NEXUSMIND_PROVIDERS.find((p) => p.id === (m == null ? void 0 : m.primaryGroup)) || NEXUSMIND_PROVIDERS[0];
-            seen.set(mid, { id: mid, provider: prov });
-          }
-        }
-      }
-    } catch {
-    }
-  }
-  return Array.from(seen.values());
-}
-async function probeModelLive(ctx, modelId, prov) {
-  var _a;
-  const hostReq = (_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.request;
-  if (typeof hostReq !== "function") {
-    return { online: false, latencyMs: null, error: "ctx.host.request indisponível" };
-  }
-  const url = prov.isAnthropic ? "https://api.nexusmind.digital/v1/messages" : "https://api.nexusmind.digital/v1/chat/completions";
-  const headers = prov.isAnthropic ? {
-    "x-api-key": prov.apiKey,
-    Authorization: `Bearer ${prov.apiKey}`,
-    "anthropic-version": "2023-06-01",
-    "Content-Type": "application/json",
-    "User-Agent": "BuzzDesktop/OrgFyFailover"
-  } : {
-    Authorization: `Bearer ${prov.apiKey}`,
-    "Content-Type": "application/json",
-    "User-Agent": "BuzzDesktop/OrgFyFailover"
-  };
-  const t0 = Date.now();
-  try {
-    const res = await hostReq({
-      url,
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        model: modelId,
-        messages: [{ role: "user", content: "ok" }],
-        max_tokens: prov.isAnthropic ? 16 : 5
-      }),
-      timeoutMs: 9e3
-    });
-    const latencyMs = Date.now() - t0;
-    if ((res == null ? void 0 : res.status) >= 200 && (res == null ? void 0 : res.status) < 300) {
-      return { online: true, latencyMs };
-    }
-    return { online: false, latencyMs, error: `HTTP ${(res == null ? void 0 : res.status) ?? "erro"}` };
-  } catch (err) {
-    return { online: false, latencyMs: Date.now() - t0, error: String((err == null ? void 0 : err.message) || err).slice(0, 100) };
-  }
-}
-function findAgentInSnapshot(agentsApi, query, pubkey) {
-  if (!(agentsApi == null ? void 0 : agentsApi.snapshot)) return void 0;
-  const snap = agentsApi.snapshot() || {};
-  const pool = [];
-  const seen = /* @__PURE__ */ new Set();
-  for (const list of [snap.running, snap.agents]) {
-    if (!Array.isArray(list)) continue;
-    for (const a of list) {
-      if (!a || !a.key || seen.has(a.key)) continue;
-      seen.add(a.key);
-      pool.push(a);
-    }
-  }
-  const qLower = String(query || "").trim().toLowerCase();
-  const pkLower = String(pubkey || "").trim().toLowerCase();
-  return pkLower && pool.find((a) => String(a.pubkey || "").toLowerCase() === pkLower) || qLower && pool.find((a) => String(a.key || "").toLowerCase() === qLower) || qLower && pool.find((a) => String(a.name || "").toLowerCase() === qLower) || (qLower ? pool.find((a) => String(a.name || "").toLowerCase().includes(qLower)) : void 0);
-}
-async function executeSmartModelFailover(ctx, input = {}) {
-  const preferFree = input.prefer_free !== false;
-  const applyChange = Boolean(input.apply);
-  const retrigger = input.retrigger !== false;
-  const maxProbes = Math.max(1, Math.min(10, Number(input.max_probes || 6)));
-  const failedNorm = String(input.failed_model || "").trim().toLowerCase();
-  const agentsApi = ctx.agents;
-  const matchedAgent = input.agente || input.agent_pubkey ? findAgentInSnapshot(agentsApi, input.agente, input.agent_pubkey) : void 0;
-  const previousModel = ((matchedAgent == null ? void 0 : matchedAgent.config) && typeof matchedAgent.config === "object" ? String(matchedAgent.config.model || "") : "") || (input.failed_model || null);
-  const catalog = await discoverNexusMindCatalog(ctx);
-  if (catalog.length === 0) {
-    return {
-      ok: false,
-      mode: applyChange ? "applied" : "dry_run",
-      agentName: (matchedAgent == null ? void 0 : matchedAgent.name) || input.agente || null,
-      agentKey: (matchedAgent == null ? void 0 : matchedAgent.key) || null,
-      previousModel,
-      selectedModel: null,
-      selectedProvider: null,
-      selectedLatencyMs: null,
-      selectedIntelligenceScore: null,
-      retriggered: false,
-      candidatesTested: 0,
-      ranking: [],
-      message: "Nenhum modelo retornado pelo NexusMind Gateway (/v1/models indisponível e sem cache local)."
-    };
-  }
-  const excludeSet = /* @__PURE__ */ new Set();
-  if (failedNorm) excludeSet.add(failedNorm);
-  if (previousModel) excludeSet.add(previousModel.toLowerCase());
-  let pool = catalog.filter((c) => !excludeSet.has(c.id.toLowerCase()));
-  if (preferFree) {
-    const freeOnly = pool.filter((c) => isFreeModelId(c.id));
-    if (freeOnly.length > 0) {
-      pool = freeOnly;
-    }
-  }
-  const preRanked = pool.map((c) => ({ ...c, intelligenceScore: estimateModelIntelligence(c.id) })).sort((a, b) => b.intelligenceScore - a.intelligenceScore).slice(0, maxProbes);
-  const probed = await Promise.all(
-    preRanked.map(async (cand) => {
-      const res = await probeModelLive(ctx, cand.id, cand.provider);
-      const combinedScore = res.online ? computeCombinedModelScore(cand.intelligenceScore, res.latencyMs) : -1;
-      return {
-        model: cand.id,
-        provider: cand.provider.id,
-        isFree: isFreeModelId(cand.id),
-        intelligenceScore: cand.intelligenceScore,
-        latencyMs: res.latencyMs,
-        combinedScore,
-        online: res.online,
-        error: res.error
-      };
-    })
-  );
-  probed.sort((a, b) => {
-    if (a.online !== b.online) return a.online ? -1 : 1;
-    if (b.combinedScore !== a.combinedScore) return b.combinedScore - a.combinedScore;
-    return (a.latencyMs ?? 999999) - (b.latencyMs ?? 999999);
-  });
-  const winner = probed.find((p) => p.online) || null;
-  if (!winner) {
-    return {
-      ok: false,
-      mode: applyChange ? "applied" : "dry_run",
-      agentName: (matchedAgent == null ? void 0 : matchedAgent.name) || input.agente || null,
-      agentKey: (matchedAgent == null ? void 0 : matchedAgent.key) || null,
-      previousModel,
-      selectedModel: null,
-      selectedProvider: null,
-      selectedLatencyMs: null,
-      selectedIntelligenceScore: null,
-      retriggered: false,
-      candidatesTested: probed.length,
-      ranking: probed,
-      message: `Nenhum dos ${probed.length} modelos testados respondeu HTTP 200 no ping real do NexusMind.`
-    };
-  }
-  let appliedOk = false;
-  let retriggered = false;
-  let applyNote = "";
-  if (applyChange) {
-    if (!matchedAgent) {
-      return {
-        ok: false,
-        mode: "applied",
-        agentName: input.agente || null,
-        agentKey: null,
-        previousModel,
-        selectedModel: winner.model,
-        selectedProvider: winner.provider,
-        selectedLatencyMs: winner.latencyMs,
-        selectedIntelligenceScore: winner.intelligenceScore,
-        retriggered: false,
-        candidatesTested: probed.length,
-        ranking: probed,
-        message: `Melhor modelo eleito (${winner.model}, ${winner.latencyMs}ms), mas agente '${input.agente || input.agent_pubkey || ""}' não encontrado no Buzz Desktop.`
-      };
-    }
-    if (typeof (agentsApi == null ? void 0 : agentsApi.save) !== "function") {
-      return {
-        ok: false,
-        mode: "applied",
-        agentName: matchedAgent.name || matchedAgent.key,
-        agentKey: matchedAgent.key,
-        previousModel,
-        selectedModel: winner.model,
-        selectedProvider: winner.provider,
-        selectedLatencyMs: winner.latencyMs,
-        selectedIntelligenceScore: winner.intelligenceScore,
-        retriggered: false,
-        candidatesTested: probed.length,
-        ranking: probed,
-        message: `Melhor modelo eleito (${winner.model}, ${winner.latencyMs}ms), mas ctx.agents.save indisponível neste host.`
-      };
-    }
-    const currentCfg = matchedAgent.config && typeof matchedAgent.config === "object" ? { ...matchedAgent.config } : {};
-    currentCfg.model = winner.model;
-    if ("provider" in currentCfg || winner.provider) {
-      currentCfg.provider = winner.provider;
-    }
-    try {
-      await agentsApi.save(matchedAgent.key, { config: currentCfg });
-      appliedOk = true;
-      applyNote = `Modelo de ${matchedAgent.name || matchedAgent.key} atualizado de '${previousModel || "padrão"}' para '${winner.model}' (${winner.provider}, ${winner.latencyMs}ms, score ${winner.combinedScore}).`;
-    } catch (err) {
-      return {
-        ok: false,
-        mode: "applied",
-        agentName: matchedAgent.name || matchedAgent.key,
-        agentKey: matchedAgent.key,
-        previousModel,
-        selectedModel: winner.model,
-        selectedProvider: winner.provider,
-        selectedLatencyMs: winner.latencyMs,
-        selectedIntelligenceScore: winner.intelligenceScore,
-        retriggered: false,
-        candidatesTested: probed.length,
-        ranking: probed,
-        message: `Falha ao salvar novo modelo '${winner.model}' em ${matchedAgent.name || matchedAgent.key}: ${(err == null ? void 0 : err.message) || err}`
-      };
-    }
-    if (appliedOk && retrigger && typeof (agentsApi == null ? void 0 : agentsApi.wake) === "function") {
-      try {
-        const channel = String(input.channel_id || DEFAULT_ORGFY_CHANNEL).trim() || DEFAULT_ORGFY_CHANNEL;
-        const root = input.thread_root ? String(input.thread_root).trim() : void 0;
-        await agentsApi.wake(matchedAgent.key, {
-          channel,
-          ...root ? { root } : {},
-          text: input.retrigger_text || `[ORGFY FAILOVER AUTOMÁTICO] Seu modelo foi migrado para '${winner.model}' (${winner.latencyMs}ms online via NexusMind) após erro de API no modelo anterior. Retome imediatamente o último passo da tarefa com escopo fechado.`
-        });
-        retriggered = true;
-        applyNote += " Agente re-disparado automaticamente.";
-      } catch (wErr) {
-        applyNote += ` (Aviso: falha no re-disparo wake: ${(wErr == null ? void 0 : wErr.message) || wErr})`;
-      }
-    }
-  }
-  return {
-    ok: true,
-    mode: applyChange ? "applied" : "dry_run",
-    agentName: (matchedAgent == null ? void 0 : matchedAgent.name) || input.agente || null,
-    agentKey: (matchedAgent == null ? void 0 : matchedAgent.key) || null,
-    previousModel,
-    selectedModel: winner.model,
-    selectedProvider: winner.provider,
-    selectedLatencyMs: winner.latencyMs,
-    selectedIntelligenceScore: winner.intelligenceScore,
-    retriggered,
-    candidatesTested: probed.length,
-    ranking: probed,
-    message: applyNote || `Melhor modelo disponível (${preferFree ? "FREE" : "ALL"}): ${winner.model} (${winner.provider} · ${winner.latencyMs}ms · inteligência ${winner.intelligenceScore}/100 · score ${winner.combinedScore}).`
-  };
-}
-const RESOLVED_ARCHIVE_PATH = "/Users/heltonfraga/.buzz/.scratch/resolved-issues-archive.json";
-function decodeHostBytes(raw) {
-  if (typeof raw === "string") return raw;
-  if (raw instanceof Uint8Array) return new TextDecoder("utf-8").decode(raw);
-  if (raw instanceof ArrayBuffer) return new TextDecoder("utf-8").decode(new Uint8Array(raw));
-  if (raw && typeof raw === "object") {
-    const obj = raw;
-    if (typeof obj.content === "string") return obj.content;
-    if (typeof obj.text === "string") return obj.text;
-    if (ArrayBuffer.isView(raw)) {
-      return new TextDecoder("utf-8").decode(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength));
-    }
-  }
-  return String(raw ?? "");
-}
-async function fetchResolvedArchive(ctx) {
-  const host = ctx.host;
-  if (!(host == null ? void 0 : host.readFile)) {
-    return {
-      disponivel: false,
-      error: "ctx.host.readFile indisponível.",
-      total: 0,
-      atualizado_em: null,
-      itens: []
-    };
-  }
-  try {
-    const raw = await host.readFile(RESOLVED_ARCHIVE_PATH);
-    const parsed = JSON.parse(decodeHostBytes(raw));
-    const itens = Array.isArray(parsed == null ? void 0 : parsed.itens) ? parsed.itens : [];
-    return {
-      disponivel: true,
-      error: null,
-      total: itens.length,
-      atualizado_em: (parsed == null ? void 0 : parsed.atualizado_em) || null,
-      itens
-    };
-  } catch (err) {
-    return {
-      disponivel: false,
-      error: (err == null ? void 0 : err.message) || "Arquivo resolved-issues-archive.json não encontrado.",
-      total: 0,
-      atualizado_em: null,
-      itens: []
-    };
-  }
-}
-async function searchResolvedArchive(ctx, options = {}) {
-  const loaded = await fetchResolvedArchive(ctx);
-  if (!loaded.disponivel) {
-    return {
-      disponivel: false,
-      error: loaded.error,
-      total_arquivo: 0,
-      total_encontrados: 0,
-      resultados: []
-    };
-  }
-  const q = String(options.query || "").trim().toLowerCase();
-  const specFilter = String(options.spec || "").trim().toLowerCase();
-  const limit = Math.max(1, Math.min(50, Number(options.limit || 10)));
-  const matched = loaded.itens.filter((item) => {
-    if (specFilter && specFilter !== "all" && item.spec.toLowerCase() !== specFilter) {
-      return false;
-    }
-    if (!q) return true;
-    const haystack = [
-      item.issueId,
-      item.fullIssueId,
-      item.code,
-      item.titulo,
-      item.spec,
-      item.commitSha || "",
-      item.causaRaiz,
-      ...item.arquivosAlterados || []
-    ].join(" ").toLowerCase();
-    return q.split(/\s+/).every((tok) => haystack.includes(tok));
-  });
-  return {
-    disponivel: true,
-    error: null,
-    total_arquivo: loaded.total,
-    total_encontrados: matched.length,
-    resultados: matched.slice(0, limit)
   };
 }
 function renderResolvedArchiveTab(props) {
@@ -6769,305 +7869,9 @@ const TENANTS = [
   { id: "lumen-iptv", name: "Lumen IPTV", badge: "Subsidiária IPTV", slug: "lumen-iptv" },
   { id: "saas-tributario", name: "SaaS Tributário", badge: "Subsidiária Fiscal", slug: "saas-tributario" }
 ];
-const INITIAL_PIPELINE_CARDS = [
-  {
-    id: "card-104",
-    issueId: "5c569a9e",
-    fullIssueId: "5c569a9ec219d3edf31158a93a7e7110542e8be69a32ae0f250abff32e98e9f8",
-    owner: "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20",
-    title: "FIX-TEST-0006-AC003 — Atualizar fixture laudo_bin_com_decidido",
-    priority: "P0",
-    empresa: "orgfy",
-    executor: "OrgFy Val",
-    revisor: "OrgFy Teo",
-    decisor: "OrgFy Iris",
-    tier: "tier_1_exec_barato",
-    stage: "triagem",
-    createdAt: 179523306e4,
-    objetivo: "Atualizar fixture laudo_bin_com_decidido em test_protocolo_alvo_evidencia.py para conformidade com tipo_alvo binary_closed.",
-    contexto: "Sucessor de 5c109609. Commit f14cb69 passou a exigir plano_isolamento e id_autorizacao para tipo_alvo binary_closed em ferramentas/descoberta_lint_mod.py, mas fixture laudo_bin_com_decidido não foi atualizada.",
-    autoridade: "DECIDIDO Iris a8b30263 (21/11 01:46 BRT) — reemitir FIX-TEST-0006-AC003 com papéis explícitos",
-    decisao: "Reemitir FIX-TEST-0006-AC003 com Executor: OrgFy Val e Revisor: OrgFy Teo explícitos, vincular PR ace8a624 e acionar Gate para merge.",
-    feitoQuando: "pytest testes/0006/test_protocolo_alvo_evidencia.py sai com exit 0 sem erros de fixture em modo hermético.",
-    provaExigida: "pytest testes/0006/test_protocolo_alvo_evidencia.py -v -> exit 0; 8 passed.",
-    dsapScore: 0.12,
-    tokens: 24,
-    estimatedCost: "0.002",
-    recommendedModel: "Gemini 3.8 Flash",
-    acceptanceCommand: "pytest testes/0006/test_protocolo_alvo_evidencia.py -v",
-    acceptanceHash: "4cccbe0288e0a3b2b467ec21a590740a1b918e97f4c54965efea87d12f105bb9",
-    worktreePath: ".worktrees/5c569a9e",
-    modoBuzz: "goal",
-    goalMaxTurns: 20,
-    maxRuntime: "3600s",
-    idempotencyKey: "fix-test-0006-ac003-r2",
-    branch: "card/fix-test-0006-ac003"
-  },
-  {
-    id: "card-108",
-    issueId: "62e83956",
-    fullIssueId: "62e83956c5ba9a82d1b4a0fdc9dd0e4c62e00848300d1047f77c2e2fd6ece013",
-    owner: "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20",
-    title: "ESTEIRA-0008 — Autonomia do Ciclo Fechado da Esteira (Gatilho pós-Merge)",
-    priority: "P1",
-    empresa: "orgfy",
-    executor: "OrgFy Otto",
-    revisor: "OrgFy Bento Arquiteto",
-    decisor: "OrgFy Iris",
-    tier: "tier_1_exec_barato",
-    stage: "triagem",
-    createdAt: 179520936e4,
-    objetivo: "Implementar ciclo autônomo fechado na esteira v10 acionado automaticamente após merge de PR aprovado.",
-    contexto: "Após a fusão de um PR pelo Gate, os próximos cards na fila de triagem dependiam de intervenção manual no terminal para disparo.",
-    autoridade: "DECIDIDO Iris b27192ca e Bento Arquiteto",
-    decisao: "Gatilho pós-merge notifica o porteiro.py via evento Nostr kind:1618 para despacho automático do próximo item elegível.",
-    feitoQuando: "Testes comprovam que porteiro.py despacha automaticamente o próximo card após merge sem bloqueios.",
-    provaExigida: "pytest testes/esteira -v -k test_ci_cache -> exit 0.",
-    dsapScore: 0.08,
-    tokens: 18,
-    estimatedCost: "0.002",
-    recommendedModel: "Gemini 3.8 Flash",
-    acceptanceCommand: "pytest testes/esteira -v -k test_ci_cache",
-    acceptanceHash: "9a2f77c0b112d7c5e884021a8f90372bcde8913bcae6740b28489fba75390c12",
-    worktreePath: ".worktrees/62e83956",
-    modoBuzz: "goal",
-    goalMaxTurns: 20,
-    maxRuntime: "3600s",
-    idempotencyKey: "esteira-0008-ciclo-fechado",
-    branch: "feat/esteira-0008"
-  },
-  {
-    id: "card-105",
-    issueId: "6b631f8e",
-    fullIssueId: "6b631f8e322bb274d3abec1cbc8d9c5be7cb724ab49c3f69591ece9bbebf16ca",
-    owner: "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20",
-    title: "GATE-ACEITE-ESCRITA-AUTORIZADA — Conciliar integridade do aceite",
-    priority: "P1",
-    empresa: "orgfy",
-    executor: "OrgFy Atlas",
-    revisor: "OrgFy Bento",
-    decisor: "OrgFy Iris",
-    tier: "tier_1_exec_barato",
-    stage: "despachado",
-    createdAt: 17951109e5,
-    objetivo: "Conciliar integridade do aceite e caminhos protegidos com escrita autorizada na issue.",
-    contexto: "O mecanismo verificar_integridade_aceite congela hashes de arquivos citados no comando de aceite contra origin/main. Quando o card autoriza ampliação de testes em Escrita exclusiva, o gate recusava por 'aceite adulterado'.",
-    autoridade: "DECIDIDO Iris 19/11 (evento 3448ee826cdbbedaab283be3d25fec1ede1b4b6a0c9f439bd6b9ee1d0104be67)",
-    decisao: "Arquivo de aceite só pode mudar se constar em Escrita exclusiva de issue válida assinada. Fora disso, permanece fail-closed.",
-    feitoQuando: "verificar_integridade_aceite permite alteração apenas se o arquivo constar em Escrita exclusiva do card assinado.",
-    provaExigida: "pytest testes/esteira -v -k test_webhook_nostr -> exit 0.",
-    commitSha: "8bbb5e9",
-    tokens: 32,
-    estimatedCost: "0.003",
-    recommendedModel: "Gemini 3.8 Flash",
-    acceptanceCommand: "pytest testes/esteira -v -k test_webhook_nostr",
-    acceptanceHash: "ef8231bb44a199857d9b78297b47c6183dca0187652e98745bcae71049987c2b",
-    worktreePath: ".worktrees/6b631f8e",
-    modoBuzz: "goal",
-    goalMaxTurns: 20,
-    maxRuntime: "3600s",
-    idempotencyKey: "gate-aceite-escrita-autorizada",
-    branch: "fix/gate-aceite-escrita-autorizada"
-  },
-  {
-    id: "card-109",
-    issueId: "fef9b85e",
-    fullIssueId: "fef9b85ecca881d393d8c51efe91a9fdf628bdfe73b2fed6432893b22cec2531",
-    owner: "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20",
-    title: "BUZZ-106-WORKTREE-COMPAT — Compatibilizar entregar e gate com git rev-parse",
-    priority: "P2",
-    empresa: "orgfy",
-    executor: "OrgFy Val",
-    revisor: "QA Sentinel",
-    decisor: "OrgFy Iris",
-    tier: "tier_1_exec_barato",
-    stage: "despachado",
-    createdAt: 1795215151e3,
-    objetivo: "Compatibilizar ferramentas/esteira/entregar e ferramentas/esteira/gate para detectar a raiz do worktree ativo via git rev-parse --show-toplevel, respeitando worktrees nativos do Buzz 1.0.6.",
-    contexto: "No Workspace do Buzz 1.0.6 o agente já inicia em um worktree nativo isolado. Hoje ferramentas/esteira/entregar e ferramentas/esteira/gate usavam REPO_ROOT_DEFAULT fixo via Path(__file__) sem detectar git rev-parse --show-toplevel.",
-    autoridade: "DECIDIDO Iris 20/11 20:45 BRT (Diretriz do Fundador, frente 3) e PLANS/MIGRACAO_WORKSPACE_BUZZ_106.md",
-    decisao: "Atualizar ferramentas/esteira/entregar e ferramentas/esteira/gate para detectar a raiz do worktree ativo via git rev-parse --show-toplevel, respeitando worktrees nativos do Buzz 1.0.6 e validando o fluxo ponta a ponta.",
-    feitoQuando: "entregar e gate executam com exit 0 dentro de um worktree nativo do Buzz sem depender do caminho absoluto do host.",
-    provaExigida: "python3 ferramentas/esteira/lint_card.py -> exit 0; git rev-parse --show-toplevel detectado com sucesso no CI local.",
-    commitSha: "de39843",
-    tokens: 20,
-    estimatedCost: "0.002",
-    recommendedModel: "Gemini 3.8 Flash",
-    acceptanceCommand: "python3 ferramentas/esteira/lint_card.py",
-    acceptanceHash: void 0,
-    worktreePath: ".worktrees/fef9b85e",
-    modoBuzz: "goal",
-    goalMaxTurns: 20,
-    maxRuntime: "3600s",
-    idempotencyKey: "buzz-106-worktree-compat",
-    branch: "feat/buzz-106-worktree-compat"
-  },
-  {
-    id: "card-106",
-    issueId: "a2ca993f",
-    fullIssueId: "a2ca993f70b46ff7a5c7d48be601ffd07048cff2d453d987852b42934756e1c1",
-    owner: "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20",
-    title: "QUADRO-RUNTIME-REAL — Corrigir HTTP 403 no quadro e cruzar estado do relay com runtime real",
-    priority: "P0",
-    empresa: "orgfy",
-    executor: "OrgFy Lia",
-    revisor: "OrgFy Vera",
-    decisor: "OrgFy Iris",
-    tier: "tier_1_exec_barato",
-    stage: "execucao",
-    createdAt: 179520696e4,
-    objetivo: "Resolver falhas de autorização HTTP 403 no quadro e consolidar sincronização bidirecional entre relay Nostr e subprocessos.",
-    contexto: "A auditoria identificou divergência entre o status exibido no quadro e a ocupação real dos runners de subprocesso.",
-    autoridade: "DECIDIDO Iris c9a4b87e e Bento Arquiteto",
-    decisao: "Implementar autenticação por chave local nos endpoints de leitura do quadro e cruzar pids ativos via psutil.",
-    feitoQuando: "python3 -m pytest testes/esteira/test_quadro.py passa com exit 0 sem nenhum erro 403.",
-    provaExigida: "python3 -m pytest testes/esteira/test_quadro.py -> exit 0; quadro sincronizado.",
-    workerPid: 84219,
-    turnCurrent: 2,
-    turnMax: 5,
-    commitSha: "a743c22",
-    ciStatus: "running",
-    tokens: 45,
-    estimatedCost: "0.004",
-    recommendedModel: "Gemini 3.8 Flash",
-    acceptanceCommand: "python3 -m pytest testes/esteira/test_quadro.py",
-    acceptanceHash: "d192f8832ea489b417c80036ab788c697851dbe5986c7104dbe8a97c23405b67",
-    worktreePath: ".worktrees/a2ca993f",
-    modoBuzz: "goal",
-    goalMaxTurns: 20,
-    maxRuntime: "3600s",
-    idempotencyKey: "quadro-runtime-real",
-    branch: "feat/quadro-runtime-real"
-  },
-  {
-    id: "card-107",
-    issueId: "f46e22fd",
-    prId: "PR #42",
-    fullIssueId: "f46e22fd6d0b7fff0d0ad34d98d3abcb6b7443aa635e59516698cfe7e1b24343",
-    owner: "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20",
-    title: "ESTEIRA-0015 — Reconciliar congelamento do aceite com escrita autorizada",
-    priority: "P0",
-    empresa: "orgfy",
-    executor: "OrgFy Atlas",
-    revisor: "OrgFy Bento",
-    decisor: "OrgFy Iris",
-    tier: "tier_1_exec_barato",
-    stage: "revisao",
-    createdAt: 179511108e4,
-    objetivo: "Garantir validação hermética das regras probatórias e blindagem de aceite contra bypass no Gate.",
-    contexto: "Submissão do PR #42 para homologação do novo linter de aceites congelados com verificação de invariante L-22.",
-    autoridade: "DECIDIDO Iris e QA Sentinel",
-    decisao: "Verificar conformidade com testes de regressão L-90 e probes caixa-preta antes da emissão de GATE: aceito.",
-    feitoQuando: "Probes Caixa-Preta (Caddy, Supabase RLS e Playwright) retornam PASS e CI Swarm exit 0.",
-    provaExigida: "pytest testes/esteira -v -k test_rls_supabase -> exit 0.",
-    commitSha: "c05c52b",
-    ciStatus: "pass",
-    tokens: 38,
-    estimatedCost: "0.02",
-    recommendedModel: "Claude 3.5 Sonnet",
-    acceptanceCommand: "pytest testes/esteira -v -k test_rls_supabase",
-    acceptanceHash: "c05c52b881eff4803920c7849e7bda380128cb59a7201bce47530cba2456e790",
-    worktreePath: ".worktrees/f46e22fd",
-    modoBuzz: "goal",
-    goalMaxTurns: 20,
-    maxRuntime: "3600s",
-    idempotencyKey: "esteira-0015-reconciliar",
-    branch: "feat/esteira-0015",
-    probes: {
-      http_rota: true,
-      supabase_rls: true,
-      playwright_console: true
-    },
-    rejectionHistory: [
-      {
-        author: "OrgFy Bento",
-        timestamp: 179511108e4 - 36e5,
-        reason: "Falta validação de RLS na tabela de perfis de usuário",
-        similarityToFirst: 0.15
-      }
-    ]
-  },
-  {
-    id: "card-102",
-    issueId: "3c0b1dae",
-    prId: "PR #40",
-    fullIssueId: "3c0b1dae116452ea3eda7addc3456c6ee64a1c13d332804699b567c3fbe41792",
-    owner: "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20",
-    title: "ESTEIRA-0013 — Despacho paralelo até a capacidade e recuperação",
-    priority: "P0",
-    empresa: "orgfy",
-    executor: "OrgFy Bento Arquiteto",
-    revisor: "QA Sentinel",
-    decisor: "OrgFy Iris",
-    tier: "tier_3_arquiteto",
-    stage: "feito",
-    createdAt: 1795041e6,
-    objetivo: "Permitir despacho concorrente respeitando limite máximo de 3 workers ativos por tenant e auto-recuperação.",
-    contexto: "A esteira ficava restrita a 1 worker sequencial, gerando gargalo na entrega dos pacotes de tarefas.",
-    autoridade: "DECIDIDO Iris e Bento Arquiteto",
-    decisao: "Orquestração de runners paralelos no Swarm com isolamento absoluto de worktrees.",
-    feitoQuando: "3 workers rodam em paralelo sem colisão de branches ou arquivos compartilhados.",
-    provaExigida: "pytest testes/esteira -v -k test_concorrencia_swarm -> exit 0.",
-    commitSha: "c05c52b",
-    ciStatus: "pass",
-    tokens: 64,
-    estimatedCost: "0.05",
-    recommendedModel: "Claude 3.5 Sonnet",
-    acceptanceCommand: "pytest testes/esteira -v -k test_concorrencia_swarm",
-    acceptanceHash: "889cb012a5e982104576bcd45873918237ba5e801235678aebc912048560914a",
-    worktreePath: ".worktrees/3c0b1dae",
-    modoBuzz: "goal",
-    goalMaxTurns: 20,
-    maxRuntime: "3600s",
-    idempotencyKey: "esteira-0013-paralelo",
-    branch: "feat/esteira-0013"
-  }
-];
-const INITIAL_REGRAS_PROBATORIAS = [
-  {
-    regra_id: "R-001",
-    erro_id: "ERR_FIXTURE_LEAK",
-    descricao: "Limpeza estrita de fixtures temporárias no runner de testes",
-    comando_check: "pytest testes/esteira -k fixture_clean",
-    hash_comando: "a7b9c1d3",
-    alvo_guarda: "testes/conftest.py",
-    status: "EM_TESTE",
-    criada_em_ts: Date.now() - 864e5 * 2,
-    atualizada_em_ts: Date.now(),
-    baseline_fpy: 96,
-    fpy_observado: 100,
-    janela_alvo: 10,
-    cards_avaliados: 2,
-    falhas_durante_teste: 0,
-    motivo_transicao: "Janela probatória ativa (8/10 cards restantes)"
-  },
-  {
-    regra_id: "R-002",
-    erro_id: "ERR_MODEL_STALE",
-    descricao: "Expurgo forçado de modelos inativos no sync do Goose/Pi",
-    comando_check: "python3 ferramentas/esteira/retro.py --check-models",
-    hash_comando: "e8f2a4b6",
-    alvo_guarda: "custom_providers/nexusmind.json",
-    status: "MANTIDA",
-    criada_em_ts: Date.now() - 864e5 * 8,
-    atualizada_em_ts: Date.now() - 864e5,
-    baseline_fpy: 91.5,
-    fpy_observado: 100,
-    janela_alvo: 10,
-    cards_avaliados: 10,
-    falhas_durante_teste: 0,
-    motivo_transicao: "Homologada sem regressão após 10 cards"
-  }
-];
-const AVAILABLE_AGENTS = [
-  { id: "OrgFy Iris", name: "OrgFy Iris", role: "CEO Holding", tier: "tier_3_arquiteto", model: "gemini-3.8-flash-medium" },
-  { id: "OrgFy Bento", name: "OrgFy Bento", role: "COO Operacional", tier: "tier_3_arquiteto", model: "claude-sonnet-4-6" },
-  { id: "OrgFy Bento Arquiteto", name: "OrgFy Bento Arquiteto", role: "Arquiteto de Software", tier: "tier_3_arquiteto", model: "claude-opus-4-6" },
-  { id: "OrgFy Atlas", name: "OrgFy Atlas", role: "Engenheiro Core", tier: "tier_1_exec_barato", model: "mistral-large-4-1t" },
-  { id: "OrgFy Val", name: "OrgFy Val", role: "Engenheiro de Produto", tier: "tier_1_exec_barato", model: "gemini-3.8-flash" },
-  { id: "OrgFy Otto", name: "OrgFy Otto", role: "Engenheiro de Testes", tier: "tier_2_revisor", model: "claude-sonnet-4-6" },
-  { id: "QA Sentinel", name: "QA Sentinel", role: "Auditor de Qualidade", tier: "tier_2_revisor", model: "grok-4.5" }
-];
+const INITIAL_PIPELINE_CARDS = [];
+const INITIAL_REGRAS_PROBATORIAS = [];
+const AVAILABLE_AGENTS = [];
 const SVG = {
   orgfy: ({ h, width = 20, height = 20 }) => h(
     "svg",
@@ -7357,6 +8161,44 @@ function apply(ctx) {
     const [isRecalculatingKpis, setIsRecalculatingKpis] = React.useState(false);
     const [governanceSummary, setGovernanceSummary] = React.useState(null);
     const [loopRadar, setLoopRadar] = React.useState(null);
+    const [telemetrySnap, setTelemetrySnap] = React.useState(() => getTelemetrySnapshot());
+    const liveAgents = React.useMemo(() => {
+      var _a3, _b3;
+      try {
+        const snap = ((_b3 = (_a3 = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _a3.snapshot) == null ? void 0 : _b3.call(_a3)) || {};
+        const pool = [...snap.running || [], ...snap.agents || []];
+        const seen = /* @__PURE__ */ new Set();
+        const list = [];
+        for (const a of pool) {
+          const name = String((a == null ? void 0 : a.name) || (a == null ? void 0 : a.key) || "").trim();
+          if (!name || seen.has(name)) continue;
+          seen.add(name);
+          list.push({ id: String((a == null ? void 0 : a.key) || name), name, tier: "tier_1_exec_barato" });
+        }
+        return list;
+      } catch {
+        return [];
+      }
+    }, [holdingData]);
+    React.useEffect(() => {
+      const unsubTel = subscribeTelemetry(() => setTelemetrySnap(getTelemetrySnapshot()));
+      const unsubRelay = subscribeRelayUpdates(() => {
+        loadRealState();
+      });
+      return () => {
+        unsubTel();
+        unsubRelay();
+      };
+    }, []);
+    React.useEffect(() => {
+      var _a3, _b3;
+      updateOrgfySidebarCounts({
+        triagem: pipelineCards.filter((c) => c.stage === "triagem").length,
+        execucao: pipelineCards.filter((c) => c.stage === "execucao").length,
+        revisao: pipelineCards.filter((c) => c.stage === "revisao").length,
+        loopsAtivos: ((_a3 = loopRadar == null ? void 0 : loopRadar.resumo) == null ? void 0 : _a3.criticos_ativos) ?? ((_b3 = loopRadar == null ? void 0 : loopRadar.resumo) == null ? void 0 : _b3.criticos) ?? 0
+      });
+    }, [pipelineCards, loopRadar]);
     const [stoppingSessionId, setStoppingSessionId] = React.useState(null);
     const [failingOverSessionId, setFailingOverSessionId] = React.useState(null);
     const [resolvedItems, setResolvedItems] = React.useState([]);
@@ -8349,7 +9191,7 @@ function apply(ctx) {
                     }
                   },
                   h("option", { value: "all" }, "Todos os Responsáveis"),
-                  AVAILABLE_AGENTS.map((a) => h("option", { key: a.id, value: a.name }, a.name))
+                  liveAgents.map((a) => h("option", { key: a.id, value: a.name }, a.name))
                 )
               ),
               h(
@@ -8815,6 +9657,7 @@ function apply(ctx) {
             onRunGovernanceEval: handleRunGovernanceEval,
             governanceSummary,
             loopRadar,
+            telemetry: telemetrySnap,
             onRefreshLoopRadar: loadLoopRadar,
             onWakeIrisForLoops: handleWakeIrisForLoops,
             onStopLoopSession: handleStopLoopSession,
@@ -9326,8 +10169,8 @@ function apply(ctx) {
                   outline: "none"
                 }
               },
-              AVAILABLE_AGENTS.map(
-                (a) => h("option", { key: a.id, value: a.name }, `${a.name} (${a.tier === "tier_1_exec_barato" ? "Tier 1: Barato" : a.tier === "tier_2_revisor" ? "Tier 2: Revisor" : "Tier 3: Arquiteto"})`)
+              liveAgents.map(
+                (a) => h("option", { key: a.id, value: a.name }, a.name)
               )
             )
           ),
@@ -9355,7 +10198,7 @@ function apply(ctx) {
                   outline: "none"
                 }
               },
-              AVAILABLE_AGENTS.map(
+              liveAgents.map(
                 (a) => h(
                   "option",
                   {
@@ -11818,6 +12661,7 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
     }
   }
   registerGovernanceAgentHooks(ctx);
+  registerBuzzNativeIntegrations(ctx);
   if ((_b = ctx.agents) == null ? void 0 : _b.addInstructions) {
     try {
       ctx.agents.addInstructions({
@@ -11871,521 +12715,19 @@ Consulte sempre orgfy_status, orgfy_kpis, orgfy_loop_radar ou orgfy_kanban_read 
   }
   if ((_c = ctx.agents) == null ? void 0 : _c.addTool) {
     try {
-      ctx.agents.addTool({
-        name: "orgfy_status",
-        description: "Retorna a telemetria em tempo real da esteira OrgFy v11 com cards_por_raia derivados diretamente do Kanban real e métricas de runtime/placar separadas (sem fallbacks hardcoded).",
-        inputSchema: {
-          type: "object",
-          properties: {
-            empresa: { type: "string", description: "Slug da empresa (default: 'orgfy')" }
+      const unifiedTools = buildUnifiedOrgfyTools(ctx);
+      for (const tool of unifiedTools) {
+        ctx.agents.addTool({
+          name: tool.name,
+          description: tool.description,
+          inputSchema: tool.inputSchema,
+          call: async (_client, _context, args) => {
+            const res = await tool.execute(args || {});
+            return res.text;
           }
-        },
-        call: async (_client, _context, args) => {
-          const status = await buildOrgfyStatus(ctx, (args == null ? void 0 : args.empresa) || "orgfy");
-          return JSON.stringify(status, null, 2);
-        }
-      });
-      ctx.agents.addTool({
-        name: "orgfy_kanban_read",
-        description: "Lê a matriz Kanban real da esteira OrgFy categorizada pelas 5 raias determinísticas (triagem, despachado, execucao, revisao, feito), sem fallback para cards mockados.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            stage: { type: "string", description: "Filtrar por raia: 'triagem', 'despachado', 'execucao', 'revisao', 'feito' ou 'all' (default: 'all')" },
-            empresa: { type: "string", description: "Slug da empresa (default: 'orgfy')" }
-          }
-        },
-        call: async (_client, _context, args) => {
-          const stage = (args == null ? void 0 : args.stage) || "all";
-          const empresa = (args == null ? void 0 : args.empresa) || "orgfy";
-          const snapshot = await fetchLiveKanbanSnapshot(ctx, { stage, empresa });
-          const summarized = snapshot.cards.map((c) => ({
-            id: c.id,
-            issueId: c.issueId,
-            fullIssueId: c.fullIssueId,
-            title: c.title,
-            stage: c.stage,
-            priority: c.priority,
-            empresa: c.empresa,
-            executor: c.executor,
-            revisor: c.revisor ?? null,
-            decisor: c.decisor ?? null,
-            acceptanceCommand: c.acceptanceCommand ?? null,
-            acceptanceHash: c.acceptanceHash ?? null,
-            worktreePath: c.worktreePath ?? null,
-            objetivo: c.objetivo ?? null,
-            feitoQuando: c.feitoQuando ?? null,
-            provaExigida: c.provaExigida ?? null,
-            deepLink: `buzz://issue?id=${c.fullIssueId || c.issueId}&owner=${c.owner || "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20"}&d=${c.empresa || "orgfy"}`
-          }));
-          return JSON.stringify({
-            ok: snapshot.ok,
-            error: snapshot.error,
-            sources: snapshot.sources,
-            total: summarized.length,
-            cards: summarized
-          }, null, 2);
-        }
-      });
-      ctx.agents.addTool({
-        name: "orgfy_despachar",
-        description: "Despacha um card de issue para execução em worktree isolado sem colisão com a main, validando Hard Cap orçamentário (100%) e checkout lock atômico.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            issue_id: { type: "string", description: "Identificador curto ou completo da issue (ex: '5c569a9e')" },
-            executor: { type: "string", description: "Nome do agente executor (ex: 'OrgFy Val', 'OrgFy Atlas')" },
-            revisor: { type: "string", description: "Nome do agente revisor (ex: 'OrgFy Teo', 'OrgFy Bento')" },
-            empresa: { type: "string", description: "Slug da empresa (default: 'orgfy')" },
-            board_override: { type: "boolean", description: "Autorização explícita da diretoria para ultrapassar 100% do teto diário" }
-          },
-          required: ["issue_id", "executor", "revisor"]
-        },
-        call: async (_client, _context, args) => {
-          const kpiRes = await fetchKpisEsteira(ctx);
-          const budgetGate = evaluateBudgetGate(kpiRes.kpis, Boolean(args == null ? void 0 : args.board_override));
-          if (!budgetGate.allowed) {
-            return JSON.stringify({
-              status: "blocked",
-              code: "BUDGET_HARD_CAP_REACHED",
-              budgetGate
-            }, null, 2);
-          }
-          const lockRes = await acquireCheckoutLock(ctx, args.issue_id, args.executor, 60);
-          if (!lockRes.ok) {
-            return JSON.stringify({
-              status: "blocked",
-              code: lockRes.code,
-              message: lockRes.message,
-              lock: lockRes.lock
-            }, null, 2);
-          }
-          const res = await executeDespachar(ctx, {
-            empresa: (args == null ? void 0 : args.empresa) || "orgfy",
-            issueId: args.issue_id,
-            executor: args.executor,
-            revisor: args.revisor
-          });
-          if (res.code !== 0) {
-            await releaseCheckoutLock(ctx, args.issue_id, args.executor, true);
-          }
-          const attentionContract = buildBuzzAttentionContract({
-            slug: String(args.issue_id || "card").slice(0, 24),
-            titulo: `Issue ${args.issue_id}`,
-            executor: args.executor,
-            revisor: args.revisor,
-            policy: "event_driven"
-          });
-          return JSON.stringify({
-            status: res.code === 0 ? "ok" : "error",
-            exitCode: res.code,
-            budgetGate,
-            lock: res.code === 0 ? lockRes.lock : null,
-            lockReleasedOnFailure: res.code !== 0,
-            attentionContract: res.code === 0 ? attentionContract : null,
-            output: res.output
-          }, null, 2);
-        }
-      });
-      ctx.agents.addTool({
-        name: "orgfy_gate",
-        description: "Aplica o Gate Caixa-Preta da esteira OrgFy v11 a um PR (aceito ou recusado) com validação de probes Caddy, Supabase RLS e Playwright.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            pr_id: { type: "string", description: "ID ou hash do PR a ser avaliado" },
-            decisao: { type: "string", enum: ["aceito", "recusado"], description: "Decisão do Gate: 'aceito' ou 'recusado'" },
-            motivo: { type: "string", description: "Justificativa detalhada da decisão ou erro detectado" },
-            revisor: { type: "string", description: "Nome do revisor responsável pelo Gate" },
-            empresa: { type: "string", description: "Slug da empresa (default: 'orgfy')" }
-          },
-          required: ["pr_id", "decisao", "motivo", "revisor"]
-        },
-        call: async (_client, _context, args) => {
-          const res = await executeGate(ctx, {
-            empresa: (args == null ? void 0 : args.empresa) || "orgfy",
-            prId: args.pr_id,
-            acao: args.decisao,
-            motivo: args.motivo,
-            revisor: args.revisor
-          });
-          return JSON.stringify({
-            status: res.code === 0 ? "ok" : "error",
-            exitCode: res.code,
-            output: res.output
-          }, null, 2);
-        }
-      });
-      ctx.agents.addTool({
-        name: "orgfy_porteiro_sync",
-        description: "Dispara uma rodada determinística de sincronização do Porteiro da esteira OrgFy (porteiro.py --uma-vez) para reconciliar eventos Nostr, PRs e merges.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            empresa: { type: "string", description: "Slug da empresa (default: 'orgfy')" }
-          }
-        },
-        call: async (_client, _context, args) => {
-          const res = await executePorteiroSync(ctx, {
-            empresa: (args == null ? void 0 : args.empresa) || "orgfy"
-          });
-          return JSON.stringify({
-            status: res.code === 0 ? "ok" : "error",
-            exitCode: res.code,
-            output: res.output
-          }, null, 2);
-        }
-      });
-      ctx.agents.addTool({
-        name: "orgfy_kpis",
-        description: "Retorna os KPIs determinísticos reais da esteira OrgFy v11 (Fluxo, Qualidade, Economia, Higiene e Alertas Ativos) a partir de kpis-esteira.json, com opção de recálculo sob demanda.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            recalcular: { type: "boolean", description: "Se true, executa ferramentas/esteira/gerar_kpis_esteira.py antes de ler o snapshot" }
-          }
-        },
-        call: async (_client, _context, args) => {
-          let recalcOutput = null;
-          if (args == null ? void 0 : args.recalcular) {
-            const recalc = await recalculateKpisNow(ctx);
-            recalcOutput = recalc.output;
-          }
-          const res = await fetchKpisEsteira(ctx);
-          return JSON.stringify({
-            disponivel: res.disponivel,
-            error: res.error,
-            recalcOutput,
-            kpis: res.kpis,
-            history_points: res.history.length
-          }, null, 2);
-        }
-      });
-      ctx.agents.addTool({
-        name: "orgfy_checkout_lock",
-        description: "Gerencia locks atômicos de checkout por issue_id Nostr (64 hex) para evitar execução duplicada entre agentes (action: 'acquire' | 'release' | 'list').",
-        inputSchema: {
-          type: "object",
-          properties: {
-            action: { type: "string", enum: ["acquire", "release", "list"], description: "Ação de lock desejada" },
-            issue_id: { type: "string", description: "ID Nostr completo da issue (64 hex; prefixos de 8 chars são resolvidos automaticamente quando conhecidos)" },
-            agent_id: { type: "string", description: "Nome ou ID do agente solicitante (obrigatório para acquire)" },
-            ttl_minutes: { type: "number", description: "Tempo de expiração do lock em minutos (default: 60)" },
-            title: { type: "string", description: "Título real da issue Nostr para exibição no Kanban" },
-            owner: { type: "string", description: "Pubkey hex 64 do dono do repositório Nostr" },
-            revisor: { type: "string", description: "Nome do agente revisor independente (L-01)" },
-            acceptance_command: { type: "string", description: "Comando de aceite L-22 congelado" },
-            branch: { type: "string", description: "Branch da worktree (ex: feat/slug ou card/slug)" }
-          },
-          required: ["action"]
-        },
-        call: async (_client, _context, args) => {
-          const action = args == null ? void 0 : args.action;
-          if (action === "list") {
-            const locks = await listActiveLocks(ctx);
-            return JSON.stringify({ ok: true, total: locks.length, locks }, null, 2);
-          }
-          if (action === "acquire") {
-            if (!(args == null ? void 0 : args.issue_id) || !(args == null ? void 0 : args.agent_id)) {
-              return JSON.stringify({ ok: false, code: "MISSING_FIELDS", message: "issue_id e agent_id são obrigatórios" }, null, 2);
-            }
-            const res = await acquireCheckoutLock(ctx, args.issue_id, args.agent_id, (args == null ? void 0 : args.ttl_minutes) || 60, Date.now(), {
-              title: args == null ? void 0 : args.title,
-              owner: args == null ? void 0 : args.owner,
-              revisor: args == null ? void 0 : args.revisor,
-              acceptanceCommand: args == null ? void 0 : args.acceptance_command,
-              branch: args == null ? void 0 : args.branch
-            });
-            return JSON.stringify(res, null, 2);
-          }
-          if (action === "release") {
-            if (!(args == null ? void 0 : args.issue_id)) {
-              return JSON.stringify({ ok: false, code: "MISSING_FIELDS", message: "issue_id é obrigatório" }, null, 2);
-            }
-            const res = await releaseCheckoutLock(ctx, args.issue_id, args == null ? void 0 : args.agent_id);
-            return JSON.stringify(res, null, 2);
-          }
-          return JSON.stringify({ ok: false, code: "INVALID_ACTION", message: `Ação desconhecida: ${action}` }, null, 2);
-        }
-      });
-      ctx.agents.addTool({
-        name: "orgfy_governanca_avaliar",
-        description: "Avalia os KPIs reais contra regras de governança (Orçamento 80%/100%, Gargalo de Revisão, WIP Órfão e Estagnação Nível 3) e dispara notificações/wakes com cooldown anti-spam de 15 min.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            dry_run: { type: "boolean", description: "Se true, apenas simula as ações sem disparar notificações ou wakes" },
-            auto_wake: { type: "boolean", description: "Se true, acorda automaticamente agentes responsáveis via ctx.agents.wake quando aplicável" }
-          }
-        },
-        call: async (_client, _context, args) => {
-          const evalRes = await evaluateGovernanceAndReact(ctx, {
-            dryRun: Boolean(args == null ? void 0 : args.dry_run),
-            autoWake: (args == null ? void 0 : args.auto_wake) !== false
-          });
-          return JSON.stringify(evalRes, null, 2);
-        }
-      });
-      ctx.agents.addTool({
-        name: "orgfy_lint_card",
-        description: "Audita um card antes do despacho validando template oficial OrgFy/Spec-Kit, regras determinísticas L-01/L-22 (segregação executor/revisor, comando de aceite verificável) e revisão semântica.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            title: { type: "string", description: "Título do card" },
-            objective: { type: "string", description: "Objetivo claro da entrega" },
-            done_when: { type: "string", description: "Critério objetivo de pronto (Feito Quando)" },
-            acceptance_command: { type: "string", description: "Comando determinístico de aceite (L-22)" },
-            executor: { type: "string", description: "Agente executor proposto" },
-            revisor: { type: "string", description: "Agente revisor proposto" },
-            card_markdown: { type: "string", description: "Corpo Markdown completo do card para validação fail-closed do template OrgFy + Spec-Kit" },
-            spec_path: { type: "string", description: "Caminho da spec no Spec-Kit (ex: specs/planned/0011/spec.md)" }
-          },
-          required: ["title"]
-        },
-        call: async (_client, _context, args) => {
-          const descricao = [args.objective, args.done_when].filter(Boolean).join(" | ");
-          const lintRes = await lintCardForDispatch(ctx, {
-            titulo: args.title,
-            descricao: descricao || void 0,
-            acceptanceCommand: args.acceptance_command,
-            executor: args.executor,
-            revisor: args.revisor,
-            cardMarkdown: args.card_markdown,
-            specPath: args.spec_path
-          });
-          return JSON.stringify(lintRes, null, 2);
-        }
-      });
-      ctx.agents.addTool({
-        name: "orgfy_bind_context",
-        description: "Vincula a pasta do worktree isolado (assignConversationFolder) e injeta as regras vivas L-22/L-90 e metadados do card (setConversationSections) diretamente na conversa do agente.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            conversation_id: { type: "string", description: "ID da conversa do agente no Buzz" },
-            issue_id: { type: "string", description: "ID do card/issue da esteira" },
-            worktree_path: { type: "string", description: "Caminho absoluto do worktree isolado" },
-            title: { type: "string", description: "Título do card" },
-            acceptance_command: { type: "string", description: "Comando determinístico de aceite (L-22)" },
-            acceptance_hash: { type: "string", description: "Hash SHA-256 do comando de aceite" },
-            executor: { type: "string", description: "Agente executor" },
-            revisor: { type: "string", description: "Agente revisor" }
-          },
-          required: ["conversation_id", "issue_id"]
-        },
-        call: async (_client, _context, args) => {
-          const bindRes = await bindConversationContextForCard(ctx, {
-            conversationId: args.conversation_id,
-            issueId: args.issue_id,
-            worktreePath: args.worktree_path,
-            titulo: args.title,
-            acceptanceCommand: args.acceptance_command,
-            acceptanceHash: args.acceptance_hash,
-            executor: args.executor,
-            revisor: args.revisor
-          });
-          return JSON.stringify(bindRes, null, 2);
-        }
-      });
-      ctx.agents.addTool({
-        name: "orgfy_historico_buscar",
-        description: "Busca sob demanda (just-in-time) no Arquivo de Issues Resolvidas (resolved-issues-archive.json) por código, causa raiz, arquivo alterado ou SHA, retornando deep-links e precedentes sem poluir a janela ativa.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            query: { type: "string", description: "Palavras-chave (ex: 'porteiro', 'gate', 'T002', nome do arquivo ou SHA)" },
-            spec: { type: "string", description: "Filtrar por spec (ex: 'esteira', '0006', 'all')" },
-            limit: { type: "number", description: "Máximo de resultados (default: 10, max: 50)" }
-          }
-        },
-        call: async (_client, _context, args) => {
-          const res = await searchResolvedArchive(ctx, {
-            query: args == null ? void 0 : args.query,
-            spec: args == null ? void 0 : args.spec,
-            limit: args == null ? void 0 : args.limit
-          });
-          return JSON.stringify(res, null, 2);
-        }
-      });
-      ctx.agents.addTool({
-        name: "orgfy_loop_radar",
-        description: "Consulta o Radar de Loops & Sessões Zumbis do Goose em tempo real (mode=ro), separando alertas ativos (<=15m) de histórico (3h) com flags LOOP_SUSPEITO, STALLED_THINKING, SESSAO_DUPLICADA, EXPLORACAO_CLI_HELP, channel_id, thread_root, agent_pubkey, ultimo_shell e acao_sugerida.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            apenas_ativos: { type: "boolean", description: "Se true (padrão), lista apenas sessões ativas nos últimos 15 min; se false, inclui histórico de 3h" },
-            agente: { type: "string", description: "Filtrar por nome do agente (ex: 'Atlas', 'Lia', 'Bento')" }
-          }
-        },
-        call: async (_client, _context, args) => {
-          const radar = await fetchGooseLoopRadar(ctx);
-          const filtered = filterGooseLoopRadar(radar, {
-            apenas_ativos: args == null ? void 0 : args.apenas_ativos,
-            agente: args == null ? void 0 : args.agente
-          });
-          return JSON.stringify(filtered, null, 2);
-        }
-      });
-      ctx.agents.addTool({
-        name: "orgfy_session_stop",
-        description: "Interrompe (Stop) ou reinicia o turno de um agente travado/em loop via API nativa do Buzz Desktop e, quando relaunch=true, relança automaticamente o agente na mesma thread já com @menção exata, escopo fechado (target_files), comando de aceite L-22 e limite de shells.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            agente: { type: "string", description: "Nome, key ou pubkey do agente (ex: 'OrgFy Teo', 'OrgFy Otto')" },
-            agent_pubkey: { type: "string", description: "Pubkey 64-hex do agente (retornado por orgfy_loop_radar)" },
-            channel_id: { type: "string", description: "UUID do canal (default: canal #OrgFy)" },
-            thread_root: { type: "string", description: "Event ID 64-hex da thread (retornado por orgfy_loop_radar)" },
-            action: { type: "string", enum: ["interrupt", "new", "compact"], description: "Ação de controle (default: 'interrupt' = Stop imediato)" },
-            release_issue_id: { type: "string", description: "Opcional: issue_id cujo checkout lock deve ser liberado após parar" },
-            reason: { type: "string", description: "Motivo técnico da interrupção" },
-            relaunch: { type: "boolean", description: "Se true, relança automaticamente o agente com @menção e escopo fechado via ctx.agents.wake()" },
-            reset_session_before_relaunch: { type: "boolean", description: "Se true junto com relaunch, limpa a sessão ('new') antes de acordar o agente" },
-            relaunch_instruction: { type: "string", description: "Instrução objetiva do que o agente deve corrigir/executar ao ser relançado" },
-            target_files: { type: "array", items: { type: "string" }, description: "Lista fechada de 1 a 3 arquivos exatos que o agente deve tocar" },
-            acceptance_command: { type: "string", description: "Comando determinístico de aceite L-22 esperado" },
-            max_shells: { type: "number", description: "Teto rígido de comandos shell no novo turno (default: 10)" }
-          },
-          required: ["agente"]
-        },
-        call: async (_client, _context, args) => {
-          const res = await stopAgentSession(ctx, {
-            agente: String((args == null ? void 0 : args.agente) || (args == null ? void 0 : args.agent_pubkey) || ""),
-            agent_pubkey: args == null ? void 0 : args.agent_pubkey,
-            channel_id: args == null ? void 0 : args.channel_id,
-            thread_root: args == null ? void 0 : args.thread_root,
-            action: args == null ? void 0 : args.action,
-            release_issue_id: args == null ? void 0 : args.release_issue_id,
-            reason: args == null ? void 0 : args.reason,
-            relaunch: Boolean(args == null ? void 0 : args.relaunch),
-            reset_session_before_relaunch: Boolean(args == null ? void 0 : args.reset_session_before_relaunch),
-            relaunch_instruction: args == null ? void 0 : args.relaunch_instruction,
-            target_files: Array.isArray(args == null ? void 0 : args.target_files) ? args.target_files : void 0,
-            acceptance_command: args == null ? void 0 : args.acceptance_command,
-            max_shells: typeof (args == null ? void 0 : args.max_shells) === "number" ? args.max_shells : void 0
-          });
-          return JSON.stringify(res, null, 2);
-        }
-      });
-      ctx.agents.addTool({
-        name: "orgfy_model_failover",
-        description: "Integração OrgFy ↔ NexusMind Gateway: consulta os modelos disponíveis no NexusMind, faz ping real nos candidatos FREE (ou pagos) mais inteligentes, elege o melhor online (maior inteligência + menor latência ms), opcionalmente atualiza o agente via ctx.agents.save() e re-dispara na thread original.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            agente: { type: "string", description: "Nome, key ou pubkey do agente afetado (ex: 'OrgFy Cron')" },
-            agent_pubkey: { type: "string", description: "Pubkey 64-hex do agente (opcional)" },
-            failed_model: { type: "string", description: "ID do modelo em falha para excluir do ranking (ex: 'kilocode-fast-free')" },
-            prefer_free: { type: "boolean", description: "Se true (padrão), prioriza modelos FREE disponíveis no NexusMind" },
-            apply: { type: "boolean", description: "Se true, salva o novo modelo no agente via ctx.agents.save(); se false, apenas simula e retorna o ranking" },
-            retrigger: { type: "boolean", description: "Se true (padrão quando apply=true), re-dispara o agente via ctx.agents.wake() na thread original" },
-            channel_id: { type: "string", description: "UUID do canal para re-disparo (default: #OrgFy)" },
-            thread_root: { type: "string", description: "Event ID 64-hex da thread original para re-disparo" },
-            retrigger_text: { type: "string", description: "Texto opcional de retomada após a troca de modelo" },
-            max_probes: { type: "number", description: "Número máximo de candidatos testados com ping real (1..10, default: 6)" }
-          }
-        },
-        call: async (_client, _context, args) => {
-          const res = await executeSmartModelFailover(ctx, {
-            agente: args == null ? void 0 : args.agente,
-            agent_pubkey: args == null ? void 0 : args.agent_pubkey,
-            failed_model: args == null ? void 0 : args.failed_model,
-            prefer_free: args == null ? void 0 : args.prefer_free,
-            apply: args == null ? void 0 : args.apply,
-            retrigger: args == null ? void 0 : args.retrigger,
-            channel_id: args == null ? void 0 : args.channel_id,
-            thread_root: args == null ? void 0 : args.thread_root,
-            retrigger_text: args == null ? void 0 : args.retrigger_text,
-            max_probes: args == null ? void 0 : args.max_probes
-          });
-          return JSON.stringify(res, null, 2);
-        }
-      });
-      ctx.agents.addTool({
-        name: "orgfy_card_create",
-        description: "Abertura schema-first de card OrgFy: valida L-01 (executor !== revisor), executa triagem em cascata via Decisions API (risco, tier modelo, política Attention), congela SHA-256 (L-22), gera contrato nativo Buzz Attention/Watch (interest_set + watch_add) e opcionalmente grava em cards/<SLUG>.md + roda card-lint.sh.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            slug: { type: "string", description: "Slug único do card (ex: spec-0010-t001)" },
-            id_tarefa: { type: "string", description: "ID formal da tarefa (ex: SPEC-0010 T001)" },
-            titulo: { type: "string", description: "Título objetivo em verbo imperativo" },
-            objetivo: { type: "string", description: "Objetivo detalhado do card" },
-            contexto: { type: "string", description: "Contexto operacional" },
-            autoridade: { type: "string", description: "Spec de origem ou diretiva DECIDIDO" },
-            decisao: { type: "string", description: "Decisão executiva/técnica registrada" },
-            tipo: { type: "string", enum: ["execucao", "revisao", "infraestrutura", "seguranca", "spec", "pesquisa"] },
-            executor: { type: "string", description: "Perfil executor (L-01: diferente do revisor)" },
-            revisor: { type: "string", description: "Perfil revisor independente (L-01)" },
-            decisor: { type: "string", description: "Decisor executivo (default: OrgFy Iris)" },
-            escrita_exclusiva: { type: "array", items: { type: "string" }, description: "Arquivos/paths autorizados para escrita" },
-            leitura: { type: "array", items: { type: "string" }, description: "Arquivos/paths autorizados para leitura" },
-            passos: { type: "array", items: { type: "string" }, description: "Passos ordenados de execução" },
-            fora_escopo: { type: "array", items: { type: "string" }, description: "Itens fora de escopo" },
-            feito_quando: { type: "string", description: "Critério objetivo de conclusão" },
-            prova_positiva: { type: "string", description: "Comando e saída esperada positiva" },
-            prova_negativa: { type: "string", description: "Comando e saída esperada negativa" },
-            acceptance_command: { type: "string", description: "Comando executável de aceite L-22" },
-            attention_policy: { type: "string", enum: ["timer_curto", "event_driven", "watchdog_longo"] },
-            channel_id: { type: "string", description: "UUID do canal Buzz para o Watch" },
-            thread_root: { type: "string", description: "Event ID 64-hex da thread para Watch de evento" },
-            write_file: { type: "boolean", description: "Se true, grava em cards/<SLUG>.md" },
-            run_lint: { type: "boolean", description: "Se true e write_file=true, valida com ./ferramentas/card-lint.sh" },
-            empresa: { type: "string", description: "Slug da empresa (default: orgfy)" }
-          },
-          required: ["slug", "titulo", "autoridade", "decisao", "executor", "revisor", "escrita_exclusiva", "feito_quando", "acceptance_command"]
-        },
-        call: async (_client, _context, args) => {
-          const res = await createCanonicalCard(ctx, args || {});
-          return JSON.stringify(res, null, 2);
-        }
-      });
-      ctx.agents.addTool({
-        name: "orgfy_decision_triage",
-        description: "Classificador rápido em batch via ctx.decisions.decide (yes_no + score + choice) com fallback determinístico offline. Modo 'card' avalia escopo atômico, risco 1-5, tier de modelo e política Attention; modo 'diff' audita vazamento de Escrita exclusiva, alegação sem prova L-24 e ação de Gate.",
-        inputSchema: {
-          type: "object",
-          properties: {
-            mode: { type: "string", enum: ["card", "diff"], description: "Modo de triagem: 'card' ou 'diff'" },
-            slug: { type: "string" },
-            issue_id: { type: "string" },
-            titulo: { type: "string" },
-            objetivo: { type: "string" },
-            tipo: { type: "string" },
-            escrita_exclusiva: { type: "array", items: { type: "string" } },
-            arquivos_alterados: { type: "array", items: { type: "string" } },
-            acceptance_command: { type: "string" },
-            passos: { type: "array", items: { type: "string" } },
-            resumo_entrega: { type: "string" },
-            saida_aceite: { type: "string" },
-            recusas_anteriores: { type: "number" }
-          },
-          required: ["mode"]
-        },
-        call: async (_client, _context, args) => {
-          const mode = String((args == null ? void 0 : args.mode) || "card");
-          const res = mode === "diff" ? await triageDiffWithDecisions(ctx, {
-            issue_id: args == null ? void 0 : args.issue_id,
-            titulo: args == null ? void 0 : args.titulo,
-            escrita_exclusiva: Array.isArray(args == null ? void 0 : args.escrita_exclusiva) ? args.escrita_exclusiva : [],
-            arquivos_alterados: Array.isArray(args == null ? void 0 : args.arquivos_alterados) ? args.arquivos_alterados : [],
-            resumo_entrega: args == null ? void 0 : args.resumo_entrega,
-            saida_aceite: args == null ? void 0 : args.saida_aceite,
-            recusas_anteriores: args == null ? void 0 : args.recusas_anteriores
-          }) : await triageCardWithDecisions(ctx, {
-            slug: args == null ? void 0 : args.slug,
-            titulo: String((args == null ? void 0 : args.titulo) || ""),
-            objetivo: args == null ? void 0 : args.objetivo,
-            tipo: args == null ? void 0 : args.tipo,
-            escrita_exclusiva: Array.isArray(args == null ? void 0 : args.escrita_exclusiva) ? args.escrita_exclusiva : [],
-            acceptance_command: args == null ? void 0 : args.acceptance_command,
-            passos: Array.isArray(args == null ? void 0 : args.passos) ? args.passos : []
-          });
-          return JSON.stringify(res, null, 2);
-        }
-      });
-      console.log("[ORGFY] 16 agentTools registradas com sucesso no harness do Buzz (Ondas 1-4: Card Schema-First, Decisions Router, Buzz Attention, Radar de Loops, Session Stop, Model Failover).");
+        });
+      }
+      console.log(`[ORGFY v13] ${unifiedTools.length} agentTools registradas via Unified Tool Registry (OTel GenAI + Attention + Decisions API).`);
     } catch (err) {
       console.warn("[ORGFY] Falha ao registrar agentTools:", err);
     }
@@ -12416,11 +12758,15 @@ export {
   THEME,
   apply,
   buildBuzzAttentionContract,
+  buildUnifiedOrgfyTools,
   checkMentionTargetIdentity,
   checkThreadWakeAntiLoop,
   createCanonicalCard,
+  getTelemetrySnapshot,
   hydrateIssueDetail,
   inject,
+  registerBuzzNativeIntegrations,
+  resetTelemetryForTests,
   resetThreadWakeGuardForTests,
   triageCardWithDecisions,
   triageDiffWithDecisions

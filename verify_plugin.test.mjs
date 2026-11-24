@@ -726,3 +726,65 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     diffOutOfScope: diffCheck.arquivosForaEscopo,
   }));
 }
+
+// 14. v13 Frontier: Zero-Mock Hardcodes Purged + Unified Tool Registry + Buzz Native Synergy + OTel GenAI
+{
+  assert.equal(orgfyMod.INITIAL_PIPELINE_CARDS.length, 0, "INITIAL_PIPELINE_CARDS deve ser vazio (Zero Mock v13)");
+  assert.equal(orgfyMod.INITIAL_REGRAS_PROBATORIAS.length, 0, "INITIAL_REGRAS_PROBATORIAS deve ser vazio (Zero Mock v13)");
+  assert.equal(orgfyMod.AVAILABLE_AGENTS.length, 0, "AVAILABLE_AGENTS deve ser vazio (lido ao vivo de ctx.agents.snapshot)");
+
+  orgfyMod.resetTelemetryForTests();
+
+  const nativeEvents = { relay: 0, completions: 0, actions: 0, sidebars: 0, shortcuts: 0, attentionSources: 0, hooks: [] };
+  const nativeCtx = {
+    react: { createElement: () => null },
+    relay: {
+      snapshot: () => ({ status: "ready", generation: 1 }),
+      subscribe: () => { nativeEvents.relay++; return () => {}; },
+    },
+    conversation: {
+      registerCompletion: () => { nativeEvents.completions++; },
+      registerMessageAction: () => { nativeEvents.actions++; },
+    },
+    reflect: {
+      get: (name) => name === "sidebarSections" ? { register: () => { nativeEvents.sidebars++; } } : undefined,
+    },
+    shortcuts: { register: () => { nativeEvents.shortcuts++; } },
+    agents: {
+      addAttentionSource: () => { nativeEvents.attentionSources++; },
+      registerHook: (hk) => { nativeEvents.hooks.push(hk); },
+    },
+  };
+
+  const nativeState = orgfyMod.registerBuzzNativeIntegrations(nativeCtx);
+  assert.equal(nativeState.relayConnected, true);
+  assert.equal(nativeState.conversationRegistered, true);
+  assert.equal(nativeState.sidebarRegistered, true);
+  assert.equal(nativeState.shortcutsRegistered, true);
+  assert.equal(nativeState.attentionSourceRegistered, true);
+  assert.equal(nativeState.otelHookRegistered, true);
+
+  const failHook = nativeEvents.hooks.find((hk) => hk.event === "turn.failed");
+  assert.ok(failHook, "hook OTel turn.failed deve estar registrado");
+  failHook.run({ model: "gemini-3.8-flash-medium", error: "HTTP 429" }, { agent: "OrgFy Val", session: "s1" });
+  failHook.run({ model: "gemini-3.8-flash-medium", error: "HTTP 429" }, { agent: "OrgFy Val", session: "s1" });
+
+  await orgfyMod.triageCardWithDecisions({}, {
+    titulo: "Atualizar README de fixture",
+    escrita_exclusiva: ["README.md"],
+    acceptance_command: "pytest -q",
+  });
+
+  const snap = orgfyMod.getTelemetrySnapshot();
+  assert.ok(snap.totalSpans >= 3, "spans OTel devem ser capturados");
+  assert.equal(snap.decisionsSavings.totalCalls, 1);
+  assert.equal(snap.decisionsSavings.wakesOrEscalationsAvoided, 1);
+  assert.ok(snap.decisionsSavings.estimatedTokensSaved > 0);
+  assert.equal(snap.retryCascadeAlerts.length, 1, "deve detectar retry cascade após 2 erros consecutivos");
+  console.log("[v13 FRONTIER BUZZ-NATIVE + OTEL OK]", JSON.stringify({
+    nativeState,
+    totalSpans: snap.totalSpans,
+    tokensSaved: snap.decisionsSavings.estimatedTokensSaved,
+    retryCascadeAlerts: snap.retryCascadeAlerts.length,
+  }));
+}
