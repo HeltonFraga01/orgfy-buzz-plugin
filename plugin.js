@@ -3120,6 +3120,7 @@ function renderIntelligenceTab(props) {
               h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, "Radar de Loops (Goose Live · 3h)"),
               (loopRadar == null ? void 0 : loopRadar.ok) && (() => {
                 const critAtivos = loopRadar.resumo.criticos_ativos ?? loopRadar.resumo.criticos;
+                const avisosAtivos = loopRadar.resumo.avisos_ativos ?? loopRadar.resumo.avisos;
                 const critHist = loopRadar.resumo.criticos_historico_3h ?? 0;
                 const dupAtivos = loopRadar.resumo.duplicadas_ativas ?? loopRadar.resumo.duplicadas;
                 return h(
@@ -3131,8 +3132,8 @@ function renderIntelligenceTab(props) {
                       fontWeight: "700",
                       padding: "2px 7px",
                       borderRadius: "9999px",
-                      backgroundColor: critAtivos > 0 ? "rgba(239, 68, 68, 0.18)" : (loopRadar.resumo.avisos_ativos ?? loopRadar.resumo.avisos) > 0 || critHist > 0 ? "rgba(245, 158, 11, 0.18)" : "rgba(16, 185, 129, 0.15)",
-                      color: critAtivos > 0 ? "#f87171" : (loopRadar.resumo.avisos_ativos ?? loopRadar.resumo.avisos) > 0 || critHist > 0 ? "#fbbf24" : "#10b981"
+                      backgroundColor: critAtivos > 0 ? "rgba(239, 68, 68, 0.18)" : avisosAtivos > 0 ? "rgba(245, 158, 11, 0.18)" : "rgba(16, 185, 129, 0.15)",
+                      color: critAtivos > 0 ? "#f87171" : avisosAtivos > 0 ? "#fbbf24" : "#10b981"
                     }
                   },
                   `${critAtivos} ativos · ${critHist} hist(3h) · ${dupAtivos} dup`
@@ -3178,127 +3179,156 @@ function renderIntelligenceTab(props) {
               )
             )
           ),
-          !loopRadar || !loopRadar.ok ? h("div", { style: { fontSize: "11px", color: "#9ca3af" } }, (loopRadar == null ? void 0 : loopRadar.error) || "Carregando telemetria live do Goose...") : loopRadar.sessoes.length === 0 ? h("div", { style: { fontSize: "11px", color: "#10b981" } }, "Nenhuma sessão em loop ou travada nas últimas 3 horas.") : h(
-            "div",
-            { style: { display: "flex", flexDirection: "column", gap: "6px", maxHeight: "260px", overflowY: "auto", paddingRight: "4px" } },
-            loopRadar.sessoes.map((s) => {
-              const isActive = typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15;
-              return h(
+          !loopRadar || !loopRadar.ok ? h("div", { style: { fontSize: "11px", color: "#9ca3af" } }, (loopRadar == null ? void 0 : loopRadar.error) || "Carregando telemetria live do Goose...") : loopRadar.sessoes.length === 0 ? h("div", { style: { fontSize: "11px", color: "#10b981" } }, "Nenhuma sessão em loop ou travada nas últimas 3 horas.") : (() => {
+            const isSessionActive = (s) => typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15;
+            const activeSessions = loopRadar.sessoes.filter(isSessionActive);
+            const historySessions = loopRadar.sessoes.filter((s) => !isSessionActive(s));
+            const renderSessionCard = (s, isActive) => h(
+              "div",
+              {
+                key: s.session_id,
+                style: {
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "4px",
+                  padding: "7px 9px",
+                  borderRadius: "6px",
+                  opacity: isActive ? 1 : 0.72,
+                  backgroundColor: isActive && s.severidade === "critical" ? "rgba(239, 68, 68, 0.12)" : s.severidade === "warn" || !isActive && s.severidade === "critical" ? "rgba(245, 158, 11, 0.08)" : "rgba(255, 255, 255, 0.025)",
+                  border: isActive && s.severidade === "critical" ? "1px solid rgba(239, 68, 68, 0.35)" : s.severidade === "warn" || !isActive && s.severidade === "critical" ? "1px solid rgba(245, 158, 11, 0.25)" : "1px solid rgba(255, 255, 255, 0.05)",
+                  fontSize: "10.5px",
+                  fontFamily: "monospace"
+                }
+              },
+              h(
                 "div",
-                {
-                  key: s.session_id,
-                  style: {
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "4px",
-                    padding: "7px 9px",
-                    borderRadius: "6px",
-                    opacity: isActive ? 1 : 0.72,
-                    backgroundColor: isActive && s.severidade === "critical" ? "rgba(239, 68, 68, 0.12)" : s.severidade === "warn" || !isActive && s.severidade === "critical" ? "rgba(245, 158, 11, 0.08)" : "rgba(255, 255, 255, 0.025)",
-                    border: isActive && s.severidade === "critical" ? "1px solid rgba(239, 68, 68, 0.35)" : s.severidade === "warn" || !isActive && s.severidade === "critical" ? "1px solid rgba(245, 158, 11, 0.25)" : "1px solid rgba(255, 255, 255, 0.05)",
-                    fontSize: "10.5px",
-                    fontFamily: "monospace"
-                  }
-                },
+                { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "6px" } },
                 h(
                   "div",
-                  { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "6px" } },
+                  { style: { display: "flex", alignItems: "center", gap: "6px" } },
                   h(
-                    "div",
-                    { style: { display: "flex", alignItems: "center", gap: "6px" } },
-                    h(
+                    "span",
+                    {
+                      style: {
+                        fontSize: "8.5px",
+                        fontWeight: "700",
+                        padding: "1px 5px",
+                        borderRadius: "4px",
+                        backgroundColor: isActive ? "rgba(16, 185, 129, 0.18)" : "rgba(156, 163, 175, 0.15)",
+                        color: isActive ? "#34d399" : "#9ca3af"
+                      }
+                    },
+                    isActive ? "ATIVA" : "HIST"
+                  ),
+                  h("span", { style: { color: "#f3f4f6", fontWeight: "700" } }, s.agente)
+                ),
+                h(
+                  "div",
+                  { style: { display: "flex", alignItems: "center", gap: "8px" } },
+                  h(
+                    "span",
+                    { style: { color: isActive && s.severidade === "critical" ? "#f87171" : s.severidade === "warn" ? "#fbbf24" : "#cbd5e1", fontWeight: "600" } },
+                    `${formatMin(s.duracao_min)} · ${s.shells} shells`
+                  ),
+                  isActive && onStopLoopSession && h(
+                    "button",
+                    {
+                      onClick: () => onStopLoopSession(s),
+                      disabled: stoppingSessionId === s.session_id,
+                      title: "Interromper (Stop) o turno atual deste agente imediatamente",
+                      style: {
+                        padding: "2px 8px",
+                        borderRadius: "5px",
+                        border: "1px solid rgba(239, 68, 68, 0.55)",
+                        backgroundColor: stoppingSessionId === s.session_id ? "rgba(239, 68, 68, 0.35)" : "rgba(239, 68, 68, 0.2)",
+                        color: "#fecaca",
+                        fontSize: "9.5px",
+                        fontWeight: "700",
+                        cursor: stoppingSessionId === s.session_id ? "wait" : "pointer"
+                      }
+                    },
+                    stoppingSessionId === s.session_id ? "Parando..." : "■ Parar"
+                  )
+                )
+              ),
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px", flexWrap: "wrap" } },
+                h(
+                  "div",
+                  { style: { display: "flex", flexWrap: "wrap", gap: "4px" } },
+                  (s.flags.length > 0 ? s.flags : ["OK"]).map(
+                    (fl) => h(
                       "span",
                       {
+                        key: fl,
                         style: {
-                          fontSize: "8.5px",
+                          fontSize: "9px",
                           fontWeight: "700",
                           padding: "1px 5px",
                           borderRadius: "4px",
-                          backgroundColor: isActive ? "rgba(16, 185, 129, 0.18)" : "rgba(156, 163, 175, 0.15)",
-                          color: isActive ? "#34d399" : "#9ca3af"
+                          backgroundColor: fl === "OK" ? "rgba(16, 185, 129, 0.15)" : fl === "ITEM_JA_FECHADO" || fl === "CONTEXTO_COMPACTADO" || fl === "TURNO_EXCESSIVO" || fl === "COLISAO_WORKTREE" || fl === "COMANDO_REPETIDO" || fl === "ERRO_REPETIDO" || fl === "LOOP_SUSPEITO" || fl === "STALLED_THINKING" ? "rgba(239, 68, 68, 0.22)" : "rgba(245, 158, 11, 0.22)",
+                          color: fl === "OK" ? "#10b981" : fl === "ITEM_JA_FECHADO" || fl === "CONTEXTO_COMPACTADO" || fl === "TURNO_EXCESSIVO" || fl === "COLISAO_WORKTREE" || fl === "COMANDO_REPETIDO" || fl === "ERRO_REPETIDO" || fl === "LOOP_SUSPEITO" || fl === "STALLED_THINKING" ? "#f87171" : "#fbbf24"
                         }
                       },
-                      isActive ? "ATIVA" : "HIST"
-                    ),
-                    h("span", { style: { color: "#f3f4f6", fontWeight: "700" } }, s.agente)
-                  ),
-                  h(
-                    "div",
-                    { style: { display: "flex", alignItems: "center", gap: "8px" } },
-                    h(
-                      "span",
-                      { style: { color: isActive && s.severidade === "critical" ? "#f87171" : s.severidade === "warn" ? "#fbbf24" : "#cbd5e1", fontWeight: "600" } },
-                      `${formatMin(s.duracao_min)} · ${s.shells} shells`
-                    ),
-                    isActive && onStopLoopSession && h(
-                      "button",
-                      {
-                        onClick: () => onStopLoopSession(s),
-                        disabled: stoppingSessionId === s.session_id,
-                        title: "Interromper (Stop) o turno atual deste agente imediatamente",
-                        style: {
-                          padding: "2px 8px",
-                          borderRadius: "5px",
-                          border: "1px solid rgba(239, 68, 68, 0.55)",
-                          backgroundColor: stoppingSessionId === s.session_id ? "rgba(239, 68, 68, 0.35)" : "rgba(239, 68, 68, 0.2)",
-                          color: "#fecaca",
-                          fontSize: "9.5px",
-                          fontWeight: "700",
-                          cursor: stoppingSessionId === s.session_id ? "wait" : "pointer"
-                        }
-                      },
-                      stoppingSessionId === s.session_id ? "Parando..." : "■ Parar"
+                      fl
                     )
                   )
                 ),
                 h(
-                  "div",
-                  { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px", flexWrap: "wrap" } },
-                  h(
-                    "div",
-                    { style: { display: "flex", flexWrap: "wrap", gap: "4px" } },
-                    (s.flags.length > 0 ? s.flags : ["OK"]).map(
-                      (fl) => h(
-                        "span",
-                        {
-                          key: fl,
-                          style: {
-                            fontSize: "9px",
-                            fontWeight: "700",
-                            padding: "1px 5px",
-                            borderRadius: "4px",
-                            backgroundColor: fl === "OK" ? "rgba(16, 185, 129, 0.15)" : fl === "ITEM_JA_FECHADO" || fl === "CONTEXTO_COMPACTADO" || fl === "TURNO_EXCESSIVO" || fl === "COLISAO_WORKTREE" || fl === "COMANDO_REPETIDO" || fl === "ERRO_REPETIDO" || fl === "LOOP_SUSPEITO" || fl === "STALLED_THINKING" ? "rgba(239, 68, 68, 0.22)" : "rgba(245, 158, 11, 0.22)",
-                            color: fl === "OK" ? "#10b981" : fl === "ITEM_JA_FECHADO" || fl === "CONTEXTO_COMPACTADO" || fl === "TURNO_EXCESSIVO" || fl === "COLISAO_WORKTREE" || fl === "COMANDO_REPETIDO" || fl === "ERRO_REPETIDO" || fl === "LOOP_SUSPEITO" || fl === "STALLED_THINKING" ? "#f87171" : "#fbbf24"
-                          }
-                        },
-                        fl
-                      )
-                    )
-                  ),
-                  h(
-                    "span",
-                    { style: { fontSize: "9.5px", color: "#9ca3af" } },
-                    `${s.session_id} · há ${s.ultima_atualizacao_min}m${s.compactions ? ` · ${s.compactions}x compact` : ""}${s.errors_5xx ? ` · ${s.errors_5xx}x 5xx` : ""}`
-                  )
-                ),
-                s.gatilho_resumo && h(
-                  "div",
-                  { style: { fontSize: "9.5px", color: "#cbd5e1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: s.gatilho_resumo },
-                  `▸ ${s.gatilho_resumo}`
-                ),
-                s.ultimo_shell && h(
-                  "div",
-                  { style: { fontSize: "9.5px", color: "#9ca3af", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: s.ultimo_shell },
-                  `$ ${s.ultimo_shell}`
-                ),
-                isActive && s.acao_sugerida && h(
-                  "div",
-                  { style: { fontSize: "9.5px", color: "#38bdf8", lineHeight: "1.3" } },
-                  `→ ${s.acao_sugerida}`
+                  "span",
+                  { style: { fontSize: "9.5px", color: "#9ca3af" } },
+                  `${s.session_id} · há ${s.ultima_atualizacao_min}m${s.compactions ? ` · ${s.compactions}x compact` : ""}${s.errors_5xx ? ` · ${s.errors_5xx}x 5xx` : ""}`
                 )
-              );
-            })
-          )
+              ),
+              s.gatilho_resumo && h(
+                "div",
+                { style: { fontSize: "9.5px", color: "#cbd5e1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: s.gatilho_resumo },
+                `▸ ${s.gatilho_resumo}`
+              ),
+              s.ultimo_shell && h(
+                "div",
+                { style: { fontSize: "9.5px", color: "#9ca3af", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: s.ultimo_shell },
+                `$ ${s.ultimo_shell}`
+              ),
+              isActive && s.acao_sugerida && h(
+                "div",
+                { style: { fontSize: "9.5px", color: "#38bdf8", lineHeight: "1.3" } },
+                `→ ${s.acao_sugerida}`
+              )
+            );
+            return h(
+              "div",
+              { style: { display: "flex", flexDirection: "column", gap: "8px" } },
+              activeSessions.length === 0 ? h("div", { style: { fontSize: "11px", color: "#10b981" } }, "Nenhuma sessão ativa em loop ou travada agora.") : h(
+                "div",
+                { style: { display: "flex", flexDirection: "column", gap: "6px", maxHeight: "220px", overflowY: "auto", paddingRight: "4px" } },
+                activeSessions.map((s) => renderSessionCard(s, true))
+              ),
+              historySessions.length > 0 && h(
+                "details",
+                { style: { borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: "6px" } },
+                h(
+                  "summary",
+                  {
+                    style: {
+                      fontSize: "10.5px",
+                      color: "#9ca3af",
+                      fontFamily: "monospace",
+                      cursor: "pointer",
+                      userSelect: "none"
+                    }
+                  },
+                  `Histórico encerrado (3h · ${historySessions.length} sessões — insumo RSI)`
+                ),
+                h(
+                  "div",
+                  { style: { display: "flex", flexDirection: "column", gap: "6px", maxHeight: "220px", overflowY: "auto", paddingRight: "4px", marginTop: "6px" } },
+                  historySessions.map((s) => renderSessionCard(s, false))
+                )
+              )
+            );
+          })()
         ),
         // Top Estagnados
         h(

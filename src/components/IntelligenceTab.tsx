@@ -591,6 +591,7 @@ export function renderIntelligenceTab(props: IntelligenceTabProps) {
               loopRadar?.ok &&
                 (() => {
                   const critAtivos = loopRadar.resumo.criticos_ativos ?? loopRadar.resumo.criticos;
+                  const avisosAtivos = loopRadar.resumo.avisos_ativos ?? loopRadar.resumo.avisos;
                   const critHist = loopRadar.resumo.criticos_historico_3h ?? 0;
                   const dupAtivos = loopRadar.resumo.duplicadas_ativas ?? loopRadar.resumo.duplicadas;
                   return h(
@@ -605,13 +606,13 @@ export function renderIntelligenceTab(props: IntelligenceTabProps) {
                         backgroundColor:
                           critAtivos > 0
                             ? "rgba(239, 68, 68, 0.18)"
-                            : (loopRadar.resumo.avisos_ativos ?? loopRadar.resumo.avisos) > 0 || critHist > 0
+                            : avisosAtivos > 0
                             ? "rgba(245, 158, 11, 0.18)"
                             : "rgba(16, 185, 129, 0.15)",
                         color:
                           critAtivos > 0
                             ? "#f87171"
-                            : (loopRadar.resumo.avisos_ativos ?? loopRadar.resumo.avisos) > 0 || critHist > 0
+                            : avisosAtivos > 0
                             ? "#fbbf24"
                             : "#10b981",
                       },
@@ -665,12 +666,14 @@ export function renderIntelligenceTab(props: IntelligenceTabProps) {
             ? h("div", { style: { fontSize: "11px", color: "#9ca3af" } }, loopRadar?.error || "Carregando telemetria live do Goose...")
             : loopRadar.sessoes.length === 0
             ? h("div", { style: { fontSize: "11px", color: "#10b981" } }, "Nenhuma sessão em loop ou travada nas últimas 3 horas.")
-            : h(
-                "div",
-                { style: { display: "flex", flexDirection: "column", gap: "6px", maxHeight: "260px", overflowY: "auto", paddingRight: "4px" } },
-                loopRadar.sessoes.map((s) => {
-                  const isActive = typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15;
-                  return h(
+            : (() => {
+                const isSessionActive = (s: GooseLoopSession) =>
+                  typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15;
+                const activeSessions = loopRadar.sessoes.filter(isSessionActive);
+                const historySessions = loopRadar.sessoes.filter((s) => !isSessionActive(s));
+
+                const renderSessionCard = (s: GooseLoopSession, isActive: boolean) =>
+                  h(
                     "div",
                     {
                       key: s.session_id,
@@ -810,8 +813,42 @@ export function renderIntelligenceTab(props: IntelligenceTabProps) {
                         `→ ${s.acao_sugerida}`
                       )
                   );
-                })
-              )
+
+                return h(
+                  "div",
+                  { style: { display: "flex", flexDirection: "column", gap: "8px" } },
+                  activeSessions.length === 0
+                    ? h("div", { style: { fontSize: "11px", color: "#10b981" } }, "Nenhuma sessão ativa em loop ou travada agora.")
+                    : h(
+                        "div",
+                        { style: { display: "flex", flexDirection: "column", gap: "6px", maxHeight: "220px", overflowY: "auto", paddingRight: "4px" } },
+                        activeSessions.map((s) => renderSessionCard(s, true))
+                      ),
+                  historySessions.length > 0 &&
+                    h(
+                      "details",
+                      { style: { borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: "6px" } },
+                      h(
+                        "summary",
+                        {
+                          style: {
+                            fontSize: "10.5px",
+                            color: "#9ca3af",
+                            fontFamily: "monospace",
+                            cursor: "pointer",
+                            userSelect: "none",
+                          },
+                        },
+                        `Histórico encerrado (3h · ${historySessions.length} sessões — insumo RSI)`
+                      ),
+                      h(
+                        "div",
+                        { style: { display: "flex", flexDirection: "column", gap: "6px", maxHeight: "220px", overflowY: "auto", paddingRight: "4px", marginTop: "6px" } },
+                        historySessions.map((s) => renderSessionCard(s, false))
+                      )
+                    )
+                );
+              })()
         ),
         // Top Estagnados
         h(
