@@ -2432,8 +2432,45 @@ async function executeAgentModelFailover(ctx, options) {
 function normalizeAgentAlias(raw) {
   return String(raw || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/^@/, "").replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
 }
+function checkMentionTargetIdentity(input) {
+  const text = String(input.messageText || "");
+  const matches = Array.from(
+    text.matchAll(/@((?:OrgFy|Lumen|Tributario)\s+[A-ZÀ-Ú][a-zà-ú]+(?:\s+[A-ZÀ-Ú][a-zà-ú]+)?)/g)
+  ).map((m) => m[1].trim());
+  const mentionedTargets = Array.from(new Set(matches));
+  if (mentionedTargets.length === 0) {
+    return {
+      isForMe: true,
+      action: "PROCEED",
+      mentionedTargets: [],
+      reason: "Sem menção nominal explícita a outro agente."
+    };
+  }
+  const meNorm = normalizeAgentAlias(input.currentAgentName);
+  const isAddressedToMe = mentionedTargets.some((t) => {
+    const tNorm = normalizeAgentAlias(t);
+    return tNorm === meNorm || tNorm.includes(meNorm) || meNorm.includes(tNorm);
+  });
+  if (isAddressedToMe) {
+    return {
+      isForMe: true,
+      action: "PROCEED",
+      mentionedTargets,
+      reason: `Menção compatível com o perfil ativo (${input.currentAgentName}).`
+    };
+  }
+  return {
+    isForMe: false,
+    action: "[SILENT]",
+    mentionedTargets,
+    reason: `Menção endereçada a [${mentionedTargets.join(", ")}], não a ${input.currentAgentName}. Responder [SILENT].`
+  };
+}
 const THREAD_WAKE_COOLDOWN_MS = 10 * 60 * 1e3;
 const threadWakeTimestamps = /* @__PURE__ */ new Map();
+function resetThreadWakeGuardForTests() {
+  threadWakeTimestamps.clear();
+}
 function checkThreadWakeAntiLoop(input) {
   if (input.bypass) {
     return { allow: true, reason: "bypass" };
@@ -11261,5 +11298,8 @@ export {
   TENANTS,
   THEME,
   apply,
-  inject
+  checkMentionTargetIdentity,
+  checkThreadWakeAntiLoop,
+  inject,
+  resetThreadWakeGuardForTests
 };

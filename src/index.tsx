@@ -67,8 +67,17 @@ import {
   lintCardForDispatch,
   bindConversationContextForCard,
   stopAgentSession,
+  checkMentionTargetIdentity,
+  checkThreadWakeAntiLoop,
+  resetThreadWakeGuardForTests,
   registerGovernanceAgentHooks,
 } from "./services/governance-engine";
+
+export {
+  checkMentionTargetIdentity,
+  checkThreadWakeAntiLoop,
+  resetThreadWakeGuardForTests,
+};
 import {
   executeSmartModelFailover,
 } from "./services/model-failover";

@@ -582,9 +582,7 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
   console.log("[SESSION STOP ATOMIC RELAUNCH OK]", JSON.stringify({ relaunched: relaunchRes.relaunched, wakes: h1.wakes.length }));
 
   // Guarda de Identidade por Menção & Anti-Loop de Wake por Thread
-  const { checkMentionTargetIdentity, checkThreadWakeAntiLoop, resetThreadWakeGuardForTests } = await import(
-    "./src/services/governance-engine.ts"
-  );
+  const { checkMentionTargetIdentity, checkThreadWakeAntiLoop, resetThreadWakeGuardForTests } = orgfyMod;
   const mismatch = checkMentionTargetIdentity({
     messageText: "Por favor @OrgFy Hugo rode o GATE deste PR.",
     currentAgentName: "OrgFy Teo",
