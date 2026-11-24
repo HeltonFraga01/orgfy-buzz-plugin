@@ -17,6 +17,7 @@ export interface IntelligenceTabProps {
   governanceSummary?: string | null;
   loopRadar?: GooseLoopRadarPayload | null;
   onRefreshLoopRadar?: () => void;
+  onWakeIrisForLoops?: () => void;
 }
 
 const CARD_BG = "rgba(0, 0, 0, 0.28)";
@@ -213,7 +214,7 @@ function renderBudgetGaugeSvg(h: any, pct: number, status: string) {
 }
 
 export function renderIntelligenceTab(props: IntelligenceTabProps) {
-  const { h, kpis, history, error, isRecalculating, onRecalculate, onRunGovernanceEval, governanceSummary, loopRadar, onRefreshLoopRadar } = props;
+  const { h, kpis, history, error, isRecalculating, onRecalculate, onRunGovernanceEval, governanceSummary, loopRadar, onRefreshLoopRadar, onWakeIrisForLoops } = props;
 
   if (!kpis) {
     return h(
@@ -616,23 +617,46 @@ export function renderIntelligenceTab(props: IntelligenceTabProps) {
                   );
                 })()
             ),
-            onRefreshLoopRadar &&
-              h(
-                "button",
-                {
-                  onClick: onRefreshLoopRadar,
-                  style: {
-                    padding: "4px 10px",
-                    borderRadius: "6px",
-                    border: "1px solid rgba(255,255,255,0.12)",
-                    backgroundColor: "rgba(255,255,255,0.05)",
-                    color: "#cbd5e1",
-                    fontSize: "10.5px",
-                    cursor: "pointer",
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", gap: "6px" } },
+              onWakeIrisForLoops &&
+                h(
+                  "button",
+                  {
+                    onClick: onWakeIrisForLoops,
+                    title: "Acionar OrgFy Iris imediatamente com o diagnóstico vivo do Radar",
+                    style: {
+                      padding: "4px 10px",
+                      borderRadius: "6px",
+                      border: "1px solid rgba(239, 68, 68, 0.4)",
+                      backgroundColor: "rgba(239, 68, 68, 0.16)",
+                      color: "#fca5a5",
+                      fontSize: "10.5px",
+                      fontWeight: "700",
+                      cursor: "pointer",
+                    },
                   },
-                },
-                "Atualizar"
-              )
+                  "Acionar Iris"
+                ),
+              onRefreshLoopRadar &&
+                h(
+                  "button",
+                  {
+                    onClick: onRefreshLoopRadar,
+                    style: {
+                      padding: "4px 10px",
+                      borderRadius: "6px",
+                      border: "1px solid rgba(255,255,255,0.12)",
+                      backgroundColor: "rgba(255,255,255,0.05)",
+                      color: "#cbd5e1",
+                      fontSize: "10.5px",
+                      cursor: "pointer",
+                    },
+                  },
+                  "Atualizar"
+                )
+            )
           ),
           !loopRadar || !loopRadar.ok
             ? h("div", { style: { fontSize: "11px", color: "#9ca3af" } }, loopRadar?.error || "Carregando telemetria live do Goose...")

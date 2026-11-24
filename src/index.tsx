@@ -734,11 +734,26 @@ export function apply(ctx: Context) {
     }, [loadKpis]);
 
     const handleRunGovernanceEval = React.useCallback(async () => {
-      const evalRes = await evaluateGovernanceAndReact(ctx, { dryRun: false, autoWake: true });
+      const evalRes = await evaluateGovernanceAndReact(ctx, { dryRun: false, autoWake: true, includeRadar: true });
       setGovernanceSummary(
-        `Orçamento: ${evalRes.budget.statusOrcamento} | Alertas: ${evalRes.alertsDetected} | Notificações: ${evalRes.notificationsSent.length} | Wakes: ${evalRes.wakesTriggered.length} | Cooldown: ${evalRes.skippedByCooldown.length}`
+        `Orçamento: ${evalRes.budget.statusOrcamento} | Alertas: ${evalRes.alertsDetected} | Notificações: ${evalRes.notificationsSent.length} | Wakes: ${evalRes.wakesTriggered.join(", ") || "0"} | Cooldown: ${evalRes.skippedByCooldown.length}`
       );
     }, []);
+
+    const handleWakeIrisForLoops = React.useCallback(async () => {
+      await loadLoopRadar();
+      const evalRes = await evaluateGovernanceAndReact(ctx, {
+        dryRun: false,
+        autoWake: true,
+        bypassCooldown: true,
+        includeRadar: true,
+        reviewerAgentKey: "OrgFy Iris",
+      });
+      setGovernanceSummary(
+        `Chamada Radar → Iris disparada | Alertas: ${evalRes.alertsDetected} | Wakes: ${evalRes.wakesTriggered.join(", ") || "nenhum loop ativo"}`
+      );
+      showNotification("info", evalRes.wakesTriggered.length > 0 ? "OrgFy Iris acionada com o diagnóstico do Radar!" : "Nenhum loop ativo detectado no momento.");
+    }, [loadLoopRadar]);
 
     // Estados de Execução Concorrente e Loading (Fase 2)
     const [isExecutingDispatch, setIsExecutingDispatch] = React.useState<boolean>(false);
@@ -2235,6 +2250,7 @@ export function apply(ctx: Context) {
           governanceSummary,
           loopRadar,
           onRefreshLoopRadar: loadLoopRadar,
+          onWakeIrisForLoops: handleWakeIrisForLoops,
         })
       : activeCentralTab === "resolvidas"
       ? renderResolvedArchiveTab({
@@ -5393,6 +5409,7 @@ Regras Invariantes:
 - Push autenticado no Relay (worktree): Se 'git push relay' falhar com exit 128 ('no nostr key configured'), chame a tool 'buzz__repo' para obter o header 'Authorization: Nostr ...', injete via 'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.<relay_git_url>.extraHeader GIT_CONFIG_VALUE_0="Authorization: Nostr ..."' (sem persistir segredo) e reexecute 'entregar'.
 - Leitura Direta de Cards e PRs (Zero '--help'): Arquivos 'cards/*.md' ficam na raiz '/Users/heltonfraga/.buzz/REPOS/orgfy/cards/' (não dentro da worktree). Sem desperdiçar turnos em '--help': (a) ler issue: 'buzz issues get --event <id-64> --repo 7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20/orgfy'; (b) atualizar PR após novo commit/rebase: 'buzz pr update --repo-owner 7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20 --repo orgfy --pr <pr-id-64> --commit <sha-40>'.
 - Freio Anti-Loop (Máximo 12 'shell's): NUNCA ultrapasse 12 comandos 'shell' sem commit nem repita o mesmo erro 2 vezes seguidas. Ao bater 2 falhas consecutivas no mesmo passo ou 12 'shell's sem avanço, PARE imediatamente e publique 'BLOQUEADO | por: <seu perfil> | motivo: ... | falta: ... | resolve: <perfil>'.
+- Isolamento Estrito de Worktree (Proibido git checkout na raiz): NUNCA execute 'git checkout --detach' ou troque de branch dentro da raiz '/Users/heltonfraga/.buzz/REPOS/orgfy' (isso corrompe o estado compartilhado para todos os agentes). Para revisar ou comparar BASE_VS_AGORA, crie SEMPRE uma worktree isolada e remova-a ao final.
 - Protocolo de Auto-Cura de Loops (Bento, Iris, Cron e Revisores): ANTES de despachar um card ou cobrar um agente, chame 'orgfy_loop_radar({ apenas_ativos: true })'. (1) Se o agente estiver com 'SESSAO_DUPLICADA', NUNCA envie nova menção ou cobrança (aguarde o turno atual terminar). (2) Se estiver com 'LOOP_SUSPEITO' ou 'STALLED_THINKING', leia 'ultimo_shell' e 'acao_sugerida' e envie 1 instrução cirúrgica destravando aquele passo específico (nunca cobrança genérica); se sem progresso real, libere o lock via 'orgfy_checkout_lock({ action: "release", ... })' e reatribua.
 - Decisor Híbrido v12: orgfy_lint_card usa Decisions API com fallback determinístico offline automático (ferramentas/esteira/decisor_fallback.py) em caso de falta de saldo ou timeout.
 Ferramentas nativas disponíveis neste plugin:

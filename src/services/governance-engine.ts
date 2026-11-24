@@ -1,5 +1,5 @@
 import type { Context } from "@buzz/author";
-import { fetchKpisEsteira, type KpisEsteiraPayload } from "./kpi-service";
+import { fetchKpisEsteira, fetchGooseLoopRadar, type KpisEsteiraPayload } from "./kpi-service";
 
 export interface CheckoutLockRecord {
   issueId: string;
@@ -407,11 +407,15 @@ function canTriggerWithCooldown(
   return true;
 }
 
+export const DEFAULT_ORGFY_CHANNEL = "e445491d-2fb3-4ebd-8e2e-f6813c33fb03";
+
 export async function evaluateGovernanceAndReact(
   ctx: Context,
   options: {
     dryRun?: boolean;
     autoWake?: boolean;
+    bypassCooldown?: boolean;
+    includeRadar?: boolean;
     reviewerAgentKey?: string;
     channel?: string;
     nowMs?: number;
@@ -427,11 +431,51 @@ export async function evaluateGovernanceAndReact(
   const wakesTriggered: string[] = [];
   const skippedByCooldown: string[] = [];
 
-  const alerts = kpis?.alertas_ativos ?? [];
+  const alerts = [...(kpis?.alertas_ativos ?? [])];
+
+  // Integração ativa com o Radar de Loops & Sessões Zumbis (Goose Live)
+  if (options.includeRadar !== false) {
+    try {
+      const radar = await fetchGooseLoopRadar(ctx);
+      if (radar.ok && Array.isArray(radar.sessoes)) {
+        const activeCrit = radar.sessoes.filter(
+          (s) => (typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15) && s.severidade === "critical"
+        );
+        const activeDup = radar.sessoes.filter(
+          (s) => (typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15) && (s.flags || []).includes("SESSAO_DUPLICADA")
+        );
+        if (activeCrit.length > 0) {
+          const top = activeCrit
+            .slice(0, 4)
+            .map((s) => `${s.agente} (${s.session_id}, ${s.shells} shells, ${s.duracao_min}m)`)
+            .join("; ");
+          alerts.push({
+            codigo: "GOOSE_ACTIVE_LOOP",
+            severidade: "critical",
+            mensagem: `${activeCrit.length} sessão(ões) ativa(s) em loop no Goose: ${top}.`,
+            acao_sugerida:
+              "Chamar orgfy_loop_radar({ apenas_ativos: true }), interromper re-menções duplicadas, enviar 1 instrução cirúrgica por agente travado ou liberar lock com orgfy_checkout_lock(release).",
+          });
+        }
+        if (activeDup.length >= 2) {
+          const dupAgents = Array.from(new Set(activeDup.map((s) => s.agente))).join(", ");
+          alerts.push({
+            codigo: "GOOSE_DUPLICATE_SESSIONS",
+            severidade: "warn",
+            mensagem: `${activeDup.length} sessões duplicadas ativas nos agentes: ${dupAgents}.`,
+            acao_sugerida:
+              "Pausar cobranças/menções paralelas para esses agentes até concluírem o turno atual e designar dono único por card.",
+          });
+        }
+      }
+    } catch {
+      // Radar opcional se o snapshot não estiver acessível
+    }
+  }
 
   for (const al of alerts) {
     const cooldownKey = `alert:${al.codigo}`;
-    if (!canTriggerWithCooldown(cooldownKey, nowMs, !options.dryRun)) {
+    if (!options.bypassCooldown && !canTriggerWithCooldown(cooldownKey, nowMs, !options.dryRun)) {
       skippedByCooldown.push(al.codigo);
       continue;
     }
@@ -451,20 +495,23 @@ export async function evaluateGovernanceAndReact(
       notificationsSent.push(al.codigo);
     }
 
+    const isRadarAlert = al.codigo === "GOOSE_ACTIVE_LOOP" || al.codigo === "GOOSE_DUPLICATE_SESSIONS";
     if (
       options.autoWake &&
       !options.dryRun &&
-      (al.codigo === "REVIEW_QUEUE_BOTTLENECK" || al.codigo === "STAGNATION_LEVEL_3")
+      (al.codigo === "REVIEW_QUEUE_BOTTLENECK" || al.codigo === "STAGNATION_LEVEL_3" || isRadarAlert)
     ) {
-      const wakeKey = options.reviewerAgentKey || "OrgFy Bento";
+      const wakeKey = options.reviewerAgentKey || (isRadarAlert ? "OrgFy Iris" : "OrgFy Bento");
       const wakeCooldownKey = `wake:${al.codigo}:${wakeKey}`;
-      if (canTriggerWithCooldown(wakeCooldownKey, nowMs)) {
+      if (options.bypassCooldown || canTriggerWithCooldown(wakeCooldownKey, nowMs)) {
         try {
           const agentsApi = (ctx as any).agents;
           if (agentsApi?.wake) {
             await agentsApi.wake(wakeKey, {
-              channel: options.channel || "#esteira-orgfy",
-              text: `[ORGFY GOVERNANÇA] ${al.mensagem} Ação recomendada: ${al.acao_sugerida}`,
+              channel: options.channel || DEFAULT_ORGFY_CHANNEL,
+              text: isRadarAlert
+                ? `@OrgFy Iris [ORGFY RADAR AUTO-CURA · ${al.codigo}] ${al.mensagem} Ação obrigatória agora: ${al.acao_sugerida}`
+                : `[ORGFY GOVERNANÇA] ${al.mensagem} Ação recomendada: ${al.acao_sugerida}`,
             });
             wakesTriggered.push(`${wakeKey}:${al.codigo}`);
           }
@@ -828,7 +875,7 @@ export function registerGovernanceAgentHooks(ctx: Context): boolean {
       harness: "all",
       event: "turn.completed",
       run: async () => {
-        await evaluateGovernanceAndReact(ctx, { dryRun: false, autoWake: false });
+        await evaluateGovernanceAndReact(ctx, { dryRun: false, autoWake: true, includeRadar: true });
       },
     });
     return true;

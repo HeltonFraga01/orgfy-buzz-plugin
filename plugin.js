@@ -2012,7 +2012,7 @@ function renderBudgetGaugeSvg(h, pct, status) {
   );
 }
 function renderIntelligenceTab(props) {
-  const { h, kpis, history, error, isRecalculating, onRecalculate, onRunGovernanceEval, governanceSummary, loopRadar, onRefreshLoopRadar } = props;
+  const { h, kpis, history, error, isRecalculating, onRecalculate, onRunGovernanceEval, governanceSummary, loopRadar, onRefreshLoopRadar, onWakeIrisForLoops } = props;
   if (!kpis) {
     return h(
       "div",
@@ -2380,21 +2380,43 @@ function renderIntelligenceTab(props) {
                 );
               })()
             ),
-            onRefreshLoopRadar && h(
-              "button",
-              {
-                onClick: onRefreshLoopRadar,
-                style: {
-                  padding: "4px 10px",
-                  borderRadius: "6px",
-                  border: "1px solid rgba(255,255,255,0.12)",
-                  backgroundColor: "rgba(255,255,255,0.05)",
-                  color: "#cbd5e1",
-                  fontSize: "10.5px",
-                  cursor: "pointer"
-                }
-              },
-              "Atualizar"
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", gap: "6px" } },
+              onWakeIrisForLoops && h(
+                "button",
+                {
+                  onClick: onWakeIrisForLoops,
+                  title: "Acionar OrgFy Iris imediatamente com o diagnóstico vivo do Radar",
+                  style: {
+                    padding: "4px 10px",
+                    borderRadius: "6px",
+                    border: "1px solid rgba(239, 68, 68, 0.4)",
+                    backgroundColor: "rgba(239, 68, 68, 0.16)",
+                    color: "#fca5a5",
+                    fontSize: "10.5px",
+                    fontWeight: "700",
+                    cursor: "pointer"
+                  }
+                },
+                "Acionar Iris"
+              ),
+              onRefreshLoopRadar && h(
+                "button",
+                {
+                  onClick: onRefreshLoopRadar,
+                  style: {
+                    padding: "4px 10px",
+                    borderRadius: "6px",
+                    border: "1px solid rgba(255,255,255,0.12)",
+                    backgroundColor: "rgba(255,255,255,0.05)",
+                    color: "#cbd5e1",
+                    fontSize: "10.5px",
+                    cursor: "pointer"
+                  }
+                },
+                "Atualizar"
+              )
             )
           ),
           !loopRadar || !loopRadar.ok ? h("div", { style: { fontSize: "11px", color: "#9ca3af" } }, (loopRadar == null ? void 0 : loopRadar.error) || "Carregando telemetria live do Goose...") : loopRadar.sessoes.length === 0 ? h("div", { style: { fontSize: "11px", color: "#10b981" } }, "Nenhuma sessão em loop ou travada nas últimas 3 horas.") : h(
@@ -2884,6 +2906,7 @@ function canTriggerWithCooldown(key, nowMs, commit = true, cooldownMs = DEFAULT_
   }
   return true;
 }
+const DEFAULT_ORGFY_CHANNEL = "e445491d-2fb3-4ebd-8e2e-f6813c33fb03";
 async function evaluateGovernanceAndReact(ctx, options = {}) {
   const nowMs = options.nowMs ?? Date.now();
   const kpiRes = await fetchKpisEsteira(ctx);
@@ -2893,10 +2916,42 @@ async function evaluateGovernanceAndReact(ctx, options = {}) {
   const notificationsSent = [];
   const wakesTriggered = [];
   const skippedByCooldown = [];
-  const alerts = (kpis == null ? void 0 : kpis.alertas_ativos) ?? [];
+  const alerts = [...(kpis == null ? void 0 : kpis.alertas_ativos) ?? []];
+  if (options.includeRadar !== false) {
+    try {
+      const radar = await fetchGooseLoopRadar(ctx);
+      if (radar.ok && Array.isArray(radar.sessoes)) {
+        const activeCrit = radar.sessoes.filter(
+          (s) => (typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15) && s.severidade === "critical"
+        );
+        const activeDup = radar.sessoes.filter(
+          (s) => (typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15) && (s.flags || []).includes("SESSAO_DUPLICADA")
+        );
+        if (activeCrit.length > 0) {
+          const top = activeCrit.slice(0, 4).map((s) => `${s.agente} (${s.session_id}, ${s.shells} shells, ${s.duracao_min}m)`).join("; ");
+          alerts.push({
+            codigo: "GOOSE_ACTIVE_LOOP",
+            severidade: "critical",
+            mensagem: `${activeCrit.length} sessão(ões) ativa(s) em loop no Goose: ${top}.`,
+            acao_sugerida: "Chamar orgfy_loop_radar({ apenas_ativos: true }), interromper re-menções duplicadas, enviar 1 instrução cirúrgica por agente travado ou liberar lock com orgfy_checkout_lock(release)."
+          });
+        }
+        if (activeDup.length >= 2) {
+          const dupAgents = Array.from(new Set(activeDup.map((s) => s.agente))).join(", ");
+          alerts.push({
+            codigo: "GOOSE_DUPLICATE_SESSIONS",
+            severidade: "warn",
+            mensagem: `${activeDup.length} sessões duplicadas ativas nos agentes: ${dupAgents}.`,
+            acao_sugerida: "Pausar cobranças/menções paralelas para esses agentes até concluírem o turno atual e designar dono único por card."
+          });
+        }
+      }
+    } catch {
+    }
+  }
   for (const al of alerts) {
     const cooldownKey = `alert:${al.codigo}`;
-    if (!canTriggerWithCooldown(cooldownKey, nowMs, !options.dryRun)) {
+    if (!options.bypassCooldown && !canTriggerWithCooldown(cooldownKey, nowMs, !options.dryRun)) {
       skippedByCooldown.push(al.codigo);
       continue;
     }
@@ -2913,16 +2968,17 @@ async function evaluateGovernanceAndReact(ctx, options = {}) {
       }
       notificationsSent.push(al.codigo);
     }
-    if (options.autoWake && !options.dryRun && (al.codigo === "REVIEW_QUEUE_BOTTLENECK" || al.codigo === "STAGNATION_LEVEL_3")) {
-      const wakeKey = options.reviewerAgentKey || "OrgFy Bento";
+    const isRadarAlert = al.codigo === "GOOSE_ACTIVE_LOOP" || al.codigo === "GOOSE_DUPLICATE_SESSIONS";
+    if (options.autoWake && !options.dryRun && (al.codigo === "REVIEW_QUEUE_BOTTLENECK" || al.codigo === "STAGNATION_LEVEL_3" || isRadarAlert)) {
+      const wakeKey = options.reviewerAgentKey || (isRadarAlert ? "OrgFy Iris" : "OrgFy Bento");
       const wakeCooldownKey = `wake:${al.codigo}:${wakeKey}`;
-      if (canTriggerWithCooldown(wakeCooldownKey, nowMs)) {
+      if (options.bypassCooldown || canTriggerWithCooldown(wakeCooldownKey, nowMs)) {
         try {
           const agentsApi = ctx.agents;
           if (agentsApi == null ? void 0 : agentsApi.wake) {
             await agentsApi.wake(wakeKey, {
-              channel: options.channel || "#esteira-orgfy",
-              text: `[ORGFY GOVERNANÇA] ${al.mensagem} Ação recomendada: ${al.acao_sugerida}`
+              channel: options.channel || DEFAULT_ORGFY_CHANNEL,
+              text: isRadarAlert ? `@OrgFy Iris [ORGFY RADAR AUTO-CURA · ${al.codigo}] ${al.mensagem} Ação obrigatória agora: ${al.acao_sugerida}` : `[ORGFY GOVERNANÇA] ${al.mensagem} Ação recomendada: ${al.acao_sugerida}`
             });
             wakesTriggered.push(`${wakeKey}:${al.codigo}`);
           }
@@ -3177,7 +3233,7 @@ function registerGovernanceAgentHooks(ctx) {
       harness: "all",
       event: "turn.completed",
       run: async () => {
-        await evaluateGovernanceAndReact(ctx, { dryRun: false, autoWake: false });
+        await evaluateGovernanceAndReact(ctx, { dryRun: false, autoWake: true, includeRadar: true });
       }
     });
     return true;
@@ -5276,11 +5332,25 @@ function apply(ctx) {
       }
     }, [loadKpis]);
     const handleRunGovernanceEval = React.useCallback(async () => {
-      const evalRes = await evaluateGovernanceAndReact(ctx, { dryRun: false, autoWake: true });
+      const evalRes = await evaluateGovernanceAndReact(ctx, { dryRun: false, autoWake: true, includeRadar: true });
       setGovernanceSummary(
-        `Orçamento: ${evalRes.budget.statusOrcamento} | Alertas: ${evalRes.alertsDetected} | Notificações: ${evalRes.notificationsSent.length} | Wakes: ${evalRes.wakesTriggered.length} | Cooldown: ${evalRes.skippedByCooldown.length}`
+        `Orçamento: ${evalRes.budget.statusOrcamento} | Alertas: ${evalRes.alertsDetected} | Notificações: ${evalRes.notificationsSent.length} | Wakes: ${evalRes.wakesTriggered.join(", ") || "0"} | Cooldown: ${evalRes.skippedByCooldown.length}`
       );
     }, []);
+    const handleWakeIrisForLoops = React.useCallback(async () => {
+      await loadLoopRadar();
+      const evalRes = await evaluateGovernanceAndReact(ctx, {
+        dryRun: false,
+        autoWake: true,
+        bypassCooldown: true,
+        includeRadar: true,
+        reviewerAgentKey: "OrgFy Iris"
+      });
+      setGovernanceSummary(
+        `Chamada Radar → Iris disparada | Alertas: ${evalRes.alertsDetected} | Wakes: ${evalRes.wakesTriggered.join(", ") || "nenhum loop ativo"}`
+      );
+      showNotification("info", evalRes.wakesTriggered.length > 0 ? "OrgFy Iris acionada com o diagnóstico do Radar!" : "Nenhum loop ativo detectado no momento.");
+    }, [loadLoopRadar]);
     const [isExecutingDispatch, setIsExecutingDispatch] = React.useState(false);
     const [isExecutingGate, setIsExecutingGate] = React.useState(false);
     const [liveLogStream, setLiveLogStream] = React.useState(
@@ -6633,7 +6703,8 @@ function apply(ctx) {
             onRunGovernanceEval: handleRunGovernanceEval,
             governanceSummary,
             loopRadar,
-            onRefreshLoopRadar: loadLoopRadar
+            onRefreshLoopRadar: loadLoopRadar,
+            onWakeIrisForLoops: handleWakeIrisForLoops
           }) : activeCentralTab === "resolvidas" ? renderResolvedArchiveTab({
             h,
             items: resolvedItems,
@@ -9614,6 +9685,7 @@ Regras Invariantes:
 - Push autenticado no Relay (worktree): Se 'git push relay' falhar com exit 128 ('no nostr key configured'), chame a tool 'buzz__repo' para obter o header 'Authorization: Nostr ...', injete via 'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.<relay_git_url>.extraHeader GIT_CONFIG_VALUE_0="Authorization: Nostr ..."' (sem persistir segredo) e reexecute 'entregar'.
 - Leitura Direta de Cards e PRs (Zero '--help'): Arquivos 'cards/*.md' ficam na raiz '/Users/heltonfraga/.buzz/REPOS/orgfy/cards/' (não dentro da worktree). Sem desperdiçar turnos em '--help': (a) ler issue: 'buzz issues get --event <id-64> --repo 7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20/orgfy'; (b) atualizar PR após novo commit/rebase: 'buzz pr update --repo-owner 7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20 --repo orgfy --pr <pr-id-64> --commit <sha-40>'.
 - Freio Anti-Loop (Máximo 12 'shell's): NUNCA ultrapasse 12 comandos 'shell' sem commit nem repita o mesmo erro 2 vezes seguidas. Ao bater 2 falhas consecutivas no mesmo passo ou 12 'shell's sem avanço, PARE imediatamente e publique 'BLOQUEADO | por: <seu perfil> | motivo: ... | falta: ... | resolve: <perfil>'.
+- Isolamento Estrito de Worktree (Proibido git checkout na raiz): NUNCA execute 'git checkout --detach' ou troque de branch dentro da raiz '/Users/heltonfraga/.buzz/REPOS/orgfy' (isso corrompe o estado compartilhado para todos os agentes). Para revisar ou comparar BASE_VS_AGORA, crie SEMPRE uma worktree isolada e remova-a ao final.
 - Protocolo de Auto-Cura de Loops (Bento, Iris, Cron e Revisores): ANTES de despachar um card ou cobrar um agente, chame 'orgfy_loop_radar({ apenas_ativos: true })'. (1) Se o agente estiver com 'SESSAO_DUPLICADA', NUNCA envie nova menção ou cobrança (aguarde o turno atual terminar). (2) Se estiver com 'LOOP_SUSPEITO' ou 'STALLED_THINKING', leia 'ultimo_shell' e 'acao_sugerida' e envie 1 instrução cirúrgica destravando aquele passo específico (nunca cobrança genérica); se sem progresso real, libere o lock via 'orgfy_checkout_lock({ action: "release", ... })' e reatribua.
 - Decisor Híbrido v12: orgfy_lint_card usa Decisions API com fallback determinístico offline automático (ferramentas/esteira/decisor_fallback.py) em caso de falta de saldo ou timeout.
 Ferramentas nativas disponíveis neste plugin:
