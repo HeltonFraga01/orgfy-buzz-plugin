@@ -422,6 +422,19 @@ export async function createCanonicalCard(
     } catch (err: any) {
       lintOutput = `Falha ao gravar ${absCardPath}: ${err?.message || err}`;
     }
+  } else if (shouldWrite && typeof ctx?.host?.spawn === "function") {
+    try {
+      const b64 = typeof (globalThis as any).Buffer !== "undefined"
+        ? (globalThis as any).Buffer.from(markdown, "utf-8").toString("base64")
+        : btoa(unescape(encodeURIComponent(markdown)));
+      const proc = await ctx.host.spawn("bash", {
+        args: [`python3 -c "import base64, pathlib, sys; p = pathlib.Path(sys.argv[1]); p.parent.mkdir(parents=True, exist_ok=True); p.write_bytes(base64.b64decode(sys.argv[2]))" "${absCardPath}" "${b64}"`],
+      });
+      const code = await proc.exited;
+      writtenToDisk = code === 0;
+    } catch (err: any) {
+      lintOutput = `Falha ao gravar via spawn ${absCardPath}: ${err?.message || err}`;
+    }
   }
 
   if (input.run_lint && writtenToDisk && ctx?.host?.spawn) {

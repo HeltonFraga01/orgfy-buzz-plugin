@@ -342,9 +342,23 @@ export async function executeCardProgress(
   }
 
   let writtenToDisk = false;
+  const absCardFile = `${ORGFY_ABS_PATH}/${foundPath}`;
   if (typeof host.writeFile === "function") {
-    await host.writeFile(`${ORGFY_ABS_PATH}/${foundPath}`, applied.updatedMarkdown);
+    await host.writeFile(absCardFile, applied.updatedMarkdown);
     writtenToDisk = true;
+  } else if (typeof host.spawn === "function") {
+    try {
+      const b64 = typeof (globalThis as any).Buffer !== "undefined"
+        ? (globalThis as any).Buffer.from(applied.updatedMarkdown, "utf-8").toString("base64")
+        : btoa(unescape(encodeURIComponent(applied.updatedMarkdown)));
+      const proc = await host.spawn("bash", {
+        args: [`python3 -c "import base64, pathlib, sys; pathlib.Path(sys.argv[1]).write_bytes(base64.b64decode(sys.argv[2]))" "${absCardFile}" "${b64}"`],
+      });
+      const code = await proc.exited;
+      writtenToDisk = code === 0;
+    } catch {
+      writtenToDisk = false;
+    }
   }
 
   return {

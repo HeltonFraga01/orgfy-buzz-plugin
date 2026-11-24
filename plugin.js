@@ -3253,7 +3253,7 @@ function renderCanonicalCardMarkdown(params) {
   return lines.join("\n");
 }
 async function createCanonicalCard(ctx, input) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
   const slug = sanitizeSlug(input.slug || input.id_tarefa || input.titulo);
   const branch = `feat/${slug}`;
   const worktreePath = `.worktrees/${slug}`;
@@ -3370,8 +3370,19 @@ async function createCanonicalCard(ctx, input) {
     } catch (err) {
       lintOutput = `Falha ao gravar ${absCardPath}: ${(err == null ? void 0 : err.message) || err}`;
     }
+  } else if (shouldWrite && typeof ((_i = ctx == null ? void 0 : ctx.host) == null ? void 0 : _i.spawn) === "function") {
+    try {
+      const b64 = typeof globalThis.Buffer !== "undefined" ? globalThis.Buffer.from(markdown, "utf-8").toString("base64") : btoa(unescape(encodeURIComponent(markdown)));
+      const proc = await ctx.host.spawn("bash", {
+        args: [`python3 -c "import base64, pathlib, sys; p = pathlib.Path(sys.argv[1]); p.parent.mkdir(parents=True, exist_ok=True); p.write_bytes(base64.b64decode(sys.argv[2]))" "${absCardPath}" "${b64}"`]
+      });
+      const code = await proc.exited;
+      writtenToDisk = code === 0;
+    } catch (err) {
+      lintOutput = `Falha ao gravar via spawn ${absCardPath}: ${(err == null ? void 0 : err.message) || err}`;
+    }
   }
-  if (input.run_lint && writtenToDisk && ((_i = ctx == null ? void 0 : ctx.host) == null ? void 0 : _i.spawn)) {
+  if (input.run_lint && writtenToDisk && ((_j = ctx == null ? void 0 : ctx.host) == null ? void 0 : _j.spawn)) {
     try {
       let combined = "";
       const proc = await ctx.host.spawn("bash", {
@@ -4692,9 +4703,21 @@ async function executeCardProgress(ctx, input) {
     };
   }
   let writtenToDisk = false;
+  const absCardFile = `${ORGFY_ABS_PATH}/${foundPath}`;
   if (typeof host.writeFile === "function") {
-    await host.writeFile(`${ORGFY_ABS_PATH}/${foundPath}`, applied.updatedMarkdown);
+    await host.writeFile(absCardFile, applied.updatedMarkdown);
     writtenToDisk = true;
+  } else if (typeof host.spawn === "function") {
+    try {
+      const b64 = typeof globalThis.Buffer !== "undefined" ? globalThis.Buffer.from(applied.updatedMarkdown, "utf-8").toString("base64") : btoa(unescape(encodeURIComponent(applied.updatedMarkdown)));
+      const proc = await host.spawn("bash", {
+        args: [`python3 -c "import base64, pathlib, sys; pathlib.Path(sys.argv[1]).write_bytes(base64.b64decode(sys.argv[2]))" "${absCardFile}" "${b64}"`]
+      });
+      const code = await proc.exited;
+      writtenToDisk = code === 0;
+    } catch {
+      writtenToDisk = false;
+    }
   }
   return {
     ok: true,
