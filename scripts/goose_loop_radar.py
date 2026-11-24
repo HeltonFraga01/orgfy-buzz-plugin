@@ -379,11 +379,21 @@ def main() -> int:
                                 last_shell = cmd[:140]
                                 if "--help" in cmd or " -h" in cmd:
                                     help_count += 1
-                                # Só conta worktree quando o agente entra (`cd .../.worktrees/X`) ou edita nela
+                                # Só conta worktree como risco de colisão quando há mutação real (ignora leitura/inspeção de QA/COO)
                                 m_wt = re.search(r"(?:cd|git\s+-C)\s+[^\s;&|]*\.worktrees/([A-Za-z0-9._-]+)", cmd)
                                 if m_wt:
                                     wt_name = m_wt.group(1)
-                                    if wt_name not in IGNORED_WORKTREES and not wt_name.startswith(("revisao-", "cron-")):
+                                    is_mutating_cmd = bool(re.search(
+                                        r"\b(git\s+(?:add|commit|rebase|merge|checkout|reset|cherry-pick|apply|am|stash|rm|mv)|"
+                                        r"rm\s+-|mv\s+|cp\s+|tee\s+|sed\s+-i|perl\s+-i|patch\b|entregar\b)|"
+                                        r"(?:^|[^0-9&])>(?!&|/?dev/null)",
+                                        cmd,
+                                    ))
+                                    if (
+                                        is_mutating_cmd
+                                        and wt_name not in IGNORED_WORKTREES
+                                        and not wt_name.startswith(("revisao-", "cron-"))
+                                    ):
                                         active_worktree = wt_name
 
             # Detecta se o gatilho da sessão referencia item já fechado/merged na main
