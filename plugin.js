@@ -5390,7 +5390,7 @@ function createAgentOrgfyTabComponent(ctx) {
       try {
         const nav = ctx == null ? void 0 : ctx.navigation;
         if (nav == null ? void 0 : nav.open) {
-          nav.open({ version: 1, kind: "page", pluginId: "digital-cortexx-orgfy", pageId: "orgfy" });
+          nav.open({ version: 1, kind: "page", pluginId: "digital.cortexx.orgfy", pageId: "orgfy" });
         } else if (nav == null ? void 0 : nav.navigate) {
           nav.navigate("orgfy");
         } else if (typeof window !== "undefined") {
@@ -5706,10 +5706,39 @@ let sidebarCounts = {
   revisao: 0,
   loopsAtivos: 0
 };
+function buildSidebarRows(counts) {
+  return [
+    {
+      id: "orgfy-revisao",
+      label: "Em Revisão (Gate)",
+      count: counts.revisao,
+      status: counts.revisao > 0 ? "active" : "idle"
+    },
+    {
+      id: "orgfy-execucao",
+      label: "Em Execução",
+      count: counts.execucao,
+      status: counts.execucao > 0 ? "active" : "idle"
+    },
+    {
+      id: "orgfy-loops",
+      label: "Loops Ativos",
+      count: counts.loopsAtivos,
+      badge: counts.loopsAtivos > 0 ? "ALERTA" : void 0,
+      status: counts.loopsAtivos > 0 ? "error" : "ok"
+    }
+  ];
+}
+let sidebarRowsSnapshot = buildSidebarRows(sidebarCounts);
 const sidebarListeners = /* @__PURE__ */ new Set();
 const relayChangeListeners = /* @__PURE__ */ new Set();
 function updateOrgfySidebarCounts(next) {
-  sidebarCounts = { ...sidebarCounts, ...next };
+  const merged = { ...sidebarCounts, ...next };
+  if (merged.triagem === sidebarCounts.triagem && merged.execucao === sidebarCounts.execucao && merged.revisao === sidebarCounts.revisao && merged.loopsAtivos === sidebarCounts.loopsAtivos) {
+    return;
+  }
+  sidebarCounts = merged;
+  sidebarRowsSnapshot = buildSidebarRows(sidebarCounts);
   for (const fn of sidebarListeners) {
     try {
       fn();
@@ -5822,7 +5851,7 @@ function registerBuzzNativeIntegrations(ctx) {
           var _a2, _b2;
           try {
             if ((_a2 = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a2.open) {
-              ctx.navigation.open({ version: 1, kind: "page", pluginId: "digital-cortexx-orgfy", pageId: "orgfy" });
+              ctx.navigation.open({ version: 1, kind: "page", pluginId: "digital.cortexx.orgfy", pageId: "orgfy" });
             } else if ((_b2 = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _b2.navigate) {
               ctx.navigation.navigate("orgfy");
             }
@@ -5845,33 +5874,13 @@ function registerBuzzNativeIntegrations(ctx) {
         title: "OrgFy Esteira",
         icon: h ? h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#10b981" } }, "◈") : null,
         rows: {
-          snapshot: () => [
-            {
-              id: "orgfy-revisao",
-              label: "Em Revisão (Gate)",
-              count: sidebarCounts.revisao,
-              status: sidebarCounts.revisao > 0 ? "active" : "idle"
-            },
-            {
-              id: "orgfy-execucao",
-              label: "Em Execução",
-              count: sidebarCounts.execucao,
-              status: sidebarCounts.execucao > 0 ? "active" : "idle"
-            },
-            {
-              id: "orgfy-loops",
-              label: "Loops Ativos",
-              count: sidebarCounts.loopsAtivos,
-              badge: sidebarCounts.loopsAtivos > 0 ? "ALERTA" : void 0,
-              status: sidebarCounts.loopsAtivos > 0 ? "error" : "ok"
-            }
-          ],
+          snapshot: () => sidebarRowsSnapshot,
           subscribe: (listener) => {
             sidebarListeners.add(listener);
             return () => sidebarListeners.delete(listener);
           }
         },
-        select: () => ({ version: 1, kind: "page", page: "orgfy" })
+        select: () => ({ version: 1, kind: "page", pluginId: "digital.cortexx.orgfy", pageId: "orgfy" })
       });
       state.sidebarRegistered = true;
     }
@@ -5889,7 +5898,7 @@ function registerBuzzNativeIntegrations(ctx) {
           var _a2, _b2;
           try {
             if ((_a2 = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a2.open) {
-              ctx.navigation.open({ version: 1, kind: "page", pluginId: "digital-cortexx-orgfy", pageId: "orgfy" });
+              ctx.navigation.open({ version: 1, kind: "page", pluginId: "digital.cortexx.orgfy", pageId: "orgfy" });
             } else if ((_b2 = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _b2.navigate) {
               ctx.navigation.navigate("orgfy");
             }

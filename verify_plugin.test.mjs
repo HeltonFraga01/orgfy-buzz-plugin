@@ -735,7 +735,7 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
 
   orgfyMod.resetTelemetryForTests();
 
-  const nativeEvents = { relay: 0, completions: 0, actions: 0, sidebars: 0, shortcuts: 0, attentionSources: 0, hooks: [], agentTabs: [] };
+  const nativeEvents = { relay: 0, completions: 0, actions: 0, sidebars: [], shortcuts: 0, attentionSources: 0, hooks: [], agentTabs: [] };
   const nativeCtx = {
     react: { createElement: () => null },
     relay: {
@@ -747,7 +747,7 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
       registerMessageAction: () => { nativeEvents.actions++; },
     },
     reflect: {
-      get: (name) => name === "sidebarSections" ? { register: () => { nativeEvents.sidebars++; } } : undefined,
+      get: (name) => name === "sidebarSections" ? { register: (sec) => { nativeEvents.sidebars.push(sec); } } : undefined,
     },
     shortcuts: { register: () => { nativeEvents.shortcuts++; } },
     agents: {
@@ -761,6 +761,10 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
   assert.equal(nativeState.relayConnected, true);
   assert.equal(nativeState.conversationRegistered, true);
   assert.equal(nativeState.sidebarRegistered, true);
+  assert.equal(nativeEvents.sidebars.length, 1);
+  const sidebarSec = nativeEvents.sidebars[0];
+  assert.strictEqual(sidebarSec.rows.snapshot(), sidebarSec.rows.snapshot(), "sidebar snapshot() deve retornar referência estável para useSyncExternalStore");
+  assert.equal(sidebarSec.select(sidebarSec.rows.snapshot()[0]).pluginId, "digital.cortexx.orgfy", "sidebar select() deve usar pluginId digital.cortexx.orgfy");
   assert.equal(nativeState.shortcutsRegistered, true);
   assert.equal(nativeState.attentionSourceRegistered, true);
   assert.equal(nativeState.otelHookRegistered, true);

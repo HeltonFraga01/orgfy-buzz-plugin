@@ -111,7 +111,7 @@ export function createAgentOrgfyTabComponent(ctx: Context) {
       try {
         const nav: any = (ctx as any)?.navigation;
         if (nav?.open) {
-          nav.open({ version: 1, kind: "page", pluginId: "digital-cortexx-orgfy", pageId: "orgfy" });
+          nav.open({ version: 1, kind: "page", pluginId: "digital.cortexx.orgfy", pageId: "orgfy" });
         } else if (nav?.navigate) {
           nav.navigate("orgfy");
         } else if (typeof window !== "undefined") {

@@ -51,11 +51,48 @@ let sidebarCounts: LiveSidebarCounts = {
   loopsAtivos: 0,
 };
 
+function buildSidebarRows(counts: LiveSidebarCounts) {
+  return [
+    {
+      id: "orgfy-revisao",
+      label: "Em Revisão (Gate)",
+      count: counts.revisao,
+      status: counts.revisao > 0 ? "active" : "idle",
+    },
+    {
+      id: "orgfy-execucao",
+      label: "Em Execução",
+      count: counts.execucao,
+      status: counts.execucao > 0 ? "active" : "idle",
+    },
+    {
+      id: "orgfy-loops",
+      label: "Loops Ativos",
+      count: counts.loopsAtivos,
+      badge: counts.loopsAtivos > 0 ? "ALERTA" : undefined,
+      status: counts.loopsAtivos > 0 ? "error" : "ok",
+    },
+  ] as const;
+}
+
+// Referência estável obrigatória para React useSyncExternalStore no Buzz Desktop
+let sidebarRowsSnapshot = buildSidebarRows(sidebarCounts);
+
 const sidebarListeners = new Set<() => void>();
 const relayChangeListeners = new Set<() => void>();
 
 export function updateOrgfySidebarCounts(next: Partial<LiveSidebarCounts>) {
-  sidebarCounts = { ...sidebarCounts, ...next };
+  const merged: LiveSidebarCounts = { ...sidebarCounts, ...next };
+  if (
+    merged.triagem === sidebarCounts.triagem &&
+    merged.execucao === sidebarCounts.execucao &&
+    merged.revisao === sidebarCounts.revisao &&
+    merged.loopsAtivos === sidebarCounts.loopsAtivos
+  ) {
+    return;
+  }
+  sidebarCounts = merged;
+  sidebarRowsSnapshot = buildSidebarRows(sidebarCounts);
   for (const fn of sidebarListeners) {
     try {
       fn();
@@ -176,7 +213,7 @@ export function registerBuzzNativeIntegrations(ctx: Context | any): BuzzNativeSt
         run: () => {
           try {
             if (ctx?.navigation?.open) {
-              ctx.navigation.open({ version: 1, kind: "page", pluginId: "digital-cortexx-orgfy", pageId: "orgfy" });
+              ctx.navigation.open({ version: 1, kind: "page", pluginId: "digital.cortexx.orgfy", pageId: "orgfy" });
             } else if (ctx?.navigation?.navigate) {
               ctx.navigation.navigate("orgfy");
             }
@@ -200,33 +237,13 @@ export function registerBuzzNativeIntegrations(ctx: Context | any): BuzzNativeSt
         title: "OrgFy Esteira",
         icon: h ? h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#10b981" } }, "◈") : null,
         rows: {
-          snapshot: () => [
-            {
-              id: "orgfy-revisao",
-              label: "Em Revisão (Gate)",
-              count: sidebarCounts.revisao,
-              status: sidebarCounts.revisao > 0 ? "active" : "idle",
-            },
-            {
-              id: "orgfy-execucao",
-              label: "Em Execução",
-              count: sidebarCounts.execucao,
-              status: sidebarCounts.execucao > 0 ? "active" : "idle",
-            },
-            {
-              id: "orgfy-loops",
-              label: "Loops Ativos",
-              count: sidebarCounts.loopsAtivos,
-              badge: sidebarCounts.loopsAtivos > 0 ? "ALERTA" : undefined,
-              status: sidebarCounts.loopsAtivos > 0 ? "error" : "ok",
-            },
-          ],
+          snapshot: () => sidebarRowsSnapshot,
           subscribe: (listener: () => void) => {
             sidebarListeners.add(listener);
             return () => sidebarListeners.delete(listener);
           },
         },
-        select: () => ({ version: 1, kind: "page", page: "orgfy" }),
+        select: () => ({ version: 1, kind: "page", pluginId: "digital.cortexx.orgfy", pageId: "orgfy" }),
       });
       state.sidebarRegistered = true;
     }
@@ -245,7 +262,7 @@ export function registerBuzzNativeIntegrations(ctx: Context | any): BuzzNativeSt
         run: () => {
           try {
             if (ctx?.navigation?.open) {
-              ctx.navigation.open({ version: 1, kind: "page", pluginId: "digital-cortexx-orgfy", pageId: "orgfy" });
+              ctx.navigation.open({ version: 1, kind: "page", pluginId: "digital.cortexx.orgfy", pageId: "orgfy" });
             } else if (ctx?.navigation?.navigate) {
               ctx.navigation.navigate("orgfy");
             }
