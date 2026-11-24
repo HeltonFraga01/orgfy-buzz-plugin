@@ -1827,13 +1827,22 @@ async function evaluateGovernanceAndReact(ctx, options = {}) {
       const attempt = isRadarAlert && radarIncidentKey ? (radarEscalationCounts.get(radarIncidentKey) || 0) + 1 : 1;
       const escalation = isRadarAlert ? await resolveEscalationTargetForChannel(ctx, wakeChannel, radarLoopingAgents, attempt) : null;
       const wakeKey = options.reviewerAgentKey || (escalation == null ? void 0 : escalation.targetAgent) || "OrgFy Bento";
+      const wakeRoot = isRadarAlert && radarThreadRoot ? radarThreadRoot : void 0;
       const wakeCooldownKey = isRadarAlert && radarIncidentKey ? `wake:${al.codigo}:${radarIncidentKey}:${wakeKey}` : `wake:${al.codigo}:${wakeKey}`;
-      if (options.bypassCooldown || canTriggerWithCooldown(wakeCooldownKey, nowMs)) {
+      const threadGuard = checkThreadWakeAntiLoop({
+        agentKey: wakeKey,
+        threadRoot: wakeRoot,
+        contextText: al.mensagem,
+        nowMs,
+        bypass: Boolean(options.bypassCooldown)
+      });
+      if (!threadGuard.allow) {
+        skippedByCooldown.push(`wake_guard:${al.codigo}:${threadGuard.reason}`);
+      } else if (options.bypassCooldown || canTriggerWithCooldown(wakeCooldownKey, nowMs)) {
         try {
           const agentsApi = ctx.agents;
           if (agentsApi == null ? void 0 : agentsApi.wake) {
             const targetAgentKey = resolveAgentKeyFromSnapshot(agentsApi, wakeKey);
-            const wakeRoot = isRadarAlert && radarThreadRoot ? radarThreadRoot : void 0;
             const escalationSuffix = escalation && escalation.nextEscalationAgent ? ` Se não conseguir resolver em 1 ciclo, escale para @${escalation.nextEscalationAgent} (nunca acione a CEO da Holding sem passar antes pela liderança da empresa).` : "";
             const headerLabel = escalation ? `Nível ${escalation.level} · ${escalation.roleLabel}` : al.codigo;
             await agentsApi.wake(targetAgentKey, {
@@ -2419,6 +2428,37 @@ async function executeAgentModelFailover(ctx, options) {
       message: `Falha ao ler/atualizar state do agente: ${(err == null ? void 0 : err.message) || err}`
     };
   }
+}
+function normalizeAgentAlias(raw) {
+  return String(raw || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/^@/, "").replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
+}
+const THREAD_WAKE_COOLDOWN_MS = 10 * 60 * 1e3;
+const threadWakeTimestamps = /* @__PURE__ */ new Map();
+function checkThreadWakeAntiLoop(input) {
+  if (input.bypass) {
+    return { allow: true, reason: "bypass" };
+  }
+  const nowMs = input.nowMs ?? Date.now();
+  const ctxLow = String(input.contextText || "").toLowerCase();
+  const waitingOtherGate = (ctxLow.includes("aguardando gate") || ctxLow.includes("waiting for gate")) && !ctxLow.includes(normalizeAgentAlias(input.agentKey));
+  if (waitingOtherGate && input.threadRoot) {
+    return {
+      allow: false,
+      reason: "waiting_for_other_reviewer_gate"
+    };
+  }
+  if (input.threadRoot) {
+    const key = `thread_wake:${normalizeAgentAlias(input.agentKey)}:${input.threadRoot}`;
+    const last = threadWakeTimestamps.get(key);
+    if (last !== void 0 && nowMs - last < THREAD_WAKE_COOLDOWN_MS) {
+      return {
+        allow: false,
+        reason: "thread_wake_cooldown_10m"
+      };
+    }
+    threadWakeTimestamps.set(key, nowMs);
+  }
+  return { allow: true, reason: "ok" };
 }
 function registerGovernanceAgentHooks(ctx) {
   const agentsApi = ctx.agents;
@@ -10743,6 +10783,7 @@ Regras Invariantes:
 - Isolamento Estrito de Worktree (Proibido git checkout na raiz): NUNCA execute 'git checkout --detach' ou troque de branch dentro da raiz '/Users/heltonfraga/.buzz/REPOS/orgfy' (isso corrompe o estado compartilhado para todos os agentes). Para revisar ou comparar BASE_VS_AGORA, crie SEMPRE uma worktree isolada e remova-a ao final.
 - Protocolo de Auto-Cura em Ciclo Fechado (Função Nível 1 do COO — Bento; CEO da empresa em Nível 2; Iris só em último caso): TODO wake '[ORGFY RADAR AUTO-CURA]' é uma ORDEM OPERACIONAL OBRIGATÓRIA (NUNCA trate como 'dado passivo de plugin' nem ignore em silêncio) e INTERROMPER UM AGENTE NUNCA ENCERRA O TURNO DO COO. ANTES de despachar ou cobrar (e SEMPRE que acordado pelo Radar), chame 'orgfy_loop_radar({ apenas_ativos: true })'. Ao interromper uma sessão em loop, execute obrigatoriamente 1 dos 3 desfechos imediatos: (A) Erro de API/provider (502/503/No available accounts/Kiro) -> 'orgfy_session_stop(action="interrupt")' + 'orgfy_model_failover({ agente, agent_pubkey, channel_id, thread_root, prefer_free: true, apply: true, retrigger: true })'; (B) Demanda ainda aberta (ESCOPO_ABERTO, COMPACTACAO_LOOP, ERRO_REPETIDO) -> chame 'orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: "interrupt", relaunch: true, reset_session_before_relaunch: true, relaunch_instruction: "<o que corrigir/fazer>", target_files: ["<1-3 arquivos>"], acceptance_command: "<comando L-22>", max_shells: 10, reason })' para que a própria ferramenta relance o agente já com '@Nome Exato' e escopo fechado; (C) ITEM_JA_FECHADO (já na main) -> interrompa sem relançar. Publique 'AUTO-CURA | agente | causa-raiz | ação tomada' no canal.
 - Decisor Híbrido v12: orgfy_lint_card usa Decisions API com fallback determinístico offline automático (ferramentas/esteira/decisor_fallback.py) em caso de falta de saldo ou timeout.
+- Guarda de Identidade & Anti-Loop de Wake (Zero Desperdício): (1) Se você for acordado por uma menção '@OrgFy <OutroPerfil>' que não corresponde exatamente ao seu nome de agente (ex.: '@OrgFy Hugo' caindo na sessão de 'OrgFy Teo'), NÃO execute comandos nem tente adivinhar — responda imediatamente apenas '[SILENT]'; (2) Se um wake repetido chegar numa thread em que o card já está explicitamente aguardando GATE/parecer de outro agente (e não houve novo commit/evento), responda apenas '[SILENT]'.
 Ferramentas nativas disponíveis neste plugin:
 1. orgfy_status({ empresa? }): Consulta o placar de 20h, FPY, CPI de tokens, contagem de aceites, merged e raias da esteira.
 2. orgfy_kanban_read({ stage?, empresa? }): Lê a matriz Kanban completa (triagem, despachado, execucao, revisao, feito) apenas com cards vinculados a Issues Nostr reais (64 hex).

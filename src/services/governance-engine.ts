@@ -700,16 +700,25 @@ export async function evaluateGovernanceAndReact(
         ? await resolveEscalationTargetForChannel(ctx, wakeChannel, radarLoopingAgents, attempt)
         : null;
       const wakeKey = options.reviewerAgentKey || escalation?.targetAgent || "OrgFy Bento";
+      const wakeRoot = isRadarAlert && radarThreadRoot ? radarThreadRoot : undefined;
       const wakeCooldownKey =
         isRadarAlert && radarIncidentKey
           ? `wake:${al.codigo}:${radarIncidentKey}:${wakeKey}`
           : `wake:${al.codigo}:${wakeKey}`;
-      if (options.bypassCooldown || canTriggerWithCooldown(wakeCooldownKey, nowMs)) {
+      const threadGuard = checkThreadWakeAntiLoop({
+        agentKey: wakeKey,
+        threadRoot: wakeRoot,
+        contextText: al.mensagem,
+        nowMs,
+        bypass: Boolean(options.bypassCooldown),
+      });
+      if (!threadGuard.allow) {
+        skippedByCooldown.push(`wake_guard:${al.codigo}:${threadGuard.reason}`);
+      } else if (options.bypassCooldown || canTriggerWithCooldown(wakeCooldownKey, nowMs)) {
         try {
           const agentsApi = (ctx as any).agents;
           if (agentsApi?.wake) {
             const targetAgentKey = resolveAgentKeyFromSnapshot(agentsApi, wakeKey);
-            const wakeRoot = isRadarAlert && radarThreadRoot ? radarThreadRoot : undefined;
             const escalationSuffix =
               escalation && escalation.nextEscalationAgent
                 ? ` Se não conseguir resolver em 1 ciclo, escale para @${escalation.nextEscalationAgent} (nunca acione a CEO da Holding sem passar antes pela liderança da empresa).`
@@ -1536,6 +1545,112 @@ export async function executeAgentModelFailover(
       message: `Falha ao ler/atualizar state do agente: ${err?.message || err}`,
     };
   }
+}
+
+export interface MentionIdentityCheckResult {
+  isForMe: boolean;
+  action: "PROCEED" | "[SILENT]";
+  mentionedTargets: string[];
+  reason: string;
+}
+
+function normalizeAgentAlias(raw: string): string {
+  return String(raw || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/^@/, "")
+    .replace(/[-_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function checkMentionTargetIdentity(input: {
+  messageText: string;
+  currentAgentName: string;
+  currentAgentPubkey?: string;
+}): MentionIdentityCheckResult {
+  const text = String(input.messageText || "");
+  const matches = Array.from(
+    text.matchAll(/@((?:OrgFy|Lumen|Tributario)\s+[A-ZÀ-Ú][a-zà-ú]+(?:\s+[A-ZÀ-Ú][a-zà-ú]+)?)/g)
+  ).map((m) => m[1].trim());
+  const mentionedTargets = Array.from(new Set(matches));
+
+  if (mentionedTargets.length === 0) {
+    return {
+      isForMe: true,
+      action: "PROCEED",
+      mentionedTargets: [],
+      reason: "Sem menção nominal explícita a outro agente.",
+    };
+  }
+
+  const meNorm = normalizeAgentAlias(input.currentAgentName);
+  const isAddressedToMe = mentionedTargets.some((t) => {
+    const tNorm = normalizeAgentAlias(t);
+    return tNorm === meNorm || tNorm.includes(meNorm) || meNorm.includes(tNorm);
+  });
+
+  if (isAddressedToMe) {
+    return {
+      isForMe: true,
+      action: "PROCEED",
+      mentionedTargets,
+      reason: `Menção compatível com o perfil ativo (${input.currentAgentName}).`,
+    };
+  }
+
+  return {
+    isForMe: false,
+    action: "[SILENT]",
+    mentionedTargets,
+    reason: `Menção endereçada a [${mentionedTargets.join(", ")}], não a ${input.currentAgentName}. Responder [SILENT].`,
+  };
+}
+
+const THREAD_WAKE_COOLDOWN_MS = 10 * 60 * 1000;
+const threadWakeTimestamps = new Map<string, number>();
+
+export function resetThreadWakeGuardForTests(): void {
+  threadWakeTimestamps.clear();
+}
+
+export function checkThreadWakeAntiLoop(input: {
+  agentKey: string;
+  threadRoot?: string;
+  contextText?: string;
+  nowMs?: number;
+  bypass?: boolean;
+}): { allow: boolean; reason: string } {
+  if (input.bypass) {
+    return { allow: true, reason: "bypass" };
+  }
+  const nowMs = input.nowMs ?? Date.now();
+  const ctxLow = String(input.contextText || "").toLowerCase();
+  const waitingOtherGate =
+    (ctxLow.includes("aguardando gate") || ctxLow.includes("waiting for gate")) &&
+    !ctxLow.includes(normalizeAgentAlias(input.agentKey));
+
+  if (waitingOtherGate && input.threadRoot) {
+    return {
+      allow: false,
+      reason: "waiting_for_other_reviewer_gate",
+    };
+  }
+
+  if (input.threadRoot) {
+    const key = `thread_wake:${normalizeAgentAlias(input.agentKey)}:${input.threadRoot}`;
+    const last = threadWakeTimestamps.get(key);
+    if (last !== undefined && nowMs - last < THREAD_WAKE_COOLDOWN_MS) {
+      return {
+        allow: false,
+        reason: "thread_wake_cooldown_10m",
+      };
+    }
+    threadWakeTimestamps.set(key, nowMs);
+  }
+
+  return { allow: true, reason: "ok" };
 }
 
 export function registerGovernanceAgentHooks(ctx: Context): boolean {

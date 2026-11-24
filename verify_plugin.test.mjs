@@ -580,4 +580,49 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
   // Sem relaunch -> deve devolver next_required_action obrigatório para o COO
   assert.ok(stopRes.next_required_action && stopRes.next_required_action.includes("AÇÃO OBRIGATÓRIA DO COO"));
   console.log("[SESSION STOP ATOMIC RELAUNCH OK]", JSON.stringify({ relaunched: relaunchRes.relaunched, wakes: h1.wakes.length }));
+
+  // Guarda de Identidade por Menção & Anti-Loop de Wake por Thread
+  const { checkMentionTargetIdentity, checkThreadWakeAntiLoop, resetThreadWakeGuardForTests } = await import(
+    "./src/services/governance-engine.ts"
+  );
+  const mismatch = checkMentionTargetIdentity({
+    messageText: "Por favor @OrgFy Hugo rode o GATE deste PR.",
+    currentAgentName: "OrgFy Teo",
+  });
+  assert.equal(mismatch.isForMe, false);
+  assert.equal(mismatch.action, "[SILENT]");
+
+  const matchOk = checkMentionTargetIdentity({
+    messageText: "Por favor @OrgFy Teo valide o PR.",
+    currentAgentName: "OrgFy Teo",
+  });
+  assert.equal(matchOk.isForMe, true);
+  assert.equal(matchOk.action, "PROCEED");
+
+  resetThreadWakeGuardForTests();
+  const w1 = checkThreadWakeAntiLoop({
+    agentKey: "OrgFy Bento",
+    threadRoot: "thread-abc-123",
+    contextText: "PR entregue, verificando fila.",
+    nowMs: 1_000_000,
+  });
+  assert.equal(w1.allow, true);
+  const w2 = checkThreadWakeAntiLoop({
+    agentKey: "OrgFy Bento",
+    threadRoot: "thread-abc-123",
+    contextText: "PR entregue, verificando fila.",
+    nowMs: 1_000_000 + 60_000,
+  });
+  assert.equal(w2.allow, false);
+  assert.equal(w2.reason, "thread_wake_cooldown_10m");
+
+  const wGate = checkThreadWakeAntiLoop({
+    agentKey: "OrgFy Bento",
+    threadRoot: "thread-gate-999",
+    contextText: "Aguardando GATE de OrgFy Hugo na T021.",
+    nowMs: 2_000_000,
+  });
+  assert.equal(wGate.allow, false);
+  assert.equal(wGate.reason, "waiting_for_other_reviewer_gate");
+  console.log("[MENTION IDENTITY & WAKE ANTI-LOOP OK]");
 }
