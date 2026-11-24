@@ -315,37 +315,45 @@ export interface GooseLoopRadarPayload {
 
 export const GOOSE_LOOP_RADAR_SCRIPT_PATH =
   "/Users/heltonfraga/.buzz/REPOS/orgfy-buzz-plugin/scripts/goose_loop_radar.py";
+export const GOOSE_LOOP_RADAR_SNAPSHOT_PATH =
+  "/Users/heltonfraga/.buzz/.scratch/goose-loop-radar.json";
 
 export async function fetchGooseLoopRadar(ctx: Context): Promise<GooseLoopRadarPayload> {
   const host = (ctx as any).host;
   const empty: GooseLoopRadarPayload = {
     ok: false,
-    error: "Execução local indisponível para leitura do sessions.db.",
+    error: "Leitura do radar Goose indisponível neste ambiente.",
     gerado_em: new Date().toISOString(),
     resumo: { total_recentes: 0, criticos: 0, avisos: 0, duplicadas: 0 },
     sessoes: [],
   };
+
+  // 1. Tenta atualizar o snapshot via host.spawn("python", { args: [...] }) (API oficial @buzz/author)
   try {
-    let stdout = "";
-    if (host?.exec) {
-      let res = await host.exec("python", [GOOSE_LOOP_RADAR_SCRIPT_PATH]);
-      if (res?.exitCode && res.exitCode !== 0) {
-        res = await host.exec("bash", ["-c", `python3 "${GOOSE_LOOP_RADAR_SCRIPT_PATH}"`]);
+    if (host?.spawn) {
+      const proc = await host.spawn("python", { args: [GOOSE_LOOP_RADAR_SCRIPT_PATH] });
+      if (proc?.exited) {
+        await proc.exited;
       }
-      stdout = String(res?.stdout || "").trim();
-    } else if (host?.spawn) {
-      const proc = await host.spawn("python", [GOOSE_LOOP_RADAR_SCRIPT_PATH]);
-      if (proc?.exited) await proc.exited;
-      stdout = String(proc?.stdout || "").trim();
-    } else {
-      return empty;
+    } else if (host?.exec) {
+      await host.exec("python", [GOOSE_LOOP_RADAR_SCRIPT_PATH]);
     }
-    const start = stdout.indexOf("{");
-    if (start === -1) return { ...empty, error: "Saída JSON ausente do radar Goose." };
-    const parsed = JSON.parse(stdout.slice(start)) as GooseLoopRadarPayload;
-    if (!parsed || typeof parsed !== "object" || !parsed.resumo) return empty;
-    return parsed;
+  } catch {
+    // Se falhar o spawn, segue para ler o último snapshot gravado em disco
+  }
+
+  // 2. Lê o JSON gravado em ~/.buzz/.scratch/goose-loop-radar.json via host.readFile
+  try {
+    if (host?.readFile) {
+      const raw = await host.readFile(GOOSE_LOOP_RADAR_SNAPSHOT_PATH);
+      const text = decodeHostFile(raw);
+      const parsed = JSON.parse(text) as GooseLoopRadarPayload;
+      if (parsed && typeof parsed === "object" && parsed.resumo) {
+        return parsed;
+      }
+    }
+    return empty;
   } catch (err: any) {
-    return { ...empty, error: err?.message || "Erro ao consultar radar de loops Goose." };
+    return { ...empty, error: err?.message || "Snapshot goose-loop-radar.json ainda não gerado." };
   }
 }

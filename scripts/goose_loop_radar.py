@@ -28,6 +28,7 @@ def _resolve_goose_db() -> Path:
 
 
 GOOSE_DB = _resolve_goose_db()
+RADAR_SNAPSHOT_PATH = Path("/Users/heltonfraga/.buzz/.scratch/goose-loop-radar.json")
 
 
 def parse_utc(ts_str: str | None) -> datetime | None:
@@ -159,7 +160,7 @@ def main() -> int:
         ordem = {"critical": 0, "warn": 1, "ok": 2}
         sessoes.sort(key=lambda s: (ordem.get(s["severidade"], 3), -s["shells"], -s["duracao_min"]))
 
-        print(json.dumps({
+        payload = {
             "ok": True,
             "error": None,
             "gerado_em": now.isoformat(),
@@ -170,7 +171,14 @@ def main() -> int:
                 "duplicadas": duplicadas,
             },
             "sessoes": sessoes[:12],
-        }, ensure_ascii=False))
+        }
+        serialized = json.dumps(payload, ensure_ascii=False, indent=2)
+        try:
+            RADAR_SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
+            RADAR_SNAPSHOT_PATH.write_text(serialized + "\n", encoding="utf-8")
+        except Exception:
+            pass
+        print(serialized)
         return 0
     except Exception as exc:
         print(json.dumps({
