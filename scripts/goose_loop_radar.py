@@ -311,10 +311,9 @@ def main() -> int:
                 flags.append("STALLED_THINKING")
                 severidade = "critical"
 
-            # 4. Colisão real: mesmo agente na MESMA thread_root ou MESMO worktree (não threads distintas!)
+            # 4. Colisão real: mesmo agente na MESMA thread_root (threads distintas = paralelismo planejado)
             same_thread_dup = bool(item["thread_root"] and thread_collision_counts[(item["ag"], item["thread_root"])] >= 2)
-            same_wt_dup = bool(item["last_worktree"] and worktree_collision_counts[(item["ag"], item["last_worktree"])] >= 2)
-            if ativa and (same_thread_dup or same_wt_dup):
+            if ativa and same_thread_dup:
                 flags.append("SESSAO_DUPLICADA")
                 duplicadas += 1
                 duplicadas_ativas += 1
