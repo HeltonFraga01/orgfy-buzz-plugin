@@ -108,7 +108,7 @@ function makeHarness(failReads = false) {
 
 // 1. Testes Originais (Kanban & Status Positivo/Negativo + MCP)
 const h1 = makeHarness(false);
-assert.equal(h1.tools.size, 13, "devem existir exatamente 13 agentTools registradas");
+assert.equal(h1.tools.size, 14, "devem existir exatamente 14 agentTools registradas");
 assert.ok(h1.panels.has("orgfy-channel-pulse"), "sidebar panel orgfy-channel-pulse deve ser registrado");
 assert.ok(h1.hooks.length >= 1, "hooks de governança devem ser registrados");
 
@@ -385,3 +385,83 @@ assert.equal(mcpStopJson.agentKey, "local:orgfy-bento-arq");
 const stopMissing = JSON.parse(await stopTool.call({}, {}, { agente: "Agente Inexistente" }));
 assert.equal(stopMissing.ok, false);
 console.log("[SESSION STOP AGENT+MCP OK]", JSON.stringify({ stopped: h1.sessionActions.length, lastAgent: mcpStopJson.agentName }));
+
+// 10. Blindagem contra ID sintético repetido em orgfy_checkout_lock
+const syntheticRes = JSON.parse(await lockTool.call({}, {}, {
+  action: "acquire",
+  issue_id: "ef97ba1cef97ba1cef97ba1cef97ba1cef97ba1cef97ba1cef97ba1cef97ba1c",
+  agent_id: "OrgFy Teo",
+}));
+assert.equal(syntheticRes.ok, false, "ID sintético repetido deve ser recusado");
+assert.ok(syntheticRes.message.includes("INVALID_SYNTHETIC_ID"));
+console.log("[SYNTHETIC LOCK GUARD OK]");
+
+// 11. Auto-Failover de Modelo via NexusMind Ping Real: orgfy_model_failover
+const failoverTools = new Map();
+const savedChanges = [];
+const failoverWakes = [];
+orgfyMod.apply({
+  react: { createElement: () => null },
+  pages: { register: () => {} },
+  settingsCards: { register: () => {} },
+  panels: { register: () => {} },
+  navigation: { open: async () => ({ status: "opened" }) },
+  notifications: { notify: async () => {} },
+  agents: {
+    addInstructions: () => {},
+    addTool: (t) => failoverTools.set(t.name, t),
+    registerHook: () => {},
+    snapshot: () => ({
+      agents: [
+        { key: "local:orgfy-cron", pubkey: "aaa111", name: "OrgFy Cron", place: "here", config: { model: "kilocode-fast-free", provider: "nexusmind_openai" } },
+      ],
+      running: [],
+    }),
+    save: async (agentKey, change) => savedChanges.push({ agentKey, change }),
+    wake: async (agentKey, payload) => failoverWakes.push({ agentKey, payload }),
+  },
+  host: {
+    request: async (req) => {
+      if (req.url.endsWith("/v1/models")) {
+        return {
+          status: 200,
+          body: JSON.stringify({
+            data: [
+              { id: "kilocode-fast-free" },
+              { id: "deepseek/deepseek-r1:free" },
+              { id: "qwen/qwen3-coder:free" },
+              { id: "mini-nano-free" },
+            ],
+          }),
+        };
+      }
+      const body = JSON.parse(req.body || "{}");
+      if (body.model === "deepseek/deepseek-r1:free") {
+        return { status: 503, body: JSON.stringify({ error: { message: "No available accounts" } }) };
+      }
+      return { status: 200, body: JSON.stringify({ choices: [{ message: { content: "ok" } }] }) };
+    },
+    readFile: async () => { throw new Error("unused"); },
+    writeFile: async () => {},
+    serveMcp: async () => ({ url: "mcp://test-failover", close: () => {} }),
+  },
+});
+const failoverTool = failoverTools.get("orgfy_model_failover");
+assert.ok(failoverTool, "agentTool orgfy_model_failover deve estar registrada");
+const failoverRes = JSON.parse(await failoverTool.call({}, {}, {
+  agente: "OrgFy Cron",
+  failed_model: "kilocode-fast-free",
+  prefer_free: true,
+  apply: true,
+  retrigger: true,
+  channel_id: "e445491d-2fb3-4ebd-8e2e-f6813c33fb03",
+  thread_root: "25c49b323d299d3a81ca260197cecd5b6208668d84bb8788971ba347fb15b193",
+}));
+assert.equal(failoverRes.ok, true, "failover deve eleger o melhor modelo free online");
+assert.equal(failoverRes.selectedModel, "qwen/qwen3-coder:free", "deve pular o 503 e escolher o mais inteligente online");
+assert.equal(failoverRes.retriggered, true);
+assert.equal(savedChanges.length, 1);
+assert.equal(savedChanges[0].change.config.model, "qwen/qwen3-coder:free");
+assert.equal(failoverWakes.length, 1);
+assert.equal(failoverWakes[0].payload.root, "25c49b323d299d3a81ca260197cecd5b6208668d84bb8788971ba347fb15b193");
+console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failoverRes.selectedModel, tested: failoverRes.candidatesTested, retriggered: failoverRes.retriggered }));
