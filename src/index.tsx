@@ -52,6 +52,7 @@ import {
   type KpisEsteiraPayload,
   type KpiHistoryPoint,
   type GooseLoopRadarPayload,
+  type GooseLoopSession,
 } from "./services/kpi-service";
 import {
   renderIntelligenceTab,
@@ -65,6 +66,7 @@ import {
   evaluateGovernanceAndReact,
   lintCardForDispatch,
   bindConversationContextForCard,
+  stopAgentSession,
   registerGovernanceAgentHooks,
 } from "./services/governance-engine";
 import {
@@ -681,6 +683,7 @@ export function apply(ctx: Context) {
     const [isRecalculatingKpis, setIsRecalculatingKpis] = React.useState<boolean>(false);
     const [governanceSummary, setGovernanceSummary] = React.useState<string | null>(null);
     const [loopRadar, setLoopRadar] = React.useState<GooseLoopRadarPayload | null>(null);
+    const [stoppingSessionId, setStoppingSessionId] = React.useState<string | null>(null);
 
     // Estado do Arquivo Pesquisável de Issues Resolvidas (Just-in-Time Context)
     const [resolvedItems, setResolvedItems] = React.useState<ResolvedIssueItem[]>([]);
@@ -753,6 +756,25 @@ export function apply(ctx: Context) {
         `Chamada Radar → Iris disparada | Alertas: ${evalRes.alertsDetected} | Wakes: ${evalRes.wakesTriggered.join(", ") || "nenhum loop ativo"}`
       );
       showNotification("info", evalRes.wakesTriggered.length > 0 ? "OrgFy Iris acionada com o diagnóstico do Radar!" : "Nenhum loop ativo detectado no momento.");
+    }, [loadLoopRadar]);
+
+    const handleStopLoopSession = React.useCallback(async (session: GooseLoopSession) => {
+      setStoppingSessionId(session.session_id);
+      try {
+        const res = await stopAgentSession(ctx, {
+          agente: session.agente,
+          agent_pubkey: session.agent_pubkey,
+          channel_id: session.channel_id,
+          thread_root: session.thread_root,
+          action: "interrupt",
+          reason: `Stop manual via Radar (${session.duracao_min}m · ${session.shells} shells)`,
+        });
+        setGovernanceSummary(res.message);
+        showNotification(res.ok ? "success" : "warning", res.message);
+        setTimeout(() => { loadLoopRadar(); }, 800);
+      } finally {
+        setStoppingSessionId(null);
+      }
     }, [loadLoopRadar]);
 
     // Estados de Execução Concorrente e Loading (Fase 2)
@@ -2251,6 +2273,8 @@ export function apply(ctx: Context) {
           loopRadar,
           onRefreshLoopRadar: loadLoopRadar,
           onWakeIrisForLoops: handleWakeIrisForLoops,
+          onStopLoopSession: handleStopLoopSession,
+          stoppingSessionId,
         })
       : activeCentralTab === "resolvidas"
       ? renderResolvedArchiveTab({
@@ -4366,7 +4390,7 @@ export function apply(ctx: Context) {
             h(
               "div",
               { style: { display: "flex", flexDirection: "column", gap: "8px" } },
-              h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, "Ferramentas Homologadas (6 Tools MCP + 12 AgentTools):"),
+              h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, "Ferramentas Homologadas (7 Tools MCP + 13 AgentTools):"),
               [
                 {
                   name: "orgfy_status",
@@ -4390,7 +4414,11 @@ export function apply(ctx: Context) {
                 },
                 {
                   name: "orgfy_loop_radar",
-                  desc: "Radar Live do Goose (mode=ro): detecta LOOP_SUSPEITO, STALLED_THINKING e SESSAO_DUPLICADA com acao_sugerida.",
+                  desc: "Radar Live do Goose (mode=ro): detecta LOOP_SUSPEITO, STALLED_THINKING e SESSAO_DUPLICADA com channel_id/thread_root e acao_sugerida.",
+                },
+                {
+                  name: "orgfy_session_stop",
+                  desc: "Stop / Interrupt nativo (ctx.agents.session): interrompe ou reinicia sessões travadas ou inúteis queimando tokens.",
                 },
               ].map((tool) =>
                 h(
@@ -5410,7 +5438,7 @@ Regras Invariantes:
 - Leitura Direta de Cards e PRs (Zero '--help'): Arquivos 'cards/*.md' ficam na raiz '/Users/heltonfraga/.buzz/REPOS/orgfy/cards/' (não dentro da worktree). Sem desperdiçar turnos em '--help': (a) ler issue: 'buzz issues get --event <id-64> --repo 7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20/orgfy'; (b) atualizar PR após novo commit/rebase: 'buzz pr update --repo-owner 7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20 --repo orgfy --pr <pr-id-64> --commit <sha-40>'.
 - Freio Anti-Loop (Máximo 12 'shell's): NUNCA ultrapasse 12 comandos 'shell' sem commit nem repita o mesmo erro 2 vezes seguidas. Ao bater 2 falhas consecutivas no mesmo passo ou 12 'shell's sem avanço, PARE imediatamente e publique 'BLOQUEADO | por: <seu perfil> | motivo: ... | falta: ... | resolve: <perfil>'.
 - Isolamento Estrito de Worktree (Proibido git checkout na raiz): NUNCA execute 'git checkout --detach' ou troque de branch dentro da raiz '/Users/heltonfraga/.buzz/REPOS/orgfy' (isso corrompe o estado compartilhado para todos os agentes). Para revisar ou comparar BASE_VS_AGORA, crie SEMPRE uma worktree isolada e remova-a ao final.
-- Protocolo de Auto-Cura de Loops (Bento, Iris, Cron e Revisores): ANTES de despachar um card ou cobrar um agente, chame 'orgfy_loop_radar({ apenas_ativos: true })'. (1) Se o agente estiver com 'SESSAO_DUPLICADA', NUNCA envie nova menção ou cobrança (aguarde o turno atual terminar). (2) Se estiver com 'LOOP_SUSPEITO' ou 'STALLED_THINKING', leia 'ultimo_shell' e 'acao_sugerida' e envie 1 instrução cirúrgica destravando aquele passo específico (nunca cobrança genérica); se sem progresso real, libere o lock via 'orgfy_checkout_lock({ action: "release", ... })' e reatribua.
+- Protocolo de Auto-Cura e Interrupção de Loops (Bento, Iris, Cron e Revisores): ANTES de despachar um card ou cobrar um agente, chame 'orgfy_loop_radar({ apenas_ativos: true })'. NUNCA espere indefinidamente uma sessão queimando tokens em loop (>20m ou >25 shells sem commit, grep em loop, --help repetido, ou revisando PR já fechado). (1) Inspecione 'ultimo_shell': se o trabalho for inútil, repetitivo ou travado ('LOOP_SUSPEITO' / 'STALLED_THINKING'), INTERROMPA IMEDIATAMENTE chamando 'orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: "interrupt", release_issue_id?, reason })'. (2) Só depois de parar a sessão inútil (e liberar lock se necessário), reatribua ou envie 1 instrução cirúrgica. (3) Em 'SESSAO_DUPLICADA', encerre a sessão obsoleta com 'orgfy_session_stop' em vez de re-mencionar.
 - Decisor Híbrido v12: orgfy_lint_card usa Decisions API com fallback determinístico offline automático (ferramentas/esteira/decisor_fallback.py) em caso de falta de saldo ou timeout.
 Ferramentas nativas disponíveis neste plugin:
 1. orgfy_status({ empresa? }): Consulta o placar de 20h, FPY, CPI de tokens, contagem de aceites, merged e raias da esteira.
@@ -5424,7 +5452,8 @@ Ferramentas nativas disponíveis neste plugin:
 9. orgfy_lint_card({ title, objective?, done_when?, acceptance_command?, executor?, revisor?, card_markdown?, spec_path? }): Audita template OrgFy/Spec-Kit, qualidade semântica e regras L-01/L-22 antes do despacho.
 10. orgfy_bind_context({ conversation_id, issue_id, worktree_path?, title?, acceptance_command?, acceptance_hash?, executor?, revisor? }): Vincula o worktree e injeta regras vivas L-22/L-90 direto na conversa do agente.
 11. orgfy_historico_buscar({ query?, spec?, limit? }): Busca just-in-time no Arquivo de Issues Resolvidas por código, causa raiz, arquivo ou SHA.
-12. orgfy_loop_radar({ apenas_ativos?, agente? }): Inspeciona o Radar de Loops & Sessões Zumbis do Goose em tempo real (LOOP_SUSPEITO, STALLED_THINKING, SESSAO_DUPLICADA, EXPLORACAO_CLI_HELP) com ultimo_shell e acao_sugerida para auto-cura autônoma.
+12. orgfy_loop_radar({ apenas_ativos?, agente? }): Inspeciona o Radar de Loops & Sessões Zumbis do Goose em tempo real (LOOP_SUSPEITO, STALLED_THINKING, SESSAO_DUPLICADA, EXPLORACAO_CLI_HELP) com channel_id, thread_root, agent_pubkey, ultimo_shell e acao_sugerida.
+13. orgfy_session_stop({ agente, agent_pubkey?, channel_id?, thread_root?, action?, release_issue_id?, reason? }): Interrompe (Stop) ou reinicia imediatamente o turno de um agente travado ou em trabalho inútil via API nativa do Buzz Desktop (action: 'interrupt' | 'new' | 'compact'), com liberação opcional de lock.
 Consulte sempre orgfy_status, orgfy_kpis, orgfy_loop_radar ou orgfy_kanban_read para inspecionar métricas reais antes de agir.`
       });
       console.log("[ORGFY] ctx.agents.addInstructions registrado com sucesso.");
@@ -5787,7 +5816,7 @@ Consulte sempre orgfy_status, orgfy_kpis, orgfy_loop_radar ou orgfy_kanban_read 
       // ── RADAR LIVE DE LOOPS & SESSÕES ZUMBIS (AUTO-CURA DE AGENTES) ──
       (ctx.agents as any).addTool({
         name: "orgfy_loop_radar",
-        description: "Consulta o Radar de Loops & Sessões Zumbis do Goose em tempo real (mode=ro), separando alertas ativos (<=15m) de histórico (3h) com flags LOOP_SUSPEITO, STALLED_THINKING, SESSAO_DUPLICADA, EXPLORACAO_CLI_HELP, ultimo_shell e acao_sugerida.",
+        description: "Consulta o Radar de Loops & Sessões Zumbis do Goose em tempo real (mode=ro), separando alertas ativos (<=15m) de histórico (3h) com flags LOOP_SUSPEITO, STALLED_THINKING, SESSAO_DUPLICADA, EXPLORACAO_CLI_HELP, channel_id, thread_root, agent_pubkey, ultimo_shell e acao_sugerida.",
         inputSchema: {
           type: "object",
           properties: {
@@ -5805,7 +5834,38 @@ Consulte sempre orgfy_status, orgfy_kpis, orgfy_loop_radar ou orgfy_kanban_read 
         },
       });
 
-      console.log("[ORGFY] 12 agentTools registradas com sucesso no harness do Buzz (Ondas 1, 2, 3 + Arquivo + Radar de Loops).");
+      // ── STOP / INTERRUPT NATIVO DE SESSÕES EM LOOP (ctx.agents.session) ──
+      (ctx.agents as any).addTool({
+        name: "orgfy_session_stop",
+        description: "Interrompe (Stop) ou reinicia imediatamente o turno de um agente travado ou em trabalho inútil usando a API nativa do Buzz Desktop (ctx.agents.session interrupt/new/compact), opcionalmente liberando o checkout lock do card.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            agente: { type: "string", description: "Nome, key ou pubkey do agente (ex: 'OrgFy Teo', 'OrgFy Bento Arquiteto')" },
+            agent_pubkey: { type: "string", description: "Pubkey 64-hex do agente (retornado por orgfy_loop_radar)" },
+            channel_id: { type: "string", description: "UUID do canal (default: canal #OrgFy)" },
+            thread_root: { type: "string", description: "Event ID 64-hex da thread (retornado por orgfy_loop_radar)" },
+            action: { type: "string", enum: ["interrupt", "new", "compact"], description: "Ação de controle (default: 'interrupt' = Stop imediato)" },
+            release_issue_id: { type: "string", description: "Opcional: issue_id cujo checkout lock deve ser liberado após parar" },
+            reason: { type: "string", description: "Motivo técnico da interrupção" },
+          },
+          required: ["agente"],
+        },
+        call: async (_client: any, _context: any, args: any) => {
+          const res = await stopAgentSession(ctx, {
+            agente: String(args?.agente || args?.agent_pubkey || ""),
+            agent_pubkey: args?.agent_pubkey,
+            channel_id: args?.channel_id,
+            thread_root: args?.thread_root,
+            action: args?.action,
+            release_issue_id: args?.release_issue_id,
+            reason: args?.reason,
+          });
+          return JSON.stringify(res, null, 2);
+        },
+      });
+
+      console.log("[ORGFY] 13 agentTools registradas com sucesso no harness do Buzz (Ondas 1, 2, 3 + Arquivo + Radar de Loops + Session Stop).");
     } catch (err) {
       console.warn("[ORGFY] Falha ao registrar agentTools:", err);
     }

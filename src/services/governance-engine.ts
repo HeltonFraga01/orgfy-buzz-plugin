@@ -454,7 +454,7 @@ export async function evaluateGovernanceAndReact(
             severidade: "critical",
             mensagem: `${activeCrit.length} sessão(ões) ativa(s) em loop no Goose: ${top}.`,
             acao_sugerida:
-              "Chamar orgfy_loop_radar({ apenas_ativos: true }), interromper re-menções duplicadas, enviar 1 instrução cirúrgica por agente travado ou liberar lock com orgfy_checkout_lock(release).",
+              "Chamar orgfy_loop_radar({ apenas_ativos: true }), inspecionar ultimo_shell e INTERROMPER imediatamente turnos travados ou inúteis via orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt' }), liberando o lock se necessário.",
           });
         }
         if (activeDup.length >= 2) {
@@ -863,6 +863,166 @@ export async function bindConversationContextForCard(
     fallbackContextFile,
     degradedFallback,
     notes,
+  };
+}
+
+export interface StopAgentSessionInput {
+  agente: string;
+  agent_pubkey?: string | null;
+  channel_id?: string | null;
+  thread_root?: string | null;
+  action?: "interrupt" | "new" | "compact";
+  release_issue_id?: string | null;
+  reason?: string | null;
+}
+
+export interface StopAgentSessionResult {
+  ok: boolean;
+  action: "interrupt" | "new" | "compact";
+  agentName: string | null;
+  agentKey: string | null;
+  agentPlace: string | null;
+  place: { channelId: string; root?: string };
+  previousState: string | null;
+  lockReleased: boolean;
+  message: string;
+}
+
+export async function stopAgentSession(
+  ctx: Context,
+  input: StopAgentSessionInput
+): Promise<StopAgentSessionResult> {
+  const agentsApi = (ctx as any).agents;
+  const action: "interrupt" | "new" | "compact" =
+    input.action === "new" || input.action === "compact" ? input.action : "interrupt";
+  const channelId = String(input.channel_id || DEFAULT_ORGFY_CHANNEL).trim() || DEFAULT_ORGFY_CHANNEL;
+  const root = input.thread_root ? String(input.thread_root).trim() : undefined;
+  const place: { channelId: string; root?: string } = root ? { channelId, root } : { channelId };
+
+  if (!agentsApi?.snapshot || (!agentsApi?.session && !agentsApi?.interrupt)) {
+    return {
+      ok: false,
+      action,
+      agentName: null,
+      agentKey: null,
+      agentPlace: null,
+      place,
+      previousState: null,
+      lockReleased: false,
+      message: "API nativa ctx.agents.session / snapshot indisponível neste host.",
+    };
+  }
+
+  const snap = agentsApi.snapshot() || {};
+  const pool: any[] = [];
+  const seen = new Set<string>();
+  for (const list of [snap.running, snap.agents]) {
+    if (!Array.isArray(list)) continue;
+    for (const a of list) {
+      if (!a || !a.key || seen.has(a.key)) continue;
+      seen.add(a.key);
+      pool.push(a);
+    }
+  }
+
+  const queryRaw = String(input.agente || "").trim();
+  const queryLower = queryRaw.toLowerCase();
+  const pubkeyLower = String(input.agent_pubkey || "").trim().toLowerCase();
+
+  const matched =
+    (pubkeyLower && pool.find((a) => String(a.pubkey || "").toLowerCase() === pubkeyLower)) ||
+    pool.find((a) => String(a.key || "").toLowerCase() === queryLower) ||
+    pool.find((a) => String(a.pubkey || "").toLowerCase() === queryLower) ||
+    pool.find((a) => String(a.name || "").toLowerCase() === queryLower) ||
+    (queryLower
+      ? pool.find((a) => String(a.name || "").toLowerCase().includes(queryLower))
+      : undefined);
+
+  if (!matched) {
+    const available = pool.map((a) => a.name || a.key).slice(0, 12).join(", ");
+    return {
+      ok: false,
+      action,
+      agentName: null,
+      agentKey: null,
+      agentPlace: null,
+      place,
+      previousState: null,
+      lockReleased: false,
+      message: `Agente '${queryRaw || pubkeyLower}' não encontrado no Buzz Desktop. Disponíveis: ${available || "nenhum"}`,
+    };
+  }
+
+  let previousState: string | null = null;
+  try {
+    if (agentsApi.sessionState) {
+      previousState = String(agentsApi.sessionState(matched.key, place));
+    }
+  } catch {
+    previousState = null;
+  }
+
+  try {
+    if (matched.place === "hosted" && action === "interrupt" && agentsApi.interrupt) {
+      await agentsApi.interrupt(matched.key, {
+        channelId: place.channelId,
+        ...(place.root ? { threadRootId: place.root } : {}),
+      });
+    } else if (agentsApi.session) {
+      await agentsApi.session(matched.key, place, action);
+    } else if (action === "interrupt" && agentsApi.interrupt) {
+      await agentsApi.interrupt(matched.key, {
+        channelId: place.channelId,
+        ...(place.root ? { threadRootId: place.root } : {}),
+      });
+    } else {
+      return {
+        ok: false,
+        action,
+        agentName: matched.name || matched.key,
+        agentKey: matched.key,
+        agentPlace: matched.place || null,
+        place,
+        previousState,
+        lockReleased: false,
+        message: `Host não suporta ação '${action}' para ${matched.name || matched.key}.`,
+      };
+    }
+  } catch (err: any) {
+    return {
+      ok: false,
+      action,
+      agentName: matched.name || matched.key,
+      agentKey: matched.key,
+      agentPlace: matched.place || null,
+      place,
+      previousState,
+      lockReleased: false,
+      message: `Falha ao executar '${action}' em ${matched.name || matched.key}: ${err?.message || err}`,
+    };
+  }
+
+  let lockReleased = false;
+  if (input.release_issue_id && String(input.release_issue_id).trim()) {
+    try {
+      const rel = await releaseCheckoutLock(ctx, String(input.release_issue_id).trim(), undefined, true);
+      lockReleased = rel.ok && rel.code === "RELEASED";
+    } catch {
+      lockReleased = false;
+    }
+  }
+
+  const reasonSuffix = input.reason ? ` Motivo: ${String(input.reason).trim()}.` : "";
+  return {
+    ok: true,
+    action,
+    agentName: matched.name || matched.key,
+    agentKey: matched.key,
+    agentPlace: matched.place || null,
+    place,
+    previousState,
+    lockReleased,
+    message: `Comando '${action}' enviado com sucesso para ${matched.name || matched.key} (canal ${place.channelId.slice(0, 8)}${place.root ? `, thread ${place.root.slice(0, 8)}` : ""}).${lockReleased ? " Lock liberado." : ""}${reasonSuffix}`,
   };
 }
 

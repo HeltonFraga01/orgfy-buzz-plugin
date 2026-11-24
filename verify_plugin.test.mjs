@@ -29,6 +29,7 @@ function makeHarness(failReads = false) {
   const hooks = [];
   const notifications = [];
   const wakes = [];
+  const sessionActions = [];
   const assignedFolders = [];
   const injectedSections = [];
   const artifacts = new Map();
@@ -60,6 +61,19 @@ function makeHarness(failReads = false) {
       wake: async (w) => {
         wakes.push(w);
       },
+      snapshot: () => ({
+        agents: [
+          { key: "local:orgfy-teo", pubkey: "23fa72f980088b18344c7a2d836f723e92f21709be998a7c8cc2a77812002ce8", name: "OrgFy Teo", place: "here" },
+          { key: "local:orgfy-bento-arq", pubkey: "6d2ab612cc8e091e5c4381694728ce3f8873661156adeeda1522737af334b271", name: "OrgFy Bento Arquiteto", place: "here" },
+        ],
+        running: [
+          { key: "local:orgfy-teo", pubkey: "23fa72f980088b18344c7a2d836f723e92f21709be998a7c8cc2a77812002ce8", name: "OrgFy Teo", place: "here" },
+        ],
+      }),
+      sessionState: () => "active",
+      session: async (agentKey, place, action) => {
+        sessionActions.push({ agentKey, place, action });
+      },
       assignConversationFolder: async (convId, folder) => {
         assignedFolders.push({ convId, folder });
       },
@@ -89,12 +103,12 @@ function makeHarness(failReads = false) {
   };
 
   orgfyMod.apply(ctx);
-  return { tools, panels, hooks, notifications, wakes, assignedFolders, injectedSections, artifacts, getMcp: () => mcpHandler };
+  return { tools, panels, hooks, notifications, wakes, sessionActions, assignedFolders, injectedSections, artifacts, getMcp: () => mcpHandler };
 }
 
 // 1. Testes Originais (Kanban & Status Positivo/Negativo + MCP)
 const h1 = makeHarness(false);
-assert.equal(h1.tools.size, 12, "devem existir exatamente 12 agentTools registradas");
+assert.equal(h1.tools.size, 13, "devem existir exatamente 13 agentTools registradas");
 assert.ok(h1.panels.has("orgfy-channel-pulse"), "sidebar panel orgfy-channel-pulse deve ser registrado");
 assert.ok(h1.hooks.length >= 1, "hooks de governança devem ser registrados");
 
@@ -338,3 +352,36 @@ assert.equal(mcpRadarJson.ok, true);
 const radarFail = JSON.parse(await h2.tools.get("orgfy_loop_radar").call({}, {}, { apenas_ativos: true }));
 assert.equal(radarFail.ok, false);
 console.log("[RADAR LOOPS AGENT+MCP OK]", JSON.stringify({ criticos_ativos: radarAll.resumo.criticos_ativos, criticos_hist: radarAll.resumo.criticos_historico_3h, exibidas_ativas: mcpRadarJson.total_exibidas }));
+
+// 9. Stop / Interrupt nativo de sessão em loop: orgfy_session_stop (agentTool + MCP + negativo)
+const stopTool = h1.tools.get("orgfy_session_stop");
+assert.ok(stopTool, "agentTool orgfy_session_stop deve estar registrada");
+const stopRes = JSON.parse(await stopTool.call({}, {}, {
+  agente: "OrgFy Teo",
+  channel_id: "e445491d-2fb3-4ebd-8e2e-f6813c33fb03",
+  thread_root: "77655d509b0abc2a2caa2708dac2510be7cb1630537ba24c54098e1c1122e3fb",
+  action: "interrupt",
+  reason: "PR duplicado fechado",
+}));
+assert.equal(stopRes.ok, true);
+assert.equal(stopRes.agentKey, "local:orgfy-teo");
+assert.equal(stopRes.action, "interrupt");
+assert.equal(stopRes.previousState, "active");
+assert.equal(h1.sessionActions.length, 1);
+assert.equal(h1.sessionActions[0].place.root, "77655d509b0abc2a2caa2708dac2510be7cb1630537ba24c54098e1c1122e3fb");
+
+assert.ok(mcpToolsList.result.tools.some((t) => t.name === "orgfy_session_stop"), "MCP deve expor orgfy_session_stop");
+const mcpStopRes = await mcp({
+  jsonrpc: "2.0",
+  id: 5,
+  method: "tools/call",
+  params: { name: "orgfy_session_stop", arguments: { agente: "Bento Arquiteto", action: "interrupt" } },
+});
+assert.equal(mcpStopRes.result.isError, false);
+const mcpStopJson = JSON.parse(mcpStopRes.result.content[0].text);
+assert.equal(mcpStopJson.ok, true);
+assert.equal(mcpStopJson.agentKey, "local:orgfy-bento-arq");
+
+const stopMissing = JSON.parse(await stopTool.call({}, {}, { agente: "Agente Inexistente" }));
+assert.equal(stopMissing.ok, false);
+console.log("[SESSION STOP AGENT+MCP OK]", JSON.stringify({ stopped: h1.sessionActions.length, lastAgent: mcpStopJson.agentName }));

@@ -4,6 +4,7 @@ import type {
   KpiHistoryPoint,
   DailySeriesPoint,
   GooseLoopRadarPayload,
+  GooseLoopSession,
 } from "../services/kpi-service";
 
 export interface IntelligenceTabProps {
@@ -18,6 +19,8 @@ export interface IntelligenceTabProps {
   loopRadar?: GooseLoopRadarPayload | null;
   onRefreshLoopRadar?: () => void;
   onWakeIrisForLoops?: () => void;
+  onStopLoopSession?: (session: GooseLoopSession) => void;
+  stoppingSessionId?: string | null;
 }
 
 const CARD_BG = "rgba(0, 0, 0, 0.28)";
@@ -214,7 +217,7 @@ function renderBudgetGaugeSvg(h: any, pct: number, status: string) {
 }
 
 export function renderIntelligenceTab(props: IntelligenceTabProps) {
-  const { h, kpis, history, error, isRecalculating, onRecalculate, onRunGovernanceEval, governanceSummary, loopRadar, onRefreshLoopRadar, onWakeIrisForLoops } = props;
+  const { h, kpis, history, error, isRecalculating, onRecalculate, onRunGovernanceEval, governanceSummary, loopRadar, onRefreshLoopRadar, onWakeIrisForLoops, onStopLoopSession, stoppingSessionId } = props;
 
   if (!kpis) {
     return h(
@@ -717,9 +720,34 @@ export function renderIntelligenceTab(props: IntelligenceTabProps) {
                         h("span", { style: { color: "#f3f4f6", fontWeight: "700" } }, s.agente)
                       ),
                       h(
-                        "span",
-                        { style: { color: isActive && s.severidade === "critical" ? "#f87171" : s.severidade === "warn" ? "#fbbf24" : "#cbd5e1", fontWeight: "600" } },
-                        `${formatMin(s.duracao_min)} · ${s.shells} shells`
+                        "div",
+                        { style: { display: "flex", alignItems: "center", gap: "8px" } },
+                        h(
+                          "span",
+                          { style: { color: isActive && s.severidade === "critical" ? "#f87171" : s.severidade === "warn" ? "#fbbf24" : "#cbd5e1", fontWeight: "600" } },
+                          `${formatMin(s.duracao_min)} · ${s.shells} shells`
+                        ),
+                        isActive &&
+                          onStopLoopSession &&
+                          h(
+                            "button",
+                            {
+                              onClick: () => onStopLoopSession(s),
+                              disabled: stoppingSessionId === s.session_id,
+                              title: "Interromper (Stop) o turno atual deste agente imediatamente",
+                              style: {
+                                padding: "2px 8px",
+                                borderRadius: "5px",
+                                border: "1px solid rgba(239, 68, 68, 0.55)",
+                                backgroundColor: stoppingSessionId === s.session_id ? "rgba(239, 68, 68, 0.35)" : "rgba(239, 68, 68, 0.2)",
+                                color: "#fecaca",
+                                fontSize: "9.5px",
+                                fontWeight: "700",
+                                cursor: stoppingSessionId === s.session_id ? "wait" : "pointer",
+                              },
+                            },
+                            stoppingSessionId === s.session_id ? "Parando..." : "■ Parar"
+                          )
                       )
                     ),
                     h(

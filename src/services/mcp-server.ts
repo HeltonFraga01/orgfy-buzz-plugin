@@ -14,6 +14,9 @@ import {
   fetchGooseLoopRadar,
   filterGooseLoopRadar,
 } from "./kpi-service";
+import {
+  stopAgentSession,
+} from "./governance-engine";
 
 export interface McpServerStatus {
   active: boolean;
@@ -140,13 +143,30 @@ export async function startOrgfyMcpServer(
     },
     {
       name: "orgfy_loop_radar",
-      description: "Consulta o Radar de Loops & Sessões Zumbis do Goose em tempo real (mode=ro), identificando LOOP_SUSPEITO, STALLED_THINKING, SESSAO_DUPLICADA e EXPLORACAO_CLI_HELP com acao_sugerida para auto-cura autônoma.",
+      description: "Consulta o Radar de Loops & Sessões Zumbis do Goose em tempo real (mode=ro), identificando LOOP_SUSPEITO, STALLED_THINKING, SESSAO_DUPLICADA e EXPLORACAO_CLI_HELP com channel_id, thread_root, agent_pubkey, ultimo_shell e acao_sugerida.",
       inputSchema: {
         type: "object",
         properties: {
           apenas_ativos: { type: "boolean", description: "Se true (padrão), retorna apenas sessões ativas nos últimos 15 min; se false, inclui histórico de 3h" },
           agente: { type: "string", description: "Filtrar por nome do agente (ex: 'Atlas', 'Lia', 'Bento')" },
         },
+      },
+    },
+    {
+      name: "orgfy_session_stop",
+      description: "Interrompe (Stop) ou reinicia um turno/sessão de agente em loop ou fazendo trabalho inútil via API nativa do Buzz Desktop (ctx.agents.session interrupt/new/compact), opcionalmente liberando o checkout lock.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          agente: { type: "string", description: "Nome, key ou pubkey do agente (ex: 'OrgFy Teo', 'OrgFy Bento Arquiteto')" },
+          agent_pubkey: { type: "string", description: "Pubkey 64-hex do agente (retornado por orgfy_loop_radar)" },
+          channel_id: { type: "string", description: "UUID do canal (default: canal #OrgFy)" },
+          thread_root: { type: "string", description: "Event ID 64-hex da thread (retornado por orgfy_loop_radar)" },
+          action: { type: "string", enum: ["interrupt", "new", "compact"], description: "Ação de controle (default: 'interrupt' = Stop imediato)" },
+          release_issue_id: { type: "string", description: "Opcional: issue_id cujo checkout lock deve ser liberado após parar" },
+          reason: { type: "string", description: "Motivo técnico da interrupção" },
+        },
+        required: ["agente"],
       },
     },
   ];
@@ -357,6 +377,37 @@ export async function startOrgfyMcpServer(
             result: {
               content: [{ type: "text", text: JSON.stringify(filtered, null, 2) }],
               isError: !radar.ok,
+            },
+          };
+        }
+
+        if (name === "orgfy_session_stop") {
+          const agente = String(args?.agente || args?.agent_pubkey || "").trim();
+          if (!agente) {
+            return {
+              jsonrpc: "2.0",
+              id,
+              result: {
+                content: [{ type: "text", text: "Erro: 'agente' (ou 'agent_pubkey') é obrigatório para orgfy_session_stop." }],
+                isError: true,
+              },
+            };
+          }
+          const res = await stopAgentSession(ctx, {
+            agente,
+            agent_pubkey: args?.agent_pubkey,
+            channel_id: args?.channel_id,
+            thread_root: args?.thread_root,
+            action: args?.action,
+            release_issue_id: args?.release_issue_id,
+            reason: args?.reason,
+          });
+          return {
+            jsonrpc: "2.0",
+            id,
+            result: {
+              content: [{ type: "text", text: JSON.stringify(res, null, 2) }],
+              isError: !res.ok,
             },
           };
         }

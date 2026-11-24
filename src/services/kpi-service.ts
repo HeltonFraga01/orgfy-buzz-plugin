@@ -291,6 +291,9 @@ export interface GooseLoopSession {
   agente: string;
   nome: string;
   ativa?: boolean;
+  channel_id?: string | null;
+  thread_root?: string | null;
+  agent_pubkey?: string | null;
   duracao_min: number;
   ultima_atualizacao_min: number;
   msgs: number;
@@ -403,9 +406,9 @@ export function filterGooseLoopRadar(
     total_exibidas: filtered.length,
     sessoes: filtered,
     protocolo_resolucao: [
-      "SESSAO_DUPLICADA: NUNCA re-mencionar nem cobrar este agente; aguardar o turno atual concluir.",
-      "LOOP_SUSPEITO / STALLED_THINKING: Ler ultimo_shell e enviar 1 instrução cirúrgica para destravar o passo atual; se >15m sem avanço, liberar lock com orgfy_checkout_lock(action='release') e reatribuir.",
-      "EXPLORACAO_CLI_HELP: Fornecer sintaxe exata do comando (ex: buzz issues get / buzz pr update) para zerar turnos em --help.",
+      "LOOP_SUSPEITO / STALLED_THINKING / >20m ou >25 shells sem progresso real: NUNCA aguardar indefinidamente. Inspecione ultimo_shell e chame IMEDIATAMENTE orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', release_issue_id? }) para cortar o desperdício de tokens.",
+      "SESSAO_DUPLICADA: Não envie novas cobranças paralelas; identifique qual sessão está em trabalho obsoleto/inútil e encerre-a com orgfy_session_stop(action='interrupt').",
+      "EXPLORACAO_CLI_HELP: Se o agente repetir --help sem avançar, interrompa via orgfy_session_stop e envie 1 instrução cirúrgica com a sintaxe exata.",
     ],
   };
 }
