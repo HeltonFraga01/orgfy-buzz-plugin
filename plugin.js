@@ -1474,7 +1474,7 @@ async function persistLocksToDisk(ctx) {
   }
 }
 async function acquireCheckoutLock(ctx, issueId, agentKey, ttlMs = DEFAULT_LOCK_TTL_MS, nowMs = Date.now(), meta) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o;
   const rawIssue = String(issueId || "").trim();
   const cleanIssue = await resolveFullNostrIssueId(ctx, rawIssue);
   const cleanAgent = String(agentKey || "").trim();
@@ -1522,6 +1522,43 @@ async function acquireCheckoutLock(ctx, issueId, agentKey, ttlMs = DEFAULT_LOCK_
         message: `Lock de ${cleanIssue} renovado para ${cleanAgent}.`
       };
     }
+    const designatedRevisor = String(existing.revisor || "").trim();
+    let isDesignatedRevisor = false;
+    if (designatedRevisor) {
+      const candidates = [cleanAgent];
+      if (meta == null ? void 0 : meta.owner) candidates.push(String(meta.owner));
+      try {
+        const snap = (_g = (_f = ctx.agents) == null ? void 0 : _f.snapshot) == null ? void 0 : _g.call(_f);
+        const pool = [...Array.isArray(snap == null ? void 0 : snap.running) ? snap.running : [], ...Array.isArray(snap == null ? void 0 : snap.agents) ? snap.agents : []];
+        const matched = pool.find(
+          (a) => String((a == null ? void 0 : a.key) || "").toLowerCase() === cleanAgent.toLowerCase() || String((a == null ? void 0 : a.pubkey) || "").toLowerCase() === cleanAgent.toLowerCase()
+        );
+        if (matched == null ? void 0 : matched.name) candidates.push(String(matched.name));
+      } catch {
+      }
+      isDesignatedRevisor = candidates.some((c) => sameAgentName(c, designatedRevisor));
+    }
+    if (isDesignatedRevisor) {
+      const handedOff = {
+        issueId: cleanIssue,
+        agentKey: cleanAgent,
+        acquiredAt: nowMs,
+        expiresAt: nowMs + normalizedTtlMs,
+        title: ((_h = meta == null ? void 0 : meta.title) == null ? void 0 : _h.trim()) || existing.title,
+        owner: existing.owner,
+        revisor: existing.revisor,
+        acceptanceCommand: ((_i = meta == null ? void 0 : meta.acceptanceCommand) == null ? void 0 : _i.trim()) || existing.acceptanceCommand,
+        branch: ((_j = meta == null ? void 0 : meta.branch) == null ? void 0 : _j.trim()) || existing.branch
+      };
+      memoryLocks.set(cleanIssue, handedOff);
+      await persistLocksToDisk(ctx);
+      return {
+        ok: true,
+        code: "ACQUIRED",
+        lock: handedOff,
+        message: `Handoff automático de lock para o revisor designado (${designatedRevisor}) no card ${cleanIssue}.`
+      };
+    }
     return {
       ok: false,
       code: "LOCK_CONFLICT",
@@ -1535,11 +1572,11 @@ async function acquireCheckoutLock(ctx, issueId, agentKey, ttlMs = DEFAULT_LOCK_
     agentKey: cleanAgent,
     acquiredAt: nowMs,
     expiresAt: nowMs + normalizedTtlMs,
-    title: ((_f = meta == null ? void 0 : meta.title) == null ? void 0 : _f.trim()) || void 0,
-    owner: ((_g = meta == null ? void 0 : meta.owner) == null ? void 0 : _g.trim()) || void 0,
-    revisor: ((_h = meta == null ? void 0 : meta.revisor) == null ? void 0 : _h.trim()) || void 0,
-    acceptanceCommand: ((_i = meta == null ? void 0 : meta.acceptanceCommand) == null ? void 0 : _i.trim()) || void 0,
-    branch: ((_j = meta == null ? void 0 : meta.branch) == null ? void 0 : _j.trim()) || void 0
+    title: ((_k = meta == null ? void 0 : meta.title) == null ? void 0 : _k.trim()) || void 0,
+    owner: ((_l = meta == null ? void 0 : meta.owner) == null ? void 0 : _l.trim()) || void 0,
+    revisor: ((_m = meta == null ? void 0 : meta.revisor) == null ? void 0 : _m.trim()) || void 0,
+    acceptanceCommand: ((_n = meta == null ? void 0 : meta.acceptanceCommand) == null ? void 0 : _n.trim()) || void 0,
+    branch: ((_o = meta == null ? void 0 : meta.branch) == null ? void 0 : _o.trim()) || void 0
   };
   memoryLocks.set(cleanIssue, created);
   await persistLocksToDisk(ctx);
@@ -1794,7 +1831,7 @@ async function evaluateGovernanceAndReact(ctx, options = {}) {
             codigo: "GOOSE_ACTIVE_LOOP",
             severidade: "critical",
             mensagem: `${activeCrit.length} sessão(ões) ativa(s) em loop no Goose: ${top}.`,
-            acao_sugerida: "Ciclo Fechado de Auto-Cura (PARAR NUNCA ENCERRA O TURNO): chame orgfy_loop_radar({ apenas_ativos: true }) e execute 1 dos 3 desfechos: (A) Erro de API/5xx/provider -> orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', reason }) + orgfy_model_failover({ agente, agent_pubkey, channel_id, thread_root, prefer_free: true, apply: true, retrigger: true }); (B) Card ainda aberto (ESCOPO_ABERTO, COMPACTACAO_LOOP, ERRO_REPETIDO) -> orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', relaunch: true, reset_session_before_relaunch: true, relaunch_instruction: '<o que fazer agora>', target_files: ['<1-3 arquivos>'], acceptance_command: '<comando L-22>', max_shells: 10, reason }); (C) PR/issue já na main -> orgfy_session_stop({ agente, action: 'interrupt', release_issue_id, reason }) sem relançar. Publique 'AUTO-CURA | agente | causa-raiz | ação' no canal."
+            acao_sugerida: "Ciclo Fechado de Auto-Cura (PARAR NUNCA ENCERRA O TURNO): chame orgfy_loop_radar({ apenas_ativos: true }) e execute 1 dos 3 desfechos: (A) Erro de API/5xx/provider -> orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', reason }) + orgfy_model_failover({ agente, agent_pubkey, channel_id, thread_root, prefer_free: false, apply: true, retrigger: true }); (B) Card ainda aberto (ESCOPO_ABERTO, COMPACTACAO_LOOP, ERRO_REPETIDO) -> orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', relaunch: true, reset_session_before_relaunch: true, relaunch_instruction: '<o que fazer agora>', target_files: ['<1-3 arquivos>'], acceptance_command: '<comando L-22>', max_shells: 10, reason }); (C) PR/issue já na main -> orgfy_session_stop({ agente, action: 'interrupt', release_issue_id, reason }) sem relançar. Publique 'AUTO-CURA | agente | causa-raiz | ação' no canal."
           });
         }
         if (activeDup.length >= 2) {
@@ -2249,7 +2286,7 @@ async function stopAgentSession(ctx, input) {
       relaunchMessage = `Falha no relaunch automático: ${(wakeErr == null ? void 0 : wakeErr.message) || wakeErr}`;
     }
   }
-  const nextRequiredAction = relaunched ? null : `AÇÃO OBRIGATÓRIA DO COO (parar nunca encerra o turno): escolha 1 dos 3 desfechos para ${resolvedName}: (1) Se erro de API/5xx, chame orgfy_model_failover({ agente: '${resolvedName}', channel_id: '${place.channelId}'${place.root ? `, thread_root: '${place.root}'` : ""}, prefer_free: true, apply: true, retrigger: true }); (2) Se a demanda ainda está aberta, chame orgfy_session_stop({ agente: '${resolvedName}', channel_id: '${place.channelId}'${place.root ? `, thread_root: '${place.root}'` : ""}, relaunch: true, relaunch_instruction: '<o que fazer>', target_files: ['...'], acceptance_command: '<L-22>', max_shells: 10 }); (3) Se o PR já foi integrado na main, apenas registre 'AUTO-CURA | ${resolvedName} | ITEM_JA_FECHADO | encerrado sem relançar'.`;
+  const nextRequiredAction = relaunched ? null : `AÇÃO OBRIGATÓRIA DO COO (parar nunca encerra o turno): escolha 1 dos 3 desfechos para ${resolvedName}: (1) Se erro de API/5xx, chame orgfy_model_failover({ agente: '${resolvedName}', channel_id: '${place.channelId}'${place.root ? `, thread_root: '${place.root}'` : ""}, prefer_free: false, apply: true, retrigger: true }); (2) Se a demanda ainda está aberta, chame orgfy_session_stop({ agente: '${resolvedName}', channel_id: '${place.channelId}'${place.root ? `, thread_root: '${place.root}'` : ""}, relaunch: true, relaunch_instruction: '<o que fazer>', target_files: ['...'], acceptance_command: '<L-22>', max_shells: 10 }); (3) Se o PR já foi integrado na main, apenas registre 'AUTO-CURA | ${resolvedName} | ITEM_JA_FECHADO | encerrado sem relançar'.`;
   const reasonSuffix = input.reason ? ` Motivo: ${String(input.reason).trim()}.` : "";
   return {
     ok: true,
