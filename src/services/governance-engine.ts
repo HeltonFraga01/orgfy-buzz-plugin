@@ -415,6 +415,151 @@ function canTriggerWithCooldown(
 }
 
 export const DEFAULT_ORGFY_CHANNEL = "e445491d-2fb3-4ebd-8e2e-f6813c33fb03";
+const EMPRESAS_DIR = "/Users/heltonfraga/.buzz/REPOS/orgfy/empresas";
+const KNOWN_COMPANY_SLUGS = ["orgfy", "lumen-iptv", "saas-tributario"];
+const radarEscalationCounts = new Map<string, number>();
+
+export interface EscalationResolution {
+  empresaSlug: string;
+  empresaNome: string;
+  level: 1 | 2 | 3;
+  roleLabel: string;
+  targetAgent: string;
+  nextEscalationAgent: string | null;
+  holdingCeo: string;
+  reason: string;
+}
+
+function decodeHostBytes(raw: any): string {
+  if (typeof raw === "string") return raw;
+  if (raw instanceof Uint8Array) return new TextDecoder("utf-8").decode(raw);
+  if (raw instanceof ArrayBuffer) return new TextDecoder("utf-8").decode(new Uint8Array(raw));
+  if (ArrayBuffer.isView(raw)) {
+    return new TextDecoder("utf-8").decode(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength));
+  }
+  return String(raw ?? "");
+}
+
+function sameAgentName(a: string, b: string): boolean {
+  const na = String(a || "").trim().toLowerCase();
+  const nb = String(b || "").trim().toLowerCase();
+  return Boolean(na && nb && (na === nb || na.includes(nb) || nb.includes(na)));
+}
+
+export async function resolveEscalationTargetForChannel(
+  ctx: Context,
+  channelId: string | undefined,
+  loopingAgents: string[] = [],
+  escalationAttempt: number = 1
+): Promise<EscalationResolution> {
+  const host = (ctx as any).host;
+  const targetChannel = String(channelId || DEFAULT_ORGFY_CHANNEL).trim();
+
+  let matchedManifest: any = null;
+  let defaultManifest: any = null;
+
+  if (host?.readFile) {
+    for (const slug of KNOWN_COMPANY_SLUGS) {
+      try {
+        const raw = await host.readFile(`${EMPRESAS_DIR}/${slug}.json`);
+        const parsed = JSON.parse(decodeHostBytes(raw));
+        if (slug === "orgfy") defaultManifest = parsed;
+        if (parsed?.canal && String(parsed.canal).trim() === targetChannel) {
+          matchedManifest = parsed;
+          break;
+        }
+      } catch {
+        // Manifesto opcional
+      }
+    }
+  }
+
+  const manifest = matchedManifest || defaultManifest || {};
+  const empresaSlug = String(manifest.empresa || manifest.slug || "orgfy");
+  const empresaNome = String(
+    manifest.hierarquia?.workspace_buzz || manifest.nome || (empresaSlug === "orgfy" ? "OrgFy" : empresaSlug)
+  );
+  const papeis = manifest.papeis && typeof manifest.papeis === "object" ? manifest.papeis : {};
+  const hierarquia = manifest.hierarquia && typeof manifest.hierarquia === "object" ? manifest.hierarquia : {};
+  const agentesEntries: Array<{ nome: string; papel: string }> = Array.isArray(manifest.agentes)
+    ? manifest.agentes.map((a: any) => ({ nome: String(a?.nome || ""), papel: String(a?.papel || "") }))
+    : manifest.agentes && typeof manifest.agentes === "object"
+    ? Object.entries(manifest.agentes).map(([nome, cfg]: [string, any]) => ({
+        nome,
+        papel: String(cfg?.papel || ""),
+      }))
+    : [];
+
+  const findByRole = (role: string): string | undefined =>
+    agentesEntries.find((a) => a.papel.toLowerCase() === role)?.nome;
+
+  const coo =
+    String(papeis.coo || findByRole("coo") || "OrgFy Bento").trim();
+  const companyCeo =
+    String(
+      hierarquia.ceo_empresa ||
+        papeis.ceo_empresa ||
+        findByRole("ceo_empresa") ||
+        papeis.ceo ||
+        findByRole("ceo") ||
+        "OrgFy Iris"
+    ).trim();
+  const holdingCeo =
+    String(
+      hierarquia.ceo_holding ||
+        papeis.ceo_holding ||
+        findByRole("ceo_holding") ||
+        "OrgFy Iris"
+    ).trim();
+
+  const isCooLooping = loopingAgents.some((ag) => sameAgentName(ag, coo));
+  const isCompanyCeoLooping = loopingAgents.some((ag) => sameAgentName(ag, companyCeo));
+  const hasSeparateCompanyCeo = !sameAgentName(companyCeo, holdingCeo);
+
+  // Nível 3: Holding CEO (Iris) apenas se CEO da empresa também estiver em loop ou falhou após N1 e N2
+  if (hasSeparateCompanyCeo && (isCompanyCeoLooping || escalationAttempt >= 3)) {
+    return {
+      empresaSlug,
+      empresaNome,
+      level: 3,
+      roleLabel: "CEO Holding",
+      targetAgent: holdingCeo,
+      nextEscalationAgent: null,
+      holdingCeo,
+      reason: isCompanyCeoLooping
+        ? `CEO da empresa (${companyCeo}) está em loop`
+        : `incidente persistiu após acionamento do COO (${coo}) e CEO (${companyCeo})`,
+    };
+  }
+
+  // Nível 2: CEO da empresa específica se o COO estiver em loop ou não resolveu no ciclo anterior
+  if (isCooLooping || escalationAttempt >= 2) {
+    return {
+      empresaSlug,
+      empresaNome,
+      level: 2,
+      roleLabel: hasSeparateCompanyCeo ? `CEO ${empresaNome}` : "CEO Holding",
+      targetAgent: companyCeo,
+      nextEscalationAgent: hasSeparateCompanyCeo ? holdingCeo : null,
+      holdingCeo,
+      reason: isCooLooping
+        ? `o próprio COO (${coo}) entrou em loop`
+        : `COO (${coo}) não resolveu o loop no ciclo anterior`,
+    };
+  }
+
+  // Nível 1 (padrão): COO da empresa/esteira específica — preserva a CEO da Holding (Iris)
+  return {
+    empresaSlug,
+    empresaNome,
+    level: 1,
+    roleLabel: `COO · ${empresaNome}`,
+    targetAgent: coo,
+    nextEscalationAgent: companyCeo,
+    holdingCeo,
+    reason: "primeiro acionamento operacional de auto-cura na esteira",
+  };
+}
 
 function resolveAgentKeyFromSnapshot(agentsApi: any, query: string): string {
   const clean = String(query || "").trim();
@@ -468,6 +613,8 @@ export async function evaluateGovernanceAndReact(
   const alerts = [...(kpis?.alertas_ativos ?? [])];
   let radarChannelId: string | undefined;
   let radarThreadRoot: string | undefined;
+  let radarLoopingAgents: string[] = [];
+  let radarIncidentKey = "";
 
   // Integração ativa com o Radar de Loops & Sessões Zumbis (Goose Live)
   if (options.includeRadar !== false) {
@@ -483,6 +630,13 @@ export async function evaluateGovernanceAndReact(
         const anchorSession = activeCrit[0] || activeDup[0];
         if (anchorSession?.channel_id) radarChannelId = anchorSession.channel_id;
         if (anchorSession?.thread_root) radarThreadRoot = anchorSession.thread_root;
+        radarLoopingAgents = Array.from(
+          new Set([...activeCrit, ...activeDup].map((s) => String(s.agente || "").trim()).filter(Boolean))
+        );
+        radarIncidentKey = `${radarChannelId || DEFAULT_ORGFY_CHANNEL}:${activeCrit
+          .map((s) => s.session_id)
+          .sort()
+          .join(",")}`;
         if (activeCrit.length > 0) {
           const top = activeCrit
             .slice(0, 4)
@@ -493,7 +647,7 @@ export async function evaluateGovernanceAndReact(
             severidade: "critical",
             mensagem: `${activeCrit.length} sessão(ões) ativa(s) em loop no Goose: ${top}.`,
             acao_sugerida:
-              "Executar Ciclo Fechado de Auto-Cura: (1) chamar orgfy_loop_radar({ apenas_ativos: true }) e INTERROMPER imediatamente via orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', release_issue_id?, reason }); (2) diagnosticar a causa-raiz (ITEM_JA_FECHADO, ESCOPO_ABERTO, COMPACTACAO_LOOP, COLISAO_WORKTREE, ERRO_REPETIDO, TEMPESTADE_5XX); (3) se a causa for erro de API/provider (502/503/No available accounts), chamar orgfy_model_failover({ agente, agent_pubkey, channel_id, thread_root, prefer_free: true, apply: true, retrigger: true }) para migrar ao melhor modelo free online no NexusMind e re-disparar; se for escopo aberto, relançar com ESCOPO FECHADO (1-3 arquivos + aceite L-22 + limite 10 shells); se já estiver na main, encerrar sem relançar. Registrar 'AUTO-CURA | agente | causa-raiz | ação' no #OrgFy.",
+              "Executar Ciclo Fechado de Auto-Cura: (1) chamar orgfy_loop_radar({ apenas_ativos: true }) e INTERROMPER imediatamente via orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', release_issue_id?, reason }); (2) diagnosticar a causa-raiz (ITEM_JA_FECHADO, ESCOPO_ABERTO, COMPACTACAO_LOOP, COLISAO_WORKTREE, ERRO_REPETIDO, TEMPESTADE_5XX); (3) se a causa for erro de API/provider (502/503/No available accounts), chamar orgfy_model_failover({ agente, agent_pubkey, channel_id, thread_root, prefer_free: true, apply: true, retrigger: true }) para migrar ao melhor modelo free online no NexusMind e re-disparar; se for escopo aberto, relançar com ESCOPO FECHADO (1-3 arquivos + aceite L-22 + limite 10 shells); se já estiver na main, encerrar sem relançar. Registrar 'AUTO-CURA | agente | causa-raiz | ação' no canal.",
           });
         }
         if (activeDup.length >= 2) {
@@ -513,7 +667,8 @@ export async function evaluateGovernanceAndReact(
   }
 
   for (const al of alerts) {
-    const cooldownKey = `alert:${al.codigo}`;
+    const isRadarAlert = al.codigo === "GOOSE_ACTIVE_LOOP" || al.codigo === "GOOSE_DUPLICATE_SESSIONS";
+    const cooldownKey = isRadarAlert && radarIncidentKey ? `alert:${al.codigo}:${radarIncidentKey}` : `alert:${al.codigo}`;
     if (!options.bypassCooldown && !canTriggerWithCooldown(cooldownKey, nowMs, !options.dryRun)) {
       skippedByCooldown.push(al.codigo);
       continue;
@@ -534,28 +689,44 @@ export async function evaluateGovernanceAndReact(
       notificationsSent.push(al.codigo);
     }
 
-    const isRadarAlert = al.codigo === "GOOSE_ACTIVE_LOOP" || al.codigo === "GOOSE_DUPLICATE_SESSIONS";
     if (
       options.autoWake &&
       !options.dryRun &&
       (al.codigo === "REVIEW_QUEUE_BOTTLENECK" || al.codigo === "STAGNATION_LEVEL_3" || isRadarAlert)
     ) {
-      const wakeKey = options.reviewerAgentKey || (isRadarAlert ? "OrgFy Iris" : "OrgFy Bento");
-      const wakeCooldownKey = `wake:${al.codigo}:${wakeKey}`;
+      const wakeChannel = (isRadarAlert && radarChannelId) || options.channel || DEFAULT_ORGFY_CHANNEL;
+      const attempt = isRadarAlert && radarIncidentKey ? (radarEscalationCounts.get(radarIncidentKey) || 0) + 1 : 1;
+      const escalation = isRadarAlert
+        ? await resolveEscalationTargetForChannel(ctx, wakeChannel, radarLoopingAgents, attempt)
+        : null;
+      const wakeKey = options.reviewerAgentKey || escalation?.targetAgent || "OrgFy Bento";
+      const wakeCooldownKey =
+        isRadarAlert && radarIncidentKey
+          ? `wake:${al.codigo}:${radarIncidentKey}:${wakeKey}`
+          : `wake:${al.codigo}:${wakeKey}`;
       if (options.bypassCooldown || canTriggerWithCooldown(wakeCooldownKey, nowMs)) {
         try {
           const agentsApi = (ctx as any).agents;
           if (agentsApi?.wake) {
             const targetAgentKey = resolveAgentKeyFromSnapshot(agentsApi, wakeKey);
-            const wakeChannel = (isRadarAlert && radarChannelId) || options.channel || DEFAULT_ORGFY_CHANNEL;
             const wakeRoot = isRadarAlert && radarThreadRoot ? radarThreadRoot : undefined;
+            const escalationSuffix =
+              escalation && escalation.nextEscalationAgent
+                ? ` Se não conseguir resolver em 1 ciclo, escale para @${escalation.nextEscalationAgent} (nunca acione a CEO da Holding sem passar antes pela liderança da empresa).`
+                : "";
+            const headerLabel = escalation
+              ? `Nível ${escalation.level} · ${escalation.roleLabel}`
+              : al.codigo;
             await agentsApi.wake(targetAgentKey, {
               channel: wakeChannel,
               ...(wakeRoot ? { root: wakeRoot } : {}),
               text: isRadarAlert
-                ? `@OrgFy Iris [ORGFY RADAR AUTO-CURA · ${al.codigo}] ${al.mensagem} Ação obrigatória agora: ${al.acao_sugerida}`
+                ? `@${wakeKey} [ORGFY RADAR AUTO-CURA · ${headerLabel} · ${al.codigo}] ${al.mensagem} Ação obrigatória agora: ${al.acao_sugerida}${escalationSuffix}`
                 : `[ORGFY GOVERNANÇA] ${al.mensagem} Ação recomendada: ${al.acao_sugerida}`,
             });
+            if (isRadarAlert && radarIncidentKey) {
+              radarEscalationCounts.set(radarIncidentKey, attempt);
+            }
             wakesTriggered.push(`${wakeKey}:${al.codigo}`);
           }
         } catch (err) {

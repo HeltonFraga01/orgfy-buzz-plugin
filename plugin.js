@@ -1630,6 +1630,103 @@ function canTriggerWithCooldown(key, nowMs, commit = true, cooldownMs = DEFAULT_
   return true;
 }
 const DEFAULT_ORGFY_CHANNEL$1 = "e445491d-2fb3-4ebd-8e2e-f6813c33fb03";
+const EMPRESAS_DIR = "/Users/heltonfraga/.buzz/REPOS/orgfy/empresas";
+const KNOWN_COMPANY_SLUGS = ["orgfy", "lumen-iptv", "saas-tributario"];
+const radarEscalationCounts = /* @__PURE__ */ new Map();
+function decodeHostBytes$1(raw) {
+  if (typeof raw === "string") return raw;
+  if (raw instanceof Uint8Array) return new TextDecoder("utf-8").decode(raw);
+  if (raw instanceof ArrayBuffer) return new TextDecoder("utf-8").decode(new Uint8Array(raw));
+  if (ArrayBuffer.isView(raw)) {
+    return new TextDecoder("utf-8").decode(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength));
+  }
+  return String(raw ?? "");
+}
+function sameAgentName(a, b) {
+  const na = String(a || "").trim().toLowerCase();
+  const nb = String(b || "").trim().toLowerCase();
+  return Boolean(na && nb && (na === nb || na.includes(nb) || nb.includes(na)));
+}
+async function resolveEscalationTargetForChannel(ctx, channelId, loopingAgents = [], escalationAttempt = 1) {
+  var _a;
+  const host = ctx.host;
+  const targetChannel = String(channelId).trim();
+  let matchedManifest = null;
+  let defaultManifest = null;
+  if (host == null ? void 0 : host.readFile) {
+    for (const slug of KNOWN_COMPANY_SLUGS) {
+      try {
+        const raw = await host.readFile(`${EMPRESAS_DIR}/${slug}.json`);
+        const parsed = JSON.parse(decodeHostBytes$1(raw));
+        if (slug === "orgfy") defaultManifest = parsed;
+        if ((parsed == null ? void 0 : parsed.canal) && String(parsed.canal).trim() === targetChannel) {
+          matchedManifest = parsed;
+          break;
+        }
+      } catch {
+      }
+    }
+  }
+  const manifest = matchedManifest || defaultManifest || {};
+  const empresaSlug = String(manifest.empresa || manifest.slug || "orgfy");
+  const empresaNome = String(
+    ((_a = manifest.hierarquia) == null ? void 0 : _a.workspace_buzz) || manifest.nome || (empresaSlug === "orgfy" ? "OrgFy" : empresaSlug)
+  );
+  const papeis = manifest.papeis && typeof manifest.papeis === "object" ? manifest.papeis : {};
+  const hierarquia = manifest.hierarquia && typeof manifest.hierarquia === "object" ? manifest.hierarquia : {};
+  const agentesEntries = Array.isArray(manifest.agentes) ? manifest.agentes.map((a) => ({ nome: String((a == null ? void 0 : a.nome) || ""), papel: String((a == null ? void 0 : a.papel) || "") })) : manifest.agentes && typeof manifest.agentes === "object" ? Object.entries(manifest.agentes).map(([nome, cfg]) => ({
+    nome,
+    papel: String((cfg == null ? void 0 : cfg.papel) || "")
+  })) : [];
+  const findByRole = (role) => {
+    var _a2;
+    return (_a2 = agentesEntries.find((a) => a.papel.toLowerCase() === role)) == null ? void 0 : _a2.nome;
+  };
+  const coo = String(papeis.coo || findByRole("coo") || "OrgFy Bento").trim();
+  const companyCeo = String(
+    hierarquia.ceo_empresa || papeis.ceo_empresa || findByRole("ceo_empresa") || papeis.ceo || findByRole("ceo") || "OrgFy Iris"
+  ).trim();
+  const holdingCeo = String(
+    hierarquia.ceo_holding || papeis.ceo_holding || findByRole("ceo_holding") || "OrgFy Iris"
+  ).trim();
+  const isCooLooping = loopingAgents.some((ag) => sameAgentName(ag, coo));
+  const isCompanyCeoLooping = loopingAgents.some((ag) => sameAgentName(ag, companyCeo));
+  const hasSeparateCompanyCeo = !sameAgentName(companyCeo, holdingCeo);
+  if (hasSeparateCompanyCeo && (isCompanyCeoLooping || escalationAttempt >= 3)) {
+    return {
+      empresaSlug,
+      empresaNome,
+      level: 3,
+      roleLabel: "CEO Holding",
+      targetAgent: holdingCeo,
+      nextEscalationAgent: null,
+      holdingCeo,
+      reason: isCompanyCeoLooping ? `CEO da empresa (${companyCeo}) está em loop` : `incidente persistiu após acionamento do COO (${coo}) e CEO (${companyCeo})`
+    };
+  }
+  if (isCooLooping || escalationAttempt >= 2) {
+    return {
+      empresaSlug,
+      empresaNome,
+      level: 2,
+      roleLabel: hasSeparateCompanyCeo ? `CEO ${empresaNome}` : "CEO Holding",
+      targetAgent: companyCeo,
+      nextEscalationAgent: hasSeparateCompanyCeo ? holdingCeo : null,
+      holdingCeo,
+      reason: isCooLooping ? `o próprio COO (${coo}) entrou em loop` : `COO (${coo}) não resolveu o loop no ciclo anterior`
+    };
+  }
+  return {
+    empresaSlug,
+    empresaNome,
+    level: 1,
+    roleLabel: `COO · ${empresaNome}`,
+    targetAgent: coo,
+    nextEscalationAgent: companyCeo,
+    holdingCeo,
+    reason: "primeiro acionamento operacional de auto-cura na esteira"
+  };
+}
 function resolveAgentKeyFromSnapshot(agentsApi, query) {
   const clean = String(query).trim();
   if (!clean || !(agentsApi == null ? void 0 : agentsApi.snapshot)) return clean;
@@ -1664,6 +1761,8 @@ async function evaluateGovernanceAndReact(ctx, options = {}) {
   const alerts = [...(kpis == null ? void 0 : kpis.alertas_ativos) ?? []];
   let radarChannelId;
   let radarThreadRoot;
+  let radarLoopingAgents = [];
+  let radarIncidentKey = "";
   if (options.includeRadar !== false) {
     try {
       const radar = await fetchGooseLoopRadar(ctx);
@@ -1677,13 +1776,17 @@ async function evaluateGovernanceAndReact(ctx, options = {}) {
         const anchorSession = activeCrit[0] || activeDup[0];
         if (anchorSession == null ? void 0 : anchorSession.channel_id) radarChannelId = anchorSession.channel_id;
         if (anchorSession == null ? void 0 : anchorSession.thread_root) radarThreadRoot = anchorSession.thread_root;
+        radarLoopingAgents = Array.from(
+          new Set([...activeCrit, ...activeDup].map((s) => String(s.agente || "").trim()).filter(Boolean))
+        );
+        radarIncidentKey = `${radarChannelId || DEFAULT_ORGFY_CHANNEL$1}:${activeCrit.map((s) => s.session_id).sort().join(",")}`;
         if (activeCrit.length > 0) {
           const top = activeCrit.slice(0, 4).map((s) => `${s.agente} (${s.session_id}, ${s.shells} shells, ${s.duracao_min}m, flags=${(s.flags || []).join("+")})`).join("; ");
           alerts.push({
             codigo: "GOOSE_ACTIVE_LOOP",
             severidade: "critical",
             mensagem: `${activeCrit.length} sessão(ões) ativa(s) em loop no Goose: ${top}.`,
-            acao_sugerida: "Executar Ciclo Fechado de Auto-Cura: (1) chamar orgfy_loop_radar({ apenas_ativos: true }) e INTERROMPER imediatamente via orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', release_issue_id?, reason }); (2) diagnosticar a causa-raiz (ITEM_JA_FECHADO, ESCOPO_ABERTO, COMPACTACAO_LOOP, COLISAO_WORKTREE, ERRO_REPETIDO, TEMPESTADE_5XX); (3) se a causa for erro de API/provider (502/503/No available accounts), chamar orgfy_model_failover({ agente, agent_pubkey, channel_id, thread_root, prefer_free: true, apply: true, retrigger: true }) para migrar ao melhor modelo free online no NexusMind e re-disparar; se for escopo aberto, relançar com ESCOPO FECHADO (1-3 arquivos + aceite L-22 + limite 10 shells); se já estiver na main, encerrar sem relançar. Registrar 'AUTO-CURA | agente | causa-raiz | ação' no #OrgFy."
+            acao_sugerida: "Executar Ciclo Fechado de Auto-Cura: (1) chamar orgfy_loop_radar({ apenas_ativos: true }) e INTERROMPER imediatamente via orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', release_issue_id?, reason }); (2) diagnosticar a causa-raiz (ITEM_JA_FECHADO, ESCOPO_ABERTO, COMPACTACAO_LOOP, COLISAO_WORKTREE, ERRO_REPETIDO, TEMPESTADE_5XX); (3) se a causa for erro de API/provider (502/503/No available accounts), chamar orgfy_model_failover({ agente, agent_pubkey, channel_id, thread_root, prefer_free: true, apply: true, retrigger: true }) para migrar ao melhor modelo free online no NexusMind e re-disparar; se for escopo aberto, relançar com ESCOPO FECHADO (1-3 arquivos + aceite L-22 + limite 10 shells); se já estiver na main, encerrar sem relançar. Registrar 'AUTO-CURA | agente | causa-raiz | ação' no canal."
           });
         }
         if (activeDup.length >= 2) {
@@ -1700,7 +1803,8 @@ async function evaluateGovernanceAndReact(ctx, options = {}) {
     }
   }
   for (const al of alerts) {
-    const cooldownKey = `alert:${al.codigo}`;
+    const isRadarAlert = al.codigo === "GOOSE_ACTIVE_LOOP" || al.codigo === "GOOSE_DUPLICATE_SESSIONS";
+    const cooldownKey = isRadarAlert && radarIncidentKey ? `alert:${al.codigo}:${radarIncidentKey}` : `alert:${al.codigo}`;
     if (!options.bypassCooldown && !canTriggerWithCooldown(cooldownKey, nowMs, !options.dryRun)) {
       skippedByCooldown.push(al.codigo);
       continue;
@@ -1718,22 +1822,28 @@ async function evaluateGovernanceAndReact(ctx, options = {}) {
       }
       notificationsSent.push(al.codigo);
     }
-    const isRadarAlert = al.codigo === "GOOSE_ACTIVE_LOOP" || al.codigo === "GOOSE_DUPLICATE_SESSIONS";
     if (options.autoWake && !options.dryRun && (al.codigo === "REVIEW_QUEUE_BOTTLENECK" || al.codigo === "STAGNATION_LEVEL_3" || isRadarAlert)) {
-      const wakeKey = options.reviewerAgentKey || (isRadarAlert ? "OrgFy Iris" : "OrgFy Bento");
-      const wakeCooldownKey = `wake:${al.codigo}:${wakeKey}`;
+      const wakeChannel = isRadarAlert && radarChannelId || options.channel || DEFAULT_ORGFY_CHANNEL$1;
+      const attempt = isRadarAlert && radarIncidentKey ? (radarEscalationCounts.get(radarIncidentKey) || 0) + 1 : 1;
+      const escalation = isRadarAlert ? await resolveEscalationTargetForChannel(ctx, wakeChannel, radarLoopingAgents, attempt) : null;
+      const wakeKey = options.reviewerAgentKey || (escalation == null ? void 0 : escalation.targetAgent) || "OrgFy Bento";
+      const wakeCooldownKey = isRadarAlert && radarIncidentKey ? `wake:${al.codigo}:${radarIncidentKey}:${wakeKey}` : `wake:${al.codigo}:${wakeKey}`;
       if (options.bypassCooldown || canTriggerWithCooldown(wakeCooldownKey, nowMs)) {
         try {
           const agentsApi = ctx.agents;
           if (agentsApi == null ? void 0 : agentsApi.wake) {
             const targetAgentKey = resolveAgentKeyFromSnapshot(agentsApi, wakeKey);
-            const wakeChannel = isRadarAlert && radarChannelId || options.channel || DEFAULT_ORGFY_CHANNEL$1;
             const wakeRoot = isRadarAlert && radarThreadRoot ? radarThreadRoot : void 0;
+            const escalationSuffix = escalation && escalation.nextEscalationAgent ? ` Se não conseguir resolver em 1 ciclo, escale para @${escalation.nextEscalationAgent} (nunca acione a CEO da Holding sem passar antes pela liderança da empresa).` : "";
+            const headerLabel = escalation ? `Nível ${escalation.level} · ${escalation.roleLabel}` : al.codigo;
             await agentsApi.wake(targetAgentKey, {
               channel: wakeChannel,
               ...wakeRoot ? { root: wakeRoot } : {},
-              text: isRadarAlert ? `@OrgFy Iris [ORGFY RADAR AUTO-CURA · ${al.codigo}] ${al.mensagem} Ação obrigatória agora: ${al.acao_sugerida}` : `[ORGFY GOVERNANÇA] ${al.mensagem} Ação recomendada: ${al.acao_sugerida}`
+              text: isRadarAlert ? `@${wakeKey} [ORGFY RADAR AUTO-CURA · ${headerLabel} · ${al.codigo}] ${al.mensagem} Ação obrigatória agora: ${al.acao_sugerida}${escalationSuffix}` : `[ORGFY GOVERNANÇA] ${al.mensagem} Ação recomendada: ${al.acao_sugerida}`
             });
+            if (isRadarAlert && radarIncidentKey) {
+              radarEscalationCounts.set(radarIncidentKey, attempt);
+            }
             wakesTriggered.push(`${wakeKey}:${al.codigo}`);
           }
         } catch (err) {
@@ -3236,7 +3346,7 @@ function renderIntelligenceTab(props) {
                 "button",
                 {
                   onClick: onWakeIrisForLoops,
-                  title: "Acionar OrgFy Iris imediatamente com o diagnóstico vivo do Radar",
+                  title: "Acionar o COO da esteira (escalação hierárquica: COO → CEO da empresa → Iris só em último caso)",
                   style: {
                     padding: "4px 10px",
                     borderRadius: "6px",
@@ -3248,7 +3358,7 @@ function renderIntelligenceTab(props) {
                     cursor: "pointer"
                   }
                 },
-                "Acionar Iris"
+                "Acionar COO"
               ),
               onRefreshLoopRadar && h(
                 "button",
@@ -6025,13 +6135,13 @@ function apply(ctx) {
         dryRun: false,
         autoWake: true,
         bypassCooldown: true,
-        includeRadar: true,
-        reviewerAgentKey: "OrgFy Iris"
+        includeRadar: true
       });
+      const targets = evalRes.wakesTriggered.join(", ") || "nenhum loop ativo";
       setGovernanceSummary(
-        `Chamada Radar → Iris disparada | Alertas: ${evalRes.alertsDetected} | Wakes: ${evalRes.wakesTriggered.join(", ") || "nenhum loop ativo"}`
+        `Chamada Radar (COO → CEO) disparada | Alertas: ${evalRes.alertsDetected} | Wakes: ${targets}`
       );
-      showNotification("info", evalRes.wakesTriggered.length > 0 ? "OrgFy Iris acionada com o diagnóstico do Radar!" : "Nenhum loop ativo detectado no momento.");
+      showNotification("info", evalRes.wakesTriggered.length > 0 ? `Auto-cura acionada: ${targets}` : "Nenhum loop ativo detectado no momento.");
     }, [loadLoopRadar]);
     const handleStopLoopSession = React.useCallback(async (session) => {
       setStoppingSessionId(session.session_id);
@@ -10416,11 +10526,13 @@ Regras Invariantes:
 - Push autenticado no Relay (worktree): Se 'git push relay' falhar com exit 128 ('no nostr key configured'), chame a tool 'buzz__repo' para obter o header 'Authorization: Nostr ...', injete via 'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.<relay_git_url>.extraHeader GIT_CONFIG_VALUE_0="Authorization: Nostr ..."' (sem persistir segredo) e reexecute 'entregar'.
 - Leitura Direta de Cards e PRs (Zero '--help'): Arquivos 'cards/*.md' ficam na raiz '/Users/heltonfraga/.buzz/REPOS/orgfy/cards/' (não dentro da worktree). Sem desperdiçar turnos em '--help': (a) ler issue: 'buzz issues get --event <id-64> --repo 7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20/orgfy'; (b) atualizar PR após novo commit/rebase: 'buzz pr update --repo-owner 7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20 --repo orgfy --pr <pr-id-64> --commit <sha-40>'.
 - Freio Anti-Loop (Máximo 12 'shell's): NUNCA ultrapasse 12 comandos 'shell' sem commit nem repita o mesmo erro 2 vezes seguidas. Ao bater 2 falhas consecutivas no mesmo passo ou 12 'shell's sem avanço, PARE imediatamente e publique 'BLOQUEADO | por: <seu perfil> | motivo: ... | falta: ... | resolve: <perfil>'.
-- Regra Anti-Escopo Aberto (Iris / Despachos ao COO e Executores): PROIBIDO delegar ao Bento (COO) ou a executores com pedido aberto (ex.: 'escolha o próximo item da auditoria', 'veja o que falta'). Todo acionamento DEVE declarar: (a) alvo concreto (slug/bug + 1 a 3 arquivos exatos), (b) critério de pronto / comando de aceite L-22 esperado e (c) o que NÃO refazer.
-- Orçamento de Exploração do COO (Bento): ao receber acionamento para emitir card, limite a leitura exploratória a no máximo 10 comandos 'shell' (<= 5 min). Se o escopo chegar aberto ou ambíguo, NÃO varra o repositório inteiro — responda em 1 turno pedindo à Iris o alvo fechado (ou proponha 1 candidato concreto para aprovação).
+- Escalonamento Hierárquico por Empresa (Preservação da CEO Holding): A ordem obrigatória de escalonamento operacional é Agente → COO da empresa (ex.: OrgFy Bento) → CEO da empresa específica (ex.: Lumen Lara na Lumen IPTV, Tributario CEO no SaaS Tributário) → CEO da Holding (OrgFy Iris) APENAS em último caso. PROIBIDO acionar OrgFy Iris para loops rotineiros de esteira; o COO da empresa resolve em Nível 1 e só escala ao CEO da empresa se não conseguir resolver ou se o próprio COO travar.
+- Regra Anti-Escopo Aberto (Iris / CEOs / Despachos ao COO e Executores): PROIBIDO delegar ao COO ou a executores com pedido aberto (ex.: 'escolha o próximo item da auditoria', 'veja o que falta'). Todo acionamento DEVE declarar: (a) alvo concreto (slug/bug + 1 a 3 arquivos exatos), (b) critério de pronto / comando de aceite L-22 esperado e (c) o que NÃO refazer.
+- Consistência Card ↔ Issue & Escrita Exclusiva: Antes de despachar, garanta que o card versionado em 'cards/' tenha exatamente o mesmo Executor, Revisor, Branch e lista de 'Escrita exclusiva' que a issue Nostr despachada (todo arquivo citado em 'O que fazer' DEVE constar em 'Escrita exclusiva').
+- Orçamento de Exploração do COO (Bento): ao receber acionamento para emitir card, limite a leitura exploratória a no máximo 10 comandos 'shell' (<= 5 min). Se o escopo chegar aberto ou ambíguo, NÃO varra o repositório inteiro — responda em 1 turno pedindo o alvo fechado (ou proponha 1 candidato concreto para aprovação).
 - Limite de Turno para Revisores (Teo, Bento Arquiteto, Vera, QA Sentinel — Máximo 15 'shell's): em uma revisão, rode o comando de aceite L-22, confira o diff/escopo e emita imediatamente 'GATE: aceito' ou 'GATE: recusado' (e encerre). PROIBIDO abrir sessões longas de debug de 'porteiro.py'/'esteira_minima.py' durante uma revisão — se o merge atrasar, reporte em 1 linha e saia.
 - Isolamento Estrito de Worktree (Proibido git checkout na raiz): NUNCA execute 'git checkout --detach' ou troque de branch dentro da raiz '/Users/heltonfraga/.buzz/REPOS/orgfy' (isso corrompe o estado compartilhado para todos os agentes). Para revisar ou comparar BASE_VS_AGORA, crie SEMPRE uma worktree isolada e remova-a ao final.
-- Protocolo de Auto-Cura em Ciclo Fechado (Bento, Iris, Cron e Revisores): ANTES de despachar um card ou cobrar um agente (e SEMPRE que acordada pelo Radar), chame 'orgfy_loop_radar({ apenas_ativos: true })'. NUNCA espere indefinidamente uma sessão queimando tokens em loop (>20m ou >25 shells sem commit, compactação repetida, grep em loop, --help repetido ou PR já fechado). Ao detectar loop/travamento ativo, execute obrigatoriamente os 3 passos: (1) PARAR: chame 'orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: "interrupt", release_issue_id?, reason })'; (2) DIAGNOSTICAR CAUSA-RAIZ: classifique a causa pelos campos 'flags', 'gatilho_resumo' e 'ultimo_shell' (ITEM_JA_FECHADO, ESCOPO_ABERTO, COMPACTACAO_LOOP, COLISAO_WORKTREE, ERRO_REPETIDO, TEMPESTADE_5XX); (3) AGIR (nunca deixar o agente parado no vácuo): se erro de API/provider (502/503/No available accounts), chame 'orgfy_model_failover({ agente, agent_pubkey, channel_id, thread_root, prefer_free: true, apply: true, retrigger: true })' para consultar o NexusMind Ping Real, migrar para o melhor modelo free online e re-disparar; se ITEM_JA_FECHADO, confirme merge na main e encerre sem relançar; se demanda ainda aberta (ex.: ESCOPO_ABERTO ou COMPACTACAO_LOOP), relance limpo com ESCOPO FECHADO (1-3 arquivos exatos + comando de aceite L-22 + limite de 10 shells) ou reatribua na 2ª falha, e publique no #OrgFy 'AUTO-CURA | agente | causa-raiz | ação tomada'. Em 'SESSAO_DUPLICADA', encerre a sessão obsoleta com 'orgfy_session_stop' em vez de re-mencionar.
+- Protocolo de Auto-Cura em Ciclo Fechado (COO da empresa em Nível 1; CEO da empresa em Nível 2; Iris só em último caso): ANTES de despachar um card ou cobrar um agente (e SEMPRE que acordado pelo Radar), chame 'orgfy_loop_radar({ apenas_ativos: true })'. NUNCA espere indefinidamente uma sessão queimando tokens em loop (>20m ou >25 shells sem commit, compactação repetida, grep em loop, --help repetido ou PR já fechado). Ao detectar loop/travamento ativo, execute obrigatoriamente os 3 passos: (1) PARAR: chame 'orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: "interrupt", release_issue_id?, reason })'; (2) DIAGNOSTICAR CAUSA-RAIZ: classifique a causa pelos campos 'flags', 'gatilho_resumo' e 'ultimo_shell' (ITEM_JA_FECHADO, ESCOPO_ABERTO, COMPACTACAO_LOOP, COLISAO_WORKTREE, ERRO_REPETIDO, TEMPESTADE_5XX); (3) AGIR (nunca deixar o agente parado no vácuo): se erro de API/provider (502/503/No available accounts), chame 'orgfy_model_failover({ agente, agent_pubkey, channel_id, thread_root, prefer_free: true, apply: true, retrigger: true })' para consultar o NexusMind Ping Real, migrar para o melhor modelo free online e re-disparar; se ITEM_JA_FECHADO, confirme merge na main e encerre sem relançar; se demanda ainda aberta (ex.: ESCOPO_ABERTO ou COMPACTACAO_LOOP), relance limpo com ESCOPO FECHADO (1-3 arquivos exatos + comando de aceite L-22 + limite de 10 shells) ou reatribua na 2ª falha, e publique no canal 'AUTO-CURA | agente | causa-raiz | ação tomada'. Em 'SESSAO_DUPLICADA', encerre a sessão obsoleta com 'orgfy_session_stop' em vez de re-mencionar.
 - Decisor Híbrido v12: orgfy_lint_card usa Decisions API com fallback determinístico offline automático (ferramentas/esteira/decisor_fallback.py) em caso de falta de saldo ou timeout.
 Ferramentas nativas disponíveis neste plugin:
 1. orgfy_status({ empresa? }): Consulta o placar de 20h, FPY, CPI de tokens, contagem de aceites, merged e raias da esteira.

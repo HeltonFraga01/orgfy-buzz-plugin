@@ -465,3 +465,91 @@ assert.equal(savedChanges[0].change.config.model, "qwen/qwen3-coder:free");
 assert.equal(failoverWakes.length, 1);
 assert.equal(failoverWakes[0].payload.root, "25c49b323d299d3a81ca260197cecd5b6208668d84bb8788971ba347fb15b193");
 console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failoverRes.selectedModel, tested: failoverRes.candidatesTested, retriggered: failoverRes.retriggered }));
+
+// 12. Escalação Hierárquica Multi-Empresa no Radar (COO -> CEO da Empresa -> Iris só em último caso)
+{
+  const runEscalationScenario = async (channelId, loopingAgent, sessionId) => {
+    const tools = new Map();
+    const wakes = [];
+    const fakeKpis = JSON.stringify({
+      schema_version: "1.0.0",
+      gerado_em: new Date().toISOString(),
+      janela_dias: 30,
+      fluxo: { vazao_total_feito: 10, fila_revisao_atual: 0 },
+      qualidade: { fpy_real_pct: 100 },
+      economia: { status_orcamento: "OK", uso_teto_diario_pct: 5 },
+      higiene: { wip_total_ativo: 1, orphan_wip_count: 0, estagnados_nivel_3: 0 },
+      alertas_ativos: [],
+    });
+    const fakeRadar = JSON.stringify({
+      ok: true,
+      gerado_em: new Date().toISOString(),
+      resumo: { criticos: 1, criticos_ativos: 1, avisos: 0, duplicadas: 0 },
+      sessoes: [
+        {
+          session_id: sessionId,
+          agente: loopingAgent,
+          severidade: "critical",
+          ativa: true,
+          ultima_atualizacao_min: 1,
+          duracao_min: 25,
+          shells: 30,
+          flags: ["LOOP_SUSPEITO"],
+          channel_id: channelId,
+          thread_root: "aaaa1111bbbb2222cccc3333dddd4444eeee5555ffff66667777888899990000",
+        },
+      ],
+    });
+    orgfyMod.apply({
+      react: { createElement: () => null },
+      pages: { register: () => {} },
+      settingsCards: { register: () => {} },
+      panels: { register: () => {} },
+      navigation: { open: async () => ({ status: "opened" }) },
+      notifications: { notify: async () => {} },
+      agents: {
+        addInstructions: () => {},
+        addTool: (t) => tools.set(t.name, t),
+        registerHook: () => {},
+        snapshot: () => ({
+          agents: [
+            { key: "local:orgfy-bento", name: "OrgFy Bento", place: "here" },
+            { key: "local:lumen-lara", name: "Lumen Lara", place: "here" },
+            { key: "local:orgfy-iris", name: "OrgFy Iris", place: "here" },
+          ],
+          running: [],
+        }),
+        wake: async (agentKey, payload) => wakes.push({ agentKey, payload }),
+      },
+      host: {
+        readFile: async (p) => {
+          if (p.endsWith("kpis-esteira.json")) return new TextEncoder().encode(fakeKpis);
+          if (p.endsWith("goose-loop-radar.json")) return new TextEncoder().encode(fakeRadar);
+          return new Uint8Array(fs.readFileSync(p));
+        },
+        writeFile: async () => {},
+        serveMcp: async () => ({ url: "mcp://test-esc", close: () => {} }),
+      },
+    });
+    const gov = tools.get("orgfy_governanca_avaliar");
+    const res = JSON.parse(await gov.call({}, {}, { dry_run: false, auto_wake: true }));
+    return { res, wakes };
+  };
+
+  // Caso A (Nível 1): Loop de executor na Lumen IPTV -> acorda o COO (OrgFy Bento), NÃO a Iris
+  const s1 = await runEscalationScenario("41315b4e-6d9a-42e9-9521-f8ce1f9dbc15", "Lumen Dev", "20261124_esc_n1");
+  assert.equal(s1.res.ok, true);
+  assert.equal(s1.wakes.length, 1, "deve disparar 1 wake para o COO da empresa");
+  assert.equal(s1.wakes[0].agentKey, "local:orgfy-bento", "loop normal deve acordar o COO (OrgFy Bento), não a Iris");
+  assert.ok(s1.wakes[0].payload.text.includes("@OrgFy Bento"));
+  assert.ok(s1.wakes[0].payload.text.includes("@Lumen Lara"));
+
+  // Caso B (Nível 2): Próprio COO (OrgFy Bento) entra em loop na Lumen IPTV -> escala para CEO da empresa (Lumen Lara), ainda preservando a Iris
+  const s2 = await runEscalationScenario("41315b4e-6d9a-42e9-9521-f8ce1f9dbc15", "OrgFy Bento", "20261124_esc_n2");
+  assert.equal(s2.res.ok, true);
+  assert.equal(s2.wakes.length, 1, "deve disparar 1 wake para a CEO da subsidiária");
+  assert.equal(s2.wakes[0].agentKey, "local:lumen-lara", "se o COO travar na Lumen IPTV, deve escalar para Lumen Lara (CEO da empresa), não direto para Iris");
+  assert.ok(s2.wakes[0].payload.text.includes("@Lumen Lara"));
+  assert.ok(s2.wakes[0].payload.text.includes("Nível 2"));
+  console.log("[HIERARCHICAL ESCALATION COO->CEO OK]", JSON.stringify({ n1: s1.wakes[0].agentKey, n2: s2.wakes[0].agentKey }));
+}

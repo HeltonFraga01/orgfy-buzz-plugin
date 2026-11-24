@@ -631,7 +631,7 @@ export function renderIntelligenceTab(props: IntelligenceTabProps) {
                   "button",
                   {
                     onClick: onWakeIrisForLoops,
-                    title: "Acionar OrgFy Iris imediatamente com o diagnóstico vivo do Radar",
+                    title: "Acionar o COO da esteira (escalação hierárquica: COO → CEO da empresa → Iris só em último caso)",
                     style: {
                       padding: "4px 10px",
                       borderRadius: "6px",
@@ -643,7 +643,7 @@ export function renderIntelligenceTab(props: IntelligenceTabProps) {
                       cursor: "pointer",
                     },
                   },
-                  "Acionar Iris"
+                  "Acionar COO"
                 ),
               onRefreshLoopRadar &&
                 h(
