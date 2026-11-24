@@ -5947,22 +5947,18 @@ function buildSidebarRows(counts) {
   return [
     {
       id: "orgfy-revisao",
-      label: "Em Revisão (Gate)",
-      count: counts.revisao,
-      status: counts.revisao > 0 ? "active" : "idle"
+      label: "Em Revisão",
+      count: counts.revisao > 0 ? counts.revisao : void 0
     },
     {
       id: "orgfy-execucao",
       label: "Em Execução",
-      count: counts.execucao,
-      status: counts.execucao > 0 ? "active" : "idle"
+      count: counts.execucao > 0 ? counts.execucao : void 0
     },
     {
       id: "orgfy-loops",
       label: "Loops Ativos",
-      count: counts.loopsAtivos,
-      badge: counts.loopsAtivos > 0 ? "ALERTA" : void 0,
-      status: counts.loopsAtivos > 0 ? "error" : "ok"
+      count: counts.loopsAtivos > 0 ? counts.loopsAtivos : void 0
     }
   ];
 }
@@ -6105,11 +6101,28 @@ function registerBuzzNativeIntegrations(ctx) {
     const sidebar = ((_d = (_c = ctx == null ? void 0 : ctx.reflect) == null ? void 0 : _c.get) == null ? void 0 : _d.call(_c, "sidebarSections")) || (ctx == null ? void 0 : ctx.sidebarSections);
     if (sidebar == null ? void 0 : sidebar.register) {
       const h = (_e = ctx == null ? void 0 : ctx.react) == null ? void 0 : _e.createElement;
+      const sidebarIcon = h ? h(
+        "svg",
+        {
+          viewBox: "0 0 24 24",
+          fill: "none",
+          stroke: "currentColor",
+          strokeWidth: 1.8,
+          strokeLinecap: "round",
+          strokeLinejoin: "round",
+          width: 14,
+          height: 14,
+          style: { marginRight: "6px", flexShrink: 0, opacity: 0.75 }
+        },
+        h("polygon", { points: "12 2 20 6.5 20 17.5 12 22 4 17.5 4 6.5 12 2" }),
+        h("polyline", { points: "4 6.5 12 11.5 20 6.5" }),
+        h("line", { x1: 12, y1: 11.5, x2: 12, y2: 22 })
+      ) : null;
       sidebar.register({
         version: 1,
         id: "orgfy-live-pulse",
-        title: "OrgFy Esteira",
-        icon: h ? h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#10b981" } }, "◈") : null,
+        title: "OrgFy",
+        icon: sidebarIcon,
         rows: {
           snapshot: () => sidebarRowsSnapshot,
           subscribe: (listener) => {
@@ -14584,7 +14597,7 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
     );
   }
   const ORGFY_PAGE_ICON = "data:image/svg+xml;base64," + btoa(
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#e6e6e6" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 20 6.5 20 17.5 12 22 4 17.5 4 6.5 12 2"/><polyline points="4 6.5 12 11.5 20 6.5"/><line x1="12" y1="11.5" x2="12" y2="22"/></svg>'
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 20 6.5 20 17.5 12 22 4 17.5 4 6.5 12 2"/><polyline points="4 6.5 12 11.5 20 6.5"/><line x1="12" y1="11.5" x2="12" y2="22"/></svg>'
   );
   ctx.pages.register({
     id: "orgfy",

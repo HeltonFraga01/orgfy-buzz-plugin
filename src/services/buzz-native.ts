@@ -55,22 +55,18 @@ function buildSidebarRows(counts: LiveSidebarCounts) {
   return [
     {
       id: "orgfy-revisao",
-      label: "Em Revisão (Gate)",
-      count: counts.revisao,
-      status: counts.revisao > 0 ? "active" : "idle",
+      label: "Em Revisão",
+      count: counts.revisao > 0 ? counts.revisao : undefined,
     },
     {
       id: "orgfy-execucao",
       label: "Em Execução",
-      count: counts.execucao,
-      status: counts.execucao > 0 ? "active" : "idle",
+      count: counts.execucao > 0 ? counts.execucao : undefined,
     },
     {
       id: "orgfy-loops",
       label: "Loops Ativos",
-      count: counts.loopsAtivos,
-      badge: counts.loopsAtivos > 0 ? "ALERTA" : undefined,
-      status: counts.loopsAtivos > 0 ? "error" : "ok",
+      count: counts.loopsAtivos > 0 ? counts.loopsAtivos : undefined,
     },
   ] as const;
 }
@@ -231,11 +227,30 @@ export function registerBuzzNativeIntegrations(ctx: Context | any): BuzzNativeSt
     const sidebar = ctx?.reflect?.get?.("sidebarSections") || ctx?.sidebarSections;
     if (sidebar?.register) {
       const h = ctx?.react?.createElement;
+      const sidebarIcon = h
+        ? h(
+            "svg",
+            {
+              viewBox: "0 0 24 24",
+              fill: "none",
+              stroke: "currentColor",
+              strokeWidth: 1.8,
+              strokeLinecap: "round",
+              strokeLinejoin: "round",
+              width: 14,
+              height: 14,
+              style: { marginRight: "6px", flexShrink: 0, opacity: 0.75 },
+            },
+            h("polygon", { points: "12 2 20 6.5 20 17.5 12 22 4 17.5 4 6.5 12 2" }),
+            h("polyline", { points: "4 6.5 12 11.5 20 6.5" }),
+            h("line", { x1: 12, y1: 11.5, x2: 12, y2: 22 })
+          )
+        : null;
       sidebar.register({
         version: 1,
         id: "orgfy-live-pulse",
-        title: "OrgFy Esteira",
-        icon: h ? h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#10b981" } }, "◈") : null,
+        title: "OrgFy",
+        icon: sidebarIcon,
         rows: {
           snapshot: () => sidebarRowsSnapshot,
           subscribe: (listener: () => void) => {

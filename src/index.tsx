@@ -5748,11 +5748,11 @@ export function apply(ctx: Context) {
     );
   }
 
-  // Ícone monocromático padrão Buzz (sem fundo verde, traço limpo igual aos ícones nativos da barra lateral)
+  // Ícone monocromático padrão Buzz com currentColor (branco inativo, preto quando selecionado)
   const ORGFY_PAGE_ICON =
     "data:image/svg+xml;base64," +
     btoa(
-      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#e6e6e6" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 20 6.5 20 17.5 12 22 4 17.5 4 6.5 12 2"/><polyline points="4 6.5 12 11.5 20 6.5"/><line x1="12" y1="11.5" x2="12" y2="22"/></svg>'
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 20 6.5 20 17.5 12 22 4 17.5 4 6.5 12 2"/><polyline points="4 6.5 12 11.5 20 6.5"/><line x1="12" y1="11.5" x2="12" y2="22"/></svg>'
     );
 
   // Registra Página Principal com layout: "workspace" (Zero margens de documento)
