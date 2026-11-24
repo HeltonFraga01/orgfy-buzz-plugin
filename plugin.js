@@ -1641,7 +1641,7 @@ const DEFAULT_ORGFY_CHANNEL$2 = "e445491d-2fb3-4ebd-8e2e-f6813c33fb03";
 const EMPRESAS_DIR = "/Users/heltonfraga/.buzz/REPOS/orgfy/empresas";
 const KNOWN_COMPANY_SLUGS = ["orgfy", "lumen-iptv", "saas-tributario"];
 const radarEscalationCounts = /* @__PURE__ */ new Map();
-function decodeHostBytes$1(raw) {
+function decodeHostBytes$2(raw) {
   if (typeof raw === "string") return raw;
   if (raw instanceof Uint8Array) return new TextDecoder("utf-8").decode(raw);
   if (raw instanceof ArrayBuffer) return new TextDecoder("utf-8").decode(new Uint8Array(raw));
@@ -1665,7 +1665,7 @@ async function resolveEscalationTargetForChannel(ctx, channelId, loopingAgents =
     for (const slug of KNOWN_COMPANY_SLUGS) {
       try {
         const raw = await host.readFile(`${EMPRESAS_DIR}/${slug}.json`);
-        const parsed = JSON.parse(decodeHostBytes$1(raw));
+        const parsed = JSON.parse(decodeHostBytes$2(raw));
         if (slug === "orgfy") defaultManifest = parsed;
         if ((parsed == null ? void 0 : parsed.canal) && String(parsed.canal).trim() === targetChannel) {
           matchedManifest = parsed;
@@ -4077,6 +4077,32 @@ const NEXUSMIND_PROVIDERS = [
   }
 ];
 const DEFAULT_ORGFY_CHANNEL = "e445491d-2fb3-4ebd-8e2e-f6813c33fb03";
+const SHARED_RANKING_PATHS = [
+  "/Users/heltonfraga/.buzz/.scratch/nexusmind-model-ranking.json",
+  "~/.buzz/.scratch/nexusmind-model-ranking.json"
+];
+const SHARED_USAGE_PATHS = [
+  "/Users/heltonfraga/.buzz/.scratch/nm_usage.json",
+  "~/.buzz/.scratch/nm_usage.json"
+];
+function decodeHostBytes$1(raw) {
+  if (typeof raw === "string") return raw;
+  if (raw instanceof Uint8Array) return new TextDecoder("utf-8").decode(raw);
+  if (raw instanceof ArrayBuffer) return new TextDecoder("utf-8").decode(new Uint8Array(raw));
+  if (ArrayBuffer.isView(raw)) {
+    return new TextDecoder("utf-8").decode(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength));
+  }
+  return String(raw ?? "");
+}
+function inferProviderId(modelId) {
+  const m = String(modelId || "").toLowerCase();
+  if (m.includes("grok")) return "nexusmind_grok";
+  if (m.includes("gemini") || m.includes("antigravity") || m.includes("thinking") || m.includes("-high") || m.includes("-medium") || m.includes("-low")) {
+    return "nexusmind_antigravity";
+  }
+  if (m.includes("claude")) return "nexusmind_anthropic";
+  return "nexusmind_openai";
+}
 function isFreeModelId(modelId) {
   const lower = String(modelId || "").toLowerCase();
   return lower.includes(":free") || lower.includes("-free") || lower.includes("/free") || lower.endsWith("free");
@@ -4115,16 +4141,131 @@ function getDisabledModelsFromLocalStorage() {
     return /* @__PURE__ */ new Set();
   }
 }
-async function discoverNexusMindCatalog(ctx) {
+async function loadSharedNexusMindRanking(ctx, excludeSet, preferFree) {
   var _a, _b, _c;
-  const hostReq = (_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.request;
+  const disabled = getDisabledModelsFromLocalStorage();
+  let parsed = null;
+  const host = ctx == null ? void 0 : ctx.host;
+  if (typeof (host == null ? void 0 : host.readFile) === "function") {
+    for (const p of SHARED_RANKING_PATHS) {
+      try {
+        const raw = await host.readFile(p);
+        if (!raw) continue;
+        const txt = decodeHostBytes$1(raw);
+        const obj = JSON.parse(txt);
+        if (obj && Array.isArray(obj.models) && obj.models.length > 0) {
+          parsed = obj;
+          break;
+        }
+      } catch {
+      }
+    }
+  }
+  if (!parsed) {
+    try {
+      const raw = (_b = (_a = globalThis == null ? void 0 : globalThis.localStorage) == null ? void 0 : _a.getItem) == null ? void 0 : _b.call(_a, "nexusmind_model_ranking");
+      if (raw) {
+        const obj = JSON.parse(raw);
+        if (obj && Array.isArray(obj.models) && obj.models.length > 0) {
+          parsed = obj;
+        }
+      }
+    } catch {
+    }
+  }
+  if (parsed && Array.isArray(parsed.models)) {
+    const candidates = [];
+    for (const m of parsed.models) {
+      const mid = String((m == null ? void 0 : m.model) || "").trim();
+      if (!mid || m.isDisabled || disabled.has(mid) || excludeSet.has(mid.toLowerCase())) continue;
+      if (m.online === false) continue;
+      const free = isFreeModelId(mid);
+      if (preferFree && !free) continue;
+      if (!preferFree && free) continue;
+      candidates.push({
+        model: mid,
+        provider: String(m.group || inferProviderId(mid)),
+        isFree: free,
+        intelligenceScore: Number(m.capabilityScore || estimateModelIntelligence(mid)),
+        latencyMs: typeof m.pingLatencyMs === "number" ? m.pingLatencyMs : typeof m.avgFirstTokenMs === "number" ? m.avgFirstTokenMs : typeof m.avgDurationMs === "number" ? m.avgDurationMs : null,
+        combinedScore: Number(m.score ?? estimateModelIntelligence(mid)),
+        online: true,
+        calls: Number(m.calls || 0),
+        source: "nexusmind_ranking"
+      });
+    }
+    if (candidates.length > 0) {
+      candidates.sort((a, b) => b.combinedScore - a.combinedScore);
+      return candidates;
+    }
+  }
+  if (typeof (host == null ? void 0 : host.readFile) === "function") {
+    for (const p of SHARED_USAGE_PATHS) {
+      try {
+        const raw = await host.readFile(p);
+        if (!raw) continue;
+        const txt = decodeHostBytes$1(raw);
+        const obj = JSON.parse(txt);
+        const items = Array.isArray((_c = obj == null ? void 0 : obj.data) == null ? void 0 : _c.items) ? obj.data.items : Array.isArray(obj == null ? void 0 : obj.items) ? obj.items : [];
+        if (items.length === 0) continue;
+        const acc = /* @__PURE__ */ new Map();
+        for (const it of items) {
+          const mid = String((it == null ? void 0 : it.model) || "").trim();
+          if (!mid || disabled.has(mid) || excludeSet.has(mid.toLowerCase())) continue;
+          const free = isFreeModelId(mid);
+          if (preferFree && !free) continue;
+          if (!preferFree && free) continue;
+          let st = acc.get(mid);
+          if (!st) {
+            st = { calls: 0, durSum: 0, durN: 0 };
+            acc.set(mid, st);
+          }
+          st.calls += 1;
+          const dur = Number((it == null ? void 0 : it.first_token_ms) ?? (it == null ? void 0 : it.duration_ms));
+          if (Number.isFinite(dur) && dur > 0 && dur < 18e4) {
+            st.durSum += dur;
+            st.durN += 1;
+          }
+        }
+        const fromUsage = [];
+        for (const [mid, st] of acc.entries()) {
+          if (st.calls < 5) continue;
+          const intel = estimateModelIntelligence(mid);
+          const avgMs = st.durN > 0 ? Math.round(st.durSum / st.durN) : null;
+          const adoption = Math.min(25, Math.log10(st.calls + 1) * 6.5);
+          const speedBonus = avgMs !== null ? Math.max(0, 15 - avgMs / 1e3 * 0.5) : 5;
+          fromUsage.push({
+            model: mid,
+            provider: inferProviderId(mid),
+            isFree: isFreeModelId(mid),
+            intelligenceScore: intel,
+            latencyMs: avgMs,
+            combinedScore: Number((intel * 0.65 + adoption + speedBonus).toFixed(2)),
+            online: true,
+            calls: st.calls,
+            source: "gateway_usage"
+          });
+        }
+        if (fromUsage.length > 0) {
+          fromUsage.sort((a, b) => b.combinedScore - a.combinedScore);
+          return fromUsage.slice(0, 10);
+        }
+      } catch {
+      }
+    }
+  }
+  return [];
+}
+async function discoverNexusMindCatalog(ctx) {
+  var _a, _b;
+  const host = ctx == null ? void 0 : ctx.host;
   const disabled = getDisabledModelsFromLocalStorage();
   const seen = /* @__PURE__ */ new Map();
-  if (typeof hostReq === "function") {
+  if (typeof (host == null ? void 0 : host.request) === "function") {
     await Promise.all(
       NEXUSMIND_PROVIDERS.map(async (prov) => {
         try {
-          const res = await hostReq({
+          const res = await host.request({
             url: "https://api.nexusmind.digital/v1/models",
             method: "GET",
             headers: {
@@ -4149,7 +4290,7 @@ async function discoverNexusMindCatalog(ctx) {
   }
   if (seen.size === 0) {
     try {
-      const raw = (_c = (_b = globalThis == null ? void 0 : globalThis.localStorage) == null ? void 0 : _b.getItem) == null ? void 0 : _c.call(_b, "nexusmind_cached_models");
+      const raw = (_b = (_a = globalThis == null ? void 0 : globalThis.localStorage) == null ? void 0 : _a.getItem) == null ? void 0 : _b.call(_a, "nexusmind_cached_models");
       if (raw) {
         const cached = JSON.parse(raw);
         if (Array.isArray(cached)) {
@@ -4167,9 +4308,8 @@ async function discoverNexusMindCatalog(ctx) {
   return Array.from(seen.values());
 }
 async function probeModelLive(ctx, modelId, prov) {
-  var _a;
-  const hostReq = (_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.request;
-  if (typeof hostReq !== "function") {
+  const host = ctx == null ? void 0 : ctx.host;
+  if (typeof (host == null ? void 0 : host.request) !== "function") {
     return { online: false, latencyMs: null, error: "ctx.host.request indisponível" };
   }
   const url = prov.isAnthropic ? "https://api.nexusmind.digital/v1/messages" : "https://api.nexusmind.digital/v1/chat/completions";
@@ -4186,7 +4326,7 @@ async function probeModelLive(ctx, modelId, prov) {
   };
   const t0 = Date.now();
   try {
-    const res = await hostReq({
+    const res = await host.request({
       url,
       method: "POST",
       headers,
@@ -4224,7 +4364,7 @@ function findAgentInSnapshot(agentsApi, query, pubkey) {
   return pkLower && pool.find((a) => String(a.pubkey || "").toLowerCase() === pkLower) || qLower && pool.find((a) => String(a.key || "").toLowerCase() === qLower) || qLower && pool.find((a) => String(a.name || "").toLowerCase() === qLower) || (qLower ? pool.find((a) => String(a.name || "").toLowerCase().includes(qLower)) : void 0);
 }
 async function executeSmartModelFailover(ctx, input = {}) {
-  const preferFree = input.prefer_free !== false;
+  const preferFree = Boolean(input.prefer_free);
   const applyChange = Boolean(input.apply);
   const retrigger = input.retrigger !== false;
   const maxProbes = Math.max(1, Math.min(10, Number(input.max_probes || 6)));
@@ -4232,57 +4372,49 @@ async function executeSmartModelFailover(ctx, input = {}) {
   const agentsApi = ctx.agents;
   const matchedAgent = input.agente || input.agent_pubkey ? findAgentInSnapshot(agentsApi, input.agente, input.agent_pubkey) : void 0;
   const previousModel = ((matchedAgent == null ? void 0 : matchedAgent.config) && typeof matchedAgent.config === "object" ? String(matchedAgent.config.model || "") : "") || (input.failed_model || null);
-  const catalog = await discoverNexusMindCatalog(ctx);
-  if (catalog.length === 0) {
-    return {
-      ok: false,
-      mode: applyChange ? "applied" : "dry_run",
-      agentName: (matchedAgent == null ? void 0 : matchedAgent.name) || input.agente || null,
-      agentKey: (matchedAgent == null ? void 0 : matchedAgent.key) || null,
-      previousModel,
-      selectedModel: null,
-      selectedProvider: null,
-      selectedLatencyMs: null,
-      selectedIntelligenceScore: null,
-      retriggered: false,
-      candidatesTested: 0,
-      ranking: [],
-      message: "Nenhum modelo retornado pelo NexusMind Gateway (/v1/models indisponível e sem cache local)."
-    };
-  }
   const excludeSet = /* @__PURE__ */ new Set();
   if (failedNorm) excludeSet.add(failedNorm);
   if (previousModel) excludeSet.add(previousModel.toLowerCase());
-  let pool = catalog.filter((c) => !excludeSet.has(c.id.toLowerCase()));
-  if (preferFree) {
-    const freeOnly = pool.filter((c) => isFreeModelId(c.id));
-    if (freeOnly.length > 0) {
-      pool = freeOnly;
+  const sharedRanking = await loadSharedNexusMindRanking(ctx, excludeSet, preferFree);
+  let probed = [];
+  if (sharedRanking.length === 0) {
+    const catalog = await discoverNexusMindCatalog(ctx);
+    let pool = catalog.filter((c) => !excludeSet.has(c.id.toLowerCase()));
+    if (preferFree) {
+      const freeOnly = pool.filter((c) => isFreeModelId(c.id));
+      if (freeOnly.length > 0) pool = freeOnly;
+    } else {
+      const paidOnly = pool.filter((c) => !isFreeModelId(c.id));
+      if (paidOnly.length > 0) pool = paidOnly;
+    }
+    const preRanked = pool.map((c) => ({ ...c, intelligenceScore: estimateModelIntelligence(c.id) })).sort((a, b) => b.intelligenceScore - a.intelligenceScore).slice(0, maxProbes);
+    if (preRanked.length > 0) {
+      probed = await Promise.all(
+        preRanked.map(async (cand) => {
+          const res = await probeModelLive(ctx, cand.id, cand.provider);
+          const combinedScore = res.online ? computeCombinedModelScore(cand.intelligenceScore, res.latencyMs) : -1;
+          return {
+            model: cand.id,
+            provider: cand.provider.id,
+            isFree: isFreeModelId(cand.id),
+            intelligenceScore: cand.intelligenceScore,
+            latencyMs: res.latencyMs,
+            combinedScore,
+            online: res.online,
+            source: "live_probe",
+            error: res.error
+          };
+        })
+      );
+      probed.sort((a, b) => {
+        if (a.online !== b.online) return a.online ? -1 : 1;
+        if (b.combinedScore !== a.combinedScore) return b.combinedScore - a.combinedScore;
+        return (a.latencyMs ?? 999999) - (b.latencyMs ?? 999999);
+      });
     }
   }
-  const preRanked = pool.map((c) => ({ ...c, intelligenceScore: estimateModelIntelligence(c.id) })).sort((a, b) => b.intelligenceScore - a.intelligenceScore).slice(0, maxProbes);
-  const probed = await Promise.all(
-    preRanked.map(async (cand) => {
-      const res = await probeModelLive(ctx, cand.id, cand.provider);
-      const combinedScore = res.online ? computeCombinedModelScore(cand.intelligenceScore, res.latencyMs) : -1;
-      return {
-        model: cand.id,
-        provider: cand.provider.id,
-        isFree: isFreeModelId(cand.id),
-        intelligenceScore: cand.intelligenceScore,
-        latencyMs: res.latencyMs,
-        combinedScore,
-        online: res.online,
-        error: res.error
-      };
-    })
-  );
-  probed.sort((a, b) => {
-    if (a.online !== b.online) return a.online ? -1 : 1;
-    if (b.combinedScore !== a.combinedScore) return b.combinedScore - a.combinedScore;
-    return (a.latencyMs ?? 999999) - (b.latencyMs ?? 999999);
-  });
-  const winner = probed.find((p) => p.online) || null;
+  const finalRanking = sharedRanking.length > 0 ? sharedRanking : probed;
+  const winner = finalRanking.find((p) => p.online) || null;
   if (!winner) {
     return {
       ok: false,
@@ -4295,14 +4427,15 @@ async function executeSmartModelFailover(ctx, input = {}) {
       selectedLatencyMs: null,
       selectedIntelligenceScore: null,
       retriggered: false,
-      candidatesTested: probed.length,
-      ranking: probed,
-      message: `Nenhum dos ${probed.length} modelos testados respondeu HTTP 200 no ping real do NexusMind.`
+      candidatesTested: finalRanking.length,
+      ranking: finalRanking,
+      message: finalRanking.length > 0 ? `Nenhum dos ${finalRanking.length} modelos testados respondeu HTTP 200 no ping real do NexusMind. Abra a aba "Ranking de Modelos" no plugin NexusMind Gateway para atualizar o ranking.` : "Ranking do NexusMind indisponível. Abra o plugin NexusMind Gateway > Ranking de Modelos para gerar o ranking em tempo real."
     };
   }
   let appliedOk = false;
   let retriggered = false;
   let applyNote = "";
+  const sourceTag = winner.source === "nexusmind_ranking" ? `Ranking NexusMind · score ${winner.combinedScore}${winner.calls ? ` · ${winner.calls} chamadas reais` : ""}` : winner.source === "gateway_usage" ? `Telemetria Gateway · score ${winner.combinedScore}${winner.calls ? ` · ${winner.calls} chamadas reais` : ""}` : `${winner.latencyMs}ms · score ${winner.combinedScore}`;
   if (applyChange) {
     if (!matchedAgent) {
       return {
@@ -4316,9 +4449,9 @@ async function executeSmartModelFailover(ctx, input = {}) {
         selectedLatencyMs: winner.latencyMs,
         selectedIntelligenceScore: winner.intelligenceScore,
         retriggered: false,
-        candidatesTested: probed.length,
-        ranking: probed,
-        message: `Melhor modelo eleito (${winner.model}, ${winner.latencyMs}ms), mas agente '${input.agente || input.agent_pubkey || ""}' não encontrado no Buzz Desktop.`
+        candidatesTested: finalRanking.length,
+        ranking: finalRanking,
+        message: `Melhor modelo eleito (${winner.model}, ${sourceTag}), mas agente '${input.agente || input.agent_pubkey || ""}' não encontrado no Buzz Desktop.`
       };
     }
     if (typeof (agentsApi == null ? void 0 : agentsApi.save) !== "function") {
@@ -4333,9 +4466,9 @@ async function executeSmartModelFailover(ctx, input = {}) {
         selectedLatencyMs: winner.latencyMs,
         selectedIntelligenceScore: winner.intelligenceScore,
         retriggered: false,
-        candidatesTested: probed.length,
-        ranking: probed,
-        message: `Melhor modelo eleito (${winner.model}, ${winner.latencyMs}ms), mas ctx.agents.save indisponível neste host.`
+        candidatesTested: finalRanking.length,
+        ranking: finalRanking,
+        message: `Melhor modelo eleito (${winner.model}, ${sourceTag}), mas ctx.agents.save indisponível neste host.`
       };
     }
     const currentCfg = matchedAgent.config && typeof matchedAgent.config === "object" ? { ...matchedAgent.config } : {};
@@ -4346,7 +4479,7 @@ async function executeSmartModelFailover(ctx, input = {}) {
     try {
       await agentsApi.save(matchedAgent.key, { config: currentCfg });
       appliedOk = true;
-      applyNote = `Modelo de ${matchedAgent.name || matchedAgent.key} atualizado de '${previousModel || "padrão"}' para '${winner.model}' (${winner.provider}, ${winner.latencyMs}ms, score ${winner.combinedScore}).`;
+      applyNote = `Modelo de ${matchedAgent.name || matchedAgent.key} atualizado de '${previousModel || "padrão"}' para '${winner.model}' (${winner.provider} · ${sourceTag}).`;
     } catch (err) {
       return {
         ok: false,
@@ -4359,8 +4492,8 @@ async function executeSmartModelFailover(ctx, input = {}) {
         selectedLatencyMs: winner.latencyMs,
         selectedIntelligenceScore: winner.intelligenceScore,
         retriggered: false,
-        candidatesTested: probed.length,
-        ranking: probed,
+        candidatesTested: finalRanking.length,
+        ranking: finalRanking,
         message: `Falha ao salvar novo modelo '${winner.model}' em ${matchedAgent.name || matchedAgent.key}: ${(err == null ? void 0 : err.message) || err}`
       };
     }
@@ -4371,7 +4504,7 @@ async function executeSmartModelFailover(ctx, input = {}) {
         await agentsApi.wake(matchedAgent.key, {
           channel,
           ...root ? { root } : {},
-          text: input.retrigger_text || `[ORGFY FAILOVER AUTOMÁTICO] Seu modelo foi migrado para '${winner.model}' (${winner.latencyMs}ms online via NexusMind) após erro de API no modelo anterior. Retome imediatamente o último passo da tarefa com escopo fechado.`
+          text: input.retrigger_text || `[ORGFY FAILOVER AUTOMÁTICO] Seu modelo foi migrado para '${winner.model}' (${winner.provider} · ${sourceTag}) após erro de API no modelo anterior. Retome imediatamente o último passo da tarefa com escopo fechado.`
         });
         retriggered = true;
         applyNote += " Agente re-disparado automaticamente.";
@@ -4391,9 +4524,9 @@ async function executeSmartModelFailover(ctx, input = {}) {
     selectedLatencyMs: winner.latencyMs,
     selectedIntelligenceScore: winner.intelligenceScore,
     retriggered,
-    candidatesTested: probed.length,
-    ranking: probed,
-    message: applyNote || `Melhor modelo disponível (${preferFree ? "FREE" : "ALL"}): ${winner.model} (${winner.provider} · ${winner.latencyMs}ms · inteligência ${winner.intelligenceScore}/100 · score ${winner.combinedScore}).`
+    candidatesTested: finalRanking.length,
+    ranking: finalRanking,
+    message: applyNote || `Melhor modelo disponível (${preferFree ? "FREE" : "PRODUÇÃO"}): ${winner.model} (${winner.provider} · ${sourceTag}).`
   };
 }
 const RESOLVED_ARCHIVE_PATH = "/Users/heltonfraga/.buzz/.scratch/resolved-issues-archive.json";
@@ -5427,11 +5560,14 @@ function createAgentOrgfyTabComponent(ctx) {
           agente: agentName,
           agent_pubkey: agentPubkey || void 0,
           failed_model: currentModel !== "padrão" ? currentModel : void 0,
-          prefer_free: true,
+          prefer_free: false,
           apply: true,
           retrigger: false
         });
         setStatusBanner({ ok: res.ok, text: res.message });
+        if (res.ok) {
+          await loadAgentContext();
+        }
       } catch (err) {
         setStatusBanner({ ok: false, text: `Erro no failover: ${(err == null ? void 0 : err.message) || err}` });
       } finally {

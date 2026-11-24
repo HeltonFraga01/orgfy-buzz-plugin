@@ -8,6 +8,8 @@ export interface ModelCandidateScore {
   latencyMs: number | null;
   combinedScore: number;
   online: boolean;
+  calls?: number;
+  source?: "live_probe" | "nexusmind_ranking" | "gateway_usage";
   error?: string;
 }
 
@@ -75,6 +77,41 @@ const NEXUSMIND_PROVIDERS: ProviderGroupConfig[] = [
 ];
 
 const DEFAULT_ORGFY_CHANNEL = "e445491d-2fb3-4ebd-8e2e-f6813c33fb03";
+const SHARED_RANKING_PATHS = [
+  "/Users/heltonfraga/.buzz/.scratch/nexusmind-model-ranking.json",
+  "~/.buzz/.scratch/nexusmind-model-ranking.json",
+];
+const SHARED_USAGE_PATHS = [
+  "/Users/heltonfraga/.buzz/.scratch/nm_usage.json",
+  "~/.buzz/.scratch/nm_usage.json",
+];
+
+function decodeHostBytes(raw: unknown): string {
+  if (typeof raw === "string") return raw;
+  if (raw instanceof Uint8Array) return new TextDecoder("utf-8").decode(raw);
+  if (raw instanceof ArrayBuffer) return new TextDecoder("utf-8").decode(new Uint8Array(raw));
+  if (ArrayBuffer.isView(raw)) {
+    return new TextDecoder("utf-8").decode(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength));
+  }
+  return String(raw ?? "");
+}
+
+function inferProviderId(modelId: string): string {
+  const m = String(modelId || "").toLowerCase();
+  if (m.includes("grok")) return "nexusmind_grok";
+  if (
+    m.includes("gemini") ||
+    m.includes("antigravity") ||
+    m.includes("thinking") ||
+    m.includes("-high") ||
+    m.includes("-medium") ||
+    m.includes("-low")
+  ) {
+    return "nexusmind_antigravity";
+  }
+  if (m.includes("claude")) return "nexusmind_anthropic";
+  return "nexusmind_openai";
+}
 
 export function isFreeModelId(modelId: string): boolean {
   const lower = String(modelId || "").toLowerCase();
@@ -89,7 +126,6 @@ export function estimateModelIntelligence(modelId: string): number {
   const m = String(modelId || "").toLowerCase();
   let score = 50;
 
-  // Famílias de alta capacidade / raciocínio / código
   if (/(opus|o3|gpt-5|gpt-6|claude-sonnet-4-6|claude-sonnet-5|gemini-3\.?5?-pro|gemini-2\.5-pro|deepseek-r1|deepseek-v3|qwen3-coder|mistral-large|grok-4)/.test(m)) {
     score += 32;
   } else if (/(sonnet|pro|large|coder|r1|reasoning|thinking|v3|nemotron-ultra|llama-4|glm-4\.5|kimi-k2)/.test(m)) {
@@ -98,7 +134,6 @@ export function estimateModelIntelligence(modelId: string): number {
     score += 12;
   }
 
-  // Penalização para modelos ultra-leves / preview instáveis
   if (/(nano|tiny|1b|3b|7b|8b|fast-free|lite)/.test(m)) {
     score -= 12;
   }
@@ -115,7 +150,6 @@ export function estimateModelIntelligence(modelId: string): number {
  */
 export function computeCombinedModelScore(intelligenceScore: number, latencyMs: number | null): number {
   if (latencyMs === null || !Number.isFinite(latencyMs)) return -1;
-  // Cada 1000ms de latência subtrai ~4 pontos (teto 35 pts), mantendo inteligência como fator dominante
   const latencyPenalty = Math.min(35, (latencyMs / 1000) * 4);
   return Number((intelligenceScore - latencyPenalty).toFixed(2));
 }
@@ -131,16 +165,158 @@ function getDisabledModelsFromLocalStorage(): Set<string> {
   }
 }
 
+/**
+ * Lê o ranking real compartilhado gravado pelo plugin NexusMind Gateway
+ * (localStorage["nexusmind_model_ranking"] ou ~/.buzz/.scratch/nexusmind-model-ranking.json),
+ * contornando o isolamento de networkOrigins do OrgFy sem perder precisão real.
+ */
+async function loadSharedNexusMindRanking(
+  ctx: Context,
+  excludeSet: Set<string>,
+  preferFree: boolean
+): Promise<ModelCandidateScore[]> {
+  const disabled = getDisabledModelsFromLocalStorage();
+  let parsed: any = null;
+
+  // 1. Snapshot em disco gravado pelo NexusMind Gateway (mais recente e cross-webview)
+  const host = (ctx as any)?.host;
+  if (typeof host?.readFile === "function") {
+    for (const p of SHARED_RANKING_PATHS) {
+      try {
+        const raw = await host.readFile(p);
+        if (!raw) continue;
+        const txt = decodeHostBytes(raw);
+        const obj = JSON.parse(txt);
+        if (obj && Array.isArray(obj.models) && obj.models.length > 0) {
+          parsed = obj;
+          break;
+        }
+      } catch {}
+    }
+  }
+
+  // 2. Fallback em localStorage
+  if (!parsed) {
+    try {
+      const raw = (globalThis as any)?.localStorage?.getItem?.("nexusmind_model_ranking");
+      if (raw) {
+        const obj = JSON.parse(raw);
+        if (obj && Array.isArray(obj.models) && obj.models.length > 0) {
+          parsed = obj;
+        }
+      }
+    } catch {}
+  }
+
+  if (parsed && Array.isArray(parsed.models)) {
+    const candidates: ModelCandidateScore[] = [];
+    for (const m of parsed.models) {
+      const mid = String(m?.model || "").trim();
+      if (!mid || m.isDisabled || disabled.has(mid) || excludeSet.has(mid.toLowerCase())) continue;
+      if (m.online === false) continue; // Pula modelos que falharam no ping real do NexusMind
+      const free = isFreeModelId(mid);
+      if (preferFree && !free) continue;
+      if (!preferFree && free) continue;
+      candidates.push({
+        model: mid,
+        provider: String(m.group || inferProviderId(mid)),
+        isFree: free,
+        intelligenceScore: Number(m.capabilityScore || estimateModelIntelligence(mid)),
+        latencyMs:
+          typeof m.pingLatencyMs === "number"
+            ? m.pingLatencyMs
+            : typeof m.avgFirstTokenMs === "number"
+            ? m.avgFirstTokenMs
+            : typeof m.avgDurationMs === "number"
+            ? m.avgDurationMs
+            : null,
+        combinedScore: Number(m.score ?? estimateModelIntelligence(mid)),
+        online: true,
+        calls: Number(m.calls || 0),
+        source: "nexusmind_ranking",
+      });
+    }
+    if (candidates.length > 0) {
+      candidates.sort((a, b) => b.combinedScore - a.combinedScore);
+      return candidates;
+    }
+  }
+
+  // 3. Fallback direto em ~/.buzz/.scratch/nm_usage.json (telemetria bruta do Gateway)
+  if (typeof host?.readFile === "function") {
+    for (const p of SHARED_USAGE_PATHS) {
+      try {
+        const raw = await host.readFile(p);
+        if (!raw) continue;
+        const txt = decodeHostBytes(raw);
+        const obj = JSON.parse(txt);
+        const items: any[] = Array.isArray(obj?.data?.items)
+          ? obj.data.items
+          : Array.isArray(obj?.items)
+          ? obj.items
+          : [];
+        if (items.length === 0) continue;
+
+        const acc = new Map<string, { calls: number; durSum: number; durN: number }>();
+        for (const it of items) {
+          const mid = String(it?.model || "").trim();
+          if (!mid || disabled.has(mid) || excludeSet.has(mid.toLowerCase())) continue;
+          const free = isFreeModelId(mid);
+          if (preferFree && !free) continue;
+          if (!preferFree && free) continue;
+          let st = acc.get(mid);
+          if (!st) {
+            st = { calls: 0, durSum: 0, durN: 0 };
+            acc.set(mid, st);
+          }
+          st.calls += 1;
+          const dur = Number(it?.first_token_ms ?? it?.duration_ms);
+          if (Number.isFinite(dur) && dur > 0 && dur < 180000) {
+            st.durSum += dur;
+            st.durN += 1;
+          }
+        }
+
+        const fromUsage: ModelCandidateScore[] = [];
+        for (const [mid, st] of acc.entries()) {
+          if (st.calls < 5) continue;
+          const intel = estimateModelIntelligence(mid);
+          const avgMs = st.durN > 0 ? Math.round(st.durSum / st.durN) : null;
+          const adoption = Math.min(25, Math.log10(st.calls + 1) * 6.5);
+          const speedBonus = avgMs !== null ? Math.max(0, 15 - (avgMs / 1000) * 0.5) : 5;
+          fromUsage.push({
+            model: mid,
+            provider: inferProviderId(mid),
+            isFree: isFreeModelId(mid),
+            intelligenceScore: intel,
+            latencyMs: avgMs,
+            combinedScore: Number((intel * 0.65 + adoption + speedBonus).toFixed(2)),
+            online: true,
+            calls: st.calls,
+            source: "gateway_usage",
+          });
+        }
+        if (fromUsage.length > 0) {
+          fromUsage.sort((a, b) => b.combinedScore - a.combinedScore);
+          return fromUsage.slice(0, 10);
+        }
+      } catch {}
+    }
+  }
+
+  return [];
+}
+
 async function discoverNexusMindCatalog(ctx: Context): Promise<Array<{ id: string; provider: ProviderGroupConfig }>> {
-  const hostReq = (ctx as any)?.host?.request;
+  const host = (ctx as any)?.host;
   const disabled = getDisabledModelsFromLocalStorage();
   const seen = new Map<string, { id: string; provider: ProviderGroupConfig }>();
 
-  if (typeof hostReq === "function") {
+  if (typeof host?.request === "function") {
     await Promise.all(
       NEXUSMIND_PROVIDERS.map(async (prov) => {
         try {
-          const res = await hostReq({
+          const res = await host.request({
             url: "https://api.nexusmind.digital/v1/models",
             method: "GET",
             headers: {
@@ -159,13 +335,12 @@ async function discoverNexusMindCatalog(ctx: Context): Promise<Array<{ id: strin
             }
           }
         } catch {
-          // Grupo indisponível no momento — continua nos demais
+          // Grupo indisponível ou origem bloqueada no OrgFy
         }
       })
     );
   }
 
-  // Fallback para cache local do NexusMind plugin caso o catálogo /v1/models falhe
   if (seen.size === 0) {
     try {
       const raw = (globalThis as any)?.localStorage?.getItem?.("nexusmind_cached_models");
@@ -181,9 +356,7 @@ async function discoverNexusMindCatalog(ctx: Context): Promise<Array<{ id: strin
           }
         }
       }
-    } catch {
-      // Sem cache local
-    }
+    } catch {}
   }
 
   return Array.from(seen.values());
@@ -194,8 +367,8 @@ async function probeModelLive(
   modelId: string,
   prov: ProviderGroupConfig
 ): Promise<{ online: boolean; latencyMs: number | null; error?: string }> {
-  const hostReq = (ctx as any)?.host?.request;
-  if (typeof hostReq !== "function") {
+  const host = (ctx as any)?.host;
+  if (typeof host?.request !== "function") {
     return { online: false, latencyMs: null, error: "ctx.host.request indisponível" };
   }
   const url = prov.isAnthropic
@@ -217,7 +390,7 @@ async function probeModelLive(
 
   const t0 = Date.now();
   try {
-    const res = await hostReq({
+    const res = await host.request({
       url,
       method: "POST",
       headers,
@@ -263,17 +436,18 @@ function findAgentInSnapshot(agentsApi: any, query?: string, pubkey?: string | n
 
 /**
  * Integração nativa OrgFy Control Room ↔ NexusMind Gateway:
- * 1. Consulta os modelos disponíveis no NexusMind (priorizando modelos FREE por padrão);
- * 2. Faz ping real em paralelo nos top candidatos mais inteligentes (excluindo o modelo em erro);
- * 3. Elege o melhor modelo online (maior inteligência + menor latência real);
- * 4. Opcionalmente (apply: true) salva o novo modelo no agente via ctx.agents.save()
- *    e re-dispara o agente via ctx.agents.wake() na thread original.
+ * 1. Tenta ping ao vivo via ctx.host.request (quando permitido);
+ * 2. Se o OrgFy estiver sem origem de rede do NexusMind (CSP/manifest), consome automaticamente
+ *    o Ranking Real compartilhado pelo NexusMind Gateway (~/.buzz/.scratch/nexusmind-model-ranking.json
+ *    ou telemetria real de 30k chamadas em ~/.buzz/.scratch/nm_usage.json);
+ * 3. Por padrão evita modelos :free (propensos a HTTP 429), salvo se prefer_free: true;
+ * 4. Opcionalmente (apply: true) salva o novo modelo no agente via ctx.agents.save().
  */
 export async function executeSmartModelFailover(
   ctx: Context,
   input: ModelFailoverInput = {}
 ): Promise<ModelFailoverResult> {
-  const preferFree = input.prefer_free !== false;
+  const preferFree = Boolean(input.prefer_free);
   const applyChange = Boolean(input.apply);
   const retrigger = input.retrigger !== false;
   const maxProbes = Math.max(1, Math.min(10, Number(input.max_probes || 6)));
@@ -289,70 +463,62 @@ export async function executeSmartModelFailover(
       ? String((matchedAgent.config as any).model || "")
       : "") || (input.failed_model || null);
 
-  const catalog = await discoverNexusMindCatalog(ctx);
-  if (catalog.length === 0) {
-    return {
-      ok: false,
-      mode: applyChange ? "applied" : "dry_run",
-      agentName: matchedAgent?.name || input.agente || null,
-      agentKey: matchedAgent?.key || null,
-      previousModel,
-      selectedModel: null,
-      selectedProvider: null,
-      selectedLatencyMs: null,
-      selectedIntelligenceScore: null,
-      retriggered: false,
-      candidatesTested: 0,
-      ranking: [],
-      message: "Nenhum modelo retornado pelo NexusMind Gateway (/v1/models indisponível e sem cache local).",
-    };
-  }
-
-  // Filtrar candidatos (excluindo o modelo em falha atual)
   const excludeSet = new Set<string>();
   if (failedNorm) excludeSet.add(failedNorm);
   if (previousModel) excludeSet.add(previousModel.toLowerCase());
 
-  let pool = catalog.filter((c) => !excludeSet.has(c.id.toLowerCase()));
-  if (preferFree) {
-    const freeOnly = pool.filter((c) => isFreeModelId(c.id));
-    if (freeOnly.length > 0) {
-      pool = freeOnly;
+  // 1. Primeiro verifica o ranking real compartilhado pelo NexusMind Gateway (zero erro de CSP)
+  const sharedRanking = await loadSharedNexusMindRanking(ctx, excludeSet, preferFree);
+
+  // 2. Se o host permitir chamadas diretas ao NexusMind (ex: testes ou rede liberada), faz probe ao vivo
+  let probed: ModelCandidateScore[] = [];
+  if (sharedRanking.length === 0) {
+    const catalog = await discoverNexusMindCatalog(ctx);
+    let pool = catalog.filter((c) => !excludeSet.has(c.id.toLowerCase()));
+    if (preferFree) {
+      const freeOnly = pool.filter((c) => isFreeModelId(c.id));
+      if (freeOnly.length > 0) pool = freeOnly;
+    } else {
+      const paidOnly = pool.filter((c) => !isFreeModelId(c.id));
+      if (paidOnly.length > 0) pool = paidOnly;
+    }
+
+    const preRanked = pool
+      .map((c) => ({ ...c, intelligenceScore: estimateModelIntelligence(c.id) }))
+      .sort((a, b) => b.intelligenceScore - a.intelligenceScore)
+      .slice(0, maxProbes);
+
+    if (preRanked.length > 0) {
+      probed = await Promise.all(
+        preRanked.map(async (cand) => {
+          const res = await probeModelLive(ctx, cand.id, cand.provider);
+          const combinedScore = res.online
+            ? computeCombinedModelScore(cand.intelligenceScore, res.latencyMs)
+            : -1;
+          return {
+            model: cand.id,
+            provider: cand.provider.id,
+            isFree: isFreeModelId(cand.id),
+            intelligenceScore: cand.intelligenceScore,
+            latencyMs: res.latencyMs,
+            combinedScore,
+            online: res.online,
+            source: "live_probe" as const,
+            error: res.error,
+          };
+        })
+      );
+      probed.sort((a, b) => {
+        if (a.online !== b.online) return a.online ? -1 : 1;
+        if (b.combinedScore !== a.combinedScore) return b.combinedScore - a.combinedScore;
+        return (a.latencyMs ?? 999999) - (b.latencyMs ?? 999999);
+      });
     }
   }
 
-  // Pré-ordena por inteligência estimada e faz ping real nos top maxProbes em paralelo
-  const preRanked = pool
-    .map((c) => ({ ...c, intelligenceScore: estimateModelIntelligence(c.id) }))
-    .sort((a, b) => b.intelligenceScore - a.intelligenceScore)
-    .slice(0, maxProbes);
+  const finalRanking = sharedRanking.length > 0 ? sharedRanking : probed;
+  const winner = finalRanking.find((p) => p.online) || null;
 
-  const probed: ModelCandidateScore[] = await Promise.all(
-    preRanked.map(async (cand) => {
-      const res = await probeModelLive(ctx, cand.id, cand.provider);
-      const combinedScore = res.online
-        ? computeCombinedModelScore(cand.intelligenceScore, res.latencyMs)
-        : -1;
-      return {
-        model: cand.id,
-        provider: cand.provider.id,
-        isFree: isFreeModelId(cand.id),
-        intelligenceScore: cand.intelligenceScore,
-        latencyMs: res.latencyMs,
-        combinedScore,
-        online: res.online,
-        error: res.error,
-      };
-    })
-  );
-
-  probed.sort((a, b) => {
-    if (a.online !== b.online) return a.online ? -1 : 1;
-    if (b.combinedScore !== a.combinedScore) return b.combinedScore - a.combinedScore;
-    return (a.latencyMs ?? 999999) - (b.latencyMs ?? 999999);
-  });
-
-  const winner = probed.find((p) => p.online) || null;
   if (!winner) {
     return {
       ok: false,
@@ -365,15 +531,24 @@ export async function executeSmartModelFailover(
       selectedLatencyMs: null,
       selectedIntelligenceScore: null,
       retriggered: false,
-      candidatesTested: probed.length,
-      ranking: probed,
-      message: `Nenhum dos ${probed.length} modelos testados respondeu HTTP 200 no ping real do NexusMind.`,
+      candidatesTested: finalRanking.length,
+      ranking: finalRanking,
+      message:
+        finalRanking.length > 0
+          ? `Nenhum dos ${finalRanking.length} modelos testados respondeu HTTP 200 no ping real do NexusMind. Abra a aba "Ranking de Modelos" no plugin NexusMind Gateway para atualizar o ranking.`
+          : "Ranking do NexusMind indisponível. Abra o plugin NexusMind Gateway > Ranking de Modelos para gerar o ranking em tempo real.",
     };
   }
 
   let appliedOk = false;
   let retriggered = false;
   let applyNote = "";
+  const sourceTag =
+    winner.source === "nexusmind_ranking"
+      ? `Ranking NexusMind · score ${winner.combinedScore}${winner.calls ? ` · ${winner.calls} chamadas reais` : ""}`
+      : winner.source === "gateway_usage"
+      ? `Telemetria Gateway · score ${winner.combinedScore}${winner.calls ? ` · ${winner.calls} chamadas reais` : ""}`
+      : `${winner.latencyMs}ms · score ${winner.combinedScore}`;
 
   if (applyChange) {
     if (!matchedAgent) {
@@ -388,9 +563,9 @@ export async function executeSmartModelFailover(
         selectedLatencyMs: winner.latencyMs,
         selectedIntelligenceScore: winner.intelligenceScore,
         retriggered: false,
-        candidatesTested: probed.length,
-        ranking: probed,
-        message: `Melhor modelo eleito (${winner.model}, ${winner.latencyMs}ms), mas agente '${input.agente || input.agent_pubkey || ""}' não encontrado no Buzz Desktop.`,
+        candidatesTested: finalRanking.length,
+        ranking: finalRanking,
+        message: `Melhor modelo eleito (${winner.model}, ${sourceTag}), mas agente '${input.agente || input.agent_pubkey || ""}' não encontrado no Buzz Desktop.`,
       };
     }
 
@@ -406,9 +581,9 @@ export async function executeSmartModelFailover(
         selectedLatencyMs: winner.latencyMs,
         selectedIntelligenceScore: winner.intelligenceScore,
         retriggered: false,
-        candidatesTested: probed.length,
-        ranking: probed,
-        message: `Melhor modelo eleito (${winner.model}, ${winner.latencyMs}ms), mas ctx.agents.save indisponível neste host.`,
+        candidatesTested: finalRanking.length,
+        ranking: finalRanking,
+        message: `Melhor modelo eleito (${winner.model}, ${sourceTag}), mas ctx.agents.save indisponível neste host.`,
       };
     }
 
@@ -424,7 +599,7 @@ export async function executeSmartModelFailover(
     try {
       await agentsApi.save(matchedAgent.key, { config: currentCfg });
       appliedOk = true;
-      applyNote = `Modelo de ${matchedAgent.name || matchedAgent.key} atualizado de '${previousModel || "padrão"}' para '${winner.model}' (${winner.provider}, ${winner.latencyMs}ms, score ${winner.combinedScore}).`;
+      applyNote = `Modelo de ${matchedAgent.name || matchedAgent.key} atualizado de '${previousModel || "padrão"}' para '${winner.model}' (${winner.provider} · ${sourceTag}).`;
     } catch (err: any) {
       return {
         ok: false,
@@ -437,8 +612,8 @@ export async function executeSmartModelFailover(
         selectedLatencyMs: winner.latencyMs,
         selectedIntelligenceScore: winner.intelligenceScore,
         retriggered: false,
-        candidatesTested: probed.length,
-        ranking: probed,
+        candidatesTested: finalRanking.length,
+        ranking: finalRanking,
         message: `Falha ao salvar novo modelo '${winner.model}' em ${matchedAgent.name || matchedAgent.key}: ${err?.message || err}`,
       };
     }
@@ -452,7 +627,7 @@ export async function executeSmartModelFailover(
           ...(root ? { root } : {}),
           text:
             input.retrigger_text ||
-            `[ORGFY FAILOVER AUTOMÁTICO] Seu modelo foi migrado para '${winner.model}' (${winner.latencyMs}ms online via NexusMind) após erro de API no modelo anterior. Retome imediatamente o último passo da tarefa com escopo fechado.`,
+            `[ORGFY FAILOVER AUTOMÁTICO] Seu modelo foi migrado para '${winner.model}' (${winner.provider} · ${sourceTag}) após erro de API no modelo anterior. Retome imediatamente o último passo da tarefa com escopo fechado.`,
         });
         retriggered = true;
         applyNote += " Agente re-disparado automaticamente.";
@@ -473,10 +648,10 @@ export async function executeSmartModelFailover(
     selectedLatencyMs: winner.latencyMs,
     selectedIntelligenceScore: winner.intelligenceScore,
     retriggered,
-    candidatesTested: probed.length,
-    ranking: probed,
+    candidatesTested: finalRanking.length,
+    ranking: finalRanking,
     message:
       applyNote ||
-      `Melhor modelo disponível (${preferFree ? "FREE" : "ALL"}): ${winner.model} (${winner.provider} · ${winner.latencyMs}ms · inteligência ${winner.intelligenceScore}/100 · score ${winner.combinedScore}).`,
+      `Melhor modelo disponível (${preferFree ? "FREE" : "PRODUÇÃO"}): ${winner.model} (${winner.provider} · ${sourceTag}).`,
   };
 }

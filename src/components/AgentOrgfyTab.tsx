@@ -95,11 +95,14 @@ export function createAgentOrgfyTabComponent(ctx: Context) {
           agente: agentName,
           agent_pubkey: agentPubkey || undefined,
           failed_model: currentModel !== "padrão" ? currentModel : undefined,
-          prefer_free: true,
+          prefer_free: false,
           apply: true,
           retrigger: false,
         });
         setStatusBanner({ ok: res.ok, text: res.message });
+        if (res.ok) {
+          await loadAgentContext();
+        }
       } catch (err: any) {
         setStatusBanner({ ok: false, text: `Erro no failover: ${err?.message || err}` });
       } finally {
