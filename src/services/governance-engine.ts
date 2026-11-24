@@ -721,7 +721,7 @@ export async function evaluateGovernanceAndReact(
               channel: wakeChannel,
               ...(wakeRoot ? { root: wakeRoot } : {}),
               text: isRadarAlert
-                ? `@${wakeKey} [ORGFY RADAR AUTO-CURA · ${headerLabel} · ${al.codigo}] ${al.mensagem} Ação obrigatória agora: ${al.acao_sugerida}${escalationSuffix}`
+                ? `@${wakeKey} ORDEM OPERACIONAL OBRIGATÓRIA [ORGFY RADAR AUTO-CURA · ${headerLabel} · ${al.codigo}] (Isto NÃO é telemetria passiva — execute agora e publique o resultado no canal). ${al.mensagem} Ação obrigatória agora: ${al.acao_sugerida}${escalationSuffix}`
                 : `[ORGFY GOVERNANÇA] ${al.mensagem} Ação recomendada: ${al.acao_sugerida}`,
             });
             if (isRadarAlert && radarIncidentKey) {
