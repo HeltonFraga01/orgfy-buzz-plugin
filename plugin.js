@@ -3971,6 +3971,217 @@ function createChannelPulsePanel(ctx, fetchKpis) {
     );
   };
 }
+const ORGFY_REPO_ROOT = "/Users/heltonfraga/.buzz/REPOS/orgfy";
+const SCRATCH_ROOT = "/Users/heltonfraga/.buzz/.scratch";
+const BUZZ_AGENTS_DIR = "/Users/heltonfraga/Library/Application Support/xyz.block.buzz.desktop/agents";
+function decodeBytes(raw) {
+  if (typeof raw === "string") return raw;
+  if (raw instanceof Uint8Array) return new TextDecoder("utf-8").decode(raw);
+  if (raw instanceof ArrayBuffer) return new TextDecoder("utf-8").decode(new Uint8Array(raw));
+  if (raw && typeof raw === "object") {
+    const obj = raw;
+    if (typeof obj.content === "string") return obj.content;
+    if (typeof obj.text === "string") return obj.text;
+    if (ArrayBuffer.isView(raw)) {
+      return new TextDecoder("utf-8").decode(
+        new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength)
+      );
+    }
+  }
+  return String(raw ?? "");
+}
+async function safeReadText(ctx, filePath) {
+  const host = ctx.host;
+  if (!(host == null ? void 0 : host.readFile)) return null;
+  try {
+    const raw = await host.readFile(filePath);
+    return decodeBytes(raw);
+  } catch {
+    return null;
+  }
+}
+async function safeReadJson(ctx, filePath) {
+  const txt = await safeReadText(ctx, filePath);
+  if (!txt) return null;
+  try {
+    return JSON.parse(txt);
+  } catch {
+    return null;
+  }
+}
+function extractField(md, label) {
+  var _a;
+  const rx = new RegExp(`(?im)^(?:-\\s+)?\\*\\*${label}:\\*\\*\\s*(.+)$`);
+  const m = md.match(rx);
+  return ((_a = m == null ? void 0 : m[1]) == null ? void 0 : _a.trim()) || null;
+}
+function extractSection(md, heading) {
+  const rx = new RegExp(`(?is)##\\s*${heading}\\s*\\n([\\s\\S]*?)(?=\\n##\\s+|$)`);
+  const m = md.match(rx);
+  if (!(m == null ? void 0 : m[1])) return null;
+  const cleaned = m[1].replace(/^\*\*[^*]+:\*\*\s*/i, "").trim();
+  return cleaned || null;
+}
+function inferCardSlugCandidates(card) {
+  const candidates = [];
+  const title = String(card.title || "").trim();
+  const mSlug = title.match(/^([A-Z0-9]+(?:-[A-Z0-9]+)+)/);
+  if (mSlug == null ? void 0 : mSlug[1]) {
+    candidates.push(mSlug[1]);
+  }
+  const mSpec = title.match(/\b(SPEC-\d{4})[\s-]+(T\d{3}(?:-\d{3})?)\b/i);
+  if (mSpec) {
+    candidates.push(`${mSpec[1].toUpperCase()}-${mSpec[2].toUpperCase()}`);
+  }
+  if (card.idempotencyKey) {
+    candidates.push(card.idempotencyKey.toUpperCase());
+  }
+  return Array.from(new Set(candidates));
+}
+async function hydrateIssueDetail(ctx, card) {
+  var _a, _b, _c, _d, _e, _f, _g;
+  const fullId = String(card.fullIssueId || card.issueId || "").trim();
+  const shortId = fullId.slice(0, 8).toLowerCase();
+  const empresa = String(card.empresa || "orgfy").trim().toLowerCase();
+  let cardMd = null;
+  let cardFileFound = null;
+  for (const slug of inferCardSlugCandidates(card)) {
+    const path = `${ORGFY_REPO_ROOT}/cards/${slug}.md`;
+    const txt = await safeReadText(ctx, path);
+    if (txt) {
+      cardMd = txt;
+      cardFileFound = `cards/${slug}.md`;
+      break;
+    }
+  }
+  const [aceiteFile, esteiraState, locksData, empresaManifest, identitiesData, transicoesTxt] = await Promise.all([
+    fullId ? safeReadJson(ctx, `${ORGFY_REPO_ROOT}/.esteira/estado/aceites/${fullId}.json`) : Promise.resolve(null),
+    safeReadJson(ctx, `${ORGFY_REPO_ROOT}/.esteira/estado/esteira-minima-state.json`),
+    safeReadJson(ctx, `${SCRATCH_ROOT}/orgfy-locks.json`),
+    safeReadJson(ctx, `${ORGFY_REPO_ROOT}/empresas/${empresa}.json`),
+    safeReadJson(ctx, `${BUZZ_AGENTS_DIR}/identities.json`),
+    safeReadText(ctx, `${SCRATCH_ROOT}/esteira-transicoes.jsonl`)
+  ]);
+  const stateAceite = ((_a = esteiraState == null ? void 0 : esteiraState.aceites) == null ? void 0 : _a[fullId]) || ((_b = esteiraState == null ? void 0 : esteiraState.aceites) == null ? void 0 : _b[shortId]) || null;
+  const realHash = String(
+    (aceiteFile == null ? void 0 : aceiteFile.hash) || (aceiteFile == null ? void 0 : aceiteFile.sha256) || (stateAceite == null ? void 0 : stateAceite.hash) || (stateAceite == null ? void 0 : stateAceite.sha256) || card.acceptanceHash || ""
+  ).trim() || null;
+  const realAcceptCmd = String(
+    (aceiteFile == null ? void 0 : aceiteFile.comando) || (stateAceite == null ? void 0 : stateAceite.comando) || card.acceptanceCommand || ""
+  ).trim() || null;
+  const nowMs = Date.now();
+  const lockRec = (locksData == null ? void 0 : locksData[fullId]) || (locksData ? Object.values(locksData).find(
+    (v) => v && String(v.issueId || "").toLowerCase().startsWith(shortId)
+  ) : null);
+  const lockActive = Boolean(lockRec && typeof lockRec.expiresAt === "number" && lockRec.expiresAt > nowMs);
+  const lockExpiresInMin = lockActive ? Math.max(1, Math.round((lockRec.expiresAt - nowMs) / 6e4)) : null;
+  let executorProvider = null;
+  let executorModel = null;
+  const execName = String(card.executor || (lockRec == null ? void 0 : lockRec.agentKey) || "").trim();
+  if (execName && identitiesData) {
+    const list = Array.isArray(identitiesData) ? identitiesData : Array.isArray(identitiesData.agents) ? identitiesData.agents : [];
+    const matched = list.find(
+      (a) => a && typeof a.name === "string" && a.name.trim().toLowerCase() === execName.toLowerCase()
+    );
+    if (matched == null ? void 0 : matched.pubkey) {
+      const st = await safeReadJson(
+        ctx,
+        `${BUZZ_AGENTS_DIR}/state/buzz.agent.v1%3A${matched.pubkey}`
+      );
+      if (st == null ? void 0 : st.config) {
+        executorProvider = st.config.provider || null;
+        executorModel = st.config.model || null;
+      }
+    }
+  }
+  const probes = [];
+  let probesSource = `empresas/${empresa}.json`;
+  const manifestProbes = (_c = empresaManifest == null ? void 0 : empresaManifest.probes_caixa_preta) == null ? void 0 : _c.probes_padrao;
+  const isMerged = Boolean(((_d = esteiraState == null ? void 0 : esteiraState.merged) == null ? void 0 : _d[fullId]) || ((_e = esteiraState == null ? void 0 : esteiraState.merged) == null ? void 0 : _e[shortId]) || card.stage === "feito");
+  const ciRec = ((_f = esteiraState == null ? void 0 : esteiraState.ci) == null ? void 0 : _f[fullId]) || ((_g = esteiraState == null ? void 0 : esteiraState.ci) == null ? void 0 : _g[shortId]) || null;
+  if (Array.isArray(manifestProbes) && manifestProbes.length > 0) {
+    for (const pr of manifestProbes) {
+      const tipo = String((pr == null ? void 0 : pr.tipo) || "probe");
+      const label = tipo === "http_rota" ? `Rota HTTP (${pr.url || "health"})` : tipo === "supabase_rls" ? `Supabase RLS (${(pr.tabelas_obrigatorias || []).join(", ") || "tabelas"})` : tipo === "playwright_console" ? "Playwright Zero Console Err" : tipo;
+      probes.push({
+        label,
+        status: isMerged ? "PASS" : "PENDENTE",
+        detail: isMerged ? "Aprovado no Gate" : "Aguardando execução do Gate"
+      });
+    }
+  } else {
+    probesSource = `CI / Gate (${empresa})`;
+    probes.push({
+      label: "CI / Pytest da Esteira",
+      status: (ciRec == null ? void 0 : ciRec.ok) === true || isMerged ? "PASS" : (ciRec == null ? void 0 : ciRec.ok) === false ? "FAIL" : "PENDENTE",
+      detail: (ciRec == null ? void 0 : ciRec.sha) ? `SHA ${String(ciRec.sha).slice(0, 8)}` : isMerged ? "Integrado na main" : "Aguardando CI"
+    });
+    probes.push({
+      label: "Aceite Congelado (L-22)",
+      status: realHash ? "PASS" : "PENDENTE",
+      detail: realHash ? `SHA-256 ${realHash.slice(0, 12)}…` : "Sem arquivo em .esteira/estado/aceites/"
+    });
+    probes.push({
+      label: "Probes Web (Caddy / RLS / Playwright)",
+      status: "NA",
+      detail: `Não configurados em empresas/${empresa}.json`
+    });
+  }
+  const transitions = [];
+  let rejectionsCount = 0;
+  if (transicoesTxt && shortId) {
+    for (const line of transicoesTxt.split("\n")) {
+      if (!line.trim() || !line.toLowerCase().includes(shortId)) continue;
+      try {
+        const ev = JSON.parse(line);
+        const de = String(ev.de || ev.estagio_anterior || "?");
+        const para = String(ev.para || ev.estagio_novo || "?");
+        const detalhe = String(ev.detalhe || "");
+        if (para.toLowerCase().includes("recus") || para.toLowerCase().includes("conflito") || detalhe.toLowerCase().includes("recus")) {
+          rejectionsCount += 1;
+        }
+        transitions.push({
+          ts: String(ev.ts || ev.timestamp || ""),
+          de,
+          para,
+          autor: String(ev.autor || ""),
+          detalhe
+        });
+      } catch {
+      }
+    }
+  }
+  const escritaRaw = cardMd ? extractField(cardMd, "Escrita exclusiva") : null;
+  const escritaExclusiva = escritaRaw ? escritaRaw.split(",").map((s) => s.trim()).filter(Boolean) : [];
+  return {
+    loadedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    cardFileFound,
+    objetivo: cardMd && extractSection(cardMd, "Objetivo") || card.objetivo || null,
+    contexto: cardMd && extractField(cardMd, "Contexto") || card.contexto || null,
+    autoridade: cardMd && extractField(cardMd, "Autoridade") || card.autoridade || null,
+    decisao: cardMd && extractField(cardMd, "Decisão") || card.decisao || null,
+    escritaExclusiva,
+    feitoQuando: cardMd && extractField(cardMd, "Feito quando") || card.feitoQuando || null,
+    provaExigida: cardMd && extractSection(cardMd, "Prova exigida") || card.provaExigida || null,
+    acceptanceCommand: realAcceptCmd,
+    acceptanceHash: realHash,
+    acceptanceFrozenValid: Boolean(realHash),
+    modoBuzz: cardMd && extractField(cardMd, "Modo") || card.modoBuzz || null,
+    goalMaxTurns: cardMd && extractField(cardMd, "Goal max turns") || (card.goalMaxTurns ? String(card.goalMaxTurns) : null),
+    maxRuntime: cardMd && extractField(cardMd, "Tempo máximo") || card.maxRuntime || null,
+    worktreePath: cardMd && extractField(cardMd, "Workspace") || card.worktreePath || null,
+    branch: (lockRec == null ? void 0 : lockRec.branch) || cardMd && extractField(cardMd, "Branch") || card.branch || null,
+    lockActive,
+    lockAgent: (lockRec == null ? void 0 : lockRec.agentKey) || null,
+    lockExpiresInMin,
+    executorProvider,
+    executorModel,
+    probes,
+    probesSource,
+    transitions: transitions.slice(-6),
+    rejectionsCount
+  };
+}
 const NEXUSMIND_PROVIDERS = [
   {
     id: "nexusmind_openai",
@@ -6352,7 +6563,27 @@ function apply(ctx) {
     const [isMigrating, setIsMigrating] = React.useState(false);
     const [migrationLog, setMigrationLog] = React.useState("");
     const [activeIssueDetailCard, setActiveIssueDetailCard] = React.useState(null);
+    const [hydratedIssueDetail, setHydratedIssueDetail] = React.useState(null);
+    const [isHydratingIssueDetail, setIsHydratingIssueDetail] = React.useState(false);
     const [activeCentralTab, setActiveCentralTab] = React.useState("board");
+    React.useEffect(() => {
+      let cancelled = false;
+      if (!activeIssueDetailCard) {
+        setHydratedIssueDetail(null);
+        return;
+      }
+      setIsHydratingIssueDetail(true);
+      hydrateIssueDetail(ctx, activeIssueDetailCard).then((res) => {
+        if (!cancelled) setHydratedIssueDetail(res);
+      }).catch(() => {
+        if (!cancelled) setHydratedIssueDetail(null);
+      }).finally(() => {
+        if (!cancelled) setIsHydratingIssueDetail(false);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, [activeIssueDetailCard]);
     const [holdingData, setHoldingData] = React.useState(null);
     const [newApprovalTitle, setNewApprovalTitle] = React.useState("");
     const [newApprovalDesc, setNewApprovalDesc] = React.useState("");
@@ -8965,10 +9196,15 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
                 h(
                   "div",
                   { style: { fontSize: "12px", color: "#f1f5f9", lineHeight: "1.5" } },
-                  activeIssueDetailCard.objetivo || activeIssueDetailCard.title
+                  (hydratedIssueDetail == null ? void 0 : hydratedIssueDetail.objetivo) || activeIssueDetailCard.objetivo || activeIssueDetailCard.title
+                ),
+                (hydratedIssueDetail == null ? void 0 : hydratedIssueDetail.cardFileFound) && h(
+                  "div",
+                  { style: { fontSize: "10px", color: "#64748b", fontFamily: "monospace", marginTop: "2px" } },
+                  `Fonte real: ${hydratedIssueDetail.cardFileFound}`
                 )
               ),
-              // 2. Estado & Autoridade Decisória
+              // 2. Estado & Autoridade Decisória (100% real, sem fallback genérico)
               h(
                 "div",
                 {
@@ -8991,13 +9227,18 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
                   "div",
                   { style: { fontSize: "11px", color: "#cbd5e1", lineHeight: "1.5" } },
                   h("strong", { style: { color: "#ffffff" } }, "Contexto: "),
-                  activeIssueDetailCard.contexto || "Execução rastreada e orquestrada pela esteira determinística v10."
+                  (hydratedIssueDetail == null ? void 0 : hydratedIssueDetail.contexto) || activeIssueDetailCard.contexto || (isHydratingIssueDetail ? "Carregando card em disco..." : "Não declarado no card.")
                 ),
                 h(
                   "div",
                   { style: { fontSize: "11px", color: "#cbd5e1", lineHeight: "1.5" } },
-                  h("strong", { style: { color: "#ffffff" } }, "Decisão: "),
-                  activeIssueDetailCard.decisao || activeIssueDetailCard.autoridade || "DECIDIDO Iris conforme diretriz arquitetural da holding."
+                  h("strong", { style: { color: "#ffffff" } }, "Decisão / Autoridade: "),
+                  (hydratedIssueDetail == null ? void 0 : hydratedIssueDetail.decisao) || (hydratedIssueDetail == null ? void 0 : hydratedIssueDetail.autoridade) || activeIssueDetailCard.decisao || activeIssueDetailCard.autoridade || "Não declarada no card."
+                ),
+                (hydratedIssueDetail == null ? void 0 : hydratedIssueDetail.escritaExclusiva) && hydratedIssueDetail.escritaExclusiva.length > 0 && h(
+                  "div",
+                  { style: { fontSize: "10px", color: "#93c5fd", fontFamily: "monospace", marginTop: "2px" } },
+                  `Escrita exclusiva: ${hydratedIssueDetail.escritaExclusiva.join(", ")}`
                 )
               ),
               // 3. Invariante L-22: Comando de Aceite Congelado
@@ -9035,8 +9276,8 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
                       {
                         onClick: () => {
                           var _a3;
-                          const cmd = activeIssueDetailCard.acceptanceCommand || "python3 ferramentas/esteira/lint_card.py";
-                          if (typeof navigator !== "undefined" && ((_a3 = navigator == null ? void 0 : navigator.clipboard) == null ? void 0 : _a3.writeText)) {
+                          const cmd = (hydratedIssueDetail == null ? void 0 : hydratedIssueDetail.acceptanceCommand) || activeIssueDetailCard.acceptanceCommand || "";
+                          if (cmd && typeof navigator !== "undefined" && ((_a3 = navigator == null ? void 0 : navigator.clipboard) == null ? void 0 : _a3.writeText)) {
                             navigator.clipboard.writeText(cmd);
                             showNotification("success", "Comando de aceite L-22 copiado!");
                           }
@@ -9054,7 +9295,7 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
                           alignItems: "center",
                           gap: "4px"
                         },
-                        title: "Copiar comando de aceite congelado"
+                        title: "Copiar comando de aceite"
                       },
                       SVG.copy({ h, width: 10, height: 10 }),
                       "Copiar"
@@ -9070,20 +9311,28 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
                       backgroundColor: "#020403",
                       padding: "8px 10px",
                       borderRadius: "6px",
-                      color: "#34d399",
+                      color: (hydratedIssueDetail == null ? void 0 : hydratedIssueDetail.acceptanceCommand) || activeIssueDetailCard.acceptanceCommand ? "#34d399" : "#9ca3af",
                       display: "block",
                       whiteSpace: "pre-wrap",
                       wordBreak: "break-all",
                       border: "1px solid rgba(16, 185, 129, 0.15)"
                     }
                   },
-                  activeIssueDetailCard.acceptanceCommand || "python3 ferramentas/esteira/lint_card.py"
+                  (hydratedIssueDetail == null ? void 0 : hydratedIssueDetail.acceptanceCommand) || activeIssueDetailCard.acceptanceCommand || "Comando de aceite ainda não registrado."
                 ),
                 h(
                   "div",
-                  { style: { fontSize: "10px", color: "#9ca3af", fontFamily: "monospace", display: "flex", justifyContent: "space-between" } },
-                  h("span", {}, `Hash de Aceite: ${(activeIssueDetailCard.acceptanceHash || "7b88aa12c5596489b91e92051dc73ff539e6a0082f42a5482329dc3309aef411").slice(0, 28)}...`),
-                  h("span", { style: { color: "#10b981", fontWeight: "600" } }, "✓ Congelamento Válido (Anti-Bypass)")
+                  { style: { fontSize: "10px", color: "#9ca3af", fontFamily: "monospace", display: "flex", justifyContent: "space-between", gap: "8px" } },
+                  h(
+                    "span",
+                    {},
+                    (hydratedIssueDetail == null ? void 0 : hydratedIssueDetail.acceptanceHash) ? `Hash de Aceite: ${hydratedIssueDetail.acceptanceHash.slice(0, 28)}...` : "Hash de Aceite: não gerado"
+                  ),
+                  h(
+                    "span",
+                    { style: { color: (hydratedIssueDetail == null ? void 0 : hydratedIssueDetail.acceptanceFrozenValid) ? "#10b981" : "#f59e0b", fontWeight: "600" } },
+                    (hydratedIssueDetail == null ? void 0 : hydratedIssueDetail.acceptanceFrozenValid) ? "✓ Congelamento Válido (Anti-Bypass)" : "Pendente de congelamento L-22"
+                  )
                 )
               ),
               // 4. Critérios de Feito & Provas Exigidas
@@ -9109,16 +9358,16 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
                   "div",
                   { style: { fontSize: "11px", color: "#cbd5e1", lineHeight: "1.5" } },
                   h("strong", { style: { color: "#ffffff" } }, "Feito quando: "),
-                  activeIssueDetailCard.feitoQuando || "Execução com exit 0 no CI e lint do card aprovado sem exceção."
+                  (hydratedIssueDetail == null ? void 0 : hydratedIssueDetail.feitoQuando) || activeIssueDetailCard.feitoQuando || "Não declarado no card."
                 ),
                 h(
                   "div",
-                  { style: { fontSize: "11px", color: "#cbd5e1", lineHeight: "1.5" } },
+                  { style: { fontSize: "11px", color: "#cbd5e1", lineHeight: "1.5", whiteSpace: "pre-wrap" } },
                   h("strong", { style: { color: "#ffffff" } }, "Prova exigida: "),
-                  activeIssueDetailCard.provaExigida || "Evidência verificável de saída limpa no runner oficial do Swarm."
+                  (hydratedIssueDetail == null ? void 0 : hydratedIssueDetail.provaExigida) || activeIssueDetailCard.provaExigida || "Não declarada no card."
                 )
               ),
-              // 5. Histórico de Ciclos & DSAP Backtracking
+              // 5. Histórico de Ciclos & DSAP Backtracking (100% real)
               h(
                 "div",
                 {
@@ -9141,7 +9390,7 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
                 h(
                   "div",
                   { style: { fontSize: "11px", color: "#9ca3af" } },
-                  activeIssueDetailCard.rejectionHistory && activeIssueDetailCard.rejectionHistory.length > 0 ? `Recusa recente: ${activeIssueDetailCard.rejectionHistory[0].reason} (${Math.round((activeIssueDetailCard.rejectionHistory[0].similarityToFirst || 0) * 100)}% similaridade)` : "Nenhuma recusa registrada nesta issue (FPY 100% no primeiro ciclo de execução)."
+                  activeIssueDetailCard.rejectionHistory && activeIssueDetailCard.rejectionHistory.length > 0 ? `Recusa recente: ${activeIssueDetailCard.rejectionHistory[0].reason} (${Math.round((activeIssueDetailCard.rejectionHistory[0].similarityToFirst || 0) * 100)}% similaridade)` : hydratedIssueDetail && hydratedIssueDetail.rejectionsCount > 0 ? `${hydratedIssueDetail.rejectionsCount} recusa(s)/conflito(s) registrados em esteira-transicoes.jsonl.` : activeIssueDetailCard.stage === "feito" ? "Concluída sem recusas registradas (FPY 100% real)." : hydratedIssueDetail && hydratedIssueDetail.transitions.length > 0 ? `${hydratedIssueDetail.transitions.length} transição(ões) registrada(s); última: ${hydratedIssueDetail.transitions[hydratedIssueDetail.transitions.length - 1].de} -> ${hydratedIssueDetail.transitions[hydratedIssueDetail.transitions.length - 1].para}.` : "Em andamento — aguardando conclusão e veredito do Gate (FPY ainda não fechado)."
                 )
               )
             ),
@@ -9197,33 +9446,45 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
                     gap: "6px"
                   }
                 },
-                h("span", { style: { fontSize: "10px", fontWeight: "700", color: "#38bdf8", textTransform: "uppercase" } }, "Execução Buzz Runtime"),
+                h("span", { style: { fontSize: "10px", fontWeight: "700", color: "#38bdf8", textTransform: "uppercase" } }, "Execução Buzz Runtime (Real)"),
                 h(
                   "div",
                   { style: { display: "flex", justifyContent: "space-between", fontSize: "11px" } },
                   h("span", { style: { color: "#9ca3af" } }, "Modo"),
-                  h("span", { style: { color: "#ffffff", fontFamily: "monospace" } }, `${activeIssueDetailCard.modoBuzz || "goal"} (${activeIssueDetailCard.goalMaxTurns || 20} turns max)`)
+                  h(
+                    "span",
+                    { style: { color: "#ffffff", fontFamily: "monospace" } },
+                    (hydratedIssueDetail == null ? void 0 : hydratedIssueDetail.modoBuzz) ? `${hydratedIssueDetail.modoBuzz}${hydratedIssueDetail.goalMaxTurns ? ` (${hydratedIssueDetail.goalMaxTurns} turns max)` : ""}` : "Não declarado"
+                  )
                 ),
                 h(
                   "div",
                   { style: { display: "flex", justifyContent: "space-between", fontSize: "11px" } },
                   h("span", { style: { color: "#9ca3af" } }, "Tempo Máximo"),
-                  h("span", { style: { color: "#ffffff", fontFamily: "monospace" } }, activeIssueDetailCard.maxRuntime || "3600s")
+                  h("span", { style: { color: "#ffffff", fontFamily: "monospace" } }, (hydratedIssueDetail == null ? void 0 : hydratedIssueDetail.maxRuntime) || "Não declarado")
                 ),
                 h(
                   "div",
                   { style: { display: "flex", justifyContent: "space-between", fontSize: "11px" } },
-                  h("span", { style: { color: "#9ca3af" } }, "Idempotency Key"),
-                  h("span", { style: { color: "#38bdf8", fontFamily: "monospace", fontSize: "10px" } }, activeIssueDetailCard.idempotencyKey || activeIssueDetailCard.issueId)
+                  h("span", { style: { color: "#9ca3af" } }, "Checkout Lock"),
+                  h(
+                    "span",
+                    { style: { color: (hydratedIssueDetail == null ? void 0 : hydratedIssueDetail.lockActive) ? "#10b981" : "#9ca3af", fontFamily: "monospace", fontSize: "10px" } },
+                    (hydratedIssueDetail == null ? void 0 : hydratedIssueDetail.lockActive) ? `Ativo (${hydratedIssueDetail.lockAgent} · ${hydratedIssueDetail.lockExpiresInMin}m)` : "Sem lock ativo"
+                  )
                 ),
                 h(
                   "div",
                   { style: { display: "flex", justifyContent: "space-between", fontSize: "11px" } },
-                  h("span", { style: { color: "#9ca3af" } }, "Worktree"),
-                  h("span", { style: { color: "#10b981", fontFamily: "monospace", fontSize: "10px" } }, activeIssueDetailCard.worktreePath || `.worktrees/${activeIssueDetailCard.issueId}`)
+                  h("span", { style: { color: "#9ca3af" } }, "Worktree / Branch"),
+                  h(
+                    "span",
+                    { style: { color: "#10b981", fontFamily: "monospace", fontSize: "10px" } },
+                    (hydratedIssueDetail == null ? void 0 : hydratedIssueDetail.worktreePath) || (hydratedIssueDetail == null ? void 0 : hydratedIssueDetail.branch) || "Não definida"
+                  )
                 )
               ),
-              // Box C: Roteamento CoEvo-RSI & Custos
+              // Box C: Modelo Real do Executor (agents/state/ — Zero Hardcode)
               h(
                 "div",
                 {
@@ -9237,24 +9498,19 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
                     gap: "6px"
                   }
                 },
-                h("span", { style: { fontSize: "10px", fontWeight: "700", color: "#a855f7", textTransform: "uppercase" } }, "Roteamento CoEvo-RSI"),
+                h("span", { style: { fontSize: "10px", fontWeight: "700", color: "#a855f7", textTransform: "uppercase" } }, "Modelo Real do Executor (Buzz Desktop)"),
                 h(
                   "div",
-                  { style: { fontSize: "11px", color: "#ffffff", fontWeight: "600" } },
-                  `Modelo: ${activeIssueDetailCard.recommendedModel || (activeIssueDetailCard.tier === "tier_1_exec_barato" ? "Gemini 3.8 Flash" : "Claude 3.5 Sonnet")}`
+                  { style: { fontSize: "11px", color: "#ffffff", fontWeight: "600", fontFamily: "monospace" } },
+                  (hydratedIssueDetail == null ? void 0 : hydratedIssueDetail.executorModel) ? `${hydratedIssueDetail.executorProvider ? hydratedIssueDetail.executorProvider + "/" : ""}${hydratedIssueDetail.executorModel}` : isHydratingIssueDetail ? "Lendo agents/state/..." : "Modelo não identificado no state local"
                 ),
                 h(
                   "div",
                   { style: { fontSize: "10px", color: "#9ca3af" } },
-                  `Tier: ${activeIssueDetailCard.tier === "tier_1_exec_barato" ? "Tier 1: Barato (Enxuto)" : activeIssueDetailCard.tier === "tier_2_revisor" ? "Tier 2: Revisor (Gate)" : "Tier 3: Arquiteto (Governança)"}`
-                ),
-                h(
-                  "div",
-                  { style: { fontSize: "10px", color: "#10b981", fontFamily: "monospace" } },
-                  `Custo Estimado: ~$${activeIssueDetailCard.estimatedCost || (activeIssueDetailCard.tier === "tier_1_exec_barato" ? "0.002" : "0.02")} | ${activeIssueDetailCard.tokens || 18}k tokens`
+                  activeIssueDetailCard.tokens ? `Telemetria: ${activeIssueDetailCard.tokens}k tokens${activeIssueDetailCard.estimatedCost ? ` · $${activeIssueDetailCard.estimatedCost}` : ""}` : "Telemetria de custo/tokens da issue: indisponível (use aba Inteligência & Saúde para média real)."
                 )
               ),
-              // Box D: Probes Caixa-Preta (Quality Gate)
+              // Box D: Probes Caixa-Preta do Gate (Manifesto Real — Zero PASS Falso)
               h(
                 "div",
                 {
@@ -9268,28 +9524,34 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
                     gap: "6px"
                   }
                 },
-                h("span", { style: { fontSize: "10px", fontWeight: "700", color: "#10b981", textTransform: "uppercase" } }, "Probes Caixa-Preta do Gate"),
+                h(
+                  "div",
+                  { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+                  h("span", { style: { fontSize: "10px", fontWeight: "700", color: "#10b981", textTransform: "uppercase" } }, "Probes & Validações do Gate"),
+                  h("span", { style: { fontSize: "9px", color: "#6b7280", fontFamily: "monospace" } }, (hydratedIssueDetail == null ? void 0 : hydratedIssueDetail.probesSource) || "")
+                ),
                 h(
                   "div",
                   { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "10px" } },
-                  h(
-                    "div",
-                    { style: { display: "flex", justifyContent: "space-between", color: "#d1d5db" } },
-                    h("span", {}, "• Rota HTTP (Caddy 200 OK):"),
-                    h("span", { style: { color: "#10b981", fontWeight: "700" } }, "PASS")
+                  ...((hydratedIssueDetail == null ? void 0 : hydratedIssueDetail.probes) || []).map(
+                    (pr, idx) => h(
+                      "div",
+                      { key: idx, style: { display: "flex", justifyContent: "space-between", gap: "8px", color: "#d1d5db" } },
+                      h("span", { title: pr.detail || "" }, `• ${pr.label}`),
+                      h(
+                        "span",
+                        {
+                          style: {
+                            color: pr.status === "PASS" ? "#10b981" : pr.status === "FAIL" ? "#ef4444" : pr.status === "PENDENTE" ? "#f59e0b" : "#6b7280",
+                            fontWeight: "700",
+                            fontFamily: "monospace"
+                          }
+                        },
+                        pr.status
+                      )
+                    )
                   ),
-                  h(
-                    "div",
-                    { style: { display: "flex", justifyContent: "space-between", color: "#d1d5db" } },
-                    h("span", {}, "• Supabase RLS & Auth:"),
-                    h("span", { style: { color: "#10b981", fontWeight: "700" } }, "PASS")
-                  ),
-                  h(
-                    "div",
-                    { style: { display: "flex", justifyContent: "space-between", color: "#d1d5db" } },
-                    h("span", {}, "• Playwright Zero Console Err:"),
-                    h("span", { style: { color: "#10b981", fontWeight: "700" } }, "PASS")
-                  )
+                  (!hydratedIssueDetail || hydratedIssueDetail.probes.length === 0) && h("div", { style: { color: "#6b7280" } }, isHydratingIssueDetail ? "Lendo probes reais..." : "Nenhum probe registrado para esta issue.")
                 )
               ),
               // Box E: Transcript & Diffs Nativos do Agente (ctx.agents.ui.Transcript)
@@ -11300,6 +11562,7 @@ export {
   apply,
   checkMentionTargetIdentity,
   checkThreadWakeAntiLoop,
+  hydrateIssueDetail,
   inject,
   resetThreadWakeGuardForTests
 };

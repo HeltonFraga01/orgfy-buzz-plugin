@@ -623,4 +623,40 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
   assert.equal(wGate.allow, false);
   assert.equal(wGate.reason, "waiting_for_other_reviewer_gate");
   console.log("[MENTION IDENTITY & WAKE ANTI-LOOP OK]");
+
+  // Zero-Mock Issue Modal: garante ausência do hash falso e testa hidratação real de SPEC-0006-T020
+  const pluginBundleText = fs.readFileSync(path.resolve(__dirname, "plugin.js"), "utf8");
+  assert.ok(
+    !pluginBundleText.includes("7b88aa12c5596489b91e92051dc73ff539e6a0082f42a5482329dc3309aef411"),
+    "plugin.js não pode conter hash de aceite hardcoded"
+  );
+  const hydrated = await orgfyMod.hydrateIssueDetail(
+    {
+      host: {
+        readFile: async (p) => new Uint8Array(fs.readFileSync(p)),
+      },
+    },
+    {
+      id: "card-t020",
+      issueId: "7f8311ac",
+      fullIssueId: "7f8311acbc5018c01e800afa7b4fccd9cccad37a865d67218846a3c23b98c9d7",
+      title: "SPEC-0006-T020 Implementar descoberta-lint e cleanup-check (xfail para pass)",
+      stage: "execucao",
+      priority: "P1",
+      empresa: "orgfy",
+      executor: "OrgFy Lia",
+    }
+  );
+  assert.equal(hydrated.cardFileFound, "cards/SPEC-0006-T020.md");
+  assert.ok(hydrated.contexto && hydrated.contexto.includes("SPEC-0006"));
+  assert.equal(hydrated.acceptanceFrozenValid, false, "sem arquivo em aceites/, não pode marcar congelamento válido");
+  assert.equal(hydrated.acceptanceHash, null);
+  assert.ok(hydrated.executorModel && hydrated.executorModel.length > 0, "deve ler modelo real de OrgFy Lia em agents/state/");
+  assert.ok(hydrated.probes.some((p) => p.status === "NA"), "orgfy CLI não deve exibir Caddy/Supabase/Playwright como PASS");
+  console.log("[ZERO-MOCK ISSUE MODAL OK]", JSON.stringify({
+    cardFileFound: hydrated.cardFileFound,
+    executorModel: `${hydrated.executorProvider}/${hydrated.executorModel}`,
+    acceptanceFrozenValid: hydrated.acceptanceFrozenValid,
+    probes: hydrated.probes.map((p) => `${p.label}:${p.status}`),
+  }));
 }

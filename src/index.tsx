@@ -73,10 +73,16 @@ import {
   registerGovernanceAgentHooks,
 } from "./services/governance-engine";
 
+import {
+  hydrateIssueDetail,
+  type HydratedIssueDetail,
+} from "./services/issue-detail-hydrator";
+
 export {
   checkMentionTargetIdentity,
   checkThreadWakeAntiLoop,
   resetThreadWakeGuardForTests,
+  hydrateIssueDetail,
 };
 import {
   executeSmartModelFailover,
@@ -679,7 +685,31 @@ export function apply(ctx: Context) {
 
     // Expansão: Modal In-Cockpit de Detalhes da Issue e Abas do Control Plane v2
     const [activeIssueDetailCard, setActiveIssueDetailCard] = React.useState<PipelineCard | null>(null);
+    const [hydratedIssueDetail, setHydratedIssueDetail] = React.useState<HydratedIssueDetail | null>(null);
+    const [isHydratingIssueDetail, setIsHydratingIssueDetail] = React.useState<boolean>(false);
     const [activeCentralTab, setActiveCentralTab] = React.useState<"board" | "orgchart" | "pipeline" | "inteligencia" | "templates_rsi" | "resolvidas">("board");
+
+    React.useEffect(() => {
+      let cancelled = false;
+      if (!activeIssueDetailCard) {
+        setHydratedIssueDetail(null);
+        return;
+      }
+      setIsHydratingIssueDetail(true);
+      hydrateIssueDetail(ctx, activeIssueDetailCard)
+        .then((res) => {
+          if (!cancelled) setHydratedIssueDetail(res);
+        })
+        .catch(() => {
+          if (!cancelled) setHydratedIssueDetail(null);
+        })
+        .finally(() => {
+          if (!cancelled) setIsHydratingIssueDetail(false);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }, [activeIssueDetailCard]);
 
     // Estado Real da Holding, Board, Organograma e Aprovações (Zero Mockups)
     const [holdingData, setHoldingData] = React.useState<HoldingControlPlaneSnapshot | null>(null);
@@ -3516,11 +3546,17 @@ export function apply(ctx: Context) {
                   h(
                     "div",
                     { style: { fontSize: "12px", color: "#f1f5f9", lineHeight: "1.5" } },
-                    activeIssueDetailCard.objetivo || activeIssueDetailCard.title
-                  )
+                    hydratedIssueDetail?.objetivo || activeIssueDetailCard.objetivo || activeIssueDetailCard.title
+                  ),
+                  hydratedIssueDetail?.cardFileFound &&
+                    h(
+                      "div",
+                      { style: { fontSize: "10px", color: "#64748b", fontFamily: "monospace", marginTop: "2px" } },
+                      `Fonte real: ${hydratedIssueDetail.cardFileFound}`
+                    )
                 ),
 
-                // 2. Estado & Autoridade Decisória
+                // 2. Estado & Autoridade Decisória (100% real, sem fallback genérico)
                 h(
                   "div",
                   {
@@ -3543,14 +3579,20 @@ export function apply(ctx: Context) {
                     "div",
                     { style: { fontSize: "11px", color: "#cbd5e1", lineHeight: "1.5" } },
                     h("strong", { style: { color: "#ffffff" } }, "Contexto: "),
-                    activeIssueDetailCard.contexto || "Execução rastreada e orquestrada pela esteira determinística v10."
+                    hydratedIssueDetail?.contexto || activeIssueDetailCard.contexto || (isHydratingIssueDetail ? "Carregando card em disco..." : "Não declarado no card.")
                   ),
                   h(
                     "div",
                     { style: { fontSize: "11px", color: "#cbd5e1", lineHeight: "1.5" } },
-                    h("strong", { style: { color: "#ffffff" } }, "Decisão: "),
-                    activeIssueDetailCard.decisao || activeIssueDetailCard.autoridade || "DECIDIDO Iris conforme diretriz arquitetural da holding."
-                  )
+                    h("strong", { style: { color: "#ffffff" } }, "Decisão / Autoridade: "),
+                    hydratedIssueDetail?.decisao || hydratedIssueDetail?.autoridade || activeIssueDetailCard.decisao || activeIssueDetailCard.autoridade || "Não declarada no card."
+                  ),
+                  hydratedIssueDetail?.escritaExclusiva && hydratedIssueDetail.escritaExclusiva.length > 0 &&
+                    h(
+                      "div",
+                      { style: { fontSize: "10px", color: "#93c5fd", fontFamily: "monospace", marginTop: "2px" } },
+                      `Escrita exclusiva: ${hydratedIssueDetail.escritaExclusiva.join(", ")}`
+                    )
                 ),
 
                 // 3. Invariante L-22: Comando de Aceite Congelado
@@ -3587,8 +3629,8 @@ export function apply(ctx: Context) {
                         "button",
                         {
                           onClick: () => {
-                            const cmd = activeIssueDetailCard.acceptanceCommand || "python3 ferramentas/esteira/lint_card.py";
-                            if (typeof navigator !== "undefined" && navigator?.clipboard?.writeText) {
+                            const cmd = hydratedIssueDetail?.acceptanceCommand || activeIssueDetailCard.acceptanceCommand || "";
+                            if (cmd && typeof navigator !== "undefined" && navigator?.clipboard?.writeText) {
                               navigator.clipboard.writeText(cmd);
                               showNotification("success", "Comando de aceite L-22 copiado!");
                             }
@@ -3606,7 +3648,7 @@ export function apply(ctx: Context) {
                             alignItems: "center",
                             gap: "4px",
                           },
-                          title: "Copiar comando de aceite congelado",
+                          title: "Copiar comando de aceite",
                         },
                         SVG.copy({ h, width: 10, height: 10 }),
                         "Copiar"
@@ -3622,20 +3664,32 @@ export function apply(ctx: Context) {
                         backgroundColor: "#020403",
                         padding: "8px 10px",
                         borderRadius: "6px",
-                        color: "#34d399",
+                        color: hydratedIssueDetail?.acceptanceCommand || activeIssueDetailCard.acceptanceCommand ? "#34d399" : "#9ca3af",
                         display: "block",
                         whiteSpace: "pre-wrap",
                         wordBreak: "break-all",
                         border: "1px solid rgba(16, 185, 129, 0.15)",
                       },
                     },
-                    activeIssueDetailCard.acceptanceCommand || "python3 ferramentas/esteira/lint_card.py"
+                    hydratedIssueDetail?.acceptanceCommand || activeIssueDetailCard.acceptanceCommand || "Comando de aceite ainda não registrado."
                   ),
                   h(
                     "div",
-                    { style: { fontSize: "10px", color: "#9ca3af", fontFamily: "monospace", display: "flex", justifyContent: "space-between" } },
-                    h("span", {}, `Hash de Aceite: ${(activeIssueDetailCard.acceptanceHash || "7b88aa12c5596489b91e92051dc73ff539e6a0082f42a5482329dc3309aef411").slice(0, 28)}...`),
-                    h("span", { style: { color: "#10b981", fontWeight: "600" } }, "✓ Congelamento Válido (Anti-Bypass)")
+                    { style: { fontSize: "10px", color: "#9ca3af", fontFamily: "monospace", display: "flex", justifyContent: "space-between", gap: "8px" } },
+                    h(
+                      "span",
+                      {},
+                      hydratedIssueDetail?.acceptanceHash
+                        ? `Hash de Aceite: ${hydratedIssueDetail.acceptanceHash.slice(0, 28)}...`
+                        : "Hash de Aceite: não gerado"
+                    ),
+                    h(
+                      "span",
+                      { style: { color: hydratedIssueDetail?.acceptanceFrozenValid ? "#10b981" : "#f59e0b", fontWeight: "600" } },
+                      hydratedIssueDetail?.acceptanceFrozenValid
+                        ? "✓ Congelamento Válido (Anti-Bypass)"
+                        : "Pendente de congelamento L-22"
+                    )
                   )
                 ),
 
@@ -3662,17 +3716,17 @@ export function apply(ctx: Context) {
                     "div",
                     { style: { fontSize: "11px", color: "#cbd5e1", lineHeight: "1.5" } },
                     h("strong", { style: { color: "#ffffff" } }, "Feito quando: "),
-                    activeIssueDetailCard.feitoQuando || "Execução com exit 0 no CI e lint do card aprovado sem exceção."
+                    hydratedIssueDetail?.feitoQuando || activeIssueDetailCard.feitoQuando || "Não declarado no card."
                   ),
                   h(
                     "div",
-                    { style: { fontSize: "11px", color: "#cbd5e1", lineHeight: "1.5" } },
+                    { style: { fontSize: "11px", color: "#cbd5e1", lineHeight: "1.5", whiteSpace: "pre-wrap" } },
                     h("strong", { style: { color: "#ffffff" } }, "Prova exigida: "),
-                    activeIssueDetailCard.provaExigida || "Evidência verificável de saída limpa no runner oficial do Swarm."
+                    hydratedIssueDetail?.provaExigida || activeIssueDetailCard.provaExigida || "Não declarada no card."
                   )
                 ),
 
-                // 5. Histórico de Ciclos & DSAP Backtracking
+                // 5. Histórico de Ciclos & DSAP Backtracking (100% real)
                 h(
                   "div",
                   {
@@ -3697,7 +3751,13 @@ export function apply(ctx: Context) {
                     { style: { fontSize: "11px", color: "#9ca3af" } },
                     activeIssueDetailCard.rejectionHistory && activeIssueDetailCard.rejectionHistory.length > 0
                       ? `Recusa recente: ${activeIssueDetailCard.rejectionHistory[0].reason} (${Math.round((activeIssueDetailCard.rejectionHistory[0].similarityToFirst || 0) * 100)}% similaridade)`
-                      : "Nenhuma recusa registrada nesta issue (FPY 100% no primeiro ciclo de execução)."
+                      : hydratedIssueDetail && hydratedIssueDetail.rejectionsCount > 0
+                      ? `${hydratedIssueDetail.rejectionsCount} recusa(s)/conflito(s) registrados em esteira-transicoes.jsonl.`
+                      : activeIssueDetailCard.stage === "feito"
+                      ? "Concluída sem recusas registradas (FPY 100% real)."
+                      : hydratedIssueDetail && hydratedIssueDetail.transitions.length > 0
+                      ? `${hydratedIssueDetail.transitions.length} transição(ões) registrada(s); última: ${hydratedIssueDetail.transitions[hydratedIssueDetail.transitions.length - 1].de} -> ${hydratedIssueDetail.transitions[hydratedIssueDetail.transitions.length - 1].para}.`
+                      : "Em andamento — aguardando conclusão e veredito do Gate (FPY ainda não fechado)."
                   )
                 )
               ),
@@ -3755,34 +3815,50 @@ export function apply(ctx: Context) {
                       gap: "6px",
                     },
                   },
-                  h("span", { style: { fontSize: "10px", fontWeight: "700", color: "#38bdf8", textTransform: "uppercase" } }, "Execução Buzz Runtime"),
+                  h("span", { style: { fontSize: "10px", fontWeight: "700", color: "#38bdf8", textTransform: "uppercase" } }, "Execução Buzz Runtime (Real)"),
                   h(
                     "div",
                     { style: { display: "flex", justifyContent: "space-between", fontSize: "11px" } },
                     h("span", { style: { color: "#9ca3af" } }, "Modo"),
-                    h("span", { style: { color: "#ffffff", fontFamily: "monospace" } }, `${activeIssueDetailCard.modoBuzz || "goal"} (${activeIssueDetailCard.goalMaxTurns || 20} turns max)`)
+                    h(
+                      "span",
+                      { style: { color: "#ffffff", fontFamily: "monospace" } },
+                      hydratedIssueDetail?.modoBuzz
+                        ? `${hydratedIssueDetail.modoBuzz}${hydratedIssueDetail.goalMaxTurns ? ` (${hydratedIssueDetail.goalMaxTurns} turns max)` : ""}`
+                        : "Não declarado"
+                    )
                   ),
                   h(
                     "div",
                     { style: { display: "flex", justifyContent: "space-between", fontSize: "11px" } },
                     h("span", { style: { color: "#9ca3af" } }, "Tempo Máximo"),
-                    h("span", { style: { color: "#ffffff", fontFamily: "monospace" } }, activeIssueDetailCard.maxRuntime || "3600s")
+                    h("span", { style: { color: "#ffffff", fontFamily: "monospace" } }, hydratedIssueDetail?.maxRuntime || "Não declarado")
                   ),
                   h(
                     "div",
                     { style: { display: "flex", justifyContent: "space-between", fontSize: "11px" } },
-                    h("span", { style: { color: "#9ca3af" } }, "Idempotency Key"),
-                    h("span", { style: { color: "#38bdf8", fontFamily: "monospace", fontSize: "10px" } }, activeIssueDetailCard.idempotencyKey || activeIssueDetailCard.issueId)
+                    h("span", { style: { color: "#9ca3af" } }, "Checkout Lock"),
+                    h(
+                      "span",
+                      { style: { color: hydratedIssueDetail?.lockActive ? "#10b981" : "#9ca3af", fontFamily: "monospace", fontSize: "10px" } },
+                      hydratedIssueDetail?.lockActive
+                        ? `Ativo (${hydratedIssueDetail.lockAgent} · ${hydratedIssueDetail.lockExpiresInMin}m)`
+                        : "Sem lock ativo"
+                    )
                   ),
                   h(
                     "div",
                     { style: { display: "flex", justifyContent: "space-between", fontSize: "11px" } },
-                    h("span", { style: { color: "#9ca3af" } }, "Worktree"),
-                    h("span", { style: { color: "#10b981", fontFamily: "monospace", fontSize: "10px" } }, activeIssueDetailCard.worktreePath || `.worktrees/${activeIssueDetailCard.issueId}`)
+                    h("span", { style: { color: "#9ca3af" } }, "Worktree / Branch"),
+                    h(
+                      "span",
+                      { style: { color: "#10b981", fontFamily: "monospace", fontSize: "10px" } },
+                      hydratedIssueDetail?.worktreePath || hydratedIssueDetail?.branch || "Não definida"
+                    )
                   )
                 ),
 
-                // Box C: Roteamento CoEvo-RSI & Custos
+                // Box C: Modelo Real do Executor (agents/state/ — Zero Hardcode)
                 h(
                   "div",
                   {
@@ -3796,25 +3872,26 @@ export function apply(ctx: Context) {
                       gap: "6px",
                     },
                   },
-                  h("span", { style: { fontSize: "10px", fontWeight: "700", color: "#a855f7", textTransform: "uppercase" } }, "Roteamento CoEvo-RSI"),
+                  h("span", { style: { fontSize: "10px", fontWeight: "700", color: "#a855f7", textTransform: "uppercase" } }, "Modelo Real do Executor (Buzz Desktop)"),
                   h(
                     "div",
-                    { style: { fontSize: "11px", color: "#ffffff", fontWeight: "600" } },
-                    `Modelo: ${activeIssueDetailCard.recommendedModel || (activeIssueDetailCard.tier === "tier_1_exec_barato" ? "Gemini 3.8 Flash" : "Claude 3.5 Sonnet")}`
+                    { style: { fontSize: "11px", color: "#ffffff", fontWeight: "600", fontFamily: "monospace" } },
+                    hydratedIssueDetail?.executorModel
+                      ? `${hydratedIssueDetail.executorProvider ? hydratedIssueDetail.executorProvider + "/" : ""}${hydratedIssueDetail.executorModel}`
+                      : isHydratingIssueDetail
+                      ? "Lendo agents/state/..."
+                      : "Modelo não identificado no state local"
                   ),
                   h(
                     "div",
                     { style: { fontSize: "10px", color: "#9ca3af" } },
-                    `Tier: ${activeIssueDetailCard.tier === "tier_1_exec_barato" ? "Tier 1: Barato (Enxuto)" : activeIssueDetailCard.tier === "tier_2_revisor" ? "Tier 2: Revisor (Gate)" : "Tier 3: Arquiteto (Governança)"}`
-                  ),
-                  h(
-                    "div",
-                    { style: { fontSize: "10px", color: "#10b981", fontFamily: "monospace" } },
-                    `Custo Estimado: ~$${activeIssueDetailCard.estimatedCost || (activeIssueDetailCard.tier === "tier_1_exec_barato" ? "0.002" : "0.02")} | ${activeIssueDetailCard.tokens || 18}k tokens`
+                    activeIssueDetailCard.tokens
+                      ? `Telemetria: ${activeIssueDetailCard.tokens}k tokens${activeIssueDetailCard.estimatedCost ? ` · $${activeIssueDetailCard.estimatedCost}` : ""}`
+                      : "Telemetria de custo/tokens da issue: indisponível (use aba Inteligência & Saúde para média real)."
                   )
                 ),
 
-                // Box D: Probes Caixa-Preta (Quality Gate)
+                // Box D: Probes Caixa-Preta do Gate (Manifesto Real — Zero PASS Falso)
                 h(
                   "div",
                   {
@@ -3828,28 +3905,42 @@ export function apply(ctx: Context) {
                       gap: "6px",
                     },
                   },
-                  h("span", { style: { fontSize: "10px", fontWeight: "700", color: "#10b981", textTransform: "uppercase" } }, "Probes Caixa-Preta do Gate"),
+                  h(
+                    "div",
+                    { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+                    h("span", { style: { fontSize: "10px", fontWeight: "700", color: "#10b981", textTransform: "uppercase" } }, "Probes & Validações do Gate"),
+                    h("span", { style: { fontSize: "9px", color: "#6b7280", fontFamily: "monospace" } }, hydratedIssueDetail?.probesSource || "")
+                  ),
                   h(
                     "div",
                     { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "10px" } },
-                    h(
-                      "div",
-                      { style: { display: "flex", justifyContent: "space-between", color: "#d1d5db" } },
-                      h("span", {}, "• Rota HTTP (Caddy 200 OK):"),
-                      h("span", { style: { color: "#10b981", fontWeight: "700" } }, "PASS")
+                    ...(hydratedIssueDetail?.probes || []).map((pr, idx) =>
+                      h(
+                        "div",
+                        { key: idx, style: { display: "flex", justifyContent: "space-between", gap: "8px", color: "#d1d5db" } },
+                        h("span", { title: pr.detail || "" }, `• ${pr.label}`),
+                        h(
+                          "span",
+                          {
+                            style: {
+                              color:
+                                pr.status === "PASS"
+                                  ? "#10b981"
+                                  : pr.status === "FAIL"
+                                  ? "#ef4444"
+                                  : pr.status === "PENDENTE"
+                                  ? "#f59e0b"
+                                  : "#6b7280",
+                              fontWeight: "700",
+                              fontFamily: "monospace",
+                            },
+                          },
+                          pr.status
+                        )
+                      )
                     ),
-                    h(
-                      "div",
-                      { style: { display: "flex", justifyContent: "space-between", color: "#d1d5db" } },
-                      h("span", {}, "• Supabase RLS & Auth:"),
-                      h("span", { style: { color: "#10b981", fontWeight: "700" } }, "PASS")
-                    ),
-                    h(
-                      "div",
-                      { style: { display: "flex", justifyContent: "space-between", color: "#d1d5db" } },
-                      h("span", {}, "• Playwright Zero Console Err:"),
-                      h("span", { style: { color: "#10b981", fontWeight: "700" } }, "PASS")
-                    )
+                    (!hydratedIssueDetail || hydratedIssueDetail.probes.length === 0) &&
+                      h("div", { style: { color: "#6b7280" } }, isHydratingIssueDetail ? "Lendo probes reais..." : "Nenhum probe registrado para esta issue.")
                   )
                 ),
 
