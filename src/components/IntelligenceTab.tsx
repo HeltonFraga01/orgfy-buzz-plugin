@@ -907,78 +907,7 @@ export function renderIntelligenceTab(props: IntelligenceTabProps) {
                 )
               )
         )
-      ),
-      // ── PAINEL FRONTIER v13: OPENTELEMETRY GENAI LIVE STREAM & ECONOMIA DECISIONS API ──
-      props.telemetry &&
-        h(
-          "div",
-          {
-            style: {
-              padding: "14px 16px",
-              borderRadius: "10px",
-              backgroundColor: CARD_BG,
-              border: "1px solid rgba(56, 189, 248, 0.25)",
-              display: "flex",
-              flexDirection: "column",
-              gap: "10px",
-            },
-          },
-          h(
-            "div",
-            { style: { display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" } },
-            h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#38bdf8" } }, "Observabilidade Frontier (OTel GenAI + Economia Decisions API)"),
-            h(
-              "span",
-              { style: { fontSize: "10px", color: "#9ca3af", fontFamily: "monospace" } },
-              `${props.telemetry.totalSpans} spans capturados · ${props.telemetry.decisionsSavings.totalCalls} avaliações Decisions`
-            )
-          ),
-          h(
-            "div",
-            { style: { display: "grid", gridTemplateColumns: "repeat(4, minmax(120px, 1fr))", gap: "8px" } },
-            [
-              { label: "Decisions API", value: `${props.telemetry.decisionsSavings.decisionsApiCalls} calls`, color: "#10b981" },
-              { label: "Wakes Evitados", value: String(props.telemetry.decisionsSavings.wakesOrEscalationsAvoided), color: "#38bdf8" },
-              { label: "Tokens Economizados", value: `~${Math.round(props.telemetry.decisionsSavings.estimatedTokensSaved / 1000)}k`, color: "#c084fc" },
-              { label: "Alertas Retry Cascade", value: String(props.telemetry.retryCascadeAlerts.length), color: props.telemetry.retryCascadeAlerts.length > 0 ? "#f87171" : "#10b981" },
-            ].map((m) =>
-              h(
-                "div",
-                { key: m.label, style: { padding: "8px 10px", borderRadius: "8px", backgroundColor: "rgba(255,255,255,0.03)", border: BORDER } },
-                h("div", { style: { fontSize: "10px", color: "#9ca3af" } }, m.label),
-                h("div", { style: { fontSize: "14px", fontWeight: "700", color: m.color, fontFamily: "monospace", marginTop: "2px" } }, m.value)
-              )
-            )
-          ),
-          props.telemetry.recentSpans.length > 0 &&
-            h(
-              "div",
-              { style: { display: "flex", flexDirection: "column", gap: "4px", maxHeight: "150px", overflowY: "auto" } },
-              props.telemetry.recentSpans.slice(0, 8).map((sp) =>
-                h(
-                  "div",
-                  {
-                    key: sp.spanId,
-                    style: {
-                      display: "grid",
-                      gridTemplateColumns: "110px 1fr 75px 60px",
-                      gap: "8px",
-                      padding: "4px 8px",
-                      borderRadius: "6px",
-                      backgroundColor: "rgba(0,0,0,0.28)",
-                      fontSize: "10px",
-                      fontFamily: "monospace",
-                      alignItems: "center",
-                    },
-                  },
-                  h("span", { style: { color: "#38bdf8", fontWeight: "600" } }, sp.operationName),
-                  h("span", { style: { color: "#e5e7eb", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, `${sp.agentName}${sp.toolName ? ` · ${sp.toolName}` : ""}${sp.model ? ` (${sp.model})` : ""}`),
-                  h("span", { style: { color: sp.status === "error" ? "#f87171" : sp.status === "filtered_out" ? "#c084fc" : "#10b981", fontWeight: "700" } }, sp.status.toUpperCase()),
-                  h("span", { style: { color: "#9ca3af", textAlign: "right" } }, `${sp.durationMs}ms`)
-                )
-              )
-            )
-        )
+      )
     )
   );
 }

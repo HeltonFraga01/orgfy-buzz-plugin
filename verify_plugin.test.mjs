@@ -735,7 +735,7 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
 
   orgfyMod.resetTelemetryForTests();
 
-  const nativeEvents = { relay: 0, completions: 0, actions: 0, sidebars: 0, shortcuts: 0, attentionSources: 0, hooks: [] };
+  const nativeEvents = { relay: 0, completions: 0, actions: 0, sidebars: 0, shortcuts: 0, attentionSources: 0, hooks: [], agentTabs: [] };
   const nativeCtx = {
     react: { createElement: () => null },
     relay: {
@@ -753,6 +753,7 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     agents: {
       addAttentionSource: () => { nativeEvents.attentionSources++; },
       registerHook: (hk) => { nativeEvents.hooks.push(hk); },
+      registerTab: (tab) => { nativeEvents.agentTabs.push(tab); },
     },
   };
 
@@ -763,6 +764,10 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
   assert.equal(nativeState.shortcutsRegistered, true);
   assert.equal(nativeState.attentionSourceRegistered, true);
   assert.equal(nativeState.otelHookRegistered, true);
+  assert.equal(nativeState.agentTabRegistered, true, "aba OrgFy deve ser registrada nos perfis dos agentes via ctx.agents.registerTab");
+  assert.equal(nativeEvents.agentTabs.length, 1);
+  assert.equal(nativeEvents.agentTabs[0].title, "OrgFy");
+  assert.equal(orgfyMod.getBuzzNativeState().agentTabRegistered, true);
 
   const failHook = nativeEvents.hooks.find((hk) => hk.event === "turn.failed");
   assert.ok(failHook, "hook OTel turn.failed deve estar registrado");

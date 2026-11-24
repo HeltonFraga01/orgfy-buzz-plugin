@@ -11,6 +11,7 @@
 
 import type { Context } from "@buzz/author";
 import { recordGenAISpan } from "./telemetry-otel";
+import { createAgentOrgfyTabComponent } from "../components/AgentOrgfyTab";
 
 export interface BuzzNativeState {
   relayConnected: boolean;
@@ -19,6 +20,21 @@ export interface BuzzNativeState {
   shortcutsRegistered: boolean;
   attentionSourceRegistered: boolean;
   otelHookRegistered: boolean;
+  agentTabRegistered: boolean;
+}
+
+let lastNativeState: BuzzNativeState = {
+  relayConnected: false,
+  conversationRegistered: false,
+  sidebarRegistered: false,
+  shortcutsRegistered: false,
+  attentionSourceRegistered: false,
+  otelHookRegistered: false,
+  agentTabRegistered: false,
+};
+
+export function getBuzzNativeState(): BuzzNativeState {
+  return { ...lastNativeState };
 }
 
 export interface LiveSidebarCounts {
@@ -64,6 +80,7 @@ export function registerBuzzNativeIntegrations(ctx: Context | any): BuzzNativeSt
     shortcutsRegistered: false,
     attentionSourceRegistered: false,
     otelHookRegistered: false,
+    agentTabRegistered: false,
   };
 
   // 1. RELAY LIVE SUBSCRIPTION (Event-Driven Refresh)
@@ -159,7 +176,7 @@ export function registerBuzzNativeIntegrations(ctx: Context | any): BuzzNativeSt
         run: () => {
           try {
             if (ctx?.navigation?.open) {
-              ctx.navigation.open({ version: 1, kind: "page", page: "orgfy" });
+              ctx.navigation.open({ version: 1, kind: "page", pluginId: "digital-cortexx-orgfy", pageId: "orgfy" });
             } else if (ctx?.navigation?.navigate) {
               ctx.navigation.navigate("orgfy");
             }
@@ -228,7 +245,7 @@ export function registerBuzzNativeIntegrations(ctx: Context | any): BuzzNativeSt
         run: () => {
           try {
             if (ctx?.navigation?.open) {
-              ctx.navigation.open({ version: 1, kind: "page", page: "orgfy" });
+              ctx.navigation.open({ version: 1, kind: "page", pluginId: "digital-cortexx-orgfy", pageId: "orgfy" });
             } else if (ctx?.navigation?.navigate) {
               ctx.navigation.navigate("orgfy");
             }
@@ -299,5 +316,22 @@ export function registerBuzzNativeIntegrations(ctx: Context | any): BuzzNativeSt
     console.warn("[ORGFY v13] Falha ao registrar OTel AgentHook:", err);
   }
 
+  // 7. NATIVE AGENT PROFILE TAB (`OrgFy` entre Activity e Attention)
+  try {
+    const agents = ctx?.agents;
+    if (agents?.registerTab && typeof agents.registerTab === "function") {
+      const AgentOrgfyTab = createAgentOrgfyTabComponent(ctx);
+      agents.registerTab({
+        id: "orgfy",
+        title: "OrgFy",
+        component: AgentOrgfyTab,
+      });
+      state.agentTabRegistered = true;
+    }
+  } catch (err) {
+    console.warn("[ORGFY v13] Falha ao registrar aba OrgFy no perfil dos agentes:", err);
+  }
+
+  lastNativeState = { ...state };
   return state;
 }

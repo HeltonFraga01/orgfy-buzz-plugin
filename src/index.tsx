@@ -48,6 +48,7 @@ import {
 } from "./tools/registry";
 import {
   registerBuzzNativeIntegrations,
+  getBuzzNativeState,
   updateOrgfySidebarCounts,
   subscribeRelayUpdates,
 } from "./services/buzz-native";
@@ -71,6 +72,8 @@ import {
   renderIntelligenceTab,
   createChannelPulsePanel,
 } from "./components/IntelligenceTab";
+import { renderObservabilityTab } from "./components/ObservabilityTab";
+import { createCardStudioTabComponent } from "./components/CardStudioTab";
 import {
   acquireCheckoutLock,
   releaseCheckoutLock,
@@ -111,6 +114,7 @@ export {
   buildBuzzAttentionContract,
   buildUnifiedOrgfyTools,
   registerBuzzNativeIntegrations,
+  getBuzzNativeState,
   getTelemetrySnapshot,
   resetTelemetryForTests,
 };
@@ -647,6 +651,7 @@ export const THEME = {
 export function apply(ctx: Context) {
   const React = ctx.react;
   const h = React.createElement;
+  const CardStudioTab = createCardStudioTabComponent(ctx);
 
   function OrgFyCockpit() {
     // Estado de Tenant / Multi-Tenant da Holding
@@ -723,7 +728,10 @@ export function apply(ctx: Context) {
     const [activeIssueDetailCard, setActiveIssueDetailCard] = React.useState<PipelineCard | null>(null);
     const [hydratedIssueDetail, setHydratedIssueDetail] = React.useState<HydratedIssueDetail | null>(null);
     const [isHydratingIssueDetail, setIsHydratingIssueDetail] = React.useState<boolean>(false);
-    const [activeCentralTab, setActiveCentralTab] = React.useState<"board" | "orgchart" | "pipeline" | "inteligencia" | "templates_rsi" | "resolvidas">("board");
+    const [activeCentralTab, setActiveCentralTab] = React.useState<"board" | "orgchart" | "pipeline" | "inteligencia" | "observabilidade" | "card_studio" | "templates_rsi" | "resolvidas">("board");
+    const [obsFilter, setObsFilter] = React.useState<string>("all");
+    const [isProbingDecision, setIsProbingDecision] = React.useState<boolean>(false);
+    const [lastProbeSummary, setLastProbeSummary] = React.useState<string | null>(null);
 
     React.useEffect(() => {
       let cancelled = false;
@@ -794,6 +802,33 @@ export function apply(ctx: Context) {
     }, [pipelineCards, loopRadar]);
     const [stoppingSessionId, setStoppingSessionId] = React.useState<string | null>(null);
     const [failingOverSessionId, setFailingOverSessionId] = React.useState<string | null>(null);
+
+    const handleRunDecisionProbe = React.useCallback(async () => {
+      setIsProbingDecision(true);
+      try {
+        const t0 = Date.now();
+        const res = await triageCardWithDecisions(ctx, {
+          slug: "probe-decisions-live",
+          titulo: "Validar latência e classificação Decisions API ao vivo",
+          tipo: "execucao",
+          escrita_exclusiva: ["src/services/decision-router.ts"],
+          acceptance_command: "node --test verify_plugin.test.mjs",
+        });
+        const ms = Date.now() - t0;
+        setLastProbeSummary(
+          `Probe OK (${ms}ms) · fonte: ${res.decisionSource} · backend: ${res.backend || "fallback"} · modelo: ${res.model || "determinístico"} · risco: ${res.riscoScore}/5 · tier: ${res.modeloTier} · Attention: ${res.attentionPolicy}`
+        );
+        setTelemetrySnap(getTelemetrySnapshot());
+      } finally {
+        setIsProbingDecision(false);
+      }
+    }, []);
+
+    const handleResetSpans = React.useCallback(() => {
+      resetTelemetryForTests();
+      setTelemetrySnap(getTelemetrySnapshot());
+      setLastProbeSummary(null);
+    }, []);
 
     // Estado do Arquivo Pesquisável de Issues Resolvidas (Just-in-Time Context)
     const [resolvedItems, setResolvedItems] = React.useState<ResolvedIssueItem[]>([]);
@@ -1754,7 +1789,9 @@ export function apply(ctx: Context) {
                 { id: "board", label: "Board & Holding", color: "#10b981", icon: SVG.shield },
                 { id: "orgchart", label: "Organograma", color: "#38bdf8", icon: SVG.users },
                 { id: "pipeline", label: "Esteira (Kanban)", color: "#10b981", icon: SVG.columns },
+                { id: "card_studio", label: "Card Studio", color: "#10b981", icon: SVG.zap },
                 { id: "inteligencia", label: "Saúde & FinOps", color: "#c084fc", icon: SVG.activity },
+                { id: "observabilidade", label: `Observabilidade (${telemetrySnap.totalSpans})`, color: "#38bdf8", icon: SVG.cpu },
                 { id: "templates_rsi", label: "Templates & RSI", color: "#38bdf8", icon: SVG.fileText },
                 { id: "resolvidas", label: `Arquivo (${resolvedItems.length})`, color: "#fbbf24", icon: SVG.checkCircle },
               ].map((t) =>
@@ -1766,6 +1803,7 @@ export function apply(ctx: Context) {
                       setActiveCentralTab(t.id as any);
                       if (t.id === "board" || t.id === "orgchart" || t.id === "templates_rsi") loadHolding();
                       if (t.id === "inteligencia") loadKpis();
+                      if (t.id === "observabilidade") setTelemetrySnap(getTelemetrySnapshot());
                       if (t.id === "resolvidas") loadResolvedArchive();
                     },
                     style: {
@@ -1795,9 +1833,13 @@ export function apply(ctx: Context) {
                 : activeCentralTab === "orgchart"
                 ? "Hierarquia Real (empresas/*.json)"
                 : activeCentralTab === "pipeline"
-                ? "Esteira Determinística OrgFy v12"
+                ? "Esteira Determinística OrgFy v13"
+                : activeCentralTab === "card_studio"
+                ? "Abertura Schema-First · L-01 + L-22 + Buzz Attention"
                 : activeCentralTab === "inteligencia"
-                ? "Telemetria Real, Economia & Workflows"
+                ? "Telemetria Real, Economia & Radar Goose"
+                : activeCentralTab === "observabilidade"
+                ? "OpenTelemetry GenAI · Decisions API · Sinergia Buzz"
                 : activeCentralTab === "resolvidas"
                 ? "Memória Episódica Sob Demanda"
                 : "Templates Reais & Regras L-90"
@@ -2401,13 +2443,31 @@ export function apply(ctx: Context) {
           onRunGovernanceEval: handleRunGovernanceEval,
           governanceSummary,
           loopRadar,
-          telemetry: telemetrySnap,
           onRefreshLoopRadar: loadLoopRadar,
           onWakeIrisForLoops: handleWakeIrisForLoops,
           onStopLoopSession: handleStopLoopSession,
           stoppingSessionId,
           onFailoverModelSession: handleFailoverModelSession,
           failingOverSessionId,
+        })
+      : activeCentralTab === "observabilidade"
+      ? renderObservabilityTab({
+          h,
+          telemetry: telemetrySnap,
+          nativeState: getBuzzNativeState(),
+          operationFilter: obsFilter,
+          onFilterChange: setObsFilter,
+          isProbingDecision,
+          lastProbeSummary,
+          onRunDecisionProbe: handleRunDecisionProbe,
+          onResetSpans: handleResetSpans,
+          onRefresh: () => setTelemetrySnap(getTelemetrySnapshot()),
+        })
+      : activeCentralTab === "card_studio"
+      ? h(CardStudioTab, {
+          liveAgents,
+          defaultEmpresa: selectedTenant,
+          onNotify: showNotification,
         })
       : activeCentralTab === "resolvidas"
       ? renderResolvedArchiveTab({

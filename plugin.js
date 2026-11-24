@@ -5045,6 +5045,398 @@ function buildUnifiedOrgfyTools(ctx) {
     }
   }));
 }
+const CARD_BG$3 = "rgba(255, 255, 255, 0.03)";
+const BORDER$3 = "1px solid rgba(255, 255, 255, 0.08)";
+function normName(s) {
+  return String(s || "").trim().toLowerCase();
+}
+function createAgentOrgfyTabComponent(ctx) {
+  const React = ctx == null ? void 0 : ctx.react;
+  if (!(React == null ? void 0 : React.createElement)) {
+    return function FallbackAgentOrgfyTab() {
+      return null;
+    };
+  }
+  const h = React.createElement;
+  return function AgentOrgfyTab({ agent }) {
+    const [cards, setCards] = React.useState([]);
+    const [sessions, setSessions] = React.useState([]);
+    const [telemetry, setTelemetry] = React.useState(() => getTelemetrySnapshot());
+    const [loading, setLoading] = React.useState(true);
+    const [failoverBusy, setFailoverBusy] = React.useState(false);
+    const [statusBanner, setStatusBanner] = React.useState(null);
+    const agentName = String((agent == null ? void 0 : agent.name) || (agent == null ? void 0 : agent.key) || "Agente");
+    const agentKey = String((agent == null ? void 0 : agent.key) || "");
+    const agentPubkey = String((agent == null ? void 0 : agent.pubkey) || "");
+    const agentCfg = (agent == null ? void 0 : agent.config) && typeof agent.config === "object" ? agent.config : {};
+    const currentModel = String(agentCfg.model || (agent == null ? void 0 : agent.model) || "padrão");
+    const currentProvider = String(agentCfg.provider || (agent == null ? void 0 : agent.provider) || "padrão");
+    const currentHarness = String(agentCfg.harness || (agent == null ? void 0 : agent.harness) || "goose");
+    const loadAgentContext = React.useCallback(async () => {
+      setLoading(true);
+      try {
+        const [allCards, radar] = await Promise.all([
+          fetchLiveKanbanCards(ctx, { empresa: "all" }).catch(() => []),
+          fetchGooseLoopRadar(ctx).catch(() => null)
+        ]);
+        const targetName = normName(agentName);
+        const targetKey = normName(agentKey);
+        const targetPk = normName(agentPubkey);
+        const matchedCards = (allCards || []).filter((c) => {
+          const ex = normName(c.executor);
+          const rv = normName(c.revisor);
+          const dc = normName(c.decisor);
+          return targetName && (ex === targetName || rv === targetName || dc === targetName || ex.includes(targetName) || rv.includes(targetName)) || targetKey && (ex === targetKey || rv === targetKey);
+        });
+        setCards(matchedCards);
+        const matchedSessions = ((radar == null ? void 0 : radar.sessoes) || []).filter((s) => {
+          const sn = normName(s.agente);
+          const spk = normName(s.agent_pubkey);
+          return targetPk && spk && spk === targetPk || targetName && sn && (sn === targetName || sn.includes(targetName) || targetName.includes(sn));
+        });
+        setSessions(matchedSessions.slice(0, 6));
+      } finally {
+        setLoading(false);
+      }
+    }, [agentName, agentKey, agentPubkey]);
+    React.useEffect(() => {
+      loadAgentContext();
+      const unsub = subscribeTelemetry(() => setTelemetry(getTelemetrySnapshot()));
+      return () => unsub();
+    }, [loadAgentContext]);
+    const handleFailover = async () => {
+      setFailoverBusy(true);
+      setStatusBanner(null);
+      try {
+        const res = await executeSmartModelFailover(ctx, {
+          agente: agentName,
+          agent_pubkey: agentPubkey || void 0,
+          failed_model: currentModel !== "padrão" ? currentModel : void 0,
+          prefer_free: true,
+          apply: true,
+          retrigger: false
+        });
+        setStatusBanner({ ok: res.ok, text: res.message });
+      } catch (err) {
+        setStatusBanner({ ok: false, text: `Erro no failover: ${(err == null ? void 0 : err.message) || err}` });
+      } finally {
+        setFailoverBusy(false);
+      }
+    };
+    const handleOpenCockpit = () => {
+      try {
+        const nav = ctx == null ? void 0 : ctx.navigation;
+        if (nav == null ? void 0 : nav.open) {
+          nav.open({ version: 1, kind: "page", pluginId: "digital-cortexx-orgfy", pageId: "orgfy" });
+        } else if (nav == null ? void 0 : nav.navigate) {
+          nav.navigate("orgfy");
+        } else if (typeof window !== "undefined") {
+          window.location.hash = "#/orgfy";
+        }
+      } catch {
+      }
+    };
+    const targetLower = normName(agentName);
+    const agentSpans = telemetry.recentSpans.filter((sp) => {
+      const spName = normName(sp.agentName);
+      return spName === targetLower || spName.includes(targetLower) || targetLower.includes(spName);
+    }).slice(0, 8);
+    const agentMetric = telemetry.agentMetrics.find((m) => {
+      const mn = normName(m.agentName);
+      return mn === targetLower || mn.includes(targetLower);
+    });
+    const activeCards = cards.filter((c) => c.stage !== "feito");
+    const doneCards = cards.filter((c) => c.stage === "feito");
+    return h(
+      "div",
+      {
+        style: {
+          display: "flex",
+          flexDirection: "column",
+          gap: "14px",
+          padding: "12px 2px",
+          color: "#f3f4f6",
+          fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          fontSize: "12px"
+        }
+      },
+      // Header do Perfil OrgFy
+      h(
+        "div",
+        {
+          style: {
+            padding: "14px 16px",
+            borderRadius: "10px",
+            backgroundColor: CARD_BG$3,
+            border: "1px solid rgba(16, 185, 129, 0.28)",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: "10px"
+          }
+        },
+        h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: "4px" } },
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "center", gap: "8px" } },
+            h("span", { style: { fontSize: "14px", fontWeight: "700", color: "#10b981" } }, `OrgFy Control Plane · ${agentName}`),
+            (agentMetric == null ? void 0 : agentMetric.retryCascadeRisk) && h(
+              "span",
+              {
+                style: {
+                  fontSize: "10px",
+                  fontWeight: "700",
+                  padding: "2px 7px",
+                  borderRadius: "9999px",
+                  backgroundColor: "rgba(239, 68, 68, 0.2)",
+                  color: "#f87171"
+                }
+              },
+              "RISCO RETRY CASCADE"
+            )
+          ),
+          h(
+            "div",
+            { style: { fontSize: "11px", color: "#9ca3af", fontFamily: "monospace" } },
+            `Harness: ${currentHarness} · Provider: ${currentProvider} · Modelo: ${currentModel}${agentPubkey ? ` · pk: ${agentPubkey.slice(0, 10)}…` : ""}`
+          )
+        ),
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
+          h(
+            "button",
+            {
+              onClick: handleFailover,
+              disabled: failoverBusy,
+              style: {
+                padding: "6px 12px",
+                borderRadius: "6px",
+                border: "1px solid rgba(56, 189, 248, 0.45)",
+                backgroundColor: "rgba(56, 189, 248, 0.14)",
+                color: "#38bdf8",
+                fontSize: "11px",
+                fontWeight: "700",
+                cursor: failoverBusy ? "wait" : "pointer"
+              }
+            },
+            failoverBusy ? "Testando NexusMind..." : "⚡ Melhor Modelo (NexusMind)"
+          ),
+          h(
+            "button",
+            {
+              onClick: loadAgentContext,
+              disabled: loading,
+              style: {
+                padding: "6px 10px",
+                borderRadius: "6px",
+                border: BORDER$3,
+                backgroundColor: "rgba(255,255,255,0.05)",
+                color: "#cbd5e1",
+                fontSize: "11px",
+                cursor: "pointer"
+              }
+            },
+            loading ? "..." : "Atualizar"
+          ),
+          h(
+            "button",
+            {
+              onClick: handleOpenCockpit,
+              style: {
+                padding: "6px 12px",
+                borderRadius: "6px",
+                border: "none",
+                backgroundColor: "#10b981",
+                color: "#000000",
+                fontSize: "11px",
+                fontWeight: "700",
+                cursor: "pointer"
+              }
+            },
+            "Abrir Control Room"
+          )
+        )
+      ),
+      statusBanner && h(
+        "div",
+        {
+          style: {
+            padding: "10px 12px",
+            borderRadius: "8px",
+            backgroundColor: statusBanner.ok ? "rgba(16, 185, 129, 0.12)" : "rgba(245, 158, 11, 0.12)",
+            border: statusBanner.ok ? "1px solid rgba(16, 185, 129, 0.35)" : "1px solid rgba(245, 158, 11, 0.35)",
+            color: statusBanner.ok ? "#a7f3d0" : "#fde68a",
+            fontSize: "11px",
+            fontFamily: "monospace"
+          }
+        },
+        statusBanner.text
+      ),
+      // 4 KPIs do Agente
+      h(
+        "div",
+        { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "8px" } },
+        [
+          { label: "Cards Ativos", value: String(activeCards.length), color: "#38bdf8" },
+          { label: "Cards Concluídos", value: String(doneCards.length), color: "#10b981" },
+          { label: "Sessões Goose (3h)", value: String(sessions.length), color: sessions.some((s) => s.severidade === "critical") ? "#f87171" : "#cbd5e1" },
+          { label: "Turnos OTel", value: agentMetric ? `${agentMetric.totalTurns} (${agentMetric.errorTurns} err)` : `${agentSpans.length} spans`, color: "#c084fc" }
+        ].map(
+          (k) => h(
+            "div",
+            { key: k.label, style: { padding: "10px 12px", borderRadius: "8px", backgroundColor: CARD_BG$3, border: BORDER$3 } },
+            h("div", { style: { fontSize: "10px", color: "#9ca3af", textTransform: "uppercase" } }, k.label),
+            h("div", { style: { fontSize: "16px", fontWeight: "700", color: k.color, fontFamily: "monospace", marginTop: "3px" } }, k.value)
+          )
+        )
+      ),
+      // Cards Atribuídos na Esteira
+      h(
+        "div",
+        { style: { padding: "12px 14px", borderRadius: "10px", backgroundColor: CARD_BG$3, border: BORDER$3, display: "flex", flexDirection: "column", gap: "8px" } },
+        h(
+          "div",
+          { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+          h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, `Cards OrgFy Atribuídos (${cards.length})`),
+          h("span", { style: { fontSize: "10px", color: "#9ca3af", fontFamily: "monospace" } }, "Executor / Revisor / Decisor")
+        ),
+        loading ? h("div", { style: { fontSize: "11px", color: "#9ca3af" } }, "Carregando cards da esteira...") : cards.length === 0 ? h("div", { style: { fontSize: "11px", color: "#9ca3af" } }, `Nenhum card ativo ou recente vinculado a ${agentName} no Kanban atual.`) : h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: "6px", maxHeight: "220px", overflowY: "auto" } },
+          cards.slice(0, 12).map((c) => {
+            const role = normName(c.executor) === targetLower ? "EXECUTOR" : normName(c.revisor) === targetLower ? "REVISOR" : "DECISOR";
+            return h(
+              "div",
+              {
+                key: c.id,
+                style: {
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: "10px",
+                  padding: "8px 10px",
+                  borderRadius: "6px",
+                  backgroundColor: "rgba(0,0,0,0.28)",
+                  border: BORDER$3
+                }
+              },
+              h(
+                "div",
+                { style: { display: "flex", flexDirection: "column", gap: "2px", minWidth: 0, flex: 1 } },
+                h(
+                  "div",
+                  { style: { display: "flex", alignItems: "center", gap: "6px" } },
+                  h("span", { style: { fontFamily: "monospace", fontSize: "10px", color: "#38bdf8", fontWeight: "700" } }, `#${c.issueId.slice(0, 8)}`),
+                  h("span", { style: { fontSize: "9px", fontWeight: "700", padding: "1px 5px", borderRadius: "4px", backgroundColor: role === "EXECUTOR" ? "rgba(16,185,129,0.18)" : "rgba(192,132,252,0.18)", color: role === "EXECUTOR" ? "#34d399" : "#d8b4fe" } }, role),
+                  h("span", { style: { fontSize: "9px", fontWeight: "700", padding: "1px 5px", borderRadius: "4px", backgroundColor: "rgba(255,255,255,0.08)", color: "#cbd5e1", textTransform: "uppercase" } }, c.stage)
+                ),
+                h("span", { style: { fontSize: "11.5px", fontWeight: "600", color: "#f3f4f6", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, c.title)
+              ),
+              c.fullIssueId && h(
+                "button",
+                {
+                  onClick: () => openIssueInBuzz(ctx, { id: c.fullIssueId, owner: c.owner, dtag: c.empresa || "orgfy" }),
+                  style: {
+                    padding: "4px 8px",
+                    borderRadius: "5px",
+                    border: "1px solid rgba(56, 189, 248, 0.35)",
+                    backgroundColor: "rgba(56, 189, 248, 0.1)",
+                    color: "#38bdf8",
+                    fontSize: "10px",
+                    fontWeight: "600",
+                    cursor: "pointer",
+                    flexShrink: 0
+                  }
+                },
+                "Abrir ↗"
+              )
+            );
+          })
+        )
+      ),
+      // Sessões Goose & OTel Spans em 2 colunas
+      h(
+        "div",
+        { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" } },
+        // Sessões Goose
+        h(
+          "div",
+          { style: { padding: "12px 14px", borderRadius: "10px", backgroundColor: CARD_BG$3, border: BORDER$3, display: "flex", flexDirection: "column", gap: "6px" } },
+          h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, "Sessões Goose Recentes (3h)"),
+          sessions.length === 0 ? h("div", { style: { fontSize: "11px", color: "#9ca3af" } }, "Nenhuma sessão recente no radar Goose.") : sessions.map(
+            (s) => h(
+              "div",
+              {
+                key: s.session_id,
+                style: {
+                  padding: "6px 8px",
+                  borderRadius: "6px",
+                  backgroundColor: "rgba(0,0,0,0.28)",
+                  border: s.severidade === "critical" ? "1px solid rgba(239,68,68,0.35)" : BORDER$3,
+                  fontSize: "10px",
+                  fontFamily: "monospace",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "2px"
+                }
+              },
+              h(
+                "div",
+                { style: { display: "flex", justifyContent: "space-between" } },
+                h("span", { style: { color: s.ativa ? "#34d399" : "#9ca3af", fontWeight: "700" } }, `${s.ativa ? "ATIVA" : "HIST"} · ${s.session_id}`),
+                h("span", { style: { color: "#cbd5e1" } }, `${s.duracao_min.toFixed(0)}m · ${s.shells} shells`)
+              ),
+              h("span", { style: { color: s.flags.length > 0 ? "#fbbf24" : "#10b981" } }, s.flags.length > 0 ? s.flags.join(" · ") : "OK")
+            )
+          )
+        ),
+        // Spans OTel GenAI
+        h(
+          "div",
+          { style: { padding: "12px 14px", borderRadius: "10px", backgroundColor: CARD_BG$3, border: BORDER$3, display: "flex", flexDirection: "column", gap: "6px" } },
+          h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, "Spans OTel GenAI deste Agente"),
+          agentSpans.length === 0 ? h("div", { style: { fontSize: "11px", color: "#9ca3af" } }, "Nenhum span OTel capturado ainda nesta sessão do Buzz.") : agentSpans.map(
+            (sp) => h(
+              "div",
+              {
+                key: sp.spanId,
+                style: {
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "5px 8px",
+                  borderRadius: "6px",
+                  backgroundColor: "rgba(0,0,0,0.28)",
+                  fontSize: "10px",
+                  fontFamily: "monospace"
+                }
+              },
+              h("span", { style: { color: "#38bdf8", fontWeight: "600" } }, sp.toolName || sp.operationName),
+              h("span", { style: { color: sp.status === "error" ? "#f87171" : "#10b981", fontWeight: "700" } }, `${sp.status.toUpperCase()} · ${sp.durationMs}ms`)
+            )
+          )
+        )
+      )
+    );
+  };
+}
+let lastNativeState = {
+  relayConnected: false,
+  conversationRegistered: false,
+  sidebarRegistered: false,
+  shortcutsRegistered: false,
+  attentionSourceRegistered: false,
+  otelHookRegistered: false,
+  agentTabRegistered: false
+};
+function getBuzzNativeState() {
+  return { ...lastNativeState };
+}
 let sidebarCounts = {
   triagem: 0,
   execucao: 0,
@@ -5074,7 +5466,8 @@ function registerBuzzNativeIntegrations(ctx) {
     sidebarRegistered: false,
     shortcutsRegistered: false,
     attentionSourceRegistered: false,
-    otelHookRegistered: false
+    otelHookRegistered: false,
+    agentTabRegistered: false
   };
   try {
     const relay = ctx == null ? void 0 : ctx.relay;
@@ -5166,7 +5559,7 @@ function registerBuzzNativeIntegrations(ctx) {
           var _a2, _b2;
           try {
             if ((_a2 = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a2.open) {
-              ctx.navigation.open({ version: 1, kind: "page", page: "orgfy" });
+              ctx.navigation.open({ version: 1, kind: "page", pluginId: "digital-cortexx-orgfy", pageId: "orgfy" });
             } else if ((_b2 = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _b2.navigate) {
               ctx.navigation.navigate("orgfy");
             }
@@ -5233,7 +5626,7 @@ function registerBuzzNativeIntegrations(ctx) {
           var _a2, _b2;
           try {
             if ((_a2 = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a2.open) {
-              ctx.navigation.open({ version: 1, kind: "page", page: "orgfy" });
+              ctx.navigation.open({ version: 1, kind: "page", pluginId: "digital-cortexx-orgfy", pageId: "orgfy" });
             } else if ((_b2 = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _b2.navigate) {
               ctx.navigation.navigate("orgfy");
             }
@@ -5302,10 +5695,25 @@ function registerBuzzNativeIntegrations(ctx) {
   } catch (err) {
     console.warn("[ORGFY v13] Falha ao registrar OTel AgentHook:", err);
   }
+  try {
+    const agents = ctx == null ? void 0 : ctx.agents;
+    if ((agents == null ? void 0 : agents.registerTab) && typeof agents.registerTab === "function") {
+      const AgentOrgfyTab = createAgentOrgfyTabComponent(ctx);
+      agents.registerTab({
+        id: "orgfy",
+        title: "OrgFy",
+        component: AgentOrgfyTab
+      });
+      state.agentTabRegistered = true;
+    }
+  } catch (err) {
+    console.warn("[ORGFY v13] Falha ao registrar aba OrgFy no perfil dos agentes:", err);
+  }
+  lastNativeState = { ...state };
   return state;
 }
-const CARD_BG = "rgba(0, 0, 0, 0.28)";
-const BORDER = "1px solid rgba(255, 255, 255, 0.08)";
+const CARD_BG$2 = "rgba(0, 0, 0, 0.28)";
+const BORDER$2 = "1px solid rgba(255, 255, 255, 0.08)";
 function formatMin(min) {
   if (min === null || !Number.isFinite(min)) return "--";
   if (min < 60) return `${min.toFixed(0)}m`;
@@ -5554,8 +5962,8 @@ function renderIntelligenceTab(props) {
           gap: "10px",
           padding: "12px 14px",
           borderRadius: "10px",
-          backgroundColor: CARD_BG,
-          border: BORDER
+          backgroundColor: CARD_BG$2,
+          border: BORDER$2
         }
       },
       h(
@@ -5640,7 +6048,7 @@ function renderIntelligenceTab(props) {
       // Pilar 1: Gargalo de Revisão
       h(
         "div",
-        { style: { padding: "12px 14px", borderRadius: "10px", backgroundColor: CARD_BG, border: BORDER } },
+        { style: { padding: "12px 14px", borderRadius: "10px", backgroundColor: CARD_BG$2, border: BORDER$2 } },
         h("div", { style: { fontSize: "10px", fontWeight: "700", color: "#9ca3af", textTransform: "uppercase" } }, "1. Gargalo de Revisão"),
         h(
           "div",
@@ -5656,7 +6064,7 @@ function renderIntelligenceTab(props) {
       // Pilar 2: FPY Real & Retrabalho
       h(
         "div",
-        { style: { padding: "12px 14px", borderRadius: "10px", backgroundColor: CARD_BG, border: BORDER } },
+        { style: { padding: "12px 14px", borderRadius: "10px", backgroundColor: CARD_BG$2, border: BORDER$2 } },
         h("div", { style: { fontSize: "10px", fontWeight: "700", color: "#9ca3af", textTransform: "uppercase" } }, "2. Qualidade (FPY Real)"),
         h(
           "div",
@@ -5672,7 +6080,7 @@ function renderIntelligenceTab(props) {
       // Pilar 3: Economia & ROI
       h(
         "div",
-        { style: { padding: "12px 14px", borderRadius: "10px", backgroundColor: CARD_BG, border: BORDER } },
+        { style: { padding: "12px 14px", borderRadius: "10px", backgroundColor: CARD_BG$2, border: BORDER$2 } },
         h("div", { style: { fontSize: "10px", fontWeight: "700", color: "#9ca3af", textTransform: "uppercase" } }, "3. Economia & Cache"),
         h(
           "div",
@@ -5688,7 +6096,7 @@ function renderIntelligenceTab(props) {
       // Pilar 4: Higiene & Orphan WIP
       h(
         "div",
-        { style: { padding: "12px 14px", borderRadius: "10px", backgroundColor: CARD_BG, border: BORDER } },
+        { style: { padding: "12px 14px", borderRadius: "10px", backgroundColor: CARD_BG$2, border: BORDER$2 } },
         h("div", { style: { fontSize: "10px", fontWeight: "700", color: "#9ca3af", textTransform: "uppercase" } }, "4. Higiene & Estagnação"),
         h(
           "div",
@@ -5715,7 +6123,7 @@ function renderIntelligenceTab(props) {
       // Gráfico 14 dias
       h(
         "div",
-        { style: { padding: "14px", borderRadius: "10px", backgroundColor: CARD_BG, border: BORDER } },
+        { style: { padding: "14px", borderRadius: "10px", backgroundColor: CARD_BG$2, border: BORDER$2 } },
         h(
           "div",
           { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" } },
@@ -5731,7 +6139,7 @@ function renderIntelligenceTab(props) {
       // Medidor de Orçamento 80%/100% + Alertas
       h(
         "div",
-        { style: { padding: "14px", borderRadius: "10px", backgroundColor: CARD_BG, border: BORDER, display: "flex", flexDirection: "column", gap: "10px" } },
+        { style: { padding: "14px", borderRadius: "10px", backgroundColor: CARD_BG$2, border: BORDER$2, display: "flex", flexDirection: "column", gap: "10px" } },
         h("div", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, "Guardrail Econômico (80% Alerta / 100% Trava)"),
         renderBudgetGaugeSvg(h, kpis.economia.uso_teto_diario_pct, kpis.economia.status_orcamento),
         h(
@@ -5777,7 +6185,7 @@ function renderIntelligenceTab(props) {
       // Tabela de Modelos
       h(
         "div",
-        { style: { padding: "14px", borderRadius: "10px", backgroundColor: CARD_BG, border: BORDER } },
+        { style: { padding: "14px", borderRadius: "10px", backgroundColor: CARD_BG$2, border: BORDER$2 } },
         h(
           "div",
           { style: { display: "flex", justifyContent: "space-between", marginBottom: "8px" } },
@@ -5820,7 +6228,7 @@ function renderIntelligenceTab(props) {
         // Radar de Loops & Sessões Zumbis (Goose Live)
         h(
           "div",
-          { style: { padding: "14px", borderRadius: "10px", backgroundColor: CARD_BG, border: BORDER, display: "flex", flexDirection: "column", gap: "10px" } },
+          { style: { padding: "14px", borderRadius: "10px", backgroundColor: CARD_BG$2, border: BORDER$2, display: "flex", flexDirection: "column", gap: "10px" } },
           h(
             "div",
             { style: { display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" } },
@@ -6062,7 +6470,7 @@ function renderIntelligenceTab(props) {
         // Top Estagnados
         h(
           "div",
-          { style: { padding: "12px 14px", borderRadius: "10px", backgroundColor: CARD_BG, border: BORDER } },
+          { style: { padding: "12px 14px", borderRadius: "10px", backgroundColor: CARD_BG$2, border: BORDER$2 } },
           h("div", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6", marginBottom: "6px" } }, "Top Estagnados no Sentinela"),
           kpis.higiene.top_estagnados.length === 0 ? h("div", { style: { fontSize: "11px", color: "#10b981" } }, "Nenhum worktree estagnado.") : h(
             "div",
@@ -6086,75 +6494,6 @@ function renderIntelligenceTab(props) {
                 h("span", { style: { color: "#cbd5e1", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "70%" } }, st.chave),
                 h("span", { style: { color: st.nivel >= 3 ? "#f87171" : "#fbbf24", fontWeight: "700" } }, `N${st.nivel} · ${st.ciclos} ciclos`)
               )
-            )
-          )
-        )
-      ),
-      // ── PAINEL FRONTIER v13: OPENTELEMETRY GENAI LIVE STREAM & ECONOMIA DECISIONS API ──
-      props.telemetry && h(
-        "div",
-        {
-          style: {
-            padding: "14px 16px",
-            borderRadius: "10px",
-            backgroundColor: CARD_BG,
-            border: "1px solid rgba(56, 189, 248, 0.25)",
-            display: "flex",
-            flexDirection: "column",
-            gap: "10px"
-          }
-        },
-        h(
-          "div",
-          { style: { display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" } },
-          h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#38bdf8" } }, "Observabilidade Frontier (OTel GenAI + Economia Decisions API)"),
-          h(
-            "span",
-            { style: { fontSize: "10px", color: "#9ca3af", fontFamily: "monospace" } },
-            `${props.telemetry.totalSpans} spans capturados · ${props.telemetry.decisionsSavings.totalCalls} avaliações Decisions`
-          )
-        ),
-        h(
-          "div",
-          { style: { display: "grid", gridTemplateColumns: "repeat(4, minmax(120px, 1fr))", gap: "8px" } },
-          [
-            { label: "Decisions API", value: `${props.telemetry.decisionsSavings.decisionsApiCalls} calls`, color: "#10b981" },
-            { label: "Wakes Evitados", value: String(props.telemetry.decisionsSavings.wakesOrEscalationsAvoided), color: "#38bdf8" },
-            { label: "Tokens Economizados", value: `~${Math.round(props.telemetry.decisionsSavings.estimatedTokensSaved / 1e3)}k`, color: "#c084fc" },
-            { label: "Alertas Retry Cascade", value: String(props.telemetry.retryCascadeAlerts.length), color: props.telemetry.retryCascadeAlerts.length > 0 ? "#f87171" : "#10b981" }
-          ].map(
-            (m) => h(
-              "div",
-              { key: m.label, style: { padding: "8px 10px", borderRadius: "8px", backgroundColor: "rgba(255,255,255,0.03)", border: BORDER } },
-              h("div", { style: { fontSize: "10px", color: "#9ca3af" } }, m.label),
-              h("div", { style: { fontSize: "14px", fontWeight: "700", color: m.color, fontFamily: "monospace", marginTop: "2px" } }, m.value)
-            )
-          )
-        ),
-        props.telemetry.recentSpans.length > 0 && h(
-          "div",
-          { style: { display: "flex", flexDirection: "column", gap: "4px", maxHeight: "150px", overflowY: "auto" } },
-          props.telemetry.recentSpans.slice(0, 8).map(
-            (sp) => h(
-              "div",
-              {
-                key: sp.spanId,
-                style: {
-                  display: "grid",
-                  gridTemplateColumns: "110px 1fr 75px 60px",
-                  gap: "8px",
-                  padding: "4px 8px",
-                  borderRadius: "6px",
-                  backgroundColor: "rgba(0,0,0,0.28)",
-                  fontSize: "10px",
-                  fontFamily: "monospace",
-                  alignItems: "center"
-                }
-              },
-              h("span", { style: { color: "#38bdf8", fontWeight: "600" } }, sp.operationName),
-              h("span", { style: { color: "#e5e7eb", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, `${sp.agentName}${sp.toolName ? ` · ${sp.toolName}` : ""}${sp.model ? ` (${sp.model})` : ""}`),
-              h("span", { style: { color: sp.status === "error" ? "#f87171" : sp.status === "filtered_out" ? "#c084fc" : "#10b981", fontWeight: "700" } }, sp.status.toUpperCase()),
-              h("span", { style: { color: "#9ca3af", textAlign: "right" } }, `${sp.durationMs}ms`)
             )
           )
         )
@@ -6259,6 +6598,965 @@ function createChannelPulsePanel(ctx, fetchKpis) {
               }
             },
             al.mensagem
+          )
+        )
+      )
+    );
+  };
+}
+const CARD_BG$1 = "rgba(0, 0, 0, 0.28)";
+const BORDER$1 = "1px solid rgba(255, 255, 255, 0.08)";
+function formatTime(ts) {
+  try {
+    return new Date(ts).toLocaleTimeString("pt-BR", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit"
+    });
+  } catch {
+    return "--:--:--";
+  }
+}
+function renderObservabilityTab(props) {
+  const {
+    h,
+    telemetry,
+    nativeState,
+    operationFilter,
+    onFilterChange,
+    isProbingDecision,
+    lastProbeSummary,
+    onRunDecisionProbe,
+    onResetSpans,
+    onRefresh
+  } = props;
+  const filteredSpans = operationFilter === "all" ? telemetry.recentSpans : telemetry.recentSpans.filter((s) => s.operationName === operationFilter);
+  const integrationPills = [
+    { label: "Relay Live", ok: nativeState.relayConnected },
+    { label: "Slash Commands (/orgfy-*)", ok: nativeState.conversationRegistered },
+    { label: "Sidebar Pulse", ok: nativeState.sidebarRegistered },
+    { label: "Atalho ⌘⇧O", ok: nativeState.shortcutsRegistered },
+    { label: "AttentionSource orgfy.pipeline", ok: nativeState.attentionSourceRegistered },
+    { label: "OTel GenAI Hooks", ok: nativeState.otelHookRegistered },
+    { label: "Aba OrgFy nos Agentes", ok: nativeState.agentTabRegistered }
+  ];
+  const activeCount = integrationPills.filter((p) => p.ok).length;
+  return h(
+    "div",
+    {
+      style: {
+        display: "flex",
+        flexDirection: "column",
+        gap: "14px",
+        flex: 1,
+        minHeight: 0,
+        overflowY: "auto",
+        paddingRight: "6px"
+      }
+    },
+    // Barra Superior de Ações
+    h(
+      "div",
+      {
+        style: {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: "10px",
+          padding: "12px 16px",
+          borderRadius: "10px",
+          backgroundColor: CARD_BG$1,
+          border: "1px solid rgba(56, 189, 248, 0.25)"
+        }
+      },
+      h(
+        "div",
+        { style: { display: "flex", flexDirection: "column", gap: "2px" } },
+        h(
+          "span",
+          { style: { fontSize: "13.5px", fontWeight: "700", color: "#f3f4f6" } },
+          "Observabilidade Frontier — OpenTelemetry GenAI & Decisions API"
+        ),
+        h(
+          "span",
+          { style: { fontSize: "11px", color: "#9ca3af", fontFamily: "monospace" } },
+          `${telemetry.totalSpans} spans em memória · ${telemetry.decisionsSavings.totalCalls} avaliações Decisions · ${activeCount}/${integrationPills.length} integrações Buzz nativas ativas`
+        )
+      ),
+      h(
+        "div",
+        { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
+        h(
+          "button",
+          {
+            onClick: onRunDecisionProbe,
+            disabled: isProbingDecision,
+            style: {
+              padding: "6px 12px",
+              borderRadius: "6px",
+              border: "none",
+              backgroundColor: "#38bdf8",
+              color: "#000000",
+              fontSize: "11px",
+              fontWeight: "700",
+              cursor: isProbingDecision ? "wait" : "pointer"
+            }
+          },
+          isProbingDecision ? "Testando Decisions API..." : "⚡ Testar Decisions API Agora"
+        ),
+        h(
+          "button",
+          {
+            onClick: onRefresh,
+            style: {
+              padding: "6px 10px",
+              borderRadius: "6px",
+              border: BORDER$1,
+              backgroundColor: "rgba(255,255,255,0.05)",
+              color: "#cbd5e1",
+              fontSize: "11px",
+              cursor: "pointer"
+            }
+          },
+          "Atualizar"
+        ),
+        h(
+          "button",
+          {
+            onClick: onResetSpans,
+            style: {
+              padding: "6px 10px",
+              borderRadius: "6px",
+              border: "1px solid rgba(239, 68, 68, 0.3)",
+              backgroundColor: "rgba(239, 68, 68, 0.1)",
+              color: "#fca5a5",
+              fontSize: "11px",
+              cursor: "pointer"
+            }
+          },
+          "Limpar Spans"
+        )
+      )
+    ),
+    lastProbeSummary && h(
+      "div",
+      {
+        style: {
+          padding: "10px 14px",
+          borderRadius: "8px",
+          backgroundColor: "rgba(16, 185, 129, 0.1)",
+          border: "1px solid rgba(16, 185, 129, 0.3)",
+          fontSize: "11px",
+          color: "#a7f3d0",
+          fontFamily: "monospace"
+        }
+      },
+      lastProbeSummary
+    ),
+    // 4 KPI Cards de Observabilidade
+    h(
+      "div",
+      {
+        style: {
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
+          gap: "10px"
+        }
+      },
+      [
+        {
+          title: "1. Decisions API (Pré-LLM)",
+          value: `${telemetry.decisionsSavings.decisionsApiCalls} nativas`,
+          sub: `${telemetry.decisionsSavings.fallbackCalls} fallback · média ${telemetry.decisionsSavings.avgLatencyMs}ms`,
+          color: "#10b981"
+        },
+        {
+          title: "2. Wakes / Escalações Evitadas",
+          value: String(telemetry.decisionsSavings.wakesOrEscalationsAvoided),
+          sub: "Eventos filtrados antes de acordar LLM caro",
+          color: "#38bdf8"
+        },
+        {
+          title: "3. Tokens Economizados (Est.)",
+          value: `~${Math.round(telemetry.decisionsSavings.estimatedTokensSaved / 1e3)}k tok`,
+          sub: `${telemetry.decisionsSavings.estimatedTokensSaved.toLocaleString("pt-BR")} tokens poupados`,
+          color: "#c084fc"
+        },
+        {
+          title: "4. Alertas Retry Cascade",
+          value: String(telemetry.retryCascadeAlerts.length),
+          sub: telemetry.retryCascadeAlerts.length > 0 ? "Agentes com falhas consecutivas detectados" : "Nenhum agente em cascata de erro",
+          color: telemetry.retryCascadeAlerts.length > 0 ? "#f87171" : "#10b981"
+        }
+      ].map(
+        (kpi) => h(
+          "div",
+          {
+            key: kpi.title,
+            style: { padding: "12px 14px", borderRadius: "10px", backgroundColor: CARD_BG$1, border: BORDER$1 }
+          },
+          h("div", { style: { fontSize: "10px", fontWeight: "700", color: "#9ca3af", textTransform: "uppercase" } }, kpi.title),
+          h("div", { style: { fontSize: "22px", fontWeight: "700", color: kpi.color, marginTop: "4px", fontFamily: "monospace" } }, kpi.value),
+          h("div", { style: { fontSize: "11px", color: "#9ca3af", marginTop: "4px", fontFamily: "monospace" } }, kpi.sub)
+        )
+      )
+    ),
+    // Barra de Sinergia Nativa Buzz Desktop
+    h(
+      "div",
+      {
+        style: {
+          padding: "12px 14px",
+          borderRadius: "10px",
+          backgroundColor: CARD_BG$1,
+          border: BORDER$1,
+          display: "flex",
+          flexDirection: "column",
+          gap: "8px"
+        }
+      },
+      h(
+        "div",
+        { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+        h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, "Sinergia Nativa com Buzz Desktop (@buzz/author)"),
+        h("span", { style: { fontSize: "10.5px", color: "#10b981", fontFamily: "monospace" } }, `${activeCount}/${integrationPills.length} ativos`)
+      ),
+      h(
+        "div",
+        { style: { display: "flex", flexWrap: "wrap", gap: "8px" } },
+        integrationPills.map(
+          (p) => h(
+            "span",
+            {
+              key: p.label,
+              style: {
+                fontSize: "10.5px",
+                fontFamily: "monospace",
+                fontWeight: "600",
+                padding: "4px 10px",
+                borderRadius: "9999px",
+                backgroundColor: p.ok ? "rgba(16, 185, 129, 0.14)" : "rgba(156, 163, 175, 0.12)",
+                border: p.ok ? "1px solid rgba(16, 185, 129, 0.35)" : "1px solid rgba(156, 163, 175, 0.25)",
+                color: p.ok ? "#34d399" : "#9ca3af"
+              }
+            },
+            `${p.ok ? "●" : "○"} ${p.label}`
+          )
+        )
+      )
+    ),
+    // Grid Principal 2 Colunas: Stream de Spans OTel + Saúde por Agente
+    h(
+      "div",
+      {
+        style: {
+          display: "grid",
+          gridTemplateColumns: "1.4fr 1fr",
+          gap: "12px",
+          alignItems: "start"
+        }
+      },
+      // Coluna Esquerda: Live Event & Span Stream
+      h(
+        "div",
+        {
+          style: {
+            padding: "14px",
+            borderRadius: "10px",
+            backgroundColor: CARD_BG$1,
+            border: BORDER$1,
+            display: "flex",
+            flexDirection: "column",
+            gap: "10px"
+          }
+        },
+        h(
+          "div",
+          { style: { display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" } },
+          h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, `Live Event & Span Stream (${filteredSpans.length})`),
+          h(
+            "div",
+            { style: { display: "flex", gap: "4px", flexWrap: "wrap" } },
+            [
+              { id: "all", label: "Todos" },
+              { id: "invoke_agent", label: "Agentes" },
+              { id: "execute_tool", label: "Tools" },
+              { id: "decisions.evaluate", label: "Decisions" },
+              { id: "relay.event", label: "Relay" }
+            ].map(
+              (f) => h(
+                "button",
+                {
+                  key: f.id,
+                  onClick: () => onFilterChange(f.id),
+                  style: {
+                    padding: "3px 8px",
+                    borderRadius: "5px",
+                    border: operationFilter === f.id ? "1px solid rgba(56, 189, 248, 0.5)" : BORDER$1,
+                    backgroundColor: operationFilter === f.id ? "rgba(56, 189, 248, 0.16)" : "rgba(255,255,255,0.03)",
+                    color: operationFilter === f.id ? "#38bdf8" : "#9ca3af",
+                    fontSize: "10px",
+                    fontWeight: "600",
+                    cursor: "pointer"
+                  }
+                },
+                f.label
+              )
+            )
+          )
+        ),
+        filteredSpans.length === 0 ? h(
+          "div",
+          {
+            style: {
+              padding: "24px 12px",
+              textAlign: "center",
+              color: "#9ca3af",
+              fontSize: "11.5px",
+              lineHeight: "1.5"
+            }
+          },
+          "Nenhum span capturado neste filtro ainda. Clique em '⚡ Testar Decisions API Agora' ou execute uma tool/agente para ver o stream OTel ao vivo."
+        ) : h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: "5px", maxHeight: "360px", overflowY: "auto", paddingRight: "4px" } },
+          filteredSpans.map(
+            (sp) => h(
+              "div",
+              {
+                key: sp.spanId,
+                style: {
+                  display: "grid",
+                  gridTemplateColumns: "62px 112px 1fr 78px 54px",
+                  gap: "8px",
+                  padding: "6px 8px",
+                  borderRadius: "6px",
+                  backgroundColor: "rgba(255,255,255,0.025)",
+                  border: sp.status === "error" ? "1px solid rgba(239,68,68,0.3)" : "1px solid rgba(255,255,255,0.04)",
+                  fontSize: "10.5px",
+                  fontFamily: "monospace",
+                  alignItems: "center"
+                }
+              },
+              h("span", { style: { color: "#6b7280" } }, formatTime(sp.timestamp)),
+              h("span", { style: { color: "#38bdf8", fontWeight: "700" } }, sp.operationName),
+              h(
+                "span",
+                {
+                  style: { color: "#e5e7eb", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" },
+                  title: `${sp.agentName} ${sp.toolName || ""} ${sp.model || ""} ${sp.finishReason || ""}`
+                },
+                `${sp.agentName}${sp.toolName ? ` · ${sp.toolName}` : ""}${sp.model ? ` (${sp.model})` : ""}`
+              ),
+              h(
+                "span",
+                {
+                  style: {
+                    color: sp.status === "error" ? "#f87171" : sp.status === "filtered_out" ? "#c084fc" : "#10b981",
+                    fontWeight: "700",
+                    textAlign: "center"
+                  }
+                },
+                sp.status.toUpperCase()
+              ),
+              h("span", { style: { color: "#9ca3af", textAlign: "right" } }, `${sp.durationMs}ms`)
+            )
+          )
+        )
+      ),
+      // Coluna Direita: Saúde & Retry Cascades por Agente + Distribuição Decisions
+      h(
+        "div",
+        { style: { display: "flex", flexDirection: "column", gap: "12px" } },
+        h(
+          "div",
+          { style: { padding: "14px", borderRadius: "10px", backgroundColor: CARD_BG$1, border: BORDER$1, display: "flex", flexDirection: "column", gap: "8px" } },
+          h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, "Saúde & Retry Cascade por Agente"),
+          telemetry.agentMetrics.length === 0 ? h("div", { style: { fontSize: "11px", color: "#9ca3af" } }, "Aguardando turnos dos agentes via hook OTel (turn.completed / turn.failed).") : h(
+            "div",
+            { style: { display: "flex", flexDirection: "column", gap: "6px" } },
+            telemetry.agentMetrics.map(
+              (m) => h(
+                "div",
+                {
+                  key: m.agentName,
+                  style: {
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "7px 9px",
+                    borderRadius: "6px",
+                    backgroundColor: m.retryCascadeRisk ? "rgba(239, 68, 68, 0.12)" : "rgba(255,255,255,0.025)",
+                    border: m.retryCascadeRisk ? "1px solid rgba(239, 68, 68, 0.35)" : BORDER$1,
+                    fontSize: "10.5px",
+                    fontFamily: "monospace"
+                  }
+                },
+                h("span", { style: { color: "#f3f4f6", fontWeight: "700" } }, m.agentName),
+                h(
+                  "span",
+                  { style: { color: m.retryCascadeRisk ? "#f87171" : "#10b981" } },
+                  `${m.totalTurns} turnos · ${m.errorTurns} err · ${m.avgDurationMs}ms`
+                )
+              )
+            )
+          )
+        ),
+        h(
+          "div",
+          { style: { padding: "14px", borderRadius: "10px", backgroundColor: CARD_BG$1, border: BORDER$1, display: "flex", flexDirection: "column", gap: "8px" } },
+          h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, "Chamadas Decisions API por Modo"),
+          Object.keys(telemetry.decisionsSavings.byMode).length === 0 ? h("div", { style: { fontSize: "11px", color: "#9ca3af" } }, "Nenhuma avaliação registrada ainda.") : h(
+            "div",
+            { style: { display: "flex", flexDirection: "column", gap: "5px" } },
+            Object.entries(telemetry.decisionsSavings.byMode).map(
+              ([mode, count]) => h(
+                "div",
+                {
+                  key: mode,
+                  style: {
+                    display: "flex",
+                    justifyContent: "space-between",
+                    padding: "5px 8px",
+                    borderRadius: "6px",
+                    backgroundColor: "rgba(255,255,255,0.025)",
+                    fontSize: "11px",
+                    fontFamily: "monospace"
+                  }
+                },
+                h("span", { style: { color: "#cbd5e1" } }, mode),
+                h("span", { style: { color: "#38bdf8", fontWeight: "700" } }, `${count}x`)
+              )
+            )
+          )
+        )
+      )
+    )
+  );
+}
+const CARD_BG = "rgba(0, 0, 0, 0.28)";
+const BORDER = "1px solid rgba(255, 255, 255, 0.08)";
+const INPUT_STYLE = {
+  width: "100%",
+  padding: "7px 10px",
+  borderRadius: "7px",
+  backgroundColor: "rgba(0, 0, 0, 0.35)",
+  border: "1px solid rgba(255, 255, 255, 0.12)",
+  color: "#f3f4f6",
+  fontSize: "12px",
+  outline: "none",
+  boxSizing: "border-box"
+};
+function createCardStudioTabComponent(ctx) {
+  const React = ctx == null ? void 0 : ctx.react;
+  const h = React.createElement;
+  return function CardStudioTab({ liveAgents, defaultEmpresa, onNotify }) {
+    var _a, _b;
+    const firstAgent = ((_a = liveAgents[0]) == null ? void 0 : _a.name) || "OrgFy Atlas";
+    const secondAgent = ((_b = liveAgents.find((a) => a.name !== firstAgent)) == null ? void 0 : _b.name) || "OrgFy Bento";
+    const [empresa, setEmpresa] = React.useState(defaultEmpresa === "all" ? "orgfy" : defaultEmpresa);
+    const [slug, setSlug] = React.useState("");
+    const [titulo, setTitulo] = React.useState("");
+    const [objetivo, setObjetivo] = React.useState("");
+    const [tipo, setTipo] = React.useState("execucao");
+    const [executor, setExecutor] = React.useState(firstAgent);
+    const [revisor, setRevisor] = React.useState(secondAgent);
+    const [autoridade, setAutoridade] = React.useState("DECIDIDO Helton / OrgFy Iris");
+    const [decisao, setDecisao] = React.useState("Implementar com escopo fechado e validação L-22");
+    const [escritaText, setEscritaText] = React.useState("");
+    const [acceptanceCmd, setAcceptanceCmd] = React.useState("python3 -m pytest -q");
+    const [feitoQuando, setFeitoQuando] = React.useState("Comando de aceite L-22 retorna exit 0 sem regressões");
+    const [attentionPolicy, setAttentionPolicy] = React.useState("auto");
+    const [busy, setBusy] = React.useState(false);
+    const [result, setResult] = React.useState(null);
+    const [previewTab, setPreviewTab] = React.useState("markdown");
+    const l01Violation = executor.trim().toLowerCase() === revisor.trim().toLowerCase();
+    const copyText = (text, label) => {
+      var _a2;
+      try {
+        (_a2 = navigator == null ? void 0 : navigator.clipboard) == null ? void 0 : _a2.writeText(text);
+        onNotify("success", `${label} copiado!`);
+      } catch {
+        onNotify("warning", "Clipboard indisponível neste ambiente.");
+      }
+    };
+    const runCreate = async (writeToDisk) => {
+      if (l01Violation) {
+        onNotify("warning", "Regra L-01: Executor e Revisor precisam ser perfis diferentes.");
+        return;
+      }
+      const paths = escritaText.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
+      if (!titulo.trim() || paths.length === 0 || !acceptanceCmd.trim()) {
+        onNotify("warning", "Preencha Título, ao menos 1 path em Escrita exclusiva e Comando de aceite L-22.");
+        return;
+      }
+      setBusy(true);
+      try {
+        const res = await createCanonicalCard(ctx, {
+          slug: slug.trim() || titulo.trim(),
+          titulo: titulo.trim(),
+          objetivo: objetivo.trim() || void 0,
+          autoridade: autoridade.trim(),
+          decisao: decisao.trim(),
+          tipo,
+          executor,
+          revisor,
+          escrita_exclusiva: paths,
+          feito_quando: feitoQuando.trim(),
+          acceptance_command: acceptanceCmd.trim(),
+          attention_policy: attentionPolicy === "auto" ? void 0 : attentionPolicy,
+          empresa,
+          write_file: writeToDisk,
+          run_lint: writeToDisk
+        });
+        setResult(res);
+        onNotify(res.ok ? "success" : "warning", res.message);
+      } catch (err) {
+        onNotify("warning", `Erro ao gerar card: ${(err == null ? void 0 : err.message) || err}`);
+      } finally {
+        setBusy(false);
+      }
+    };
+    const agentOptions = liveAgents.length > 0 ? liveAgents.map((a) => a.name) : ["OrgFy Atlas", "OrgFy Bento", "OrgFy Val", "OrgFy Teo", "OrgFy Iris", "QA Sentinel"];
+    return h(
+      "div",
+      {
+        style: {
+          display: "grid",
+          gridTemplateColumns: "1.05fr 1fr",
+          gap: "14px",
+          flex: 1,
+          minHeight: 0,
+          overflow: "hidden"
+        }
+      },
+      // COLUNA ESQUERDA: FORMULÁRIO SCHEMA-FIRST
+      h(
+        "div",
+        {
+          style: {
+            display: "flex",
+            flexDirection: "column",
+            gap: "10px",
+            padding: "14px 16px",
+            borderRadius: "10px",
+            backgroundColor: CARD_BG,
+            border: BORDER,
+            overflowY: "auto",
+            minHeight: 0
+          }
+        },
+        h(
+          "div",
+          { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+          h("span", { style: { fontSize: "13.5px", fontWeight: "700", color: "#f3f4f6" } }, "Card Studio — Abertura Schema-First (L-01 + L-22 + Attention)"),
+          h("span", { style: { fontSize: "10px", color: "#10b981", fontFamily: "monospace" } }, "orgfy_card_create")
+        ),
+        // Linha 1: Empresa, Slug, Tipo
+        h(
+          "div",
+          { style: { display: "grid", gridTemplateColumns: "1fr 1.2fr 1fr", gap: "8px" } },
+          h(
+            "div",
+            { style: { display: "flex", flexDirection: "column", gap: "4px" } },
+            h("label", { style: { fontSize: "10px", color: "#9ca3af", fontWeight: "700" } }, "EMPRESA"),
+            h(
+              "select",
+              { value: empresa, onChange: (e) => setEmpresa(e.target.value), style: INPUT_STYLE },
+              h("option", { value: "orgfy" }, "orgfy"),
+              h("option", { value: "lumen-iptv" }, "lumen-iptv"),
+              h("option", { value: "saas-tributario" }, "saas-tributario")
+            )
+          ),
+          h(
+            "div",
+            { style: { display: "flex", flexDirection: "column", gap: "4px" } },
+            h("label", { style: { fontSize: "10px", color: "#9ca3af", fontWeight: "700" } }, "SLUG (OPCIONAL)"),
+            h("input", {
+              type: "text",
+              placeholder: "ex: fix-rls-checkout",
+              value: slug,
+              onChange: (e) => setSlug(e.target.value),
+              style: INPUT_STYLE
+            })
+          ),
+          h(
+            "div",
+            { style: { display: "flex", flexDirection: "column", gap: "4px" } },
+            h("label", { style: { fontSize: "10px", color: "#9ca3af", fontWeight: "700" } }, "TIPO"),
+            h(
+              "select",
+              { value: tipo, onChange: (e) => setTipo(e.target.value), style: INPUT_STYLE },
+              h("option", { value: "execucao" }, "execucao"),
+              h("option", { value: "infraestrutura" }, "infraestrutura"),
+              h("option", { value: "seguranca" }, "seguranca"),
+              h("option", { value: "spec" }, "spec"),
+              h("option", { value: "revisao" }, "revisao"),
+              h("option", { value: "pesquisa" }, "pesquisa")
+            )
+          )
+        ),
+        // Título
+        h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: "4px" } },
+          h("label", { style: { fontSize: "10px", color: "#9ca3af", fontWeight: "700" } }, "TÍTULO DO CARD *"),
+          h("input", {
+            type: "text",
+            placeholder: "Ex: Corrigir validação RLS no endpoint de billing",
+            value: titulo,
+            onChange: (e) => setTitulo(e.target.value),
+            style: INPUT_STYLE
+          })
+        ),
+        // Executor, Revisor, Attention Policy
+        h(
+          "div",
+          { style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" } },
+          h(
+            "div",
+            { style: { display: "flex", flexDirection: "column", gap: "4px" } },
+            h("label", { style: { fontSize: "10px", color: "#9ca3af", fontWeight: "700" } }, "EXECUTOR *"),
+            h(
+              "select",
+              { value: executor, onChange: (e) => setExecutor(e.target.value), style: INPUT_STYLE },
+              agentOptions.map((n) => h("option", { key: n, value: n }, n))
+            )
+          ),
+          h(
+            "div",
+            { style: { display: "flex", flexDirection: "column", gap: "4px" } },
+            h("label", { style: { fontSize: "10px", color: "#9ca3af", fontWeight: "700" } }, "REVISOR (L-01) *"),
+            h(
+              "select",
+              { value: revisor, onChange: (e) => setRevisor(e.target.value), style: INPUT_STYLE },
+              agentOptions.map((n) => h("option", { key: n, value: n }, n))
+            )
+          ),
+          h(
+            "div",
+            { style: { display: "flex", flexDirection: "column", gap: "4px" } },
+            h("label", { style: { fontSize: "10px", color: "#9ca3af", fontWeight: "700" } }, "BUZZ ATTENTION"),
+            h(
+              "select",
+              { value: attentionPolicy, onChange: (e) => setAttentionPolicy(e.target.value), style: INPUT_STYLE },
+              h("option", { value: "auto" }, "Auto (Decisions API)"),
+              h("option", { value: "timer_curto" }, "timer_curto"),
+              h("option", { value: "event_driven" }, "event_driven"),
+              h("option", { value: "watchdog_longo" }, "watchdog_longo")
+            )
+          )
+        ),
+        l01Violation && h(
+          "div",
+          {
+            style: {
+              padding: "7px 10px",
+              borderRadius: "6px",
+              backgroundColor: "rgba(239, 68, 68, 0.14)",
+              border: "1px solid rgba(239, 68, 68, 0.4)",
+              color: "#fca5a5",
+              fontSize: "11px",
+              fontWeight: "600"
+            }
+          },
+          "Regra L-01 violada: Executor e Revisor não podem ser o mesmo agente."
+        ),
+        // Escrita Exclusiva
+        h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: "4px" } },
+          h("label", { style: { fontSize: "10px", color: "#9ca3af", fontWeight: "700" } }, "ESCRITA EXCLUSIVA (1 PATH POR LINHA OU VÍRGULA) *"),
+          h("textarea", {
+            rows: 2,
+            placeholder: "ex: src/services/billing.ts, testes/test_billing.py",
+            value: escritaText,
+            onChange: (e) => setEscritaText(e.target.value),
+            style: { ...INPUT_STYLE, fontFamily: "monospace", resize: "vertical" }
+          })
+        ),
+        // Comando de Aceite L-22
+        h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: "4px" } },
+          h("label", { style: { fontSize: "10px", color: "#10b981", fontWeight: "700" } }, "COMANDO DE ACEITE CONGELADO (L-22 SHA-256) *"),
+          h("input", {
+            type: "text",
+            value: acceptanceCmd,
+            onChange: (e) => setAcceptanceCmd(e.target.value),
+            style: { ...INPUT_STYLE, fontFamily: "monospace", color: "#34d399" }
+          })
+        ),
+        // Feito Quando
+        h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: "4px" } },
+          h("label", { style: { fontSize: "10px", color: "#9ca3af", fontWeight: "700" } }, "FEITO QUANDO *"),
+          h("input", {
+            type: "text",
+            value: feitoQuando,
+            onChange: (e) => setFeitoQuando(e.target.value),
+            style: INPUT_STYLE
+          })
+        ),
+        // Autoridade e Decisão
+        h(
+          "div",
+          { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" } },
+          h(
+            "div",
+            { style: { display: "flex", flexDirection: "column", gap: "4px" } },
+            h("label", { style: { fontSize: "10px", color: "#9ca3af", fontWeight: "700" } }, "AUTORIDADE *"),
+            h("input", {
+              type: "text",
+              value: autoridade,
+              onChange: (e) => setAutoridade(e.target.value),
+              style: INPUT_STYLE
+            })
+          ),
+          h(
+            "div",
+            { style: { display: "flex", flexDirection: "column", gap: "4px" } },
+            h("label", { style: { fontSize: "10px", color: "#9ca3af", fontWeight: "700" } }, "DECISÃO *"),
+            h("input", {
+              type: "text",
+              value: decisao,
+              onChange: (e) => setDecisao(e.target.value),
+              style: INPUT_STYLE
+            })
+          )
+        ),
+        // Objetivo opcional
+        h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: "4px" } },
+          h("label", { style: { fontSize: "10px", color: "#9ca3af", fontWeight: "700" } }, "OBJETIVO (OPCIONAL)"),
+          h("textarea", {
+            rows: 2,
+            placeholder: "Detalhe o objetivo técnico se desejar complementar o título...",
+            value: objetivo,
+            onChange: (e) => setObjetivo(e.target.value),
+            style: { ...INPUT_STYLE, resize: "vertical" }
+          })
+        ),
+        // Botões de Ação
+        h(
+          "div",
+          { style: { display: "flex", gap: "8px", marginTop: "4px" } },
+          h(
+            "button",
+            {
+              onClick: () => runCreate(false),
+              disabled: busy || l01Violation,
+              style: {
+                flex: 1,
+                padding: "9px 12px",
+                borderRadius: "7px",
+                border: "1px solid rgba(56, 189, 248, 0.45)",
+                backgroundColor: "rgba(56, 189, 248, 0.14)",
+                color: "#38bdf8",
+                fontSize: "12px",
+                fontWeight: "700",
+                cursor: busy || l01Violation ? "not-allowed" : "pointer"
+              }
+            },
+            busy ? "Processando..." : "⚡ Simular & Triar (Decisions API)"
+          ),
+          h(
+            "button",
+            {
+              onClick: () => runCreate(true),
+              disabled: busy || l01Violation,
+              style: {
+                flex: 1,
+                padding: "9px 12px",
+                borderRadius: "7px",
+                border: "none",
+                backgroundColor: "#10b981",
+                color: "#000000",
+                fontSize: "12px",
+                fontWeight: "700",
+                cursor: busy || l01Violation ? "not-allowed" : "pointer"
+              }
+            },
+            busy ? "Gravando..." : "Gravar em cards/ + Lint"
+          )
+        )
+      ),
+      // COLUNA DIREITA: PREVIEW & CONTRATO DECISIONS / ATTENTION / L-22
+      h(
+        "div",
+        {
+          style: {
+            display: "flex",
+            flexDirection: "column",
+            gap: "10px",
+            padding: "14px 16px",
+            borderRadius: "10px",
+            backgroundColor: CARD_BG,
+            border: BORDER,
+            overflowY: "auto",
+            minHeight: 0
+          }
+        },
+        !result ? h(
+          "div",
+          {
+            style: {
+              flex: 1,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              textAlign: "center",
+              gap: "8px",
+              color: "#9ca3af",
+              padding: "24px"
+            }
+          },
+          h("div", { style: { fontSize: "13px", fontWeight: "700", color: "#f3f4f6" } }, "Preview Determinístico do Card"),
+          h(
+            "div",
+            { style: { fontSize: "11.5px", maxWidth: "360px", lineHeight: "1.5" } },
+            "Preencha os campos à esquerda e clique em 'Simular & Triar' para ver o veredito da Decisions API, o hash L-22 SHA-256 congelado, o Markdown canônico e os payloads nativos do Buzz Attention."
+          )
+        ) : h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: "10px", flex: 1, minHeight: 0 } },
+          // Resumo Decision Router + L-22
+          h(
+            "div",
+            {
+              style: {
+                display: "grid",
+                gridTemplateColumns: "repeat(3, 1fr)",
+                gap: "8px"
+              }
+            },
+            [
+              {
+                label: "Risco / Tier",
+                value: `${result.triage.riscoScore}/5 · ${result.triage.modeloTier}`,
+                color: result.triage.riscoScore >= 4 ? "#f87171" : "#10b981"
+              },
+              {
+                label: "Modelo Sugerido",
+                value: result.triage.modeloRecomendadoHint,
+                color: "#38bdf8"
+              },
+              {
+                label: "Fonte / Attention",
+                value: `${result.triage.decisionSource === "decisions_api" ? "Decisions API" : "Fallback"} · ${result.attentionContract.policy}`,
+                color: "#c084fc"
+              }
+            ].map(
+              (box) => h(
+                "div",
+                { key: box.label, style: { padding: "8px 10px", borderRadius: "7px", backgroundColor: "rgba(255,255,255,0.03)", border: BORDER } },
+                h("div", { style: { fontSize: "9.5px", color: "#9ca3af", textTransform: "uppercase" } }, box.label),
+                h("div", { style: { fontSize: "11px", fontWeight: "700", color: box.color, fontFamily: "monospace", marginTop: "2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, box.value)
+              )
+            )
+          ),
+          // Barra L-22 SHA-256 & Status em Disco
+          h(
+            "div",
+            {
+              style: {
+                padding: "8px 10px",
+                borderRadius: "7px",
+                backgroundColor: "rgba(16, 185, 129, 0.08)",
+                border: "1px solid rgba(16, 185, 129, 0.25)",
+                fontSize: "10.5px",
+                fontFamily: "monospace",
+                color: "#a7f3d0",
+                display: "flex",
+                flexDirection: "column",
+                gap: "3px"
+              }
+            },
+            h("span", null, `L-22 SHA-256: ${result.acceptanceHashSha256}`),
+            h(
+              "span",
+              { style: { color: "#cbd5e1" } },
+              `Arquivo: ${result.cardPath} · Disco: ${result.writtenToDisk ? "GRAVADO" : "simulação"} · Lint: ${result.lintPassed === null ? "não executado" : result.lintPassed ? "PASS" : "FAIL"}`
+            ),
+            result.lintOutput && h("span", { style: { color: result.lintPassed ? "#34d399" : "#f87171" } }, result.lintOutput)
+          ),
+          // Sub-tabs de preview
+          h(
+            "div",
+            { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" } },
+            h(
+              "div",
+              { style: { display: "flex", gap: "6px" } },
+              [
+                { id: "markdown", label: "Markdown Canônico" },
+                { id: "attention", label: "Buzz Attention JSON" },
+                { id: "publish", label: "Publicar (Guard)" }
+              ].map(
+                (t) => h(
+                  "button",
+                  {
+                    key: t.id,
+                    onClick: () => setPreviewTab(t.id),
+                    style: {
+                      padding: "4px 10px",
+                      borderRadius: "6px",
+                      border: previewTab === t.id ? "1px solid rgba(56,189,248,0.5)" : BORDER,
+                      backgroundColor: previewTab === t.id ? "rgba(56,189,248,0.16)" : "rgba(255,255,255,0.03)",
+                      color: previewTab === t.id ? "#38bdf8" : "#9ca3af",
+                      fontSize: "10.5px",
+                      fontWeight: "600",
+                      cursor: "pointer"
+                    }
+                  },
+                  t.label
+                )
+              )
+            ),
+            h(
+              "button",
+              {
+                onClick: () => {
+                  const content = previewTab === "markdown" ? result.markdown : previewTab === "attention" ? JSON.stringify(result.attentionContract, null, 2) : result.publishCommand;
+                  copyText(content, previewTab === "markdown" ? "Markdown" : previewTab === "attention" ? "Contrato Attention" : "Comando de publicação");
+                },
+                style: {
+                  padding: "4px 10px",
+                  borderRadius: "6px",
+                  border: "1px solid rgba(16,185,129,0.4)",
+                  backgroundColor: "rgba(16,185,129,0.12)",
+                  color: "#34d399",
+                  fontSize: "10.5px",
+                  fontWeight: "600",
+                  cursor: "pointer"
+                }
+              },
+              "Copiar"
+            )
+          ),
+          h(
+            "pre",
+            {
+              style: {
+                flex: 1,
+                margin: 0,
+                padding: "10px 12px",
+                borderRadius: "8px",
+                backgroundColor: "#06080a",
+                border: BORDER,
+                color: previewTab === "publish" ? "#34d399" : "#e5e7eb",
+                fontFamily: "monospace",
+                fontSize: "10.5px",
+                lineHeight: "1.45",
+                overflow: "auto",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word"
+              }
+            },
+            previewTab === "markdown" ? result.markdown : previewTab === "attention" ? JSON.stringify(result.attentionContract, null, 2) : result.publishCommand
           )
         )
       )
@@ -8072,6 +9370,7 @@ function apply(ctx) {
   var _a, _b, _c;
   const React = ctx.react;
   const h = React.createElement;
+  const CardStudioTab = createCardStudioTabComponent(ctx);
   function OrgFyCockpit() {
     var _a2, _b2, _c2, _d, _e, _f, _g, _h;
     const [selectedTenant, setSelectedTenant] = React.useState("all");
@@ -8132,6 +9431,9 @@ function apply(ctx) {
     const [hydratedIssueDetail, setHydratedIssueDetail] = React.useState(null);
     const [isHydratingIssueDetail, setIsHydratingIssueDetail] = React.useState(false);
     const [activeCentralTab, setActiveCentralTab] = React.useState("board");
+    const [obsFilter, setObsFilter] = React.useState("all");
+    const [isProbingDecision, setIsProbingDecision] = React.useState(false);
+    const [lastProbeSummary, setLastProbeSummary] = React.useState(null);
     React.useEffect(() => {
       let cancelled = false;
       if (!activeIssueDetailCard) {
@@ -8201,6 +9503,31 @@ function apply(ctx) {
     }, [pipelineCards, loopRadar]);
     const [stoppingSessionId, setStoppingSessionId] = React.useState(null);
     const [failingOverSessionId, setFailingOverSessionId] = React.useState(null);
+    const handleRunDecisionProbe = React.useCallback(async () => {
+      setIsProbingDecision(true);
+      try {
+        const t0 = Date.now();
+        const res = await triageCardWithDecisions(ctx, {
+          slug: "probe-decisions-live",
+          titulo: "Validar latência e classificação Decisions API ao vivo",
+          tipo: "execucao",
+          escrita_exclusiva: ["src/services/decision-router.ts"],
+          acceptance_command: "node --test verify_plugin.test.mjs"
+        });
+        const ms = Date.now() - t0;
+        setLastProbeSummary(
+          `Probe OK (${ms}ms) · fonte: ${res.decisionSource} · backend: ${res.backend || "fallback"} · modelo: ${res.model || "determinístico"} · risco: ${res.riscoScore}/5 · tier: ${res.modeloTier} · Attention: ${res.attentionPolicy}`
+        );
+        setTelemetrySnap(getTelemetrySnapshot());
+      } finally {
+        setIsProbingDecision(false);
+      }
+    }, []);
+    const handleResetSpans = React.useCallback(() => {
+      resetTelemetryForTests();
+      setTelemetrySnap(getTelemetrySnapshot());
+      setLastProbeSummary(null);
+    }, []);
     const [resolvedItems, setResolvedItems] = React.useState([]);
     const [resolvedError, setResolvedError] = React.useState(null);
     const [resolvedSearch, setResolvedSearch] = React.useState("");
@@ -9067,7 +10394,9 @@ function apply(ctx) {
                 { id: "board", label: "Board & Holding", color: "#10b981", icon: SVG.shield },
                 { id: "orgchart", label: "Organograma", color: "#38bdf8", icon: SVG.users },
                 { id: "pipeline", label: "Esteira (Kanban)", color: "#10b981", icon: SVG.columns },
+                { id: "card_studio", label: "Card Studio", color: "#10b981", icon: SVG.zap },
                 { id: "inteligencia", label: "Saúde & FinOps", color: "#c084fc", icon: SVG.activity },
+                { id: "observabilidade", label: `Observabilidade (${telemetrySnap.totalSpans})`, color: "#38bdf8", icon: SVG.cpu },
                 { id: "templates_rsi", label: "Templates & RSI", color: "#38bdf8", icon: SVG.fileText },
                 { id: "resolvidas", label: `Arquivo (${resolvedItems.length})`, color: "#fbbf24", icon: SVG.checkCircle }
               ].map(
@@ -9079,6 +10408,7 @@ function apply(ctx) {
                       setActiveCentralTab(t.id);
                       if (t.id === "board" || t.id === "orgchart" || t.id === "templates_rsi") loadHolding();
                       if (t.id === "inteligencia") loadKpis();
+                      if (t.id === "observabilidade") setTelemetrySnap(getTelemetrySnapshot());
                       if (t.id === "resolvidas") loadResolvedArchive();
                     },
                     style: {
@@ -9103,7 +10433,7 @@ function apply(ctx) {
             h(
               "span",
               { style: { fontSize: "11px", color: "#6b7280", fontFamily: "monospace" } },
-              activeCentralTab === "board" ? "Conselho da Holding · Visão Multi-Empresa" : activeCentralTab === "orgchart" ? "Hierarquia Real (empresas/*.json)" : activeCentralTab === "pipeline" ? "Esteira Determinística OrgFy v12" : activeCentralTab === "inteligencia" ? "Telemetria Real, Economia & Workflows" : activeCentralTab === "resolvidas" ? "Memória Episódica Sob Demanda" : "Templates Reais & Regras L-90"
+              activeCentralTab === "board" ? "Conselho da Holding · Visão Multi-Empresa" : activeCentralTab === "orgchart" ? "Hierarquia Real (empresas/*.json)" : activeCentralTab === "pipeline" ? "Esteira Determinística OrgFy v13" : activeCentralTab === "card_studio" ? "Abertura Schema-First · L-01 + L-22 + Buzz Attention" : activeCentralTab === "inteligencia" ? "Telemetria Real, Economia & Radar Goose" : activeCentralTab === "observabilidade" ? "OpenTelemetry GenAI · Decisions API · Sinergia Buzz" : activeCentralTab === "resolvidas" ? "Memória Episódica Sob Demanda" : "Templates Reais & Regras L-90"
             )
           ),
           activeCentralTab === "pipeline" ? h(
@@ -9657,13 +10987,27 @@ function apply(ctx) {
             onRunGovernanceEval: handleRunGovernanceEval,
             governanceSummary,
             loopRadar,
-            telemetry: telemetrySnap,
             onRefreshLoopRadar: loadLoopRadar,
             onWakeIrisForLoops: handleWakeIrisForLoops,
             onStopLoopSession: handleStopLoopSession,
             stoppingSessionId,
             onFailoverModelSession: handleFailoverModelSession,
             failingOverSessionId
+          }) : activeCentralTab === "observabilidade" ? renderObservabilityTab({
+            h,
+            telemetry: telemetrySnap,
+            nativeState: getBuzzNativeState(),
+            operationFilter: obsFilter,
+            onFilterChange: setObsFilter,
+            isProbingDecision,
+            lastProbeSummary,
+            onRunDecisionProbe: handleRunDecisionProbe,
+            onResetSpans: handleResetSpans,
+            onRefresh: () => setTelemetrySnap(getTelemetrySnapshot())
+          }) : activeCentralTab === "card_studio" ? h(CardStudioTab, {
+            liveAgents,
+            defaultEmpresa: selectedTenant,
+            onNotify: showNotification
           }) : activeCentralTab === "resolvidas" ? renderResolvedArchiveTab({
             h,
             items: resolvedItems,
@@ -12762,6 +14106,7 @@ export {
   checkMentionTargetIdentity,
   checkThreadWakeAntiLoop,
   createCanonicalCard,
+  getBuzzNativeState,
   getTelemetrySnapshot,
   hydrateIssueDetail,
   inject,
