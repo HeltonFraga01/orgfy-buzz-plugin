@@ -447,14 +447,14 @@ export async function evaluateGovernanceAndReact(
         if (activeCrit.length > 0) {
           const top = activeCrit
             .slice(0, 4)
-            .map((s) => `${s.agente} (${s.session_id}, ${s.shells} shells, ${s.duracao_min}m)`)
+            .map((s) => `${s.agente} (${s.session_id}, ${s.shells} shells, ${s.duracao_min}m, flags=${(s.flags || []).join("+")})`)
             .join("; ");
           alerts.push({
             codigo: "GOOSE_ACTIVE_LOOP",
             severidade: "critical",
             mensagem: `${activeCrit.length} sessão(ões) ativa(s) em loop no Goose: ${top}.`,
             acao_sugerida:
-              "Chamar orgfy_loop_radar({ apenas_ativos: true }), inspecionar ultimo_shell e INTERROMPER imediatamente turnos travados ou inúteis via orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt' }), liberando o lock se necessário.",
+              "Executar Ciclo Fechado de Auto-Cura: (1) chamar orgfy_loop_radar({ apenas_ativos: true }) e INTERROMPER imediatamente via orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', release_issue_id?, reason }); (2) diagnosticar a causa-raiz (ITEM_JA_FECHADO, ESCOPO_ABERTO, COMPACTACAO_LOOP, COLISAO_WORKTREE, ERRO_REPETIDO); (3) agir sem deixar o agente parado no vácuo — se já estiver na main, encerrar sem relançar; se ainda for demanda aberta (ex.: escopo aberto), relançar limpo com ESCOPO FECHADO (1-3 arquivos exatos + comando de aceite L-22 + limite de 10 shells) e registrar 'AUTO-CURA | agente | causa-raiz | ação' no #OrgFy.",
           });
         }
         if (activeDup.length >= 2) {
@@ -1026,20 +1026,82 @@ export async function stopAgentSession(
   };
 }
 
+const DEFAULT_WATCHDOG_INTERVAL_MS = 3 * 60 * 1000; // 3 min
+const DEFAULT_WATCHDOG_INITIAL_DELAY_MS = 12 * 1000; // 12s após carregar o plugin
+let radarWatchdogTimer: any = null;
+let radarWatchdogInitialTimer: any = null;
+let radarWatchdogRunning = false;
+
+export function stopGovernanceRadarWatchdog(): void {
+  if (radarWatchdogInitialTimer) {
+    clearTimeout(radarWatchdogInitialTimer);
+    radarWatchdogInitialTimer = null;
+  }
+  if (radarWatchdogTimer) {
+    clearInterval(radarWatchdogTimer);
+    radarWatchdogTimer = null;
+  }
+}
+
+export function startGovernanceRadarWatchdog(
+  ctx: Context,
+  options: { intervalMs?: number; initialDelayMs?: number } = {}
+): boolean {
+  const agentsApi = (ctx as any).agents;
+  if (!agentsApi?.wake) return false;
+
+  stopGovernanceRadarWatchdog();
+  const intervalMs = options.intervalMs ?? DEFAULT_WATCHDOG_INTERVAL_MS;
+  const initialDelayMs = options.initialDelayMs ?? DEFAULT_WATCHDOG_INITIAL_DELAY_MS;
+
+  const tick = async () => {
+    if (radarWatchdogRunning) return;
+    radarWatchdogRunning = true;
+    try {
+      await evaluateGovernanceAndReact(ctx, { dryRun: false, autoWake: true, includeRadar: true });
+    } catch {
+      // Watchdog resiliente: nunca derruba o host
+    } finally {
+      radarWatchdogRunning = false;
+    }
+  };
+
+  radarWatchdogInitialTimer = setTimeout(() => {
+    radarWatchdogInitialTimer = null;
+    void tick();
+  }, initialDelayMs);
+  if (typeof radarWatchdogInitialTimer?.unref === "function") {
+    radarWatchdogInitialTimer.unref();
+  }
+
+  radarWatchdogTimer = setInterval(() => {
+    void tick();
+  }, intervalMs);
+  if (typeof radarWatchdogTimer?.unref === "function") {
+    radarWatchdogTimer.unref();
+  }
+
+  return true;
+}
+
 export function registerGovernanceAgentHooks(ctx: Context): boolean {
   const agentsApi = (ctx as any).agents;
-  if (!agentsApi?.registerHook) return false;
-  try {
-    agentsApi.registerHook({
-      id: "orgfy-post-turn-governance",
-      harness: "all",
-      event: "turn.completed",
-      run: async () => {
-        await evaluateGovernanceAndReact(ctx, { dryRun: false, autoWake: true, includeRadar: true });
-      },
-    });
-    return true;
-  } catch {
-    return false;
+  let registered = false;
+  if (agentsApi?.registerHook) {
+    try {
+      agentsApi.registerHook({
+        id: "orgfy-post-turn-governance",
+        harness: "all",
+        event: "turn.completed",
+        run: async () => {
+          await evaluateGovernanceAndReact(ctx, { dryRun: false, autoWake: true, includeRadar: true });
+        },
+      });
+      registered = true;
+    } catch {
+      registered = false;
+    }
   }
+  const watchdogStarted = startGovernanceRadarWatchdog(ctx);
+  return registered || watchdogStarted;
 }

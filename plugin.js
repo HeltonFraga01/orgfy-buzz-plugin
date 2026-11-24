@@ -1644,12 +1644,12 @@ async function evaluateGovernanceAndReact(ctx, options = {}) {
           (s) => (typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15) && (s.flags || []).includes("SESSAO_DUPLICADA")
         );
         if (activeCrit.length > 0) {
-          const top = activeCrit.slice(0, 4).map((s) => `${s.agente} (${s.session_id}, ${s.shells} shells, ${s.duracao_min}m)`).join("; ");
+          const top = activeCrit.slice(0, 4).map((s) => `${s.agente} (${s.session_id}, ${s.shells} shells, ${s.duracao_min}m, flags=${(s.flags || []).join("+")})`).join("; ");
           alerts.push({
             codigo: "GOOSE_ACTIVE_LOOP",
             severidade: "critical",
             mensagem: `${activeCrit.length} sessão(ões) ativa(s) em loop no Goose: ${top}.`,
-            acao_sugerida: "Chamar orgfy_loop_radar({ apenas_ativos: true }), inspecionar ultimo_shell e INTERROMPER imediatamente turnos travados ou inúteis via orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt' }), liberando o lock se necessário."
+            acao_sugerida: "Executar Ciclo Fechado de Auto-Cura: (1) chamar orgfy_loop_radar({ apenas_ativos: true }) e INTERROMPER imediatamente via orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', release_issue_id?, reason }); (2) diagnosticar a causa-raiz (ITEM_JA_FECHADO, ESCOPO_ABERTO, COMPACTACAO_LOOP, COLISAO_WORKTREE, ERRO_REPETIDO); (3) agir sem deixar o agente parado no vácuo — se já estiver na main, encerrar sem relançar; se ainda for demanda aberta (ex.: escopo aberto), relançar limpo com ESCOPO FECHADO (1-3 arquivos exatos + comando de aceite L-22 + limite de 10 shells) e registrar 'AUTO-CURA | agente | causa-raiz | ação' no #OrgFy."
           });
         }
         if (activeDup.length >= 2) {
@@ -2057,22 +2057,72 @@ async function stopAgentSession(ctx, input) {
     message: `Comando '${action}' enviado com sucesso para ${matched.name || matched.key} (canal ${place.channelId.slice(0, 8)}${place.root ? `, thread ${place.root.slice(0, 8)}` : ""}).${lockReleased ? " Lock liberado." : ""}${reasonSuffix}`
   };
 }
+const DEFAULT_WATCHDOG_INTERVAL_MS = 3 * 60 * 1e3;
+const DEFAULT_WATCHDOG_INITIAL_DELAY_MS = 12 * 1e3;
+let radarWatchdogTimer = null;
+let radarWatchdogInitialTimer = null;
+let radarWatchdogRunning = false;
+function stopGovernanceRadarWatchdog() {
+  if (radarWatchdogInitialTimer) {
+    clearTimeout(radarWatchdogInitialTimer);
+    radarWatchdogInitialTimer = null;
+  }
+  if (radarWatchdogTimer) {
+    clearInterval(radarWatchdogTimer);
+    radarWatchdogTimer = null;
+  }
+}
+function startGovernanceRadarWatchdog(ctx, options = {}) {
+  const agentsApi = ctx.agents;
+  if (!(agentsApi == null ? void 0 : agentsApi.wake)) return false;
+  stopGovernanceRadarWatchdog();
+  const intervalMs = options.intervalMs ?? DEFAULT_WATCHDOG_INTERVAL_MS;
+  const initialDelayMs = options.initialDelayMs ?? DEFAULT_WATCHDOG_INITIAL_DELAY_MS;
+  const tick = async () => {
+    if (radarWatchdogRunning) return;
+    radarWatchdogRunning = true;
+    try {
+      await evaluateGovernanceAndReact(ctx, { dryRun: false, autoWake: true, includeRadar: true });
+    } catch {
+    } finally {
+      radarWatchdogRunning = false;
+    }
+  };
+  radarWatchdogInitialTimer = setTimeout(() => {
+    radarWatchdogInitialTimer = null;
+    void tick();
+  }, initialDelayMs);
+  if (typeof (radarWatchdogInitialTimer == null ? void 0 : radarWatchdogInitialTimer.unref) === "function") {
+    radarWatchdogInitialTimer.unref();
+  }
+  radarWatchdogTimer = setInterval(() => {
+    void tick();
+  }, intervalMs);
+  if (typeof (radarWatchdogTimer == null ? void 0 : radarWatchdogTimer.unref) === "function") {
+    radarWatchdogTimer.unref();
+  }
+  return true;
+}
 function registerGovernanceAgentHooks(ctx) {
   const agentsApi = ctx.agents;
-  if (!(agentsApi == null ? void 0 : agentsApi.registerHook)) return false;
-  try {
-    agentsApi.registerHook({
-      id: "orgfy-post-turn-governance",
-      harness: "all",
-      event: "turn.completed",
-      run: async () => {
-        await evaluateGovernanceAndReact(ctx, { dryRun: false, autoWake: true, includeRadar: true });
-      }
-    });
-    return true;
-  } catch {
-    return false;
+  let registered = false;
+  if (agentsApi == null ? void 0 : agentsApi.registerHook) {
+    try {
+      agentsApi.registerHook({
+        id: "orgfy-post-turn-governance",
+        harness: "all",
+        event: "turn.completed",
+        run: async () => {
+          await evaluateGovernanceAndReact(ctx, { dryRun: false, autoWake: true, includeRadar: true });
+        }
+      });
+      registered = true;
+    } catch {
+      registered = false;
+    }
   }
+  const watchdogStarted = startGovernanceRadarWatchdog(ctx);
+  return registered || watchdogStarted;
 }
 async function sendDesktopNotification(ctx, title, body) {
   var _a;
@@ -9938,8 +9988,10 @@ Regras Invariantes:
 - Push autenticado no Relay (worktree): Se 'git push relay' falhar com exit 128 ('no nostr key configured'), chame a tool 'buzz__repo' para obter o header 'Authorization: Nostr ...', injete via 'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.<relay_git_url>.extraHeader GIT_CONFIG_VALUE_0="Authorization: Nostr ..."' (sem persistir segredo) e reexecute 'entregar'.
 - Leitura Direta de Cards e PRs (Zero '--help'): Arquivos 'cards/*.md' ficam na raiz '/Users/heltonfraga/.buzz/REPOS/orgfy/cards/' (não dentro da worktree). Sem desperdiçar turnos em '--help': (a) ler issue: 'buzz issues get --event <id-64> --repo 7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20/orgfy'; (b) atualizar PR após novo commit/rebase: 'buzz pr update --repo-owner 7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20 --repo orgfy --pr <pr-id-64> --commit <sha-40>'.
 - Freio Anti-Loop (Máximo 12 'shell's): NUNCA ultrapasse 12 comandos 'shell' sem commit nem repita o mesmo erro 2 vezes seguidas. Ao bater 2 falhas consecutivas no mesmo passo ou 12 'shell's sem avanço, PARE imediatamente e publique 'BLOQUEADO | por: <seu perfil> | motivo: ... | falta: ... | resolve: <perfil>'.
+- Regra Anti-Escopo Aberto (Iris / Despachos ao COO e Executores): PROIBIDO delegar ao Bento (COO) ou a executores com pedido aberto (ex.: 'escolha o próximo item da auditoria', 'veja o que falta'). Todo acionamento DEVE declarar: (a) alvo concreto (slug/bug + 1 a 3 arquivos exatos), (b) critério de pronto / comando de aceite L-22 esperado e (c) o que NÃO refazer.
+- Orçamento de Exploração do COO (Bento): ao receber acionamento para emitir card, limite a leitura exploratória a no máximo 10 comandos 'shell' (<= 5 min). Se o escopo chegar aberto ou ambíguo, NÃO varra o repositório inteiro — responda em 1 turno pedindo à Iris o alvo fechado (ou proponha 1 candidato concreto para aprovação).
 - Isolamento Estrito de Worktree (Proibido git checkout na raiz): NUNCA execute 'git checkout --detach' ou troque de branch dentro da raiz '/Users/heltonfraga/.buzz/REPOS/orgfy' (isso corrompe o estado compartilhado para todos os agentes). Para revisar ou comparar BASE_VS_AGORA, crie SEMPRE uma worktree isolada e remova-a ao final.
-- Protocolo de Auto-Cura e Interrupção de Loops (Bento, Iris, Cron e Revisores): ANTES de despachar um card ou cobrar um agente, chame 'orgfy_loop_radar({ apenas_ativos: true })'. NUNCA espere indefinidamente uma sessão queimando tokens em loop (>20m ou >25 shells sem commit, grep em loop, --help repetido, ou revisando PR já fechado). (1) Inspecione 'ultimo_shell': se o trabalho for inútil, repetitivo ou travado ('LOOP_SUSPEITO' / 'STALLED_THINKING'), INTERROMPA IMEDIATAMENTE chamando 'orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: "interrupt", release_issue_id?, reason })'. (2) Só depois de parar a sessão inútil (e liberar lock se necessário), reatribua ou envie 1 instrução cirúrgica. (3) Em 'SESSAO_DUPLICADA', encerre a sessão obsoleta com 'orgfy_session_stop' em vez de re-mencionar.
+- Protocolo de Auto-Cura em Ciclo Fechado (Bento, Iris, Cron e Revisores): ANTES de despachar um card ou cobrar um agente (e SEMPRE que acordada pelo Radar), chame 'orgfy_loop_radar({ apenas_ativos: true })'. NUNCA espere indefinidamente uma sessão queimando tokens em loop (>20m ou >25 shells sem commit, compactação repetida, grep em loop, --help repetido ou PR já fechado). Ao detectar loop/travamento ativo, execute obrigatoriamente os 3 passos: (1) PARAR: chame 'orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: "interrupt", release_issue_id?, reason })'; (2) DIAGNOSTICAR CAUSA-RAIZ: classifique a causa pelos campos 'flags', 'gatilho_resumo' e 'ultimo_shell' (ITEM_JA_FECHADO, ESCOPO_ABERTO, COMPACTACAO_LOOP, COLISAO_WORKTREE, ERRO_REPETIDO, TEMPESTADE_5XX); (3) AGIR (nunca deixar o agente parado no vácuo): se ITEM_JA_FECHADO, confirme merge na main e encerre sem relançar; se demanda ainda aberta (ex.: ESCOPO_ABERTO ou COMPACTACAO_LOOP), relance limpo com ESCOPO FECHADO (1-3 arquivos exatos + comando de aceite L-22 + limite de 10 shells) ou reatribua na 2ª falha, e publique no #OrgFy 'AUTO-CURA | agente | causa-raiz | ação tomada'. Em 'SESSAO_DUPLICADA', encerre a sessão obsoleta com 'orgfy_session_stop' em vez de re-mencionar.
 - Decisor Híbrido v12: orgfy_lint_card usa Decisions API com fallback determinístico offline automático (ferramentas/esteira/decisor_fallback.py) em caso de falta de saldo ou timeout.
 Ferramentas nativas disponíveis neste plugin:
 1. orgfy_status({ empresa? }): Consulta o placar de 20h, FPY, CPI de tokens, contagem de aceites, merged e raias da esteira.

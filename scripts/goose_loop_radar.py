@@ -277,8 +277,34 @@ def main() -> int:
                 raw_cj = cj or ""
                 if "Your context was compacted" in raw_cj:
                     compactions += 1
-                if "503 Service Unavailable" in raw_cj or "502 " in raw_cj or "No available accounts" in raw_cj:
-                    errors_5xx += 1
+                # Conta 5xx apenas em erros reais de provider/tool (ignora notas antigas em mem_get/mem_set)
+                if (
+                    ("503 Service Unavailable" in raw_cj or "502 " in raw_cj or "No available accounts" in raw_cj)
+                    and "buzz__mem_" not in raw_cj
+                ):
+                    try:
+                        cj_items = json.loads(raw_cj)
+                    except Exception:
+                        cj_items = []
+                    is_real_5xx = False
+                    if isinstance(cj_items, list):
+                        for it in cj_items:
+                            if not isinstance(it, dict):
+                                continue
+                            it_type = it.get("type")
+                            if it_type == "error":
+                                is_real_5xx = True
+                                break
+                            if it_type == "toolResponse" and _is_error_response([it]):
+                                is_real_5xx = True
+                                break
+                            if it_type == "text" and role != "assistant":
+                                txt_low = str(it.get("text") or "").lower()
+                                if ("503 service unavailable" in txt_low or "no available accounts" in txt_low) and "version:" not in txt_low:
+                                    is_real_5xx = True
+                                    break
+                    if is_real_5xx:
+                        errors_5xx += 1
 
                 if role == "user":
                     # Ancora APENAS em <mention> real (ignora <turn-context> de compactação/retry)
@@ -361,9 +387,15 @@ def main() -> int:
                                         active_worktree = wt_name
 
             # Detecta se o gatilho da sessão referencia item já fechado/merged na main
+            # Remove citações de SHA de baseline/contexto (ex.: "origin/main (77ae73e)", "entrou em 77ae73e") para evitar falso positivo
             gatilho = (last_event_content or first_event_content or "")[:220]
             closed_ev = None
-            check_blob = f"{first_event_content} {last_event_content}".lower()
+            raw_blob = f"{first_event_content} {last_event_content}".lower()
+            check_blob = re.sub(
+                r"(?:origin/main|em\s+main|descontando[^.\n]{0,40}|entrou\s+em|alinhados\s+em|saneado[^.\n]{0,40}|base\s+)[(\s`]*[0-9a-f]{7,40}[)\s`]*",
+                " ",
+                raw_blob,
+            )
             for slug_key, reason in closed_slugs.items():
                 if slug_key in check_blob:
                     closed_ev = reason
