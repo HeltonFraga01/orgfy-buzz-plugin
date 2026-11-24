@@ -88,13 +88,13 @@ async function safeReadJson<T>(ctx: Context, filePath: string): Promise<T | null
 }
 
 function extractField(md: string, label: string): string | null {
-  const rx = new RegExp(`(?im)^(?:-\\s+)?\\*\\*${label}:\\*\\*\\s*(.+)$`);
+  const rx = new RegExp(`^(?:-\\s+)?\\*\\*${label}:\\*\\*\\s*(.+)$`, "im");
   const m = md.match(rx);
   return m?.[1]?.trim() || null;
 }
 
 function extractSection(md: string, heading: string): string | null {
-  const rx = new RegExp(`(?is)##\\s*${heading}\\s*\\n([\\s\\S]*?)(?=\\n##\\s+|$)`);
+  const rx = new RegExp(`##\\s*${heading}\\s*\\n([\\s\\S]*?)(?=\\n##\\s+|$)`, "is");
   const m = md.match(rx);
   if (!m?.[1]) return null;
   const cleaned = m[1]
