@@ -1,30 +1,49 @@
 #!/usr/bin/env python3
-"""Radar de Loops & Sessões Zumbis (Goose Live) — leitura somente-leitura (mode=ro).
-Analisa APENAS o turno atual (desde o último <turn-context>/<mention>) para evitar
-falsos positivos de sessões longas multi-turno e paralelismo legítimo entre threads.
+"""Radar Forense de Loops & Sessões Zumbis (Goose Live) — leitura somente-leitura (mode=ro).
 
-Detecção calibrada (zero falso positivo em trabalho produtivo):
-- COMANDO_REPETIDO (critical): mesmo comando shell normalizado repetido >= 3x nos últimos 12 shells do turno atual (ou unicidade < 50% com >= 8 shells no turno)
-- ERRO_REPETIDO (critical): >= 3 erros consecutivos no final do turno atual
-- STALLED_THINKING (critical): última mensagem do turno terminou só em thinking e ficou parada entre 10m e 60m
-- SESSAO_DUPLICADA (warn): mesmo agente com >= 2 sessões ativas na MESMA thread_root ou MESMO worktree (threads diferentes = paralelismo planejado)
-- EXPLORACAO_CLI_HELP (warn): >= 5 chamadas shell com --help ou -h no turno atual
-- TURNO_LONGO (warn): turno atual >= 30 min e >= 30 shells sem repetição (monitorar, não cortar trabalho produtivo)
+Heurística forense calibrada com evidências reais do sessions.db:
+1. Ancora o turno atual no último <mention> real (NUNCA reseta em <turn-context> de compactação/retry).
+2. Extrai gatilho_resumo + IDs/branches/SHAs do <buzz-event> e cruza com `git log main` e
+   `resolved-issues-archive.json` para detectar `ITEM_JA_FECHADO` (trabalho em card/PR já integrado ou fechado).
+3. Detecta sinais concretos de burnout/zumbi:
+   - ITEM_JA_FECHADO (critical): sessão ativa trabalhando em issue/PR/branch já merged na main ou resolvida
+   - CONTEXTO_COMPACTADO (critical): sessão ativa que já estourou a janela e sofreu compactação (>= 1)
+   - TURNO_EXCESSIVO (critical): turno contínuo >= 35 min OU >= 35 shells desde o último <mention>
+   - COLISAO_WORKTREE (critical): mesmo agente em >= 2 sessões ativas operando na mesma .worktrees/<card>
+   - COMANDO_REPETIDO (critical): mesmo comando normalizado >= 3x nos últimos 12 shells ou unicidade < 50% (>= 8 shells)
+   - ERRO_REPETIDO (critical): >= 3 erros consecutivos no fim do turno
+   - STALLED_THINKING (critical): travado só em thinking entre 10m e 60m
+   - TEMPESTADE_5XX (critical se >= 5, warn se >= 3): loop de retentativas HTTP 502/503
+   - SESSAO_DUPLICADA (warn): mesmo agente com >= 2 sessões ativas na MESMA thread_root
+   - EXPLORACAO_CLI_HELP (warn): >= 5 chamadas --help/-h no turno atual
 """
 from __future__ import annotations
 
 import json
 import re
 import sqlite3
+import subprocess
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
 ACTIVE_WINDOW_MIN = 15.0
+ORGFY_REPO = Path("/Users/heltonfraga/.buzz/REPOS/orgfy")
+RESOLVED_ARCHIVE_PATH = Path("/Users/heltonfraga/.buzz/.scratch/resolved-issues-archive.json")
+RADAR_SNAPSHOT_PATH = Path("/Users/heltonfraga/.buzz/.scratch/goose-loop-radar.json")
+
 RE_CHANNEL_ID = re.compile(r"Channel:\s*[^\n]*?\(#([0-9a-fA-F-]{36})\)")
 RE_THREAD_ROOT = re.compile(r"Thread root:\s*([0-9a-fA-F]{64})")
 RE_AGENT_PUBKEY = re.compile(r"Agent:\s*([0-9a-fA-F]{64})")
 RE_WORKTREE = re.compile(r"\.worktrees/([A-Za-z0-9._-]+)")
+RE_HEX8 = re.compile(r"\b([0-9a-f]{7,64})\b", re.I)
+RE_BRANCH = re.compile(r"\b(?:feat|fix|card)/([a-z0-9._-]+)\b", re.I)
+
+IGNORED_WORKTREES = {"_porteiro", "_runner_esteira", "card"}
+KNOWN_CLOSED_DUPLICATES = {
+    "de398431": "Issue de398431 / PR 95546476 já fechado como duplicado",
+    "95546476": "PR 95546476 (de398431) já fechado como duplicado",
+}
 
 
 def _resolve_goose_db() -> Path:
@@ -40,7 +59,6 @@ def _resolve_goose_db() -> Path:
 
 
 GOOSE_DB = _resolve_goose_db()
-RADAR_SNAPSHOT_PATH = Path("/Users/heltonfraga/.buzz/.scratch/goose-loop-radar.json")
 
 
 def parse_utc(ts_str: str | None) -> datetime | None:
@@ -75,35 +93,113 @@ def _is_error_response(items: list[dict]) -> bool:
     return False
 
 
-def sugerir_acao(flags: list[str], ativa: bool) -> str:
+def _load_closed_index() -> tuple[dict[str, str], dict[str, str]]:
+    """Retorna (closed_hex_map, closed_slug_map) a partir de git log main + resolved-issues-archive.json."""
+    closed_hex: dict[str, str] = dict(KNOWN_CLOSED_DUPLICATES)
+    closed_slugs: dict[str, str] = {}
+
+    if RESOLVED_ARCHIVE_PATH.exists():
+        try:
+            arch = json.loads(RESOLVED_ARCHIVE_PATH.read_text(encoding="utf-8"))
+            for it in arch.get("itens", []):
+                title = str(it.get("title") or it.get("codigo") or "issue resolvida")[:70]
+                for k in ("issueId", "fullIssueId", "prId", "commitSha"):
+                    v = str(it.get(k) or "").strip().lower()
+                    if len(v) >= 7 and re.fullmatch(r"[0-9a-f]+", v):
+                        closed_hex[v[:8]] = f"Já resolvida no arquivo ({title})"
+                        closed_hex[v[:7]] = f"Já resolvida no arquivo ({title})"
+        except Exception:
+            pass
+
+    if ORGFY_REPO.exists():
+        try:
+            out = subprocess.check_output(
+                ["git", "-C", str(ORGFY_REPO), "log", "main", "-n", "120", "--format=%H %s"],
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=4,
+            )
+            for line in out.splitlines():
+                if not line.strip():
+                    continue
+                parts = line.split(" ", 1)
+                sha = parts[0].strip().lower()
+                subj = parts[1].strip() if len(parts) > 1 else ""
+                subj_l = subj.lower()
+                if len(sha) >= 7:
+                    closed_hex[sha[:7]] = f"Commit {sha[:7]} já na main ({subj[:60]})"
+                    closed_hex[sha[:8]] = f"Commit {sha[:7]} já na main ({subj[:60]})"
+                for m in RE_HEX8.findall(subj_l):
+                    if len(m) >= 8:
+                        closed_hex[m[:8]] = f"Referência {m[:8]} já integrada na main ({subj[:60]})"
+                for m_p in re.findall(r"\b(p[012]-\d+)\b", subj_l):
+                    closed_slugs[m_p] = f"Marco {m_p} já integrado na main ({sha[:7]}: {subj[:55]})"
+                if "telemetria" in subj_l or "tokens faturaveis" in subj_l:
+                    closed_slugs["p0-4-telemetria-tokens"] = f"Já integrado na main ({sha[:7]}: {subj[:55]})"
+                if "circuit breaker" in subj_l or "p0-2" in subj_l:
+                    closed_slugs["p0-2-circuit-breaker-reset"] = f"Já integrado na main ({sha[:7]}: {subj[:55]})"
+        except Exception:
+            pass
+
+    return closed_hex, closed_slugs
+
+
+def _extract_event_content(raw_cj: str) -> str:
+    if "<buzz-event>" not in raw_cj:
+        return ""
+    mc = re.search(r'\\"content\\":\\"(.*?)\\",\\"', raw_cj)
+    if mc:
+        return mc.group(1).replace("\\n", " ").replace('\\"', '"').strip()
+    m = re.search(r"<buzz-event>\\n(.*?)\\n</buzz-event>", raw_cj)
+    if m:
+        try:
+            ev = json.loads(m.group(1).replace('\\"', '"'))
+            return str(ev.get("content") or "").replace("\n", " ").strip()
+        except Exception:
+            pass
+    return ""
+
+
+def sugerir_acao(flags: list[str], ativa: bool, closed_ev: str | None = None, compactions: int = 0) -> str:
     if not flags:
         return ""
     if not ativa:
         return "Sessão já encerrada (>15m sem atividade); usar apenas como insumo de RSI."
+    if "ITEM_JA_FECHADO" in flags:
+        return (
+            f"PARAR AGORA via orgfy_session_stop(action='interrupt'): {closed_ev or 'item já fechado/merged na main'} — "
+            "queimando tokens em tarefa concluída."
+        )
+    if "CONTEXTO_COMPACTADO" in flags:
+        return (
+            f"PARAR AGORA via orgfy_session_stop(action='interrupt'): sessão já compactou contexto {compactions}x "
+            "(alto risco de deriva/loop); verificar entrega, parar e reabrir limpo se ainda faltar algo."
+        )
     if "COMANDO_REPETIDO" in flags or "ERRO_REPETIDO" in flags:
         return (
-            "LOOP REAL DETECTADO: comando ou erro repetido sem mudança de estado. "
-            "INTERROMPER via orgfy_session_stop(action='interrupt'), inspecionar ultimo_shell e liberar lock se necessário."
+            "PARAR AGORA via orgfy_session_stop(action='interrupt'): loop real de comando ou erro repetido sem mudança de estado."
         )
     if "STALLED_THINKING" in flags:
         return (
-            "Sessão travada em thinking (>=10m sem resposta). "
-            "INTERROMPER via orgfy_session_stop(action='interrupt') e reatribuir se necessário."
+            "PARAR AGORA via orgfy_session_stop(action='interrupt'): travado em thinking >=10m sem resposta."
+        )
+    if "COLISAO_WORKTREE" in flags:
+        return (
+            "PARAR SESSÃO REDUNDANTE via orgfy_session_stop(action='interrupt'): mesmo agente rodando em paralelo na mesma worktree."
+        )
+    if "TURNO_EXCESSIVO" in flags:
+        return (
+            "PARAR AGORA via orgfy_session_stop(action='interrupt'): turno contínuo >=35m ou >=35 shells sem encerrar; "
+            "checar gatilho e ultimo_shell antes de relançar."
+        )
+    if "TEMPESTADE_5XX" in flags:
+        return (
+            "PARAR/REINICIAR via orgfy_session_stop(action='interrupt'): tempestade de erros HTTP 502/503 desperdiçando turnos."
         )
     if "SESSAO_DUPLICADA" in flags:
-        return (
-            "Colisão real na mesma thread/worktree; encerrar a sessão redundante via orgfy_session_stop(action='interrupt')."
-        )
+        return "Colisão na mesma thread_root; encerrar a sessão redundante via orgfy_session_stop(action='interrupt')."
     if "EXPLORACAO_CLI_HELP" in flags:
-        return (
-            "Agente gastando >=5 turnos em --help; interromper via orgfy_session_stop se persistir "
-            "e fornecer sintaxe exata do comando."
-        )
-    if "TURNO_LONGO" in flags:
-        return (
-            "Turno longo mas com comandos distintos (trabalho produtivo provável); "
-            "checar ultimo_shell antes de decidir interromper."
-        )
+        return "Agente gastando >=5 turnos em --help; parar via orgfy_session_stop e fornecer sintaxe exata."
     return ""
 
 
@@ -133,6 +229,8 @@ def main() -> int:
         }, ensure_ascii=False))
         return 0
 
+    closed_hex, closed_slugs = _load_closed_index()
+
     try:
         conn = sqlite3.connect(f"file:{GOOSE_DB}?mode=ro", uri=True, timeout=5)
         cur = conn.cursor()
@@ -142,12 +240,11 @@ def main() -> int:
             FROM sessions
             WHERE updated_at >= datetime('now', '-3 hours')
             ORDER BY updated_at DESC
-            LIMIT 40
+            LIMIT 45
             """
         )
         rows = cur.fetchall()
 
-        # Passagem 1: extrai metadados e comandos do turno atual de cada sessão
         extracted = []
         thread_collision_counts: Counter[tuple[str, str]] = Counter()
         worktree_collision_counts: Counter[tuple[str, str]] = Counter()
@@ -169,15 +266,32 @@ def main() -> int:
             channel_id = None
             thread_root = None
             agent_pubkey = None
-            last_turn_idx = 0
-            last_turn_ts = None
+            last_mention_idx = 0
+            last_mention_ts = None
+            first_event_content = ""
+            last_event_content = ""
+            compactions = 0
+            errors_5xx = 0
 
             for idx, (role, ts, cj) in enumerate(msgs):
+                raw_cj = cj or ""
+                if "Your context was compacted" in raw_cj:
+                    compactions += 1
+                if "503 Service Unavailable" in raw_cj or "502 " in raw_cj or "No available accounts" in raw_cj:
+                    errors_5xx += 1
+
                 if role == "user":
-                    raw_cj = cj or ""
-                    if "<turn-context>" in raw_cj or "<mention>" in raw_cj:
-                        last_turn_idx = idx
-                        last_turn_ts = ts
+                    # Ancora APENAS em <mention> real (ignora <turn-context> de compactação/retry)
+                    if "<mention>" in raw_cj and "Your context was compacted" not in raw_cj:
+                        ev_txt = _extract_event_content(raw_cj)
+                        # Só reinicia o relógio do turno se o <mention> for diferente do anterior (não retry do mesmo evento)
+                        if not last_event_content or (ev_txt and ev_txt[:80] != last_event_content[:80]):
+                            last_mention_idx = idx
+                            last_mention_ts = ts
+                        if ev_txt:
+                            if not first_event_content:
+                                first_event_content = ev_txt
+                            last_event_content = ev_txt
                     if channel_id is None or thread_root is None or agent_pubkey is None:
                         try:
                             items = json.loads(raw_cj)
@@ -200,17 +314,17 @@ def main() -> int:
                                 if m_ag:
                                     agent_pubkey = m_ag.group(1).lower()
 
-            turn_msgs = msgs[last_turn_idx:] if msgs else []
+            turn_msgs = msgs[last_mention_idx:] if msgs else []
             end_ts = msgs[-1][1] if msgs else None
-            if isinstance(last_turn_ts, (int, float)) and isinstance(end_ts, (int, float)) and end_ts >= last_turn_ts:
-                turno_min = round((end_ts - last_turn_ts) / 60.0, 1)
+            if isinstance(last_mention_ts, (int, float)) and isinstance(end_ts, (int, float)) and end_ts >= last_mention_ts:
+                turno_min = round((end_ts - last_mention_ts) / 60.0, 1)
             else:
                 turno_min = thread_lifetime_min
 
             turn_cmds: list[str] = []
             help_count = 0
             last_shell = ""
-            last_worktree = None
+            active_worktree = None
             last_only_thinking = False
             consecutive_errors = 0
 
@@ -239,15 +353,37 @@ def main() -> int:
                                 last_shell = cmd[:140]
                                 if "--help" in cmd or " -h" in cmd:
                                     help_count += 1
-                                m_wt = RE_WORKTREE.search(cmd)
+                                # Só conta worktree quando o agente entra (`cd .../.worktrees/X`) ou edita nela
+                                m_wt = re.search(r"(?:cd|git\s+-C)\s+[^\s;&|]*\.worktrees/([A-Za-z0-9._-]+)", cmd)
                                 if m_wt:
-                                    last_worktree = m_wt.group(1)
+                                    wt_name = m_wt.group(1)
+                                    if wt_name not in IGNORED_WORKTREES and not wt_name.startswith(("revisao-", "cron-")):
+                                        active_worktree = wt_name
+
+            # Detecta se o gatilho da sessão referencia item já fechado/merged na main
+            gatilho = (last_event_content or first_event_content or "")[:220]
+            closed_ev = None
+            check_blob = f"{first_event_content} {last_event_content}".lower()
+            for slug_key, reason in closed_slugs.items():
+                if slug_key in check_blob:
+                    closed_ev = reason
+                    break
+            if not closed_ev:
+                for hx in RE_HEX8.findall(check_blob):
+                    h8 = hx[:8].lower()
+                    h7 = hx[:7].lower()
+                    if h8 in closed_hex:
+                        closed_ev = closed_hex[h8]
+                        break
+                    if h7 in closed_hex:
+                        closed_ev = closed_hex[h7]
+                        break
 
             if ativa:
                 if thread_root:
                     thread_collision_counts[(ag, thread_root)] += 1
-                if last_worktree:
-                    worktree_collision_counts[(ag, last_worktree)] += 1
+                if active_worktree:
+                    worktree_collision_counts[(ag, active_worktree)] += 1
 
             extracted.append({
                 "sid": sid,
@@ -257,7 +393,11 @@ def main() -> int:
                 "channel_id": channel_id,
                 "thread_root": thread_root,
                 "agent_pubkey": agent_pubkey,
-                "last_worktree": last_worktree,
+                "active_worktree": active_worktree,
+                "gatilho_resumo": gatilho,
+                "closed_ev": closed_ev,
+                "compactions": compactions,
+                "errors_5xx": errors_5xx,
                 "turno_min": turno_min,
                 "thread_lifetime_min": thread_lifetime_min,
                 "age_upd_min": age_upd_min,
@@ -271,7 +411,6 @@ def main() -> int:
 
         conn.close()
 
-        # Passagem 2: aplica heurística calibrada (zero falso positivo em trabalho produtivo)
         sessoes = []
         ativas_total = 0
         criticos = 0
@@ -296,40 +435,62 @@ def main() -> int:
             flags: list[str] = []
             severidade = "ok"
 
-            # 1. Loop real por repetição de comando ou baixa unicidade no turno atual
+            # 1. Trabalho em item já fechado / merged na main
+            if item["closed_ev"] and (shell_count >= 3 or item["turno_min"] >= 5.0 or item["compactions"] >= 1):
+                flags.append("ITEM_JA_FECHADO")
+                severidade = "critical"
+
+            # 2. Estouro de contexto (compactação) em sessão ativa
+            if item["compactions"] >= 1:
+                flags.append("CONTEXTO_COMPACTADO")
+                severidade = "critical"
+
+            # 3. Turno contínuo excessivo (>= 35m OU >= 35 shells desde último <mention> real)
+            if item["turno_min"] >= 35.0 or shell_count >= 35:
+                flags.append("TURNO_EXCESSIVO")
+                severidade = "critical"
+
+            # 4. Loop por repetição de comando ou baixa unicidade
             if rep_recent_max >= 3 or (shell_count >= 8 and uniq_ratio < 0.50):
                 flags.append("COMANDO_REPETIDO")
                 severidade = "critical"
 
-            # 2. Loop real por erros consecutivos no final do turno
+            # 5. Erros consecutivos no fim do turno
             if item["consecutive_errors"] >= 3:
                 flags.append("ERRO_REPETIDO")
                 severidade = "critical"
 
-            # 3. Travado apenas em thinking por >= 10 min (e <= 60 min)
+            # 6. Travado em thinking >= 10m
             if item["last_only_thinking"] and 10.0 <= item["age_upd_min"] <= 60.0:
                 flags.append("STALLED_THINKING")
                 severidade = "critical"
 
-            # 4. Colisão real: mesmo agente na MESMA thread_root (threads distintas = paralelismo planejado)
-            same_thread_dup = bool(item["thread_root"] and thread_collision_counts[(item["ag"], item["thread_root"])] >= 2)
-            if ativa and same_thread_dup:
+            # 7. Colisão de worktree: mesmo agente em >= 2 sessões ativas na mesma worktree de card
+            if ativa and item["active_worktree"] and worktree_collision_counts[(item["ag"], item["active_worktree"])] >= 2:
+                flags.append("COLISAO_WORKTREE")
+                severidade = "critical"
+
+            # 8. Tempestade de 502/503
+            if item["errors_5xx"] >= 3:
+                flags.append("TEMPESTADE_5XX")
+                if item["errors_5xx"] >= 5:
+                    severidade = "critical"
+                elif severidade == "ok":
+                    severidade = "warn"
+
+            # 9. Colisão na mesma thread_root
+            if ativa and item["thread_root"] and thread_collision_counts[(item["ag"], item["thread_root"])] >= 2:
                 flags.append("SESSAO_DUPLICADA")
                 duplicadas += 1
                 duplicadas_ativas += 1
                 if severidade == "ok":
                     severidade = "warn"
 
-            # 5. Exploração excessiva de --help no turno atual (>= 5)
+            # 10. Exploração excessiva de --help no turno atual (>= 5)
             if item["help_count"] >= 5:
                 flags.append("EXPLORACAO_CLI_HELP")
                 if severidade == "ok":
                     severidade = "warn"
-
-            # 6. Turno longo sem repetição (aviso informativo, não crítico)
-            if severidade == "ok" and item["turno_min"] >= 30.0 and shell_count >= 30:
-                flags.append("TURNO_LONGO")
-                severidade = "warn"
 
             if severidade == "critical":
                 criticos += 1
@@ -351,7 +512,11 @@ def main() -> int:
                     "channel_id": item["channel_id"],
                     "thread_root": item["thread_root"],
                     "agent_pubkey": item["agent_pubkey"],
-                    "worktree": item["last_worktree"],
+                    "worktree": item["active_worktree"],
+                    "gatilho_resumo": item["gatilho_resumo"],
+                    "item_fechado_evidencia": item["closed_ev"],
+                    "compactions": item["compactions"],
+                    "errors_5xx": item["errors_5xx"],
                     "duracao_min": item["turno_min"],
                     "thread_lifetime_min": item["thread_lifetime_min"],
                     "ultima_atualizacao_min": item["age_upd_min"],
@@ -364,7 +529,7 @@ def main() -> int:
                     "severidade": severidade,
                     "flags": flags,
                     "ultimo_shell": item["last_shell"],
-                    "acao_sugerida": sugerir_acao(flags, ativa),
+                    "acao_sugerida": sugerir_acao(flags, ativa, item["closed_ev"], item["compactions"]),
                 })
 
         ordem = {"critical": 0, "warn": 1, "ok": 2}
@@ -372,9 +537,8 @@ def main() -> int:
             key=lambda s: (
                 0 if s["ativa"] else 1,
                 ordem.get(s["severidade"], 3),
-                -s["max_repeticao_recente"],
-                -s["shells"],
                 -s["duracao_min"],
+                -s["shells"],
             )
         )
 
@@ -393,7 +557,7 @@ def main() -> int:
                 "duplicadas": duplicadas,
                 "duplicadas_ativas": duplicadas_ativas,
             },
-            "sessoes": sessoes[:16],
+            "sessoes": sessoes[:18],
         }
         serialized = json.dumps(payload, ensure_ascii=False, indent=2)
         try:

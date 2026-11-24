@@ -1356,9 +1356,9 @@ function filterGooseLoopRadar(payload, opts) {
     total_exibidas: filtered.length,
     sessoes: filtered,
     protocolo_resolucao: [
-      "COMANDO_REPETIDO / ERRO_REPETIDO / STALLED_THINKING (critico): Loop real confirmado no turno atual (mesmo comando >=3x sem mudança de estado, >=3 erros consecutivos ou thinking travado >=10m). Inspecione ultimo_shell e chame orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', release_issue_id? }).",
-      "SESSAO_DUPLICADA (warn): Só dispara em colisão real na mesma thread_root ou mesmo worktree (threads diferentes = paralelismo legítimo). Encerre a sessão redundante com orgfy_session_stop.",
-      "TURNO_LONGO (warn): Turno longo com comandos distintos indica trabalho produtivo; só interrompa se ultimo_shell confirmar tarefa obsoleta (ex: PR já fechado)."
+      "ITEM_JA_FECHADO (critico): A sessão está trabalhando em issue/PR/branch já integrada na main ou fechada. INTERROMPA IMEDIATAMENTE com orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt' }).",
+      "CONTEXTO_COMPACTADO / TURNO_EXCESSIVO / COLISAO_WORKTREE (critico): Estouro de janela de contexto, turno contínuo >=35m/>=35 shells ou 2+ sessões do mesmo agente na mesma worktree. Inspecione gatilho_resumo e ultimo_shell e INTERROMPA com orgfy_session_stop(action='interrupt').",
+      "COMANDO_REPETIDO / ERRO_REPETIDO / STALLED_THINKING / TEMPESTADE_5XX: Loop real ou tempestade 502/503 confirmada — interromper com orgfy_session_stop(action='interrupt') e liberar lock se necessário."
     ]
   };
 }
@@ -3267,15 +3267,24 @@ function renderIntelligenceTab(props) {
                             fontWeight: "700",
                             padding: "1px 5px",
                             borderRadius: "4px",
-                            backgroundColor: fl === "OK" ? "rgba(16, 185, 129, 0.15)" : fl === "COMANDO_REPETIDO" || fl === "ERRO_REPETIDO" || fl === "LOOP_SUSPEITO" || fl === "STALLED_THINKING" ? "rgba(239, 68, 68, 0.22)" : "rgba(245, 158, 11, 0.22)",
-                            color: fl === "OK" ? "#10b981" : fl === "COMANDO_REPETIDO" || fl === "ERRO_REPETIDO" || fl === "LOOP_SUSPEITO" || fl === "STALLED_THINKING" ? "#f87171" : "#fbbf24"
+                            backgroundColor: fl === "OK" ? "rgba(16, 185, 129, 0.15)" : fl === "ITEM_JA_FECHADO" || fl === "CONTEXTO_COMPACTADO" || fl === "TURNO_EXCESSIVO" || fl === "COLISAO_WORKTREE" || fl === "COMANDO_REPETIDO" || fl === "ERRO_REPETIDO" || fl === "LOOP_SUSPEITO" || fl === "STALLED_THINKING" ? "rgba(239, 68, 68, 0.22)" : "rgba(245, 158, 11, 0.22)",
+                            color: fl === "OK" ? "#10b981" : fl === "ITEM_JA_FECHADO" || fl === "CONTEXTO_COMPACTADO" || fl === "TURNO_EXCESSIVO" || fl === "COLISAO_WORKTREE" || fl === "COMANDO_REPETIDO" || fl === "ERRO_REPETIDO" || fl === "LOOP_SUSPEITO" || fl === "STALLED_THINKING" ? "#f87171" : "#fbbf24"
                           }
                         },
                         fl
                       )
                     )
                   ),
-                  h("span", { style: { fontSize: "9.5px", color: "#9ca3af" } }, `${s.session_id} · há ${s.ultima_atualizacao_min}m`)
+                  h(
+                    "span",
+                    { style: { fontSize: "9.5px", color: "#9ca3af" } },
+                    `${s.session_id} · há ${s.ultima_atualizacao_min}m${s.compactions ? ` · ${s.compactions}x compact` : ""}${s.errors_5xx ? ` · ${s.errors_5xx}x 5xx` : ""}`
+                  )
+                ),
+                s.gatilho_resumo && h(
+                  "div",
+                  { style: { fontSize: "9.5px", color: "#cbd5e1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: s.gatilho_resumo },
+                  `▸ ${s.gatilho_resumo}`
                 ),
                 s.ultimo_shell && h(
                   "div",

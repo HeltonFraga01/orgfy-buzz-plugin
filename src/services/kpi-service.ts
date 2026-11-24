@@ -295,6 +295,10 @@ export interface GooseLoopSession {
   thread_root?: string | null;
   agent_pubkey?: string | null;
   worktree?: string | null;
+  gatilho_resumo?: string | null;
+  item_fechado_evidencia?: string | null;
+  compactions?: number;
+  errors_5xx?: number;
   duracao_min: number;
   thread_lifetime_min?: number;
   ultima_atualizacao_min: number;
@@ -411,9 +415,9 @@ export function filterGooseLoopRadar(
     total_exibidas: filtered.length,
     sessoes: filtered,
     protocolo_resolucao: [
-      "COMANDO_REPETIDO / ERRO_REPETIDO / STALLED_THINKING (critico): Loop real confirmado no turno atual (mesmo comando >=3x sem mudança de estado, >=3 erros consecutivos ou thinking travado >=10m). Inspecione ultimo_shell e chame orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', release_issue_id? }).",
-      "SESSAO_DUPLICADA (warn): Só dispara em colisão real na mesma thread_root ou mesmo worktree (threads diferentes = paralelismo legítimo). Encerre a sessão redundante com orgfy_session_stop.",
-      "TURNO_LONGO (warn): Turno longo com comandos distintos indica trabalho produtivo; só interrompa se ultimo_shell confirmar tarefa obsoleta (ex: PR já fechado).",
+      "ITEM_JA_FECHADO (critico): A sessão está trabalhando em issue/PR/branch já integrada na main ou fechada. INTERROMPA IMEDIATAMENTE com orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt' }).",
+      "CONTEXTO_COMPACTADO / TURNO_EXCESSIVO / COLISAO_WORKTREE (critico): Estouro de janela de contexto, turno contínuo >=35m/>=35 shells ou 2+ sessões do mesmo agente na mesma worktree. Inspecione gatilho_resumo e ultimo_shell e INTERROMPA com orgfy_session_stop(action='interrupt').",
+      "COMANDO_REPETIDO / ERRO_REPETIDO / STALLED_THINKING / TEMPESTADE_5XX: Loop real ou tempestade 502/503 confirmada — interromper com orgfy_session_stop(action='interrupt') e liberar lock se necessário.",
     ],
   };
 }

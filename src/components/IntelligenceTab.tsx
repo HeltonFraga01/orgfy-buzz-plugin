@@ -769,13 +769,13 @@ export function renderIntelligenceTab(props: IntelligenceTabProps) {
                                 backgroundColor:
                                   fl === "OK"
                                     ? "rgba(16, 185, 129, 0.15)"
-                                    : fl === "COMANDO_REPETIDO" || fl === "ERRO_REPETIDO" || fl === "LOOP_SUSPEITO" || fl === "STALLED_THINKING"
+                                    : fl === "ITEM_JA_FECHADO" || fl === "CONTEXTO_COMPACTADO" || fl === "TURNO_EXCESSIVO" || fl === "COLISAO_WORKTREE" || fl === "COMANDO_REPETIDO" || fl === "ERRO_REPETIDO" || fl === "LOOP_SUSPEITO" || fl === "STALLED_THINKING"
                                     ? "rgba(239, 68, 68, 0.22)"
                                     : "rgba(245, 158, 11, 0.22)",
                                 color:
                                   fl === "OK"
                                     ? "#10b981"
-                                    : fl === "COMANDO_REPETIDO" || fl === "ERRO_REPETIDO" || fl === "LOOP_SUSPEITO" || fl === "STALLED_THINKING"
+                                    : fl === "ITEM_JA_FECHADO" || fl === "CONTEXTO_COMPACTADO" || fl === "TURNO_EXCESSIVO" || fl === "COLISAO_WORKTREE" || fl === "COMANDO_REPETIDO" || fl === "ERRO_REPETIDO" || fl === "LOOP_SUSPEITO" || fl === "STALLED_THINKING"
                                     ? "#f87171"
                                     : "#fbbf24",
                               },
@@ -784,8 +784,18 @@ export function renderIntelligenceTab(props: IntelligenceTabProps) {
                           )
                         )
                       ),
-                      h("span", { style: { fontSize: "9.5px", color: "#9ca3af" } }, `${s.session_id} · há ${s.ultima_atualizacao_min}m`)
+                      h(
+                        "span",
+                        { style: { fontSize: "9.5px", color: "#9ca3af" } },
+                        `${s.session_id} · há ${s.ultima_atualizacao_min}m${s.compactions ? ` · ${s.compactions}x compact` : ""}${s.errors_5xx ? ` · ${s.errors_5xx}x 5xx` : ""}`
+                      )
                     ),
+                    s.gatilho_resumo &&
+                      h(
+                        "div",
+                        { style: { fontSize: "9.5px", color: "#cbd5e1", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: s.gatilho_resumo },
+                        `▸ ${s.gatilho_resumo}`
+                      ),
                     s.ultimo_shell &&
                       h(
                         "div",
