@@ -638,6 +638,14 @@ async function buildOrgfyStatus(ctx, empresa) {
     modo_execucao: "efemero_headless"
   };
 }
+const SENTINELA_ENV_PATH = "/Users/heltonfraga/.buzz/vault-forense/sentinela-esteira.env";
+function shQuote(arg) {
+  return `'${String(arg).replace(/'/g, `'"'"'`)}'`;
+}
+function buildEnvPythonBashCmd(pyArgs) {
+  const quotedArgs = pyArgs.map(shQuote).join(" ");
+  return `set -a; [ -f ${shQuote(SENTINELA_ENV_PATH)} ] && . ${shQuote(SENTINELA_ENV_PATH)}; set +a; cd ${shQuote(ORGFY_ABS_PATH)} && exec python3 ${quotedArgs}`;
+}
 async function executeDespachar(ctx, options) {
   var _a;
   let combinedOutput = "";
@@ -669,8 +677,8 @@ async function executeDespachar(ctx, options) {
       appendChunk(chunk);
     };
     try {
-      const proc = await ctx.host.spawn("python", {
-        args: pyArgs,
+      const proc = await ctx.host.spawn("bash", {
+        args: [buildEnvPythonBashCmd(pyArgs)],
         cwd: ORGFY_ABS_PATH,
         onStdout: appendAttempt,
         onStderr: appendAttempt
@@ -731,8 +739,8 @@ async function executeGate(ctx, options) {
     return { code: 0, output: combinedOutput };
   }
   try {
-    const proc = await ctx.host.spawn("python", {
-      args: pyArgs,
+    const proc = await ctx.host.spawn("bash", {
+      args: [buildEnvPythonBashCmd(pyArgs)],
       cwd: ORGFY_ABS_PATH,
       onStdout: appendChunk,
       onStderr: appendChunk
@@ -769,8 +777,8 @@ async function executePorteiroSync(ctx, options) {
     return { code: 0, output: combinedOutput };
   }
   try {
-    const proc = await ctx.host.spawn("python", {
-      args: pyArgs,
+    const proc = await ctx.host.spawn("bash", {
+      args: [buildEnvPythonBashCmd(pyArgs)],
       cwd: ORGFY_ABS_PATH,
       onStdout: appendChunk,
       onStderr: appendChunk
@@ -3102,8 +3110,10 @@ async function computeSha256Hex(text) {
 function renderCanonicalCardMarkdown(params) {
   const { input, slug, branch, worktreePath, idempotencyKey, acceptanceHash, triage, attention } = params;
   const formato = input.formato || "v3";
-  const idPrefix = input.id_tarefa ? `${input.id_tarefa} — ` : `${slug.toUpperCase()} — `;
-  const tituloCompleto = `${idPrefix}${input.titulo}`.slice(0, 100);
+  const rawTitulo = String(input.titulo || "").trim();
+  const prefixTag = (input.id_tarefa || slug.toUpperCase()).trim();
+  const alreadyPrefixed = rawTitulo.toLowerCase().startsWith(prefixTag.toLowerCase());
+  const tituloCompleto = (alreadyPrefixed ? rawTitulo : `${prefixTag}: ${rawTitulo}`).slice(0, 100);
   const passos = Array.isArray(input.passos) && input.passos.length > 0 ? input.passos : [
     "Ler arquivos autorizados e validar pré-condições",
     "Implementar alteração estritamente em Escrita exclusiva",
@@ -3119,14 +3129,23 @@ function renderCanonicalCardMarkdown(params) {
   const tempoMax = input.tempo_maximo || "3600s";
   const skills = input.skills || "esteira-v4-metodo";
   const tipo = input.tipo || "execucao";
+  const modoKanban = tipo === "execucao" || tipo === "infraestrutura" || tipo === "seguranca" ? "goal" : "simples";
+  const goalMaxTurns = modoKanban === "goal" ? "20" : "n/a";
+  const modeloSugerido = triage.modeloRecomendadoHint || "gemini-3.8-flash-medium";
+  const providerSugerido = /claude/i.test(modeloSugerido) ? "nexusmind_anthropic" : /gemini/i.test(modeloSugerido) ? "nexusmind_antigravity" : /grok/i.test(modeloSugerido) ? "nexusmind_grok" : "nexusmind_openai";
   const provaLinhas = [];
   if (input.prova_positiva) {
     provaLinhas.push(`  Positivo: ${input.prova_positiva.replace(/^positivo:\s*/i, "")}`);
   } else {
     provaLinhas.push(`  Positivo: ${input.acceptance_command} -> exit 0`);
   }
+  const tocaFerramentasOuTestes = input.escrita_exclusiva.some(
+    (p) => /(?:ferramentas\/|testes\/|contratos\/)/i.test(String(p || ""))
+  );
   if (input.prova_negativa) {
     provaLinhas.push(`  Negativo: ${input.prova_negativa.replace(/^negativo:\s*/i, "")}`);
+  } else if (tocaFerramentasOuTestes) {
+    provaLinhas.push(`  Negativo: na base origin/main antes da alteração, '${input.acceptance_command.trim()}' deve falhar (exit != 0)`);
   }
   const lines = [
     `<!-- orgfy:card ${formato} -->`,
@@ -3151,17 +3170,22 @@ function renderCanonicalCardMarkdown(params) {
     `- **Tempo máximo:** ${tempoMax}`,
     "",
     "## Execucao Buzz",
-    `- **Modo:** attention (${attention.policy})`,
+    `- **Modo:** ${modoKanban}`,
+    `- **Goal max turns:** ${goalMaxTurns}`,
+    `- **Modelo:** ${modeloSugerido}`,
+    `- **Provider:** ${providerSugerido}`,
+    `- **Modo Attention:** attention (${attention.policy})`,
     `- **Interest ID:** ${attention.interest_id}`,
     `- **Watch Timer:** intervalo ${attention.timer_watch_payload.interval_secs}s · max_occurrences ${attention.timer_watch_payload.max_occurrences} · expires_at ${attention.timer_watch_payload.expires_at}`,
     `- **Watch Event Classifier:** ${attention.event_watch_payload ? "ativo (Decisions API pre-wake)" : "não aplicável (timer enxuto)"}`,
     `- **Auto-cleanup Attention:** ${attention.cleanup_rule}`,
     `- **Roteamento Decision Model:** ${triage.modeloTier} (risco ${triage.riscoScore}/5 · ${triage.riscoNivel} · fonte: ${triage.decisionSource})`,
-    `- **Modelo sugerido:** ${triage.modeloRecomendadoHint}`,
     `- **Idempotency key:** ${idempotencyKey}`,
     `- **Max retries:** ${tipo === "seguranca" ? "1" : "2"}`,
     `- **Max runtime:** ${tempoMax}`,
     `- **Completion contract:** local-only`,
+    `- **Pais:** nenhum`,
+    `- **Workspace:** worktree:${worktreePath}`,
     `- **Projeto:** ${input.empresa || "orgfy"}`,
     `- **Branch:** ${branch}`,
     `- **Status inicial:** running`,
@@ -3338,7 +3362,8 @@ async function createCanonicalCard(ctx, input) {
   let lintPassed = null;
   let lintOutput = null;
   const absCardPath = `${ORGFY_ABS_PATH}/${cardPath}`;
-  if (input.write_file && ((_h = ctx == null ? void 0 : ctx.host) == null ? void 0 : _h.writeFile)) {
+  const shouldWrite = input.write_file !== false;
+  if (shouldWrite && ((_h = ctx == null ? void 0 : ctx.host) == null ? void 0 : _h.writeFile)) {
     try {
       await ctx.host.writeFile(absCardPath, markdown);
       writtenToDisk = true;
@@ -3366,7 +3391,11 @@ async function createCanonicalCard(ctx, input) {
       lintOutput = `Erro ao rodar card-lint.sh: ${(err == null ? void 0 : err.message) || err}`;
     }
   }
-  const publishCommand = `cd "${ORGFY_ABS_PATH}" && ./ferramentas/buzz-issue-guard.sh "${cardPath}"`;
+  const rawTituloPub = String(input.titulo || "").trim();
+  const prefixPub = (input.id_tarefa || slug.toUpperCase()).trim();
+  const tituloPub = (rawTituloPub.toLowerCase().startsWith(prefixPub.toLowerCase()) ? rawTituloPub : `${prefixPub}: ${rawTituloPub}`).slice(0, 100).replace(/"/g, "'");
+  const tipoPub = input.tipo || "execucao";
+  const publishCommand = `cd "${ORGFY_ABS_PATH}" && ./ferramentas/buzz-issue-guard.sh --card "${cardPath}" --title "${tituloPub}" --gate gate:qa --tipo tipo:${tipoPub} --papel papel:backend`;
   return {
     ok: lintPassed !== false,
     code: lintPassed === false ? "CARD_LINT_FAILED" : "OK",

@@ -708,7 +708,11 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
   assert.equal(goodCard.triage.decisionSource, "decisions_api");
   assert.equal(goodCard.triage.modeloTier, "tier3_frontier");
   assert.ok(goodCard.attentionContract.event_watch_payload, "event_driven deve gerar event_watch_payload com classifier");
-  assert.ok(goodCard.markdown.includes("Modo:** attention (event_driven)"));
+  assert.ok(goodCard.markdown.includes("Modo:** goal"));
+  assert.ok(goodCard.markdown.includes("Modo Attention:** attention (event_driven)"));
+  assert.ok(goodCard.markdown.includes("Goal max turns:** 20"));
+  assert.ok(goodCard.markdown.includes("Provider:** "));
+  assert.ok(goodCard.markdown.includes("Pais:** nenhum"));
 
   const diffCheck = await orgfyMod.triageDiffWithDecisions({}, {
     escrita_exclusiva: ["src/services/decision-router.ts"],

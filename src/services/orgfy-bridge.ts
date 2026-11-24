@@ -876,6 +876,17 @@ export async function buildOrgfyStatus(ctx: any, empresa?: string) {
  * Executa o comando determinístico de Despacho via `ctx.host.spawn` com bash.
  * cd /Users/heltonfraga/.buzz/REPOS/orgfy && python3 ferramentas/esteira/despachar --empresa <slug> <ISSUE_ID> "<EXECUTOR>" "<REVISOR>"
  */
+const SENTINELA_ENV_PATH = "/Users/heltonfraga/.buzz/vault-forense/sentinela-esteira.env";
+
+function shQuote(arg: string): string {
+  return `'${String(arg).replace(/'/g, `'"'"'`)}'`;
+}
+
+function buildEnvPythonBashCmd(pyArgs: string[]): string {
+  const quotedArgs = pyArgs.map(shQuote).join(" ");
+  return `set -a; [ -f ${shQuote(SENTINELA_ENV_PATH)} ] && . ${shQuote(SENTINELA_ENV_PATH)}; set +a; cd ${shQuote(ORGFY_ABS_PATH)} && exec python3 ${quotedArgs}`;
+}
+
 export async function executeDespachar(
   ctx: any,
   options: {
@@ -920,8 +931,8 @@ export async function executeDespachar(
       appendChunk(chunk);
     };
     try {
-      const proc = await ctx.host.spawn("python", {
-        args: pyArgs,
+      const proc = await ctx.host.spawn("bash", {
+        args: [buildEnvPythonBashCmd(pyArgs)],
         cwd: ORGFY_ABS_PATH,
         onStdout: appendAttempt,
         onStderr: appendAttempt,
@@ -994,8 +1005,8 @@ export async function executeGate(
   }
 
   try {
-    const proc = await ctx.host.spawn("python", {
-      args: pyArgs,
+    const proc = await ctx.host.spawn("bash", {
+      args: [buildEnvPythonBashCmd(pyArgs)],
       cwd: ORGFY_ABS_PATH,
       onStdout: appendChunk,
       onStderr: appendChunk,
@@ -1041,8 +1052,8 @@ export async function executePorteiroSync(
   }
 
   try {
-    const proc = await ctx.host.spawn("python", {
-      args: pyArgs,
+    const proc = await ctx.host.spawn("bash", {
+      args: [buildEnvPythonBashCmd(pyArgs)],
       cwd: ORGFY_ABS_PATH,
       onStdout: appendChunk,
       onStderr: appendChunk,
