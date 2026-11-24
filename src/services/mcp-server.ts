@@ -10,6 +10,10 @@ import {
   buildOrgfyStatus,
   fetchLiveKanbanSnapshot,
 } from "./orgfy-bridge";
+import {
+  fetchGooseLoopRadar,
+  filterGooseLoopRadar,
+} from "./kpi-service";
 
 export interface McpServerStatus {
   active: boolean;
@@ -131,6 +135,17 @@ export async function startOrgfyMcpServer(
         properties: {
           stage: { type: "string", description: "Filtrar por raia: 'triagem', 'despachado', 'execucao', 'revisao', 'feito' ou 'all' (default: 'all')" },
           empresa: { type: "string", description: "Slug da empresa (default: 'orgfy')" },
+        },
+      },
+    },
+    {
+      name: "orgfy_loop_radar",
+      description: "Consulta o Radar de Loops & Sessões Zumbis do Goose em tempo real (mode=ro), identificando LOOP_SUSPEITO, STALLED_THINKING, SESSAO_DUPLICADA e EXPLORACAO_CLI_HELP com acao_sugerida para auto-cura autônoma.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          apenas_ativos: { type: "boolean", description: "Se true (padrão), retorna apenas sessões ativas nos últimos 15 min; se false, inclui histórico de 3h" },
+          agente: { type: "string", description: "Filtrar por nome do agente (ex: 'Atlas', 'Lia', 'Bento')" },
         },
       },
     },
@@ -326,6 +341,22 @@ export async function startOrgfyMcpServer(
             result: {
               content: [{ type: "text", text: res.output }],
               isError: res.code !== 0,
+            },
+          };
+        }
+
+        if (name === "orgfy_loop_radar") {
+          const radar = await fetchGooseLoopRadar(ctx);
+          const filtered = filterGooseLoopRadar(radar, {
+            apenas_ativos: args?.apenas_ativos,
+            agente: args?.agente,
+          });
+          return {
+            jsonrpc: "2.0",
+            id,
+            result: {
+              content: [{ type: "text", text: JSON.stringify(filtered, null, 2) }],
+              isError: !radar.ok,
             },
           };
         }

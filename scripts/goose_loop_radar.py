@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
 """Radar de Loops & Sessões Zumbis (Goose Live) — leitura somente-leitura (mode=ro).
-Retorna JSON estruturado com sessões ativas/recentes (últimas 3h), alertas de:
+Retorna JSON estruturado com sessões ativas/recentes (últimas 3h), separando
+alertas ATIVOS (últimos 15 min) de HISTÓRICOS (15m–3h), com detecção de:
 - LOOP_SUSPEITO (>= 20 chamadas shell ou duração >= 30 min com >= 10 shells)
-- SESSAO_LONGA (duração >= 15 min)
+- SESSAO_LONGA (duração >= 15 min e >= 6 shells)
 - STALLED_THINKING (última mensagem da sessão terminou apenas em bloco thinking)
-- SESSAO_DUPLICADA (mesmo agente com >= 2 sessões ativas na última hora)
+- SESSAO_DUPLICADA (mesmo agente com >= 2 sessões ativas nos últimos 45 min)
+- EXPLORACAO_CLI_HELP (>= 3 chamadas shell com --help ou -h)
 """
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
+
+ACTIVE_WINDOW_MIN = 15.0
+
 
 def _resolve_goose_db() -> Path:
     candidates = [
@@ -42,6 +46,38 @@ def parse_utc(ts_str: str | None) -> datetime | None:
     return None
 
 
+def sugerir_acao(flags: list[str], ativa: bool) -> str:
+    if not flags:
+        return ""
+    if not ativa:
+        return "Sessão já encerrada (>15m sem atividade); usar apenas como insumo de RSI."
+    if "SESSAO_DUPLICADA" in flags:
+        return "Não re-mencionar nem cobrar este agente; aguardar o turno atual concluir para evitar corrida."
+    if "STALLED_THINKING" in flags:
+        return "Sessão parada em thinking; se >15m sem resposta, liberar lock via orgfy_checkout_lock(release) e reatribuir."
+    if "LOOP_SUSPEITO" in flags:
+        return "Ler ultimo_shell e enviar 1 instrução cirúrgica destravando o comando atual (nunca cobrança genérica) ou liberar lock."
+    if "EXPLORACAO_CLI_HELP" in flags:
+        return "Agente gastando turnos em --help; fornecer sintaxe exata do comando e registrar no addInstructions."
+    if "SESSAO_LONGA" in flags:
+        return "Monitorar avanço antes de cobrar; evitar novas menções redundantes."
+    return ""
+
+
+def _empty_resumo() -> dict:
+    return {
+        "total_recentes": 0,
+        "ativas_total": 0,
+        "criticos": 0,
+        "criticos_ativos": 0,
+        "criticos_historico_3h": 0,
+        "avisos": 0,
+        "avisos_ativos": 0,
+        "duplicadas": 0,
+        "duplicadas_ativas": 0,
+    }
+
+
 def main() -> int:
     now = datetime.now(timezone.utc)
     if not GOOSE_DB.exists():
@@ -49,7 +85,7 @@ def main() -> int:
             "ok": False,
             "error": f"Banco Goose não encontrado: {GOOSE_DB}",
             "gerado_em": now.isoformat(),
-            "resumo": {"total_recentes": 0, "criticos": 0, "avisos": 0, "duplicadas": 0},
+            "resumo": _empty_resumo(),
             "sessoes": [],
         }, ensure_ascii=False))
         return 0
@@ -68,7 +104,7 @@ def main() -> int:
         )
         rows = cur.fetchall()
 
-        # Conta sessões por agente atualizadas na última 1h para detectar concorrência duplicada
+        # Conta sessões por agente atualizadas nos últimos 45 min para detectar concorrência duplicada
         recent_agent_counts: Counter[str] = Counter()
         parsed_rows = []
         for sid, name, created_at, updated_at in rows:
@@ -82,11 +118,20 @@ def main() -> int:
             parsed_rows.append((sid, name or sid, ag, duration_min, age_since_update_min, updated_at))
 
         sessoes = []
+        ativas_total = 0
         criticos = 0
+        criticos_ativos = 0
+        criticos_historico_3h = 0
         avisos = 0
+        avisos_ativos = 0
         duplicadas = 0
+        duplicadas_ativas = 0
 
         for sid, name, ag, duration_min, age_upd_min, updated_at in parsed_rows:
+            ativa = age_upd_min <= ACTIVE_WINDOW_MIN
+            if ativa:
+                ativas_total += 1
+
             cur.execute(
                 "SELECT role, content_json FROM messages WHERE session_id=? ORDER BY id ASC",
                 (sid,),
@@ -113,7 +158,7 @@ def main() -> int:
                             if "--help" in cmd or " -h" in cmd:
                                 help_count += 1
                             if cmd:
-                                last_shell = cmd[:120]
+                                last_shell = cmd[:140]
 
             flags: list[str] = []
             severidade = "ok"
@@ -131,20 +176,34 @@ def main() -> int:
             if recent_agent_counts[ag] >= 2 and age_upd_min <= 45.0:
                 flags.append("SESSAO_DUPLICADA")
                 duplicadas += 1
+                if ativa:
+                    duplicadas_ativas += 1
+                if severidade == "ok":
+                    severidade = "warn"
+
+            if help_count >= 3:
+                flags.append("EXPLORACAO_CLI_HELP")
                 if severidade == "ok":
                     severidade = "warn"
 
             if severidade == "critical":
                 criticos += 1
+                if ativa:
+                    criticos_ativos += 1
+                else:
+                    criticos_historico_3h += 1
             elif severidade == "warn":
                 avisos += 1
+                if ativa:
+                    avisos_ativos += 1
 
-            # Exibe todas as sessões com alerta + as 8 mais recentes ativas
-            if flags or len(sessoes) < 8:
+            # Exibe todas as sessões ativas + sessões com alerta
+            if ativa or flags or len(sessoes) < 8:
                 sessoes.append({
                     "session_id": sid,
                     "agente": ag,
                     "nome": name,
+                    "ativa": ativa,
                     "duracao_min": duration_min,
                     "ultima_atualizacao_min": age_upd_min,
                     "msgs": len(msgs),
@@ -153,12 +212,20 @@ def main() -> int:
                     "severidade": severidade,
                     "flags": flags,
                     "ultimo_shell": last_shell,
+                    "acao_sugerida": sugerir_acao(flags, ativa),
                 })
 
         conn.close()
-        # Ordena: críticos primeiro, depois avisos, depois mais recentes
+        # Ordena: sessões ATIVAS primeiro, depois severidade (critical > warn > ok), depois mais shells
         ordem = {"critical": 0, "warn": 1, "ok": 2}
-        sessoes.sort(key=lambda s: (ordem.get(s["severidade"], 3), -s["shells"], -s["duracao_min"]))
+        sessoes.sort(
+            key=lambda s: (
+                0 if s["ativa"] else 1,
+                ordem.get(s["severidade"], 3),
+                -s["shells"],
+                -s["duracao_min"],
+            )
+        )
 
         payload = {
             "ok": True,
@@ -166,11 +233,16 @@ def main() -> int:
             "gerado_em": now.isoformat(),
             "resumo": {
                 "total_recentes": len(rows),
+                "ativas_total": ativas_total,
                 "criticos": criticos,
+                "criticos_ativos": criticos_ativos,
+                "criticos_historico_3h": criticos_historico_3h,
                 "avisos": avisos,
+                "avisos_ativos": avisos_ativos,
                 "duplicadas": duplicadas,
+                "duplicadas_ativas": duplicadas_ativas,
             },
-            "sessoes": sessoes[:12],
+            "sessoes": sessoes[:16],
         }
         serialized = json.dumps(payload, ensure_ascii=False, indent=2)
         try:
@@ -185,7 +257,7 @@ def main() -> int:
             "ok": False,
             "error": str(exc),
             "gerado_em": now.isoformat(),
-            "resumo": {"total_recentes": 0, "criticos": 0, "avisos": 0, "duplicadas": 0},
+            "resumo": _empty_resumo(),
             "sessoes": [],
         }, ensure_ascii=False))
         return 0

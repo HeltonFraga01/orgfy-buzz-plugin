@@ -290,6 +290,7 @@ export interface GooseLoopSession {
   session_id: string;
   agente: string;
   nome: string;
+  ativa?: boolean;
   duracao_min: number;
   ultima_atualizacao_min: number;
   msgs: number;
@@ -298,6 +299,7 @@ export interface GooseLoopSession {
   severidade: "ok" | "warn" | "critical";
   flags: string[];
   ultimo_shell: string;
+  acao_sugerida?: string;
 }
 
 export interface GooseLoopRadarPayload {
@@ -306,9 +308,14 @@ export interface GooseLoopRadarPayload {
   gerado_em: string;
   resumo: {
     total_recentes: number;
+    ativas_total?: number;
     criticos: number;
+    criticos_ativos?: number;
+    criticos_historico_3h?: number;
     avisos: number;
+    avisos_ativos?: number;
     duplicadas: number;
+    duplicadas_ativas?: number;
   };
   sessoes: GooseLoopSession[];
 }
@@ -324,7 +331,17 @@ export async function fetchGooseLoopRadar(ctx: Context): Promise<GooseLoopRadarP
     ok: false,
     error: "Leitura do radar Goose indisponível neste ambiente.",
     gerado_em: new Date().toISOString(),
-    resumo: { total_recentes: 0, criticos: 0, avisos: 0, duplicadas: 0 },
+    resumo: {
+      total_recentes: 0,
+      ativas_total: 0,
+      criticos: 0,
+      criticos_ativos: 0,
+      criticos_historico_3h: 0,
+      avisos: 0,
+      avisos_ativos: 0,
+      duplicadas: 0,
+      duplicadas_ativas: 0,
+    },
     sessoes: [],
   };
 
@@ -356,4 +373,39 @@ export async function fetchGooseLoopRadar(ctx: Context): Promise<GooseLoopRadarP
   } catch (err: any) {
     return { ...empty, error: err?.message || "Snapshot goose-loop-radar.json ainda não gerado." };
   }
+}
+
+export function filterGooseLoopRadar(
+  payload: GooseLoopRadarPayload,
+  opts?: { apenas_ativos?: boolean; agente?: string }
+) {
+  const onlyActive = opts?.apenas_ativos !== false;
+  const agentFilter = (opts?.agente || "").trim().toLowerCase();
+
+  let filtered = payload.sessoes || [];
+  if (onlyActive) {
+    filtered = filtered.filter((s) => (typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15));
+  }
+  if (agentFilter) {
+    filtered = filtered.filter(
+      (s) =>
+        s.agente.toLowerCase().includes(agentFilter) ||
+        s.nome.toLowerCase().includes(agentFilter)
+    );
+  }
+
+  return {
+    ok: payload.ok,
+    error: payload.error,
+    gerado_em: payload.gerado_em,
+    filtro_aplicado: { apenas_ativos: onlyActive, agente: agentFilter || null },
+    resumo: payload.resumo,
+    total_exibidas: filtered.length,
+    sessoes: filtered,
+    protocolo_resolucao: [
+      "SESSAO_DUPLICADA: NUNCA re-mencionar nem cobrar este agente; aguardar o turno atual concluir.",
+      "LOOP_SUSPEITO / STALLED_THINKING: Ler ultimo_shell e enviar 1 instrução cirúrgica para destravar o passo atual; se >15m sem avanço, liberar lock com orgfy_checkout_lock(action='release') e reatribuir.",
+      "EXPLORACAO_CLI_HELP: Fornecer sintaxe exata do comando (ex: buzz issues get / buzz pr update) para zerar turnos em --help.",
+    ],
+  };
 }

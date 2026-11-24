@@ -47,6 +47,7 @@ import {
 import {
   fetchKpisEsteira,
   fetchGooseLoopRadar,
+  filterGooseLoopRadar,
   recalculateKpisNow,
   type KpisEsteiraPayload,
   type KpiHistoryPoint,
@@ -1344,7 +1345,7 @@ export function apply(ctx: Context) {
           h("span", null, `FPY: ${fpyRate !== null ? `${fpyRate.toFixed(1)}%` : "--"}`),
           h("span", { style: { color: "rgba(255,255,255,0.15)" } }, "·"),
           h("span", null, `CPI: ${cpiTokens !== null ? cpiTokens.toFixed(2) : "--"}`),
-          loopRadar?.ok && loopRadar.resumo.criticos > 0 &&
+          loopRadar?.ok && (loopRadar.resumo.criticos_ativos ?? loopRadar.resumo.criticos) > 0 &&
             h(
               "button",
               {
@@ -1352,7 +1353,7 @@ export function apply(ctx: Context) {
                   setActiveCentralTab("inteligencia");
                   loadLoopRadar();
                 },
-                title: "Sessões em loop ou travadas detectadas no Goose",
+                title: "Sessões ativas em loop ou travadas nos últimos 15 min no Goose",
                 style: {
                   padding: "2px 7px",
                   borderRadius: "9999px",
@@ -1365,7 +1366,7 @@ export function apply(ctx: Context) {
                   cursor: "pointer",
                 },
               },
-              `⚠ ${loopRadar.resumo.criticos} loop(s)`
+              `⚠ ${loopRadar.resumo.criticos_ativos ?? loopRadar.resumo.criticos} loop(s) ativo(s)`
             ),
           h("span", { style: { color: "rgba(255,255,255,0.15)" } }, "·"),
           h(
@@ -4349,11 +4350,15 @@ export function apply(ctx: Context) {
             h(
               "div",
               { style: { display: "flex", flexDirection: "column", gap: "8px" } },
-              h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, "Ferramentas Homologadas (4 Tools):"),
+              h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, "Ferramentas Homologadas (6 Tools MCP + 12 AgentTools):"),
               [
                 {
                   name: "orgfy_status",
                   desc: "Telemetria agregada ao vivo: FPY, CPI, cards ativos e catraca de regras probatórias RSI.",
+                },
+                {
+                  name: "orgfy_kanban_read",
+                  desc: "Matriz Kanban real (triagem, despachado, execucao, revisao, feito) sem fallback mockado.",
                 },
                 {
                   name: "orgfy_despachar",
@@ -4366,6 +4371,10 @@ export function apply(ctx: Context) {
                 {
                   name: "orgfy_porteiro_sync",
                   desc: "Disparo pontual do ciclo determinístico do Porteiro Nostr para reconciliar filas de PR e main.",
+                },
+                {
+                  name: "orgfy_loop_radar",
+                  desc: "Radar Live do Goose (mode=ro): detecta LOOP_SUSPEITO, STALLED_THINKING e SESSAO_DUPLICADA com acao_sugerida.",
                 },
               ].map((tool) =>
                 h(
@@ -5382,8 +5391,9 @@ Regras Invariantes:
 - DSAP Backtracking: Na 2ª recusa consecutiva com similaridade >= 0.70, o card entra em backtracking para o COO re-escopar.
 - Atribuição de Issues (FERR-ASSIGN-AUTH): NUNCA execute 'buzz issues assign' diretamente (falha com auth_error Kind 1 em chamadores locais); use sempre 'python3 ferramentas/assign_issue.py' na raiz do REPOS/orgfy.
 - Push autenticado no Relay (worktree): Se 'git push relay' falhar com exit 128 ('no nostr key configured'), chame a tool 'buzz__repo' para obter o header 'Authorization: Nostr ...', injete via 'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.<relay_git_url>.extraHeader GIT_CONFIG_VALUE_0="Authorization: Nostr ..."' (sem persistir segredo) e reexecute 'entregar'.
-- Leitura Direta de Cards (Zero '--help'): Arquivos 'cards/*.md' ficam na raiz '/Users/heltonfraga/.buzz/REPOS/orgfy/cards/' (não dentro da worktree). Para ler a issue do relay sem desperdiçar turnos em '--help', rode direto: 'buzz issues get --event <id-64> --repo 7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20/orgfy'.
+- Leitura Direta de Cards e PRs (Zero '--help'): Arquivos 'cards/*.md' ficam na raiz '/Users/heltonfraga/.buzz/REPOS/orgfy/cards/' (não dentro da worktree). Sem desperdiçar turnos em '--help': (a) ler issue: 'buzz issues get --event <id-64> --repo 7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20/orgfy'; (b) atualizar PR após novo commit/rebase: 'buzz pr update --repo-owner 7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20 --repo orgfy --pr <pr-id-64> --commit <sha-40>'.
 - Freio Anti-Loop (Máximo 12 'shell's): NUNCA ultrapasse 12 comandos 'shell' sem commit nem repita o mesmo erro 2 vezes seguidas. Ao bater 2 falhas consecutivas no mesmo passo ou 12 'shell's sem avanço, PARE imediatamente e publique 'BLOQUEADO | por: <seu perfil> | motivo: ... | falta: ... | resolve: <perfil>'.
+- Protocolo de Auto-Cura de Loops (Bento, Iris, Cron e Revisores): ANTES de despachar um card ou cobrar um agente, chame 'orgfy_loop_radar({ apenas_ativos: true })'. (1) Se o agente estiver com 'SESSAO_DUPLICADA', NUNCA envie nova menção ou cobrança (aguarde o turno atual terminar). (2) Se estiver com 'LOOP_SUSPEITO' ou 'STALLED_THINKING', leia 'ultimo_shell' e 'acao_sugerida' e envie 1 instrução cirúrgica destravando aquele passo específico (nunca cobrança genérica); se sem progresso real, libere o lock via 'orgfy_checkout_lock({ action: "release", ... })' e reatribua.
 - Decisor Híbrido v12: orgfy_lint_card usa Decisions API com fallback determinístico offline automático (ferramentas/esteira/decisor_fallback.py) em caso de falta de saldo ou timeout.
 Ferramentas nativas disponíveis neste plugin:
 1. orgfy_status({ empresa? }): Consulta o placar de 20h, FPY, CPI de tokens, contagem de aceites, merged e raias da esteira.
@@ -5396,7 +5406,9 @@ Ferramentas nativas disponíveis neste plugin:
 8. orgfy_governanca_avaliar({ dry_run?, auto_wake? }): Avalia orçamento, fila de revisão, WIP órfão e estagnação nível 3, disparando alertas/wakes com cooldown anti-spam.
 9. orgfy_lint_card({ title, objective?, done_when?, acceptance_command?, executor?, revisor?, card_markdown?, spec_path? }): Audita template OrgFy/Spec-Kit, qualidade semântica e regras L-01/L-22 antes do despacho.
 10. orgfy_bind_context({ conversation_id, issue_id, worktree_path?, title?, acceptance_command?, acceptance_hash?, executor?, revisor? }): Vincula o worktree e injeta regras vivas L-22/L-90 direto na conversa do agente.
-Consulte sempre orgfy_status, orgfy_kpis ou orgfy_kanban_read para inspecionar métricas reais antes de agir.`
+11. orgfy_historico_buscar({ query?, spec?, limit? }): Busca just-in-time no Arquivo de Issues Resolvidas por código, causa raiz, arquivo ou SHA.
+12. orgfy_loop_radar({ apenas_ativos?, agente? }): Inspeciona o Radar de Loops & Sessões Zumbis do Goose em tempo real (LOOP_SUSPEITO, STALLED_THINKING, SESSAO_DUPLICADA, EXPLORACAO_CLI_HELP) com ultimo_shell e acao_sugerida para auto-cura autônoma.
+Consulte sempre orgfy_status, orgfy_kpis, orgfy_loop_radar ou orgfy_kanban_read para inspecionar métricas reais antes de agir.`
       });
       console.log("[ORGFY] ctx.agents.addInstructions registrado com sucesso.");
     } catch (err) {
@@ -5755,7 +5767,28 @@ Consulte sempre orgfy_status, orgfy_kpis ou orgfy_kanban_read para inspecionar m
         },
       });
 
-      console.log("[ORGFY] 11 agentTools registradas com sucesso no harness do Buzz (Ondas 1, 2, 3 + Arquivo de Resolvidas).");
+      // ── RADAR LIVE DE LOOPS & SESSÕES ZUMBIS (AUTO-CURA DE AGENTES) ──
+      (ctx.agents as any).addTool({
+        name: "orgfy_loop_radar",
+        description: "Consulta o Radar de Loops & Sessões Zumbis do Goose em tempo real (mode=ro), separando alertas ativos (<=15m) de histórico (3h) com flags LOOP_SUSPEITO, STALLED_THINKING, SESSAO_DUPLICADA, EXPLORACAO_CLI_HELP, ultimo_shell e acao_sugerida.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            apenas_ativos: { type: "boolean", description: "Se true (padrão), lista apenas sessões ativas nos últimos 15 min; se false, inclui histórico de 3h" },
+            agente: { type: "string", description: "Filtrar por nome do agente (ex: 'Atlas', 'Lia', 'Bento')" },
+          },
+        },
+        call: async (_client: any, _context: any, args: any) => {
+          const radar = await fetchGooseLoopRadar(ctx);
+          const filtered = filterGooseLoopRadar(radar, {
+            apenas_ativos: args?.apenas_ativos,
+            agente: args?.agente,
+          });
+          return JSON.stringify(filtered, null, 2);
+        },
+      });
+
+      console.log("[ORGFY] 12 agentTools registradas com sucesso no harness do Buzz (Ondas 1, 2, 3 + Arquivo + Radar de Loops).");
     } catch (err) {
       console.warn("[ORGFY] Falha ao registrar agentTools:", err);
     }

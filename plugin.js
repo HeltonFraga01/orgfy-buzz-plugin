@@ -1145,6 +1145,223 @@ Invariantes Absolutos:
   }
   return { success: true, log: logBuffer };
 }
+const KPI_SNAPSHOT_PATH = "/Users/heltonfraga/.buzz/.scratch/kpis-esteira.json";
+const KPI_SCRIPT_PATH = "/Users/heltonfraga/.buzz/REPOS/orgfy/ferramentas/esteira/gerar_kpis_esteira.py";
+const ARTIFACT_COLLECTION = "orgfy_kpi_history_v1";
+const LOCAL_STORAGE_KEY = "orgfy_kpi_history_v1";
+const MAX_HISTORY_POINTS = 60;
+async function readHistory(ctx) {
+  try {
+    const store = ctx.artifactStorage;
+    if (store == null ? void 0 : store.list) {
+      const items = await store.list(ARTIFACT_COLLECTION);
+      if (Array.isArray(items)) {
+        return items.map((it) => (it == null ? void 0 : it.value) ?? it).filter((p) => p && typeof p.ts === "string").slice(-MAX_HISTORY_POINTS);
+      }
+    }
+  } catch {
+  }
+  try {
+    if (typeof localStorage !== "undefined") {
+      const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed.slice(-MAX_HISTORY_POINTS);
+      }
+    }
+  } catch {
+  }
+  return [];
+}
+async function recordKpiSnapshotHistory(ctx, kpis) {
+  var _a, _b, _c, _d, _e;
+  const point = {
+    ts: kpis.gerado_em || (/* @__PURE__ */ new Date()).toISOString(),
+    fpy_real_pct: ((_a = kpis.qualidade) == null ? void 0 : _a.fpy_real_pct) ?? null,
+    fila_revisao_atual: ((_b = kpis.fluxo) == null ? void 0 : _b.fila_revisao_atual) ?? 0,
+    orphan_wip_count: ((_c = kpis.higiene) == null ? void 0 : _c.orphan_wip_count) ?? 0,
+    uso_teto_diario_pct: ((_d = kpis.economia) == null ? void 0 : _d.uso_teto_diario_pct) ?? 0,
+    vazao_7d: ((_e = kpis.fluxo) == null ? void 0 : _e.vazao_7d) ?? 0
+  };
+  try {
+    const store = ctx.artifactStorage;
+    if (store == null ? void 0 : store.put) {
+      await store.put(ARTIFACT_COLLECTION, point.ts, point);
+    }
+  } catch {
+  }
+  const prev = await readHistory(ctx);
+  const filtered = prev.filter((p) => p.ts !== point.ts);
+  const next = [...filtered, point].slice(-MAX_HISTORY_POINTS);
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(next));
+    }
+  } catch {
+  }
+  return next;
+}
+function decodeHostFile(raw) {
+  if (typeof raw === "string") return raw;
+  if (raw instanceof Uint8Array) return new TextDecoder("utf-8").decode(raw);
+  if (raw instanceof ArrayBuffer) return new TextDecoder("utf-8").decode(new Uint8Array(raw));
+  if (raw && typeof raw === "object") {
+    const obj = raw;
+    if (typeof obj.content === "string") return obj.content;
+    if (typeof obj.text === "string") return obj.text;
+    if (obj.bytes instanceof Uint8Array) return new TextDecoder("utf-8").decode(obj.bytes);
+    if (ArrayBuffer.isView(raw)) {
+      return new TextDecoder("utf-8").decode(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength));
+    }
+  }
+  return String(raw ?? "");
+}
+async function fetchKpisEsteira(ctx) {
+  const host = ctx.host;
+  const history = await readHistory(ctx);
+  if (!(host == null ? void 0 : host.readFile)) {
+    return {
+      disponivel: false,
+      error: "API ctx.host.readFile indisponível neste ambiente.",
+      sourcePath: KPI_SNAPSHOT_PATH,
+      kpis: null,
+      history
+    };
+  }
+  try {
+    const raw = await host.readFile(KPI_SNAPSHOT_PATH);
+    const text = decodeHostFile(raw);
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object" || !parsed.fluxo || !parsed.economia) {
+      return {
+        disponivel: false,
+        error: "Arquivo kpis-esteira.json inválido ou incompleto.",
+        sourcePath: KPI_SNAPSHOT_PATH,
+        kpis: null,
+        history
+      };
+    }
+    const updatedHistory = await recordKpiSnapshotHistory(ctx, parsed);
+    return {
+      disponivel: true,
+      error: null,
+      sourcePath: KPI_SNAPSHOT_PATH,
+      kpis: parsed,
+      history: updatedHistory
+    };
+  } catch (err) {
+    return {
+      disponivel: false,
+      error: (err == null ? void 0 : err.message) || "Não foi possível ler kpis-esteira.json.",
+      sourcePath: KPI_SNAPSHOT_PATH,
+      kpis: null,
+      history
+    };
+  }
+}
+async function recalculateKpisNow(ctx) {
+  const host = ctx.host;
+  let output = "";
+  try {
+    if (host == null ? void 0 : host.exec) {
+      let res = await host.exec("python", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
+      if ((res == null ? void 0 : res.exitCode) && res.exitCode !== 0) {
+        res = await host.exec("bash", [
+          "-c",
+          `python3 "${KPI_SCRIPT_PATH}" --output "${KPI_SNAPSHOT_PATH}"`
+        ]);
+      }
+      output = [res == null ? void 0 : res.stdout, res == null ? void 0 : res.stderr].filter(Boolean).join("\n").trim();
+    } else if (host == null ? void 0 : host.spawn) {
+      const proc = await host.spawn("python", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
+      if (proc == null ? void 0 : proc.exited) {
+        await proc.exited;
+      }
+      output = "Recálculo executado via subprocesso (python).";
+    }
+  } catch (err) {
+    output = `Aviso ao executar script: ${(err == null ? void 0 : err.message) || err}`;
+  }
+  const result = await fetchKpisEsteira(ctx);
+  return {
+    ok: result.disponivel,
+    output,
+    result
+  };
+}
+const GOOSE_LOOP_RADAR_SCRIPT_PATH = "/Users/heltonfraga/.buzz/REPOS/orgfy-buzz-plugin/scripts/goose_loop_radar.py";
+const GOOSE_LOOP_RADAR_SNAPSHOT_PATH = "/Users/heltonfraga/.buzz/.scratch/goose-loop-radar.json";
+async function fetchGooseLoopRadar(ctx) {
+  const host = ctx.host;
+  const empty = {
+    ok: false,
+    error: "Leitura do radar Goose indisponível neste ambiente.",
+    gerado_em: (/* @__PURE__ */ new Date()).toISOString(),
+    resumo: {
+      total_recentes: 0,
+      ativas_total: 0,
+      criticos: 0,
+      criticos_ativos: 0,
+      criticos_historico_3h: 0,
+      avisos: 0,
+      avisos_ativos: 0,
+      duplicadas: 0,
+      duplicadas_ativas: 0
+    },
+    sessoes: []
+  };
+  try {
+    if (host == null ? void 0 : host.spawn) {
+      const proc = await host.spawn("python", { args: [GOOSE_LOOP_RADAR_SCRIPT_PATH] });
+      if (proc == null ? void 0 : proc.exited) {
+        await proc.exited;
+      }
+    } else if (host == null ? void 0 : host.exec) {
+      await host.exec("python", [GOOSE_LOOP_RADAR_SCRIPT_PATH]);
+    }
+  } catch {
+  }
+  try {
+    if (host == null ? void 0 : host.readFile) {
+      const raw = await host.readFile(GOOSE_LOOP_RADAR_SNAPSHOT_PATH);
+      const text = decodeHostFile(raw);
+      const parsed = JSON.parse(text);
+      if (parsed && typeof parsed === "object" && parsed.resumo) {
+        return parsed;
+      }
+    }
+    return empty;
+  } catch (err) {
+    return { ...empty, error: (err == null ? void 0 : err.message) || "Snapshot goose-loop-radar.json ainda não gerado." };
+  }
+}
+function filterGooseLoopRadar(payload, opts) {
+  const onlyActive = (opts == null ? void 0 : opts.apenas_ativos) !== false;
+  const agentFilter = ((opts == null ? void 0 : opts.agente) || "").trim().toLowerCase();
+  let filtered = payload.sessoes || [];
+  if (onlyActive) {
+    filtered = filtered.filter((s) => typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15);
+  }
+  if (agentFilter) {
+    filtered = filtered.filter(
+      (s) => s.agente.toLowerCase().includes(agentFilter) || s.nome.toLowerCase().includes(agentFilter)
+    );
+  }
+  return {
+    ok: payload.ok,
+    error: payload.error,
+    gerado_em: payload.gerado_em,
+    filtro_aplicado: { apenas_ativos: onlyActive, agente: agentFilter || null },
+    resumo: payload.resumo,
+    total_exibidas: filtered.length,
+    sessoes: filtered,
+    protocolo_resolucao: [
+      "SESSAO_DUPLICADA: NUNCA re-mencionar nem cobrar este agente; aguardar o turno atual concluir.",
+      "LOOP_SUSPEITO / STALLED_THINKING: Ler ultimo_shell e enviar 1 instrução cirúrgica para destravar o passo atual; se >15m sem avanço, liberar lock com orgfy_checkout_lock(action='release') e reatribuir.",
+      "EXPLORACAO_CLI_HELP: Fornecer sintaxe exata do comando (ex: buzz issues get / buzz pr update) para zerar turnos em --help."
+    ]
+  };
+}
 async function sendDesktopNotification(ctx, title, body) {
   var _a;
   if (typeof window !== "undefined" && "Notification" in window) {
@@ -1245,6 +1462,17 @@ async function startOrgfyMcpServer(ctx, onStatusChange) {
         properties: {
           stage: { type: "string", description: "Filtrar por raia: 'triagem', 'despachado', 'execucao', 'revisao', 'feito' ou 'all' (default: 'all')" },
           empresa: { type: "string", description: "Slug da empresa (default: 'orgfy')" }
+        }
+      }
+    },
+    {
+      name: "orgfy_loop_radar",
+      description: "Consulta o Radar de Loops & Sessões Zumbis do Goose em tempo real (mode=ro), identificando LOOP_SUSPEITO, STALLED_THINKING, SESSAO_DUPLICADA e EXPLORACAO_CLI_HELP com acao_sugerida para auto-cura autônoma.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          apenas_ativos: { type: "boolean", description: "Se true (padrão), retorna apenas sessões ativas nos últimos 15 min; se false, inclui histórico de 3h" },
+          agente: { type: "string", description: "Filtrar por nome do agente (ex: 'Atlas', 'Lia', 'Bento')" }
         }
       }
     }
@@ -1426,6 +1654,21 @@ async function startOrgfyMcpServer(ctx, onStatusChange) {
             }
           };
         }
+        if (name === "orgfy_loop_radar") {
+          const radar = await fetchGooseLoopRadar(ctx);
+          const filtered = filterGooseLoopRadar(radar, {
+            apenas_ativos: args == null ? void 0 : args.apenas_ativos,
+            agente: args == null ? void 0 : args.agente
+          });
+          return {
+            jsonrpc: "2.0",
+            id,
+            result: {
+              content: [{ type: "text", text: JSON.stringify(filtered, null, 2) }],
+              isError: !radar.ok
+            }
+          };
+        }
         return {
           jsonrpc: "2.0",
           id,
@@ -1590,186 +1833,6 @@ async function compileProbationaryRule(ctx, options) {
 [ERRO NO RSI COMPILER] ${(err == null ? void 0 : err.message) || String(err)}
 `);
     return { success: false, output: combinedOutput };
-  }
-}
-const KPI_SNAPSHOT_PATH = "/Users/heltonfraga/.buzz/.scratch/kpis-esteira.json";
-const KPI_SCRIPT_PATH = "/Users/heltonfraga/.buzz/REPOS/orgfy/ferramentas/esteira/gerar_kpis_esteira.py";
-const ARTIFACT_COLLECTION = "orgfy_kpi_history_v1";
-const LOCAL_STORAGE_KEY = "orgfy_kpi_history_v1";
-const MAX_HISTORY_POINTS = 60;
-async function readHistory(ctx) {
-  try {
-    const store = ctx.artifactStorage;
-    if (store == null ? void 0 : store.list) {
-      const items = await store.list(ARTIFACT_COLLECTION);
-      if (Array.isArray(items)) {
-        return items.map((it) => (it == null ? void 0 : it.value) ?? it).filter((p) => p && typeof p.ts === "string").slice(-MAX_HISTORY_POINTS);
-      }
-    }
-  } catch {
-  }
-  try {
-    if (typeof localStorage !== "undefined") {
-      const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) return parsed.slice(-MAX_HISTORY_POINTS);
-      }
-    }
-  } catch {
-  }
-  return [];
-}
-async function recordKpiSnapshotHistory(ctx, kpis) {
-  var _a, _b, _c, _d, _e;
-  const point = {
-    ts: kpis.gerado_em || (/* @__PURE__ */ new Date()).toISOString(),
-    fpy_real_pct: ((_a = kpis.qualidade) == null ? void 0 : _a.fpy_real_pct) ?? null,
-    fila_revisao_atual: ((_b = kpis.fluxo) == null ? void 0 : _b.fila_revisao_atual) ?? 0,
-    orphan_wip_count: ((_c = kpis.higiene) == null ? void 0 : _c.orphan_wip_count) ?? 0,
-    uso_teto_diario_pct: ((_d = kpis.economia) == null ? void 0 : _d.uso_teto_diario_pct) ?? 0,
-    vazao_7d: ((_e = kpis.fluxo) == null ? void 0 : _e.vazao_7d) ?? 0
-  };
-  try {
-    const store = ctx.artifactStorage;
-    if (store == null ? void 0 : store.put) {
-      await store.put(ARTIFACT_COLLECTION, point.ts, point);
-    }
-  } catch {
-  }
-  const prev = await readHistory(ctx);
-  const filtered = prev.filter((p) => p.ts !== point.ts);
-  const next = [...filtered, point].slice(-MAX_HISTORY_POINTS);
-  try {
-    if (typeof localStorage !== "undefined") {
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(next));
-    }
-  } catch {
-  }
-  return next;
-}
-function decodeHostFile(raw) {
-  if (typeof raw === "string") return raw;
-  if (raw instanceof Uint8Array) return new TextDecoder("utf-8").decode(raw);
-  if (raw instanceof ArrayBuffer) return new TextDecoder("utf-8").decode(new Uint8Array(raw));
-  if (raw && typeof raw === "object") {
-    const obj = raw;
-    if (typeof obj.content === "string") return obj.content;
-    if (typeof obj.text === "string") return obj.text;
-    if (obj.bytes instanceof Uint8Array) return new TextDecoder("utf-8").decode(obj.bytes);
-    if (ArrayBuffer.isView(raw)) {
-      return new TextDecoder("utf-8").decode(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength));
-    }
-  }
-  return String(raw ?? "");
-}
-async function fetchKpisEsteira(ctx) {
-  const host = ctx.host;
-  const history = await readHistory(ctx);
-  if (!(host == null ? void 0 : host.readFile)) {
-    return {
-      disponivel: false,
-      error: "API ctx.host.readFile indisponível neste ambiente.",
-      sourcePath: KPI_SNAPSHOT_PATH,
-      kpis: null,
-      history
-    };
-  }
-  try {
-    const raw = await host.readFile(KPI_SNAPSHOT_PATH);
-    const text = decodeHostFile(raw);
-    const parsed = JSON.parse(text);
-    if (!parsed || typeof parsed !== "object" || !parsed.fluxo || !parsed.economia) {
-      return {
-        disponivel: false,
-        error: "Arquivo kpis-esteira.json inválido ou incompleto.",
-        sourcePath: KPI_SNAPSHOT_PATH,
-        kpis: null,
-        history
-      };
-    }
-    const updatedHistory = await recordKpiSnapshotHistory(ctx, parsed);
-    return {
-      disponivel: true,
-      error: null,
-      sourcePath: KPI_SNAPSHOT_PATH,
-      kpis: parsed,
-      history: updatedHistory
-    };
-  } catch (err) {
-    return {
-      disponivel: false,
-      error: (err == null ? void 0 : err.message) || "Não foi possível ler kpis-esteira.json.",
-      sourcePath: KPI_SNAPSHOT_PATH,
-      kpis: null,
-      history
-    };
-  }
-}
-async function recalculateKpisNow(ctx) {
-  const host = ctx.host;
-  let output = "";
-  try {
-    if (host == null ? void 0 : host.exec) {
-      let res = await host.exec("python", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
-      if ((res == null ? void 0 : res.exitCode) && res.exitCode !== 0) {
-        res = await host.exec("bash", [
-          "-c",
-          `python3 "${KPI_SCRIPT_PATH}" --output "${KPI_SNAPSHOT_PATH}"`
-        ]);
-      }
-      output = [res == null ? void 0 : res.stdout, res == null ? void 0 : res.stderr].filter(Boolean).join("\n").trim();
-    } else if (host == null ? void 0 : host.spawn) {
-      const proc = await host.spawn("python", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
-      if (proc == null ? void 0 : proc.exited) {
-        await proc.exited;
-      }
-      output = "Recálculo executado via subprocesso (python).";
-    }
-  } catch (err) {
-    output = `Aviso ao executar script: ${(err == null ? void 0 : err.message) || err}`;
-  }
-  const result = await fetchKpisEsteira(ctx);
-  return {
-    ok: result.disponivel,
-    output,
-    result
-  };
-}
-const GOOSE_LOOP_RADAR_SCRIPT_PATH = "/Users/heltonfraga/.buzz/REPOS/orgfy-buzz-plugin/scripts/goose_loop_radar.py";
-const GOOSE_LOOP_RADAR_SNAPSHOT_PATH = "/Users/heltonfraga/.buzz/.scratch/goose-loop-radar.json";
-async function fetchGooseLoopRadar(ctx) {
-  const host = ctx.host;
-  const empty = {
-    ok: false,
-    error: "Leitura do radar Goose indisponível neste ambiente.",
-    gerado_em: (/* @__PURE__ */ new Date()).toISOString(),
-    resumo: { total_recentes: 0, criticos: 0, avisos: 0, duplicadas: 0 },
-    sessoes: []
-  };
-  try {
-    if (host == null ? void 0 : host.spawn) {
-      const proc = await host.spawn("python", { args: [GOOSE_LOOP_RADAR_SCRIPT_PATH] });
-      if (proc == null ? void 0 : proc.exited) {
-        await proc.exited;
-      }
-    } else if (host == null ? void 0 : host.exec) {
-      await host.exec("python", [GOOSE_LOOP_RADAR_SCRIPT_PATH]);
-    }
-  } catch {
-  }
-  try {
-    if (host == null ? void 0 : host.readFile) {
-      const raw = await host.readFile(GOOSE_LOOP_RADAR_SNAPSHOT_PATH);
-      const text = decodeHostFile(raw);
-      const parsed = JSON.parse(text);
-      if (parsed && typeof parsed === "object" && parsed.resumo) {
-        return parsed;
-      }
-    }
-    return empty;
-  } catch (err) {
-    return { ...empty, error: (err == null ? void 0 : err.message) || "Snapshot goose-loop-radar.json ainda não gerado." };
   }
 }
 const CARD_BG = "rgba(0, 0, 0, 0.28)";
@@ -2296,21 +2359,26 @@ function renderIntelligenceTab(props) {
               "div",
               { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
               h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, "Radar de Loops (Goose Live · 3h)"),
-              (loopRadar == null ? void 0 : loopRadar.ok) && h(
-                "span",
-                {
-                  style: {
-                    fontSize: "10px",
-                    fontFamily: "monospace",
-                    fontWeight: "700",
-                    padding: "2px 7px",
-                    borderRadius: "9999px",
-                    backgroundColor: loopRadar.resumo.criticos > 0 ? "rgba(239, 68, 68, 0.18)" : loopRadar.resumo.avisos > 0 ? "rgba(245, 158, 11, 0.18)" : "rgba(16, 185, 129, 0.15)",
-                    color: loopRadar.resumo.criticos > 0 ? "#f87171" : loopRadar.resumo.avisos > 0 ? "#fbbf24" : "#10b981"
-                  }
-                },
-                `${loopRadar.resumo.criticos} críticos · ${loopRadar.resumo.avisos} avisos · ${loopRadar.resumo.duplicadas} dup`
-              )
+              (loopRadar == null ? void 0 : loopRadar.ok) && (() => {
+                const critAtivos = loopRadar.resumo.criticos_ativos ?? loopRadar.resumo.criticos;
+                const critHist = loopRadar.resumo.criticos_historico_3h ?? 0;
+                const dupAtivos = loopRadar.resumo.duplicadas_ativas ?? loopRadar.resumo.duplicadas;
+                return h(
+                  "span",
+                  {
+                    style: {
+                      fontSize: "10px",
+                      fontFamily: "monospace",
+                      fontWeight: "700",
+                      padding: "2px 7px",
+                      borderRadius: "9999px",
+                      backgroundColor: critAtivos > 0 ? "rgba(239, 68, 68, 0.18)" : (loopRadar.resumo.avisos_ativos ?? loopRadar.resumo.avisos) > 0 || critHist > 0 ? "rgba(245, 158, 11, 0.18)" : "rgba(16, 185, 129, 0.15)",
+                      color: critAtivos > 0 ? "#f87171" : (loopRadar.resumo.avisos_ativos ?? loopRadar.resumo.avisos) > 0 || critHist > 0 ? "#fbbf24" : "#10b981"
+                    }
+                  },
+                  `${critAtivos} ativos · ${critHist} hist(3h) · ${dupAtivos} dup`
+                );
+              })()
             ),
             onRefreshLoopRadar && h(
               "button",
@@ -2331,9 +2399,10 @@ function renderIntelligenceTab(props) {
           ),
           !loopRadar || !loopRadar.ok ? h("div", { style: { fontSize: "11px", color: "#9ca3af" } }, (loopRadar == null ? void 0 : loopRadar.error) || "Carregando telemetria live do Goose...") : loopRadar.sessoes.length === 0 ? h("div", { style: { fontSize: "11px", color: "#10b981" } }, "Nenhuma sessão em loop ou travada nas últimas 3 horas.") : h(
             "div",
-            { style: { display: "flex", flexDirection: "column", gap: "6px", maxHeight: "240px", overflowY: "auto", paddingRight: "4px" } },
-            loopRadar.sessoes.map(
-              (s) => h(
+            { style: { display: "flex", flexDirection: "column", gap: "6px", maxHeight: "260px", overflowY: "auto", paddingRight: "4px" } },
+            loopRadar.sessoes.map((s) => {
+              const isActive = typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15;
+              return h(
                 "div",
                 {
                   key: s.session_id,
@@ -2343,8 +2412,9 @@ function renderIntelligenceTab(props) {
                     gap: "4px",
                     padding: "7px 9px",
                     borderRadius: "6px",
-                    backgroundColor: s.severidade === "critical" ? "rgba(239, 68, 68, 0.1)" : s.severidade === "warn" ? "rgba(245, 158, 11, 0.08)" : "rgba(255, 255, 255, 0.025)",
-                    border: s.severidade === "critical" ? "1px solid rgba(239, 68, 68, 0.3)" : s.severidade === "warn" ? "1px solid rgba(245, 158, 11, 0.25)" : "1px solid rgba(255, 255, 255, 0.05)",
+                    opacity: isActive ? 1 : 0.72,
+                    backgroundColor: isActive && s.severidade === "critical" ? "rgba(239, 68, 68, 0.12)" : s.severidade === "warn" || !isActive && s.severidade === "critical" ? "rgba(245, 158, 11, 0.08)" : "rgba(255, 255, 255, 0.025)",
+                    border: isActive && s.severidade === "critical" ? "1px solid rgba(239, 68, 68, 0.35)" : s.severidade === "warn" || !isActive && s.severidade === "critical" ? "1px solid rgba(245, 158, 11, 0.25)" : "1px solid rgba(255, 255, 255, 0.05)",
                     fontSize: "10.5px",
                     fontFamily: "monospace"
                   }
@@ -2352,10 +2422,28 @@ function renderIntelligenceTab(props) {
                 h(
                   "div",
                   { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "6px" } },
-                  h("span", { style: { color: "#f3f4f6", fontWeight: "700" } }, s.agente),
+                  h(
+                    "div",
+                    { style: { display: "flex", alignItems: "center", gap: "6px" } },
+                    h(
+                      "span",
+                      {
+                        style: {
+                          fontSize: "8.5px",
+                          fontWeight: "700",
+                          padding: "1px 5px",
+                          borderRadius: "4px",
+                          backgroundColor: isActive ? "rgba(16, 185, 129, 0.18)" : "rgba(156, 163, 175, 0.15)",
+                          color: isActive ? "#34d399" : "#9ca3af"
+                        }
+                      },
+                      isActive ? "ATIVA" : "HIST"
+                    ),
+                    h("span", { style: { color: "#f3f4f6", fontWeight: "700" } }, s.agente)
+                  ),
                   h(
                     "span",
-                    { style: { color: s.severidade === "critical" ? "#f87171" : s.severidade === "warn" ? "#fbbf24" : "#cbd5e1", fontWeight: "600" } },
+                    { style: { color: isActive && s.severidade === "critical" ? "#f87171" : s.severidade === "warn" ? "#fbbf24" : "#cbd5e1", fontWeight: "600" } },
                     `${formatMin(s.duracao_min)} · ${s.shells} shells`
                   )
                 ),
@@ -2389,9 +2477,14 @@ function renderIntelligenceTab(props) {
                   "div",
                   { style: { fontSize: "9.5px", color: "#9ca3af", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: s.ultimo_shell },
                   `$ ${s.ultimo_shell}`
+                ),
+                isActive && s.acao_sugerida && h(
+                  "div",
+                  { style: { fontSize: "9.5px", color: "#38bdf8", lineHeight: "1.3" } },
+                  `→ ${s.acao_sugerida}`
                 )
-              )
-            )
+              );
+            })
           )
         ),
         // Top Estagnados
@@ -5718,14 +5811,14 @@ function apply(ctx) {
           h("span", null, `FPY: ${fpyRate !== null ? `${fpyRate.toFixed(1)}%` : "--"}`),
           h("span", { style: { color: "rgba(255,255,255,0.15)" } }, "·"),
           h("span", null, `CPI: ${cpiTokens !== null ? cpiTokens.toFixed(2) : "--"}`),
-          (loopRadar == null ? void 0 : loopRadar.ok) && loopRadar.resumo.criticos > 0 && h(
+          (loopRadar == null ? void 0 : loopRadar.ok) && (loopRadar.resumo.criticos_ativos ?? loopRadar.resumo.criticos) > 0 && h(
             "button",
             {
               onClick: () => {
                 setActiveCentralTab("inteligencia");
                 loadLoopRadar();
               },
-              title: "Sessões em loop ou travadas detectadas no Goose",
+              title: "Sessões ativas em loop ou travadas nos últimos 15 min no Goose",
               style: {
                 padding: "2px 7px",
                 borderRadius: "9999px",
@@ -5738,7 +5831,7 @@ function apply(ctx) {
                 cursor: "pointer"
               }
             },
-            `⚠ ${loopRadar.resumo.criticos} loop(s)`
+            `⚠ ${loopRadar.resumo.criticos_ativos ?? loopRadar.resumo.criticos} loop(s) ativo(s)`
           ),
           h("span", { style: { color: "rgba(255,255,255,0.15)" } }, "·"),
           h(
@@ -8551,11 +8644,15 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
           h(
             "div",
             { style: { display: "flex", flexDirection: "column", gap: "8px" } },
-            h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, "Ferramentas Homologadas (4 Tools):"),
+            h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, "Ferramentas Homologadas (6 Tools MCP + 12 AgentTools):"),
             [
               {
                 name: "orgfy_status",
                 desc: "Telemetria agregada ao vivo: FPY, CPI, cards ativos e catraca de regras probatórias RSI."
+              },
+              {
+                name: "orgfy_kanban_read",
+                desc: "Matriz Kanban real (triagem, despachado, execucao, revisao, feito) sem fallback mockado."
               },
               {
                 name: "orgfy_despachar",
@@ -8568,6 +8665,10 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
               {
                 name: "orgfy_porteiro_sync",
                 desc: "Disparo pontual do ciclo determinístico do Porteiro Nostr para reconciliar filas de PR e main."
+              },
+              {
+                name: "orgfy_loop_radar",
+                desc: "Radar Live do Goose (mode=ro): detecta LOOP_SUSPEITO, STALLED_THINKING e SESSAO_DUPLICADA com acao_sugerida."
               }
             ].map(
               (tool) => h(
@@ -9511,8 +9612,9 @@ Regras Invariantes:
 - DSAP Backtracking: Na 2ª recusa consecutiva com similaridade >= 0.70, o card entra em backtracking para o COO re-escopar.
 - Atribuição de Issues (FERR-ASSIGN-AUTH): NUNCA execute 'buzz issues assign' diretamente (falha com auth_error Kind 1 em chamadores locais); use sempre 'python3 ferramentas/assign_issue.py' na raiz do REPOS/orgfy.
 - Push autenticado no Relay (worktree): Se 'git push relay' falhar com exit 128 ('no nostr key configured'), chame a tool 'buzz__repo' para obter o header 'Authorization: Nostr ...', injete via 'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.<relay_git_url>.extraHeader GIT_CONFIG_VALUE_0="Authorization: Nostr ..."' (sem persistir segredo) e reexecute 'entregar'.
-- Leitura Direta de Cards (Zero '--help'): Arquivos 'cards/*.md' ficam na raiz '/Users/heltonfraga/.buzz/REPOS/orgfy/cards/' (não dentro da worktree). Para ler a issue do relay sem desperdiçar turnos em '--help', rode direto: 'buzz issues get --event <id-64> --repo 7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20/orgfy'.
+- Leitura Direta de Cards e PRs (Zero '--help'): Arquivos 'cards/*.md' ficam na raiz '/Users/heltonfraga/.buzz/REPOS/orgfy/cards/' (não dentro da worktree). Sem desperdiçar turnos em '--help': (a) ler issue: 'buzz issues get --event <id-64> --repo 7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20/orgfy'; (b) atualizar PR após novo commit/rebase: 'buzz pr update --repo-owner 7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20 --repo orgfy --pr <pr-id-64> --commit <sha-40>'.
 - Freio Anti-Loop (Máximo 12 'shell's): NUNCA ultrapasse 12 comandos 'shell' sem commit nem repita o mesmo erro 2 vezes seguidas. Ao bater 2 falhas consecutivas no mesmo passo ou 12 'shell's sem avanço, PARE imediatamente e publique 'BLOQUEADO | por: <seu perfil> | motivo: ... | falta: ... | resolve: <perfil>'.
+- Protocolo de Auto-Cura de Loops (Bento, Iris, Cron e Revisores): ANTES de despachar um card ou cobrar um agente, chame 'orgfy_loop_radar({ apenas_ativos: true })'. (1) Se o agente estiver com 'SESSAO_DUPLICADA', NUNCA envie nova menção ou cobrança (aguarde o turno atual terminar). (2) Se estiver com 'LOOP_SUSPEITO' ou 'STALLED_THINKING', leia 'ultimo_shell' e 'acao_sugerida' e envie 1 instrução cirúrgica destravando aquele passo específico (nunca cobrança genérica); se sem progresso real, libere o lock via 'orgfy_checkout_lock({ action: "release", ... })' e reatribua.
 - Decisor Híbrido v12: orgfy_lint_card usa Decisions API com fallback determinístico offline automático (ferramentas/esteira/decisor_fallback.py) em caso de falta de saldo ou timeout.
 Ferramentas nativas disponíveis neste plugin:
 1. orgfy_status({ empresa? }): Consulta o placar de 20h, FPY, CPI de tokens, contagem de aceites, merged e raias da esteira.
@@ -9525,7 +9627,9 @@ Ferramentas nativas disponíveis neste plugin:
 8. orgfy_governanca_avaliar({ dry_run?, auto_wake? }): Avalia orçamento, fila de revisão, WIP órfão e estagnação nível 3, disparando alertas/wakes com cooldown anti-spam.
 9. orgfy_lint_card({ title, objective?, done_when?, acceptance_command?, executor?, revisor?, card_markdown?, spec_path? }): Audita template OrgFy/Spec-Kit, qualidade semântica e regras L-01/L-22 antes do despacho.
 10. orgfy_bind_context({ conversation_id, issue_id, worktree_path?, title?, acceptance_command?, acceptance_hash?, executor?, revisor? }): Vincula o worktree e injeta regras vivas L-22/L-90 direto na conversa do agente.
-Consulte sempre orgfy_status, orgfy_kpis ou orgfy_kanban_read para inspecionar métricas reais antes de agir.`
+11. orgfy_historico_buscar({ query?, spec?, limit? }): Busca just-in-time no Arquivo de Issues Resolvidas por código, causa raiz, arquivo ou SHA.
+12. orgfy_loop_radar({ apenas_ativos?, agente? }): Inspeciona o Radar de Loops & Sessões Zumbis do Goose em tempo real (LOOP_SUSPEITO, STALLED_THINKING, SESSAO_DUPLICADA, EXPLORACAO_CLI_HELP) com ultimo_shell e acao_sugerida para auto-cura autônoma.
+Consulte sempre orgfy_status, orgfy_kpis, orgfy_loop_radar ou orgfy_kanban_read para inspecionar métricas reais antes de agir.`
       });
       console.log("[ORGFY] ctx.agents.addInstructions registrado com sucesso.");
     } catch (err) {
@@ -9863,7 +9967,26 @@ Consulte sempre orgfy_status, orgfy_kpis ou orgfy_kanban_read para inspecionar m
           return JSON.stringify(res, null, 2);
         }
       });
-      console.log("[ORGFY] 11 agentTools registradas com sucesso no harness do Buzz (Ondas 1, 2, 3 + Arquivo de Resolvidas).");
+      ctx.agents.addTool({
+        name: "orgfy_loop_radar",
+        description: "Consulta o Radar de Loops & Sessões Zumbis do Goose em tempo real (mode=ro), separando alertas ativos (<=15m) de histórico (3h) com flags LOOP_SUSPEITO, STALLED_THINKING, SESSAO_DUPLICADA, EXPLORACAO_CLI_HELP, ultimo_shell e acao_sugerida.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            apenas_ativos: { type: "boolean", description: "Se true (padrão), lista apenas sessões ativas nos últimos 15 min; se false, inclui histórico de 3h" },
+            agente: { type: "string", description: "Filtrar por nome do agente (ex: 'Atlas', 'Lia', 'Bento')" }
+          }
+        },
+        call: async (_client, _context, args) => {
+          const radar = await fetchGooseLoopRadar(ctx);
+          const filtered = filterGooseLoopRadar(radar, {
+            apenas_ativos: args == null ? void 0 : args.apenas_ativos,
+            agente: args == null ? void 0 : args.agente
+          });
+          return JSON.stringify(filtered, null, 2);
+        }
+      });
+      console.log("[ORGFY] 12 agentTools registradas com sucesso no harness do Buzz (Ondas 1, 2, 3 + Arquivo + Radar de Loops).");
     } catch (err) {
       console.warn("[ORGFY] Falha ao registrar agentTools:", err);
     }

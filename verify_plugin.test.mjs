@@ -94,7 +94,7 @@ function makeHarness(failReads = false) {
 
 // 1. Testes Originais (Kanban & Status Positivo/Negativo + MCP)
 const h1 = makeHarness(false);
-assert.equal(h1.tools.size, 11, "devem existir exatamente 11 agentTools registradas");
+assert.equal(h1.tools.size, 12, "devem existir exatamente 12 agentTools registradas");
 assert.ok(h1.panels.has("orgfy-channel-pulse"), "sidebar panel orgfy-channel-pulse deve ser registrado");
 assert.ok(h1.hooks.length >= 1, "hooks de governança devem ser registrados");
 
@@ -319,3 +319,22 @@ const histFail = JSON.parse(await h2.tools.get("orgfy_historico_buscar").call({}
 assert.equal(histFail.disponivel, false);
 assert.equal(histFail.total_encontrados, 0);
 console.log("[ARQUIVO RESOLVIDAS OK]", JSON.stringify({ total_arquivo: histOk.total_arquivo, porteiro_hits: histOk.total_encontrados }));
+
+// 8. Radar de Loops & Sessões Zumbis: orgfy_loop_radar (agentTool + MCP + negativo)
+const radarTool = h1.tools.get("orgfy_loop_radar");
+assert.ok(radarTool, "agentTool orgfy_loop_radar deve estar registrada");
+const radarAll = JSON.parse(await radarTool.call({}, {}, { apenas_ativos: false }));
+assert.equal(radarAll.ok, true, "snapshot goose-loop-radar.json deve ser lido");
+assert.ok(typeof radarAll.resumo.criticos_ativos === "number");
+assert.ok(Array.isArray(radarAll.protocolo_resolucao) && radarAll.protocolo_resolucao.length >= 3);
+
+const mcpToolsList = await mcp({ jsonrpc: "2.0", id: 3, method: "tools/list", params: {} });
+assert.ok(mcpToolsList.result.tools.some((t) => t.name === "orgfy_loop_radar"), "MCP deve expor orgfy_loop_radar");
+const mcpRadarRes = await mcp({ jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "orgfy_loop_radar", arguments: { apenas_ativos: true } } });
+assert.equal(mcpRadarRes.result.isError, false);
+const mcpRadarJson = JSON.parse(mcpRadarRes.result.content[0].text);
+assert.equal(mcpRadarJson.ok, true);
+
+const radarFail = JSON.parse(await h2.tools.get("orgfy_loop_radar").call({}, {}, { apenas_ativos: true }));
+assert.equal(radarFail.ok, false);
+console.log("[RADAR LOOPS AGENT+MCP OK]", JSON.stringify({ criticos_ativos: radarAll.resumo.criticos_ativos, criticos_hist: radarAll.resumo.criticos_historico_3h, exibidas_ativas: mcpRadarJson.total_exibidas }));
