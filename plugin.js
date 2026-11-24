@@ -1623,6 +1623,28 @@ function canTriggerWithCooldown(key, nowMs, commit = true, cooldownMs = DEFAULT_
   return true;
 }
 const DEFAULT_ORGFY_CHANNEL = "e445491d-2fb3-4ebd-8e2e-f6813c33fb03";
+function resolveAgentKeyFromSnapshot(agentsApi, query) {
+  const clean = String(query).trim();
+  if (!clean || !(agentsApi == null ? void 0 : agentsApi.snapshot)) return clean;
+  try {
+    const snap = agentsApi.snapshot() || {};
+    const pool = [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const list of [snap.running, snap.agents]) {
+      if (!Array.isArray(list)) continue;
+      for (const a of list) {
+        if (!a || !a.key || seen.has(a.key)) continue;
+        seen.add(a.key);
+        pool.push(a);
+      }
+    }
+    const lower = clean.toLowerCase();
+    const matched = pool.find((a) => String(a.key || "").toLowerCase() === lower) || pool.find((a) => String(a.pubkey || "").toLowerCase() === lower) || pool.find((a) => String(a.name || "").toLowerCase() === lower) || pool.find((a) => String(a.name || "").toLowerCase().includes(lower));
+    return (matched == null ? void 0 : matched.key) || clean;
+  } catch {
+    return clean;
+  }
+}
 async function evaluateGovernanceAndReact(ctx, options = {}) {
   const nowMs = options.nowMs ?? Date.now();
   const kpiRes = await fetchKpisEsteira(ctx);
@@ -1633,6 +1655,8 @@ async function evaluateGovernanceAndReact(ctx, options = {}) {
   const wakesTriggered = [];
   const skippedByCooldown = [];
   const alerts = [...(kpis == null ? void 0 : kpis.alertas_ativos) ?? []];
+  let radarChannelId;
+  let radarThreadRoot;
   if (options.includeRadar !== false) {
     try {
       const radar = await fetchGooseLoopRadar(ctx);
@@ -1643,6 +1667,9 @@ async function evaluateGovernanceAndReact(ctx, options = {}) {
         const activeDup = radar.sessoes.filter(
           (s) => (typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15) && (s.flags || []).includes("SESSAO_DUPLICADA")
         );
+        const anchorSession = activeCrit[0] || activeDup[0];
+        if (anchorSession == null ? void 0 : anchorSession.channel_id) radarChannelId = anchorSession.channel_id;
+        if (anchorSession == null ? void 0 : anchorSession.thread_root) radarThreadRoot = anchorSession.thread_root;
         if (activeCrit.length > 0) {
           const top = activeCrit.slice(0, 4).map((s) => `${s.agente} (${s.session_id}, ${s.shells} shells, ${s.duracao_min}m, flags=${(s.flags || []).join("+")})`).join("; ");
           alerts.push({
@@ -1692,13 +1719,18 @@ async function evaluateGovernanceAndReact(ctx, options = {}) {
         try {
           const agentsApi = ctx.agents;
           if (agentsApi == null ? void 0 : agentsApi.wake) {
-            await agentsApi.wake(wakeKey, {
-              channel: options.channel || DEFAULT_ORGFY_CHANNEL,
+            const targetAgentKey = resolveAgentKeyFromSnapshot(agentsApi, wakeKey);
+            const wakeChannel = isRadarAlert && radarChannelId || options.channel || DEFAULT_ORGFY_CHANNEL;
+            const wakeRoot = isRadarAlert && radarThreadRoot ? radarThreadRoot : void 0;
+            await agentsApi.wake(targetAgentKey, {
+              channel: wakeChannel,
+              ...wakeRoot ? { root: wakeRoot } : {},
               text: isRadarAlert ? `@OrgFy Iris [ORGFY RADAR AUTO-CURA · ${al.codigo}] ${al.mensagem} Ação obrigatória agora: ${al.acao_sugerida}` : `[ORGFY GOVERNANÇA] ${al.mensagem} Ação recomendada: ${al.acao_sugerida}`
             });
             wakesTriggered.push(`${wakeKey}:${al.codigo}`);
           }
-        } catch {
+        } catch (err) {
+          console.warn("[ORGFY] Falha ao acordar agente via ctx.agents.wake:", { wakeKey, err });
         }
       } else {
         skippedByCooldown.push(`wake:${al.codigo}`);

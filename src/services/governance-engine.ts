@@ -409,6 +409,33 @@ function canTriggerWithCooldown(
 
 export const DEFAULT_ORGFY_CHANNEL = "e445491d-2fb3-4ebd-8e2e-f6813c33fb03";
 
+function resolveAgentKeyFromSnapshot(agentsApi: any, query: string): string {
+  const clean = String(query || "").trim();
+  if (!clean || !agentsApi?.snapshot) return clean;
+  try {
+    const snap = agentsApi.snapshot() || {};
+    const pool: any[] = [];
+    const seen = new Set<string>();
+    for (const list of [snap.running, snap.agents]) {
+      if (!Array.isArray(list)) continue;
+      for (const a of list) {
+        if (!a || !a.key || seen.has(a.key)) continue;
+        seen.add(a.key);
+        pool.push(a);
+      }
+    }
+    const lower = clean.toLowerCase();
+    const matched =
+      pool.find((a) => String(a.key || "").toLowerCase() === lower) ||
+      pool.find((a) => String(a.pubkey || "").toLowerCase() === lower) ||
+      pool.find((a) => String(a.name || "").toLowerCase() === lower) ||
+      pool.find((a) => String(a.name || "").toLowerCase().includes(lower));
+    return matched?.key || clean;
+  } catch {
+    return clean;
+  }
+}
+
 export async function evaluateGovernanceAndReact(
   ctx: Context,
   options: {
@@ -432,6 +459,8 @@ export async function evaluateGovernanceAndReact(
   const skippedByCooldown: string[] = [];
 
   const alerts = [...(kpis?.alertas_ativos ?? [])];
+  let radarChannelId: string | undefined;
+  let radarThreadRoot: string | undefined;
 
   // Integração ativa com o Radar de Loops & Sessões Zumbis (Goose Live)
   if (options.includeRadar !== false) {
@@ -444,6 +473,9 @@ export async function evaluateGovernanceAndReact(
         const activeDup = radar.sessoes.filter(
           (s) => (typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15) && (s.flags || []).includes("SESSAO_DUPLICADA")
         );
+        const anchorSession = activeCrit[0] || activeDup[0];
+        if (anchorSession?.channel_id) radarChannelId = anchorSession.channel_id;
+        if (anchorSession?.thread_root) radarThreadRoot = anchorSession.thread_root;
         if (activeCrit.length > 0) {
           const top = activeCrit
             .slice(0, 4)
@@ -507,16 +539,20 @@ export async function evaluateGovernanceAndReact(
         try {
           const agentsApi = (ctx as any).agents;
           if (agentsApi?.wake) {
-            await agentsApi.wake(wakeKey, {
-              channel: options.channel || DEFAULT_ORGFY_CHANNEL,
+            const targetAgentKey = resolveAgentKeyFromSnapshot(agentsApi, wakeKey);
+            const wakeChannel = (isRadarAlert && radarChannelId) || options.channel || DEFAULT_ORGFY_CHANNEL;
+            const wakeRoot = isRadarAlert && radarThreadRoot ? radarThreadRoot : undefined;
+            await agentsApi.wake(targetAgentKey, {
+              channel: wakeChannel,
+              ...(wakeRoot ? { root: wakeRoot } : {}),
               text: isRadarAlert
                 ? `@OrgFy Iris [ORGFY RADAR AUTO-CURA · ${al.codigo}] ${al.mensagem} Ação obrigatória agora: ${al.acao_sugerida}`
                 : `[ORGFY GOVERNANÇA] ${al.mensagem} Ação recomendada: ${al.acao_sugerida}`,
             });
             wakesTriggered.push(`${wakeKey}:${al.codigo}`);
           }
-        } catch {
-          // Wake opcional conforme capacidades do host
+        } catch (err) {
+          console.warn("[ORGFY] Falha ao acordar agente via ctx.agents.wake:", { wakeKey, err });
         }
       } else {
         skippedByCooldown.push(`wake:${al.codigo}`);
