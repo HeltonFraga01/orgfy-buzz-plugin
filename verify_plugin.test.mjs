@@ -553,3 +553,31 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
   assert.ok(s2.wakes[0].payload.text.includes("Nível 2"));
   console.log("[HIERARCHICAL ESCALATION COO->CEO OK]", JSON.stringify({ n1: s1.wakes[0].agentKey, n2: s2.wakes[0].agentKey }));
 }
+
+// 13. Stop + Relaunch Atômico com @menção e Escopo Fechado (orgfy_session_stop)
+{
+  const relaunchRes = JSON.parse(await stopTool.call({}, {}, {
+    agente: "OrgFy Teo",
+    channel_id: "e445491d-2fb3-4ebd-8e2e-f6813c33fb03",
+    thread_root: "77655d509b0abc2a2caa2708dac2510be7cb1630537ba24c54098e1c1122e3fb",
+    action: "interrupt",
+    reason: "ESCOPO_ABERTO",
+    relaunch: true,
+    reset_session_before_relaunch: true,
+    relaunch_instruction: "Validar apenas o diff da PR e emitir GATE.",
+    target_files: ["ferramentas/esteira/auto_fix_ci.py", "testes/esteira-0001/test_auto_fix_ci.py"],
+    acceptance_command: "python3 -m pytest -q testes/esteira-0001/test_auto_fix_ci.py",
+    max_shells: 8,
+  }));
+  assert.equal(relaunchRes.ok, true);
+  assert.equal(relaunchRes.relaunched, true);
+  assert.equal(relaunchRes.next_required_action, null);
+  assert.ok(relaunchRes.relaunchMessage.includes("@OrgFy Teo"));
+  assert.ok(relaunchRes.relaunchMessage.includes("ferramentas/esteira/auto_fix_ci.py"));
+  assert.ok(relaunchRes.relaunchMessage.includes("máximo 8 comandos shell"));
+  assert.ok(h1.wakes.length >= 1, "deve ter disparado wake para o agente relançado");
+
+  // Sem relaunch -> deve devolver next_required_action obrigatório para o COO
+  assert.ok(stopRes.next_required_action && stopRes.next_required_action.includes("AÇÃO OBRIGATÓRIA DO COO"));
+  console.log("[SESSION STOP ATOMIC RELAUNCH OK]", JSON.stringify({ relaunched: relaunchRes.relaunched, wakes: h1.wakes.length }));
+}

@@ -5469,7 +5469,7 @@ Regras Invariantes:
 - Orçamento de Exploração do COO (Bento): ao receber acionamento para emitir card, limite a leitura exploratória a no máximo 10 comandos 'shell' (<= 5 min). Se o escopo chegar aberto ou ambíguo, NÃO varra o repositório inteiro — responda em 1 turno pedindo o alvo fechado (ou proponha 1 candidato concreto para aprovação).
 - Limite de Turno para Revisores (Teo, Bento Arquiteto, Vera, QA Sentinel — Máximo 15 'shell's): em uma revisão, rode o comando de aceite L-22, confira o diff/escopo e emita imediatamente 'GATE: aceito' ou 'GATE: recusado' (e encerre). PROIBIDO abrir sessões longas de debug de 'porteiro.py'/'esteira_minima.py' durante uma revisão — se o merge atrasar, reporte em 1 linha e saia.
 - Isolamento Estrito de Worktree (Proibido git checkout na raiz): NUNCA execute 'git checkout --detach' ou troque de branch dentro da raiz '/Users/heltonfraga/.buzz/REPOS/orgfy' (isso corrompe o estado compartilhado para todos os agentes). Para revisar ou comparar BASE_VS_AGORA, crie SEMPRE uma worktree isolada e remova-a ao final.
-- Protocolo de Auto-Cura em Ciclo Fechado (COO da empresa em Nível 1; CEO da empresa em Nível 2; Iris só em último caso): ANTES de despachar um card ou cobrar um agente (e SEMPRE que acordado pelo Radar), chame 'orgfy_loop_radar({ apenas_ativos: true })'. NUNCA espere indefinidamente uma sessão queimando tokens em loop (>20m ou >25 shells sem commit, compactação repetida, grep em loop, --help repetido ou PR já fechado). Ao detectar loop/travamento ativo, execute obrigatoriamente os 3 passos: (1) PARAR: chame 'orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: "interrupt", release_issue_id?, reason })'; (2) DIAGNOSTICAR CAUSA-RAIZ: classifique a causa pelos campos 'flags', 'gatilho_resumo' e 'ultimo_shell' (ITEM_JA_FECHADO, ESCOPO_ABERTO, COMPACTACAO_LOOP, COLISAO_WORKTREE, ERRO_REPETIDO, TEMPESTADE_5XX); (3) AGIR (nunca deixar o agente parado no vácuo): se erro de API/provider (502/503/No available accounts), chame 'orgfy_model_failover({ agente, agent_pubkey, channel_id, thread_root, prefer_free: true, apply: true, retrigger: true })' para consultar o NexusMind Ping Real, migrar para o melhor modelo free online e re-disparar; se ITEM_JA_FECHADO, confirme merge na main e encerre sem relançar; se demanda ainda aberta (ex.: ESCOPO_ABERTO ou COMPACTACAO_LOOP), relance limpo com ESCOPO FECHADO (1-3 arquivos exatos + comando de aceite L-22 + limite de 10 shells) ou reatribua na 2ª falha, e publique no canal 'AUTO-CURA | agente | causa-raiz | ação tomada'. Em 'SESSAO_DUPLICADA', encerre a sessão obsoleta com 'orgfy_session_stop' em vez de re-mencionar.
+- Protocolo de Auto-Cura em Ciclo Fechado (Função Nível 1 do COO — Bento; CEO da empresa em Nível 2; Iris só em último caso): INTERROMPER UM AGENTE NUNCA ENCERRA O TURNO DO COO. ANTES de despachar ou cobrar (e SEMPRE que acordado pelo Radar), chame 'orgfy_loop_radar({ apenas_ativos: true })'. Ao interromper uma sessão em loop, execute obrigatoriamente 1 dos 3 desfechos imediatos: (A) Erro de API/provider (502/503/No available accounts) -> 'orgfy_session_stop(action="interrupt")' + 'orgfy_model_failover({ agente, agent_pubkey, channel_id, thread_root, prefer_free: true, apply: true, retrigger: true })'; (B) Demanda ainda aberta (ESCOPO_ABERTO, COMPACTACAO_LOOP, ERRO_REPETIDO) -> chame 'orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: "interrupt", relaunch: true, reset_session_before_relaunch: true, relaunch_instruction: "<o que corrigir/fazer>", target_files: ["<1-3 arquivos>"], acceptance_command: "<comando L-22>", max_shells: 10, reason })' para que a própria ferramenta relance o agente já com '@Nome Exato' e escopo fechado; (C) ITEM_JA_FECHADO (já na main) -> interrompa sem relançar. Publique 'AUTO-CURA | agente | causa-raiz | ação tomada' no canal.
 - Decisor Híbrido v12: orgfy_lint_card usa Decisions API com fallback determinístico offline automático (ferramentas/esteira/decisor_fallback.py) em caso de falta de saldo ou timeout.
 Ferramentas nativas disponíveis neste plugin:
 1. orgfy_status({ empresa? }): Consulta o placar de 20h, FPY, CPI de tokens, contagem de aceites, merged e raias da esteira.
@@ -5866,20 +5866,26 @@ Consulte sempre orgfy_status, orgfy_kpis, orgfy_loop_radar ou orgfy_kanban_read 
         },
       });
 
-      // ── STOP / INTERRUPT NATIVO DE SESSÕES EM LOOP (ctx.agents.session) ──
+      // ── STOP / INTERRUPT + RELAUNCH ATÔMICO DE SESSÕES EM LOOP (ctx.agents.session + wake) ──
       (ctx.agents as any).addTool({
         name: "orgfy_session_stop",
-        description: "Interrompe (Stop) ou reinicia imediatamente o turno de um agente travado ou em trabalho inútil usando a API nativa do Buzz Desktop (ctx.agents.session interrupt/new/compact), opcionalmente liberando o checkout lock do card.",
+        description: "Interrompe (Stop) ou reinicia o turno de um agente travado/em loop via API nativa do Buzz Desktop e, quando relaunch=true, relança automaticamente o agente na mesma thread já com @menção exata, escopo fechado (target_files), comando de aceite L-22 e limite de shells.",
         inputSchema: {
           type: "object",
           properties: {
-            agente: { type: "string", description: "Nome, key ou pubkey do agente (ex: 'OrgFy Teo', 'OrgFy Bento Arquiteto')" },
+            agente: { type: "string", description: "Nome, key ou pubkey do agente (ex: 'OrgFy Teo', 'OrgFy Otto')" },
             agent_pubkey: { type: "string", description: "Pubkey 64-hex do agente (retornado por orgfy_loop_radar)" },
             channel_id: { type: "string", description: "UUID do canal (default: canal #OrgFy)" },
             thread_root: { type: "string", description: "Event ID 64-hex da thread (retornado por orgfy_loop_radar)" },
             action: { type: "string", enum: ["interrupt", "new", "compact"], description: "Ação de controle (default: 'interrupt' = Stop imediato)" },
             release_issue_id: { type: "string", description: "Opcional: issue_id cujo checkout lock deve ser liberado após parar" },
             reason: { type: "string", description: "Motivo técnico da interrupção" },
+            relaunch: { type: "boolean", description: "Se true, relança automaticamente o agente com @menção e escopo fechado via ctx.agents.wake()" },
+            reset_session_before_relaunch: { type: "boolean", description: "Se true junto com relaunch, limpa a sessão ('new') antes de acordar o agente" },
+            relaunch_instruction: { type: "string", description: "Instrução objetiva do que o agente deve corrigir/executar ao ser relançado" },
+            target_files: { type: "array", items: { type: "string" }, description: "Lista fechada de 1 a 3 arquivos exatos que o agente deve tocar" },
+            acceptance_command: { type: "string", description: "Comando determinístico de aceite L-22 esperado" },
+            max_shells: { type: "number", description: "Teto rígido de comandos shell no novo turno (default: 10)" },
           },
           required: ["agente"],
         },
@@ -5892,6 +5898,12 @@ Consulte sempre orgfy_status, orgfy_kpis, orgfy_loop_radar ou orgfy_kanban_read 
             action: args?.action,
             release_issue_id: args?.release_issue_id,
             reason: args?.reason,
+            relaunch: Boolean(args?.relaunch),
+            reset_session_before_relaunch: Boolean(args?.reset_session_before_relaunch),
+            relaunch_instruction: args?.relaunch_instruction,
+            target_files: Array.isArray(args?.target_files) ? args.target_files : undefined,
+            acceptance_command: args?.acceptance_command,
+            max_shells: typeof args?.max_shells === "number" ? args.max_shells : undefined,
           });
           return JSON.stringify(res, null, 2);
         },

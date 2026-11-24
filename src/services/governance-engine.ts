@@ -647,7 +647,7 @@ export async function evaluateGovernanceAndReact(
             severidade: "critical",
             mensagem: `${activeCrit.length} sessão(ões) ativa(s) em loop no Goose: ${top}.`,
             acao_sugerida:
-              "Executar Ciclo Fechado de Auto-Cura: (1) chamar orgfy_loop_radar({ apenas_ativos: true }) e INTERROMPER imediatamente via orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', release_issue_id?, reason }); (2) diagnosticar a causa-raiz (ITEM_JA_FECHADO, ESCOPO_ABERTO, COMPACTACAO_LOOP, COLISAO_WORKTREE, ERRO_REPETIDO, TEMPESTADE_5XX); (3) se a causa for erro de API/provider (502/503/No available accounts), chamar orgfy_model_failover({ agente, agent_pubkey, channel_id, thread_root, prefer_free: true, apply: true, retrigger: true }) para migrar ao melhor modelo free online no NexusMind e re-disparar; se for escopo aberto, relançar com ESCOPO FECHADO (1-3 arquivos + aceite L-22 + limite 10 shells); se já estiver na main, encerrar sem relançar. Registrar 'AUTO-CURA | agente | causa-raiz | ação' no canal.",
+              "Ciclo Fechado de Auto-Cura (PARAR NUNCA ENCERRA O TURNO): chame orgfy_loop_radar({ apenas_ativos: true }) e execute 1 dos 3 desfechos: (A) Erro de API/5xx/provider -> orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', reason }) + orgfy_model_failover({ agente, agent_pubkey, channel_id, thread_root, prefer_free: true, apply: true, retrigger: true }); (B) Card ainda aberto (ESCOPO_ABERTO, COMPACTACAO_LOOP, ERRO_REPETIDO) -> orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', relaunch: true, reset_session_before_relaunch: true, relaunch_instruction: '<o que fazer agora>', target_files: ['<1-3 arquivos>'], acceptance_command: '<comando L-22>', max_shells: 10, reason }); (C) PR/issue já na main -> orgfy_session_stop({ agente, action: 'interrupt', release_issue_id, reason }) sem relançar. Publique 'AUTO-CURA | agente | causa-raiz | ação' no canal.",
           });
         }
         if (activeDup.length >= 2) {
@@ -1088,6 +1088,12 @@ export interface StopAgentSessionInput {
   action?: "interrupt" | "new" | "compact";
   release_issue_id?: string | null;
   reason?: string | null;
+  relaunch?: boolean;
+  reset_session_before_relaunch?: boolean;
+  relaunch_instruction?: string | null;
+  target_files?: string[] | null;
+  acceptance_command?: string | null;
+  max_shells?: number | null;
 }
 
 export interface StopAgentSessionResult {
@@ -1099,6 +1105,9 @@ export interface StopAgentSessionResult {
   place: { channelId: string; root?: string };
   previousState: string | null;
   lockReleased: boolean;
+  relaunched: boolean;
+  relaunchMessage?: string | null;
+  next_required_action?: string | null;
   message: string;
 }
 
@@ -1123,6 +1132,7 @@ export async function stopAgentSession(
       place,
       previousState: null,
       lockReleased: false,
+      relaunched: false,
       message: "API nativa ctx.agents.session / snapshot indisponível neste host.",
     };
   }
@@ -1163,10 +1173,12 @@ export async function stopAgentSession(
       place,
       previousState: null,
       lockReleased: false,
+      relaunched: false,
       message: `Agente '${queryRaw || pubkeyLower}' não encontrado no Buzz Desktop. Disponíveis: ${available || "nenhum"}`,
     };
   }
 
+  const resolvedName = String(matched.name || matched.key);
   let previousState: string | null = null;
   try {
     if (agentsApi.sessionState) {
@@ -1193,26 +1205,28 @@ export async function stopAgentSession(
       return {
         ok: false,
         action,
-        agentName: matched.name || matched.key,
+        agentName: resolvedName,
         agentKey: matched.key,
         agentPlace: matched.place || null,
         place,
         previousState,
         lockReleased: false,
-        message: `Host não suporta ação '${action}' para ${matched.name || matched.key}.`,
+        relaunched: false,
+        message: `Host não suporta ação '${action}' para ${resolvedName}.`,
       };
     }
   } catch (err: any) {
     return {
       ok: false,
       action,
-      agentName: matched.name || matched.key,
+      agentName: resolvedName,
       agentKey: matched.key,
       agentPlace: matched.place || null,
       place,
       previousState,
       lockReleased: false,
-      message: `Falha ao executar '${action}' em ${matched.name || matched.key}: ${err?.message || err}`,
+      relaunched: false,
+      message: `Falha ao executar '${action}' em ${resolvedName}: ${err?.message || err}`,
     };
   }
 
@@ -1226,17 +1240,64 @@ export async function stopAgentSession(
     }
   }
 
+  let relaunched = false;
+  let relaunchMessage: string | null = null;
+  const wantRelaunch = Boolean(input.relaunch);
+  const relaunchInstr = String(input.relaunch_instruction || "").trim();
+  if (wantRelaunch && agentsApi?.wake) {
+    try {
+      if (input.reset_session_before_relaunch && action !== "new" && agentsApi.session) {
+        try {
+          await agentsApi.session(matched.key, place, "new");
+        } catch {
+          // Opcional
+        }
+      }
+      const files = Array.isArray(input.target_files)
+        ? input.target_files.map((f) => String(f || "").trim()).filter(Boolean)
+        : [];
+      const maxShells = Number.isFinite(Number(input.max_shells)) && Number(input.max_shells) > 0
+        ? Math.min(20, Math.max(3, Math.round(Number(input.max_shells))))
+        : 10;
+      const accCmd = String(input.acceptance_command || "").trim();
+      const parts = [
+        `@${resolvedName} [ORGFY AUTO-CURA · RELANÇAMENTO ESCOPO FECHADO]`,
+        `Sua sessão anterior foi interrompida (${String(input.reason || "loop/travamento").trim()}).`,
+        relaunchInstr ? `Objetivo único agora: ${relaunchInstr}` : "Retome a tarefa atual com foco estrito no escopo fechado.",
+        files.length > 0 ? `Arquivos-alvo exclusivos: ${files.join(", ")}.` : null,
+        accCmd ? `Comando de aceite L-22 obrigatório: ${accCmd}` : null,
+        `Limite estrito: máximo ${maxShells} comandos shell (sem --help, sem explorar fora do escopo). Ao passar o aceite, entregue imediatamente; se bater 2 falhas consecutivas, publique BLOQUEADO.`,
+      ].filter(Boolean);
+      relaunchMessage = parts.join(" ");
+      await agentsApi.wake(matched.key, {
+        channel: place.channelId,
+        ...(place.root ? { root: place.root } : {}),
+        text: relaunchMessage,
+      });
+      relaunched = true;
+    } catch (wakeErr: any) {
+      relaunchMessage = `Falha no relaunch automático: ${wakeErr?.message || wakeErr}`;
+    }
+  }
+
+  const nextRequiredAction = relaunched
+    ? null
+    : `AÇÃO OBRIGATÓRIA DO COO (parar nunca encerra o turno): escolha 1 dos 3 desfechos para ${resolvedName}: (1) Se erro de API/5xx, chame orgfy_model_failover({ agente: '${resolvedName}', channel_id: '${place.channelId}'${place.root ? `, thread_root: '${place.root}'` : ""}, prefer_free: true, apply: true, retrigger: true }); (2) Se a demanda ainda está aberta, chame orgfy_session_stop({ agente: '${resolvedName}', channel_id: '${place.channelId}'${place.root ? `, thread_root: '${place.root}'` : ""}, relaunch: true, relaunch_instruction: '<o que fazer>', target_files: ['...'], acceptance_command: '<L-22>', max_shells: 10 }); (3) Se o PR já foi integrado na main, apenas registre 'AUTO-CURA | ${resolvedName} | ITEM_JA_FECHADO | encerrado sem relançar'.`;
+
   const reasonSuffix = input.reason ? ` Motivo: ${String(input.reason).trim()}.` : "";
   return {
     ok: true,
     action,
-    agentName: matched.name || matched.key,
+    agentName: resolvedName,
     agentKey: matched.key,
     agentPlace: matched.place || null,
     place,
     previousState,
     lockReleased,
-    message: `Comando '${action}' enviado com sucesso para ${matched.name || matched.key} (canal ${place.channelId.slice(0, 8)}${place.root ? `, thread ${place.root.slice(0, 8)}` : ""}).${lockReleased ? " Lock liberado." : ""}${reasonSuffix}`,
+    relaunched,
+    relaunchMessage,
+    next_required_action: nextRequiredAction,
+    message: `Comando '${action}' enviado com sucesso para ${resolvedName} (canal ${place.channelId.slice(0, 8)}${place.root ? `, thread ${place.root.slice(0, 8)}` : ""}).${lockReleased ? " Lock liberado." : ""}${relaunched ? " Agente relançado automaticamente com @menção e escopo fechado." : ""}${reasonSuffix}`,
   };
 }
 
