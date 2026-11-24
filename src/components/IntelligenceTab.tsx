@@ -3,6 +3,7 @@ import type {
   KpisEsteiraPayload,
   KpiHistoryPoint,
   DailySeriesPoint,
+  GooseLoopRadarPayload,
 } from "../services/kpi-service";
 
 export interface IntelligenceTabProps {
@@ -14,6 +15,8 @@ export interface IntelligenceTabProps {
   onRecalculate: () => void;
   onRunGovernanceEval?: () => void;
   governanceSummary?: string | null;
+  loopRadar?: GooseLoopRadarPayload | null;
+  onRefreshLoopRadar?: () => void;
 }
 
 const CARD_BG = "rgba(0, 0, 0, 0.28)";
@@ -210,7 +213,7 @@ function renderBudgetGaugeSvg(h: any, pct: number, status: string) {
 }
 
 export function renderIntelligenceTab(props: IntelligenceTabProps) {
-  const { h, kpis, history, error, isRecalculating, onRecalculate, onRunGovernanceEval, governanceSummary } = props;
+  const { h, kpis, history, error, isRecalculating, onRecalculate, onRunGovernanceEval, governanceSummary, loopRadar, onRefreshLoopRadar } = props;
 
   if (!kpis) {
     return h(
@@ -598,6 +601,139 @@ export function renderIntelligenceTab(props: IntelligenceTabProps) {
               )
             )
       )
+    ),
+
+    // Linha 4: Radar de Loops & Sessões Zumbis (Goose Live)
+    h(
+      "div",
+      { style: { padding: "14px", borderRadius: "10px", backgroundColor: CARD_BG, border: BORDER, display: "flex", flexDirection: "column", gap: "10px" } },
+      h(
+        "div",
+        { style: { display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" } },
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", gap: "8px" } },
+          h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, "Radar de Loops & Sessões Zumbis (Goose Live · 3h)"),
+          loopRadar?.ok &&
+            h(
+              "span",
+              {
+                style: {
+                  fontSize: "10px",
+                  fontFamily: "monospace",
+                  fontWeight: "700",
+                  padding: "2px 7px",
+                  borderRadius: "9999px",
+                  backgroundColor: loopRadar.resumo.criticos > 0 ? "rgba(239, 68, 68, 0.18)" : loopRadar.resumo.avisos > 0 ? "rgba(245, 158, 11, 0.18)" : "rgba(16, 185, 129, 0.15)",
+                  color: loopRadar.resumo.criticos > 0 ? "#f87171" : loopRadar.resumo.avisos > 0 ? "#fbbf24" : "#10b981",
+                },
+              },
+              `${loopRadar.resumo.criticos} críticos · ${loopRadar.resumo.avisos} avisos · ${loopRadar.resumo.duplicadas} duplicadas`
+            )
+        ),
+        onRefreshLoopRadar &&
+          h(
+            "button",
+            {
+              onClick: onRefreshLoopRadar,
+              style: {
+                padding: "4px 10px",
+                borderRadius: "6px",
+                border: "1px solid rgba(255,255,255,0.12)",
+                backgroundColor: "rgba(255,255,255,0.05)",
+                color: "#cbd5e1",
+                fontSize: "10.5px",
+                cursor: "pointer",
+              },
+            },
+            "Atualizar Radar"
+          )
+      ),
+      !loopRadar || !loopRadar.ok
+        ? h("div", { style: { fontSize: "11px", color: "#9ca3af" } }, loopRadar?.error || "Carregando telemetria live do Goose...")
+        : loopRadar.sessoes.length === 0
+        ? h("div", { style: { fontSize: "11px", color: "#10b981" } }, "Nenhuma sessão em loop ou travada nas últimas 3 horas.")
+        : h(
+            "div",
+            { style: { display: "flex", flexDirection: "column", gap: "6px" } },
+            loopRadar.sessoes.map((s) =>
+              h(
+                "div",
+                {
+                  key: s.session_id,
+                  style: {
+                    display: "grid",
+                    gridTemplateColumns: "1.1fr 0.7fr 0.9fr 1.6fr",
+                    gap: "8px",
+                    alignItems: "center",
+                    padding: "7px 10px",
+                    borderRadius: "6px",
+                    backgroundColor:
+                      s.severidade === "critical"
+                        ? "rgba(239, 68, 68, 0.1)"
+                        : s.severidade === "warn"
+                        ? "rgba(245, 158, 11, 0.08)"
+                        : "rgba(255, 255, 255, 0.025)",
+                    border:
+                      s.severidade === "critical"
+                        ? "1px solid rgba(239, 68, 68, 0.3)"
+                        : s.severidade === "warn"
+                        ? "1px solid rgba(245, 158, 11, 0.25)"
+                        : "1px solid rgba(255, 255, 255, 0.05)",
+                    fontSize: "11px",
+                    fontFamily: "monospace",
+                  },
+                },
+                h(
+                  "div",
+                  { style: { display: "flex", flexDirection: "column", gap: "2px", minWidth: 0 } },
+                  h("span", { style: { color: "#f3f4f6", fontWeight: "700", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, s.agente),
+                  h("span", { style: { fontSize: "9.5px", color: "#9ca3af" } }, `${s.session_id} · há ${s.ultima_atualizacao_min}m`)
+                ),
+                h(
+                  "span",
+                  { style: { color: s.severidade === "critical" ? "#f87171" : s.severidade === "warn" ? "#fbbf24" : "#cbd5e1" } },
+                  `${formatMin(s.duracao_min)} · ${s.shells} shells`
+                ),
+                h(
+                  "div",
+                  { style: { display: "flex", flexWrap: "wrap", gap: "4px" } },
+                  (s.flags.length > 0 ? s.flags : ["OK"]).map((fl) =>
+                    h(
+                      "span",
+                      {
+                        key: fl,
+                        style: {
+                          fontSize: "9.5px",
+                          fontWeight: "700",
+                          padding: "1px 6px",
+                          borderRadius: "4px",
+                          backgroundColor:
+                            fl === "OK"
+                              ? "rgba(16, 185, 129, 0.15)"
+                              : fl === "LOOP_SUSPEITO" || fl === "STALLED_THINKING"
+                              ? "rgba(239, 68, 68, 0.2)"
+                              : "rgba(245, 158, 11, 0.2)",
+                          color:
+                            fl === "OK"
+                              ? "#10b981"
+                              : fl === "LOOP_SUSPEITO" || fl === "STALLED_THINKING"
+                              ? "#f87171"
+                              : "#fbbf24",
+                        },
+                      },
+                      fl
+                    )
+                  )
+                ),
+                h(
+                  "span",
+                  { style: { fontSize: "10px", color: "#9ca3af", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: s.ultimo_shell },
+                  s.ultimo_shell || "--"
+                )
+              )
+            )
+          )
     )
   );
 }

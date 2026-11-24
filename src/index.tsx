@@ -46,9 +46,11 @@ import {
 } from "./services/templates-rsi";
 import {
   fetchKpisEsteira,
+  fetchGooseLoopRadar,
   recalculateKpisNow,
   type KpisEsteiraPayload,
   type KpiHistoryPoint,
+  type GooseLoopRadarPayload,
 } from "./services/kpi-service";
 import {
   renderIntelligenceTab,
@@ -677,6 +679,7 @@ export function apply(ctx: Context) {
     const [kpisError, setKpisError] = React.useState<string | null>(null);
     const [isRecalculatingKpis, setIsRecalculatingKpis] = React.useState<boolean>(false);
     const [governanceSummary, setGovernanceSummary] = React.useState<string | null>(null);
+    const [loopRadar, setLoopRadar] = React.useState<GooseLoopRadarPayload | null>(null);
 
     // Estado do Arquivo Pesquisável de Issues Resolvidas (Just-in-Time Context)
     const [resolvedItems, setResolvedItems] = React.useState<ResolvedIssueItem[]>([]);
@@ -690,12 +693,18 @@ export function apply(ctx: Context) {
       setHoldingData(snap);
     }, []);
 
+    const loadLoopRadar = React.useCallback(async () => {
+      const radar = await fetchGooseLoopRadar(ctx);
+      setLoopRadar(radar);
+    }, []);
+
     const loadKpis = React.useCallback(async () => {
       const res = await fetchKpisEsteira(ctx);
       setKpisData(res.kpis);
       setKpisHistory(res.history);
       setKpisError(res.error);
-    }, []);
+      loadLoopRadar();
+    }, [loadLoopRadar]);
 
     const loadResolvedArchive = React.useCallback(async () => {
       const res = await fetchResolvedArchive(ctx);
@@ -1335,6 +1344,29 @@ export function apply(ctx: Context) {
           h("span", null, `FPY: ${fpyRate !== null ? `${fpyRate.toFixed(1)}%` : "--"}`),
           h("span", { style: { color: "rgba(255,255,255,0.15)" } }, "·"),
           h("span", null, `CPI: ${cpiTokens !== null ? cpiTokens.toFixed(2) : "--"}`),
+          loopRadar?.ok && loopRadar.resumo.criticos > 0 &&
+            h(
+              "button",
+              {
+                onClick: () => {
+                  setActiveCentralTab("inteligencia");
+                  loadLoopRadar();
+                },
+                title: "Sessões em loop ou travadas detectadas no Goose",
+                style: {
+                  padding: "2px 7px",
+                  borderRadius: "9999px",
+                  backgroundColor: "rgba(239, 68, 68, 0.18)",
+                  border: "1px solid rgba(239, 68, 68, 0.4)",
+                  color: "#f87171",
+                  fontSize: "10.5px",
+                  fontWeight: "700",
+                  fontFamily: "monospace",
+                  cursor: "pointer",
+                },
+              },
+              `⚠ ${loopRadar.resumo.criticos} loop(s)`
+            ),
           h("span", { style: { color: "rgba(255,255,255,0.15)" } }, "·"),
           h(
             "button",
@@ -2200,6 +2232,8 @@ export function apply(ctx: Context) {
           onRecalculate: handleRecalculateKpis,
           onRunGovernanceEval: handleRunGovernanceEval,
           governanceSummary,
+          loopRadar,
+          onRefreshLoopRadar: loadLoopRadar,
         })
       : activeCentralTab === "resolvidas"
       ? renderResolvedArchiveTab({
@@ -5347,7 +5381,9 @@ Regras Invariantes:
 - Checkout Lock Atômico (Nostr 64-hex): Nenhum card pode ser executado em paralelo por dois agentes; adquira lock passando SEMPRE o issue_id Nostr completo (64 hex) + title, revisor, acceptance_command e branch.
 - DSAP Backtracking: Na 2ª recusa consecutiva com similaridade >= 0.70, o card entra em backtracking para o COO re-escopar.
 - Atribuição de Issues (FERR-ASSIGN-AUTH): NUNCA execute 'buzz issues assign' diretamente (falha com auth_error Kind 1 em chamadores locais); use sempre 'python3 ferramentas/assign_issue.py' na raiz do REPOS/orgfy.
-- Push autenticado no Relay (worktree): Se 'git push relay' falhar com exit 128 ('no nostr key configured'), chame a tool 'buzz__repo' para obter o header 'Authorization: Nostr ...', configure 'git config http.<relay_git_url>.extraHeader' na worktree e reexecute 'entregar'.
+- Push autenticado no Relay (worktree): Se 'git push relay' falhar com exit 128 ('no nostr key configured'), chame a tool 'buzz__repo' para obter o header 'Authorization: Nostr ...', injete via 'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.<relay_git_url>.extraHeader GIT_CONFIG_VALUE_0="Authorization: Nostr ..."' (sem persistir segredo) e reexecute 'entregar'.
+- Leitura Direta de Cards (Zero '--help'): Arquivos 'cards/*.md' ficam na raiz '/Users/heltonfraga/.buzz/REPOS/orgfy/cards/' (não dentro da worktree). Para ler a issue do relay sem desperdiçar turnos em '--help', rode direto: 'buzz issues get --event <id-64> --repo 7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20/orgfy'.
+- Freio Anti-Loop (Máximo 12 'shell's): NUNCA ultrapasse 12 comandos 'shell' sem commit nem repita o mesmo erro 2 vezes seguidas. Ao bater 2 falhas consecutivas no mesmo passo ou 12 'shell's sem avanço, PARE imediatamente e publique 'BLOQUEADO | por: <seu perfil> | motivo: ... | falta: ... | resolve: <perfil>'.
 - Decisor Híbrido v12: orgfy_lint_card usa Decisions API com fallback determinístico offline automático (ferramentas/esteira/decisor_fallback.py) em caso de falta de saldo ou timeout.
 Ferramentas nativas disponíveis neste plugin:
 1. orgfy_status({ empresa? }): Consulta o placar de 20h, FPY, CPI de tokens, contagem de aceites, merged e raias da esteira.

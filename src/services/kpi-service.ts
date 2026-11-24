@@ -284,3 +284,68 @@ export async function recalculateKpisNow(ctx: Context): Promise<{
     result,
   };
 }
+
+
+export interface GooseLoopSession {
+  session_id: string;
+  agente: string;
+  nome: string;
+  duracao_min: number;
+  ultima_atualizacao_min: number;
+  msgs: number;
+  shells: number;
+  help_calls: number;
+  severidade: "ok" | "warn" | "critical";
+  flags: string[];
+  ultimo_shell: string;
+}
+
+export interface GooseLoopRadarPayload {
+  ok: boolean;
+  error: string | null;
+  gerado_em: string;
+  resumo: {
+    total_recentes: number;
+    criticos: number;
+    avisos: number;
+    duplicadas: number;
+  };
+  sessoes: GooseLoopSession[];
+}
+
+export const GOOSE_LOOP_RADAR_SCRIPT_PATH =
+  "/Users/heltonfraga/.buzz/REPOS/orgfy-buzz-plugin/scripts/goose_loop_radar.py";
+
+export async function fetchGooseLoopRadar(ctx: Context): Promise<GooseLoopRadarPayload> {
+  const host = (ctx as any).host;
+  const empty: GooseLoopRadarPayload = {
+    ok: false,
+    error: "Execução local indisponível para leitura do sessions.db.",
+    gerado_em: new Date().toISOString(),
+    resumo: { total_recentes: 0, criticos: 0, avisos: 0, duplicadas: 0 },
+    sessoes: [],
+  };
+  try {
+    let stdout = "";
+    if (host?.exec) {
+      let res = await host.exec("python", [GOOSE_LOOP_RADAR_SCRIPT_PATH]);
+      if (res?.exitCode && res.exitCode !== 0) {
+        res = await host.exec("bash", ["-c", `python3 "${GOOSE_LOOP_RADAR_SCRIPT_PATH}"`]);
+      }
+      stdout = String(res?.stdout || "").trim();
+    } else if (host?.spawn) {
+      const proc = await host.spawn("python", [GOOSE_LOOP_RADAR_SCRIPT_PATH]);
+      if (proc?.exited) await proc.exited;
+      stdout = String(proc?.stdout || "").trim();
+    } else {
+      return empty;
+    }
+    const start = stdout.indexOf("{");
+    if (start === -1) return { ...empty, error: "Saída JSON ausente do radar Goose." };
+    const parsed = JSON.parse(stdout.slice(start)) as GooseLoopRadarPayload;
+    if (!parsed || typeof parsed !== "object" || !parsed.resumo) return empty;
+    return parsed;
+  } catch (err: any) {
+    return { ...empty, error: err?.message || "Erro ao consultar radar de loops Goose." };
+  }
+}

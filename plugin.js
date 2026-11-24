@@ -1736,6 +1736,40 @@ async function recalculateKpisNow(ctx) {
     result
   };
 }
+const GOOSE_LOOP_RADAR_SCRIPT_PATH = "/Users/heltonfraga/.buzz/REPOS/orgfy-buzz-plugin/scripts/goose_loop_radar.py";
+async function fetchGooseLoopRadar(ctx) {
+  const host = ctx.host;
+  const empty = {
+    ok: false,
+    error: "Execução local indisponível para leitura do sessions.db.",
+    gerado_em: (/* @__PURE__ */ new Date()).toISOString(),
+    resumo: { total_recentes: 0, criticos: 0, avisos: 0, duplicadas: 0 },
+    sessoes: []
+  };
+  try {
+    let stdout = "";
+    if (host == null ? void 0 : host.exec) {
+      let res = await host.exec("python", [GOOSE_LOOP_RADAR_SCRIPT_PATH]);
+      if ((res == null ? void 0 : res.exitCode) && res.exitCode !== 0) {
+        res = await host.exec("bash", ["-c", `python3 "${GOOSE_LOOP_RADAR_SCRIPT_PATH}"`]);
+      }
+      stdout = String((res == null ? void 0 : res.stdout) || "").trim();
+    } else if (host == null ? void 0 : host.spawn) {
+      const proc = await host.spawn("python", [GOOSE_LOOP_RADAR_SCRIPT_PATH]);
+      if (proc == null ? void 0 : proc.exited) await proc.exited;
+      stdout = String((proc == null ? void 0 : proc.stdout) || "").trim();
+    } else {
+      return empty;
+    }
+    const start = stdout.indexOf("{");
+    if (start === -1) return { ...empty, error: "Saída JSON ausente do radar Goose." };
+    const parsed = JSON.parse(stdout.slice(start));
+    if (!parsed || typeof parsed !== "object" || !parsed.resumo) return empty;
+    return parsed;
+  } catch (err) {
+    return { ...empty, error: (err == null ? void 0 : err.message) || "Erro ao consultar radar de loops Goose." };
+  }
+}
 const CARD_BG = "rgba(0, 0, 0, 0.28)";
 const BORDER = "1px solid rgba(255, 255, 255, 0.08)";
 function formatMin(min) {
@@ -1913,7 +1947,7 @@ function renderBudgetGaugeSvg(h, pct, status) {
   );
 }
 function renderIntelligenceTab(props) {
-  const { h, kpis, history, error, isRecalculating, onRecalculate, onRunGovernanceEval, governanceSummary } = props;
+  const { h, kpis, history, error, isRecalculating, onRecalculate, onRunGovernanceEval, governanceSummary, loopRadar, onRefreshLoopRadar } = props;
   if (!kpis) {
     return h(
       "div",
@@ -2271,6 +2305,112 @@ function renderIntelligenceTab(props) {
               },
               h("span", { style: { color: "#cbd5e1", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "70%" } }, st.chave),
               h("span", { style: { color: st.nivel >= 3 ? "#f87171" : "#fbbf24", fontWeight: "700" } }, `N${st.nivel} · ${st.ciclos} ciclos`)
+            )
+          )
+        )
+      )
+    ),
+    // Linha 4: Radar de Loops & Sessões Zumbis (Goose Live)
+    h(
+      "div",
+      { style: { padding: "14px", borderRadius: "10px", backgroundColor: CARD_BG, border: BORDER, display: "flex", flexDirection: "column", gap: "10px" } },
+      h(
+        "div",
+        { style: { display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" } },
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", gap: "8px" } },
+          h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, "Radar de Loops & Sessões Zumbis (Goose Live · 3h)"),
+          (loopRadar == null ? void 0 : loopRadar.ok) && h(
+            "span",
+            {
+              style: {
+                fontSize: "10px",
+                fontFamily: "monospace",
+                fontWeight: "700",
+                padding: "2px 7px",
+                borderRadius: "9999px",
+                backgroundColor: loopRadar.resumo.criticos > 0 ? "rgba(239, 68, 68, 0.18)" : loopRadar.resumo.avisos > 0 ? "rgba(245, 158, 11, 0.18)" : "rgba(16, 185, 129, 0.15)",
+                color: loopRadar.resumo.criticos > 0 ? "#f87171" : loopRadar.resumo.avisos > 0 ? "#fbbf24" : "#10b981"
+              }
+            },
+            `${loopRadar.resumo.criticos} críticos · ${loopRadar.resumo.avisos} avisos · ${loopRadar.resumo.duplicadas} duplicadas`
+          )
+        ),
+        onRefreshLoopRadar && h(
+          "button",
+          {
+            onClick: onRefreshLoopRadar,
+            style: {
+              padding: "4px 10px",
+              borderRadius: "6px",
+              border: "1px solid rgba(255,255,255,0.12)",
+              backgroundColor: "rgba(255,255,255,0.05)",
+              color: "#cbd5e1",
+              fontSize: "10.5px",
+              cursor: "pointer"
+            }
+          },
+          "Atualizar Radar"
+        )
+      ),
+      !loopRadar || !loopRadar.ok ? h("div", { style: { fontSize: "11px", color: "#9ca3af" } }, (loopRadar == null ? void 0 : loopRadar.error) || "Carregando telemetria live do Goose...") : loopRadar.sessoes.length === 0 ? h("div", { style: { fontSize: "11px", color: "#10b981" } }, "Nenhuma sessão em loop ou travada nas últimas 3 horas.") : h(
+        "div",
+        { style: { display: "flex", flexDirection: "column", gap: "6px" } },
+        loopRadar.sessoes.map(
+          (s) => h(
+            "div",
+            {
+              key: s.session_id,
+              style: {
+                display: "grid",
+                gridTemplateColumns: "1.1fr 0.7fr 0.9fr 1.6fr",
+                gap: "8px",
+                alignItems: "center",
+                padding: "7px 10px",
+                borderRadius: "6px",
+                backgroundColor: s.severidade === "critical" ? "rgba(239, 68, 68, 0.1)" : s.severidade === "warn" ? "rgba(245, 158, 11, 0.08)" : "rgba(255, 255, 255, 0.025)",
+                border: s.severidade === "critical" ? "1px solid rgba(239, 68, 68, 0.3)" : s.severidade === "warn" ? "1px solid rgba(245, 158, 11, 0.25)" : "1px solid rgba(255, 255, 255, 0.05)",
+                fontSize: "11px",
+                fontFamily: "monospace"
+              }
+            },
+            h(
+              "div",
+              { style: { display: "flex", flexDirection: "column", gap: "2px", minWidth: 0 } },
+              h("span", { style: { color: "#f3f4f6", fontWeight: "700", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, s.agente),
+              h("span", { style: { fontSize: "9.5px", color: "#9ca3af" } }, `${s.session_id} · há ${s.ultima_atualizacao_min}m`)
+            ),
+            h(
+              "span",
+              { style: { color: s.severidade === "critical" ? "#f87171" : s.severidade === "warn" ? "#fbbf24" : "#cbd5e1" } },
+              `${formatMin(s.duracao_min)} · ${s.shells} shells`
+            ),
+            h(
+              "div",
+              { style: { display: "flex", flexWrap: "wrap", gap: "4px" } },
+              (s.flags.length > 0 ? s.flags : ["OK"]).map(
+                (fl) => h(
+                  "span",
+                  {
+                    key: fl,
+                    style: {
+                      fontSize: "9.5px",
+                      fontWeight: "700",
+                      padding: "1px 6px",
+                      borderRadius: "4px",
+                      backgroundColor: fl === "OK" ? "rgba(16, 185, 129, 0.15)" : fl === "LOOP_SUSPEITO" || fl === "STALLED_THINKING" ? "rgba(239, 68, 68, 0.2)" : "rgba(245, 158, 11, 0.2)",
+                      color: fl === "OK" ? "#10b981" : fl === "LOOP_SUSPEITO" || fl === "STALLED_THINKING" ? "#f87171" : "#fbbf24"
+                    }
+                  },
+                  fl
+                )
+              )
+            ),
+            h(
+              "span",
+              { style: { fontSize: "10px", color: "#9ca3af", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: s.ultimo_shell },
+              s.ultimo_shell || "--"
             )
           )
         )
@@ -4988,6 +5128,7 @@ function apply(ctx) {
     const [kpisError, setKpisError] = React.useState(null);
     const [isRecalculatingKpis, setIsRecalculatingKpis] = React.useState(false);
     const [governanceSummary, setGovernanceSummary] = React.useState(null);
+    const [loopRadar, setLoopRadar] = React.useState(null);
     const [resolvedItems, setResolvedItems] = React.useState([]);
     const [resolvedError, setResolvedError] = React.useState(null);
     const [resolvedSearch, setResolvedSearch] = React.useState("");
@@ -4997,12 +5138,17 @@ function apply(ctx) {
       const snap = await fetchHoldingControlPlane(ctx);
       setHoldingData(snap);
     }, []);
+    const loadLoopRadar = React.useCallback(async () => {
+      const radar = await fetchGooseLoopRadar(ctx);
+      setLoopRadar(radar);
+    }, []);
     const loadKpis = React.useCallback(async () => {
       const res = await fetchKpisEsteira(ctx);
       setKpisData(res.kpis);
       setKpisHistory(res.history);
       setKpisError(res.error);
-    }, []);
+      loadLoopRadar();
+    }, [loadLoopRadar]);
     const loadResolvedArchive = React.useCallback(async () => {
       const res = await fetchResolvedArchive(ctx);
       setResolvedItems(res.itens);
@@ -5562,6 +5708,28 @@ function apply(ctx) {
           h("span", null, `FPY: ${fpyRate !== null ? `${fpyRate.toFixed(1)}%` : "--"}`),
           h("span", { style: { color: "rgba(255,255,255,0.15)" } }, "·"),
           h("span", null, `CPI: ${cpiTokens !== null ? cpiTokens.toFixed(2) : "--"}`),
+          (loopRadar == null ? void 0 : loopRadar.ok) && loopRadar.resumo.criticos > 0 && h(
+            "button",
+            {
+              onClick: () => {
+                setActiveCentralTab("inteligencia");
+                loadLoopRadar();
+              },
+              title: "Sessões em loop ou travadas detectadas no Goose",
+              style: {
+                padding: "2px 7px",
+                borderRadius: "9999px",
+                backgroundColor: "rgba(239, 68, 68, 0.18)",
+                border: "1px solid rgba(239, 68, 68, 0.4)",
+                color: "#f87171",
+                fontSize: "10.5px",
+                fontWeight: "700",
+                fontFamily: "monospace",
+                cursor: "pointer"
+              }
+            },
+            `⚠ ${loopRadar.resumo.criticos} loop(s)`
+          ),
           h("span", { style: { color: "rgba(255,255,255,0.15)" } }, "·"),
           h(
             "button",
@@ -6360,7 +6528,9 @@ function apply(ctx) {
             isRecalculating: isRecalculatingKpis,
             onRecalculate: handleRecalculateKpis,
             onRunGovernanceEval: handleRunGovernanceEval,
-            governanceSummary
+            governanceSummary,
+            loopRadar,
+            onRefreshLoopRadar: loadLoopRadar
           }) : activeCentralTab === "resolvidas" ? renderResolvedArchiveTab({
             h,
             items: resolvedItems,
@@ -9330,7 +9500,9 @@ Regras Invariantes:
 - Checkout Lock Atômico (Nostr 64-hex): Nenhum card pode ser executado em paralelo por dois agentes; adquira lock passando SEMPRE o issue_id Nostr completo (64 hex) + title, revisor, acceptance_command e branch.
 - DSAP Backtracking: Na 2ª recusa consecutiva com similaridade >= 0.70, o card entra em backtracking para o COO re-escopar.
 - Atribuição de Issues (FERR-ASSIGN-AUTH): NUNCA execute 'buzz issues assign' diretamente (falha com auth_error Kind 1 em chamadores locais); use sempre 'python3 ferramentas/assign_issue.py' na raiz do REPOS/orgfy.
-- Push autenticado no Relay (worktree): Se 'git push relay' falhar com exit 128 ('no nostr key configured'), chame a tool 'buzz__repo' para obter o header 'Authorization: Nostr ...', configure 'git config http.<relay_git_url>.extraHeader' na worktree e reexecute 'entregar'.
+- Push autenticado no Relay (worktree): Se 'git push relay' falhar com exit 128 ('no nostr key configured'), chame a tool 'buzz__repo' para obter o header 'Authorization: Nostr ...', injete via 'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.<relay_git_url>.extraHeader GIT_CONFIG_VALUE_0="Authorization: Nostr ..."' (sem persistir segredo) e reexecute 'entregar'.
+- Leitura Direta de Cards (Zero '--help'): Arquivos 'cards/*.md' ficam na raiz '/Users/heltonfraga/.buzz/REPOS/orgfy/cards/' (não dentro da worktree). Para ler a issue do relay sem desperdiçar turnos em '--help', rode direto: 'buzz issues get --event <id-64> --repo 7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20/orgfy'.
+- Freio Anti-Loop (Máximo 12 'shell's): NUNCA ultrapasse 12 comandos 'shell' sem commit nem repita o mesmo erro 2 vezes seguidas. Ao bater 2 falhas consecutivas no mesmo passo ou 12 'shell's sem avanço, PARE imediatamente e publique 'BLOQUEADO | por: <seu perfil> | motivo: ... | falta: ... | resolve: <perfil>'.
 - Decisor Híbrido v12: orgfy_lint_card usa Decisions API com fallback determinístico offline automático (ferramentas/esteira/decisor_fallback.py) em caso de falta de saldo ou timeout.
 Ferramentas nativas disponíveis neste plugin:
 1. orgfy_status({ empresa? }): Consulta o placar de 20h, FPY, CPI de tokens, contagem de aceites, merged e raias da esteira.
