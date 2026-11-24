@@ -1,5 +1,6 @@
 import type { Context } from "@buzz/author";
 import { fetchKpisEsteira, fetchGooseLoopRadar, type KpisEsteiraPayload } from "./kpi-service";
+import { executeSmartModelFailover } from "./model-failover";
 
 export interface CheckoutLockRecord {
   issueId: string;
@@ -662,8 +663,89 @@ export async function evaluateGovernanceAndReact(
     try {
       const radar = await fetchGooseLoopRadar(ctx);
       if (radar.ok && Array.isArray(radar.sessoes)) {
+        const healedSessionIds = new Set<string>();
+
+        // Auto-failover autônomo direto para sessões ativas em tempestade 5xx/429 (sem depender de wake manual da Iris)
+        if (!options.dryRun && options.autoWake !== false) {
+          const providerStormSessions = radar.sessoes.filter((s) => {
+            const isActive = typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15;
+            if (!isActive || s.ultima_atualizacao_min > 10) return false;
+            const recentErrs = Number(s.recent_provider_errors ?? 0);
+            const hasStormFlag = Array.isArray(s.flags) && s.flags.includes("TEMPESTADE_5XX");
+            return recentErrs >= 2 || (hasStormFlag && Number(s.errors_5xx ?? 0) >= 2);
+          });
+
+          const seenAgentsForFailover = new Set<string>();
+          for (const s of providerStormSessions) {
+            const agentDedupKey = String(s.agent_pubkey || s.agente || "").trim().toLowerCase();
+            if (!agentDedupKey || seenAgentsForFailover.has(agentDedupKey)) continue;
+            seenAgentsForFailover.add(agentDedupKey);
+
+            const failCooldownKey = `auto_model_failover:${agentDedupKey}`;
+            if (!options.bypassCooldown && !canTriggerWithCooldown(failCooldownKey, nowMs, true, 90 * 1000)) {
+              skippedByCooldown.push(`auto_failover:${s.agente}`);
+              continue;
+            }
+
+            try {
+              const agentsApi = (ctx as any).agents;
+              // Interrompe a sessão travada em 503 antes de trocar o modelo para que o retrigger use o novo modelo limpo
+              if (agentsApi?.session && (s.agente || s.agent_pubkey)) {
+                const targetKey = resolveAgentKeyFromSnapshot(agentsApi, s.agent_pubkey || s.agente);
+                if (targetKey) {
+                  try {
+                    const place = s.thread_root
+                      ? { channelId: s.channel_id || DEFAULT_ORGFY_CHANNEL, root: s.thread_root }
+                      : { channelId: s.channel_id || DEFAULT_ORGFY_CHANNEL };
+                    await agentsApi.session(targetKey, place, "interrupt");
+                  } catch {
+                    // Sessão pode já estar ociosa
+                  }
+                }
+              }
+
+              const failoverRes = await executeSmartModelFailover(ctx, {
+                agente: s.agente,
+                agent_pubkey: s.agent_pubkey || null,
+                prefer_free: false,
+                apply: true,
+                retrigger: true,
+                channel_id: s.channel_id || DEFAULT_ORGFY_CHANNEL,
+                thread_root: s.thread_root || null,
+              });
+
+              if (failoverRes.ok && failoverRes.selectedModel) {
+                wakesTriggered.push(
+                  `auto_failover:${s.agente}:${failoverRes.previousModel || "padrao"}->${failoverRes.selectedModel}`
+                );
+                notificationsSent.push(`AUTO_MODEL_FAILOVER:${s.agente}`);
+                try {
+                  const notifApi = (ctx as any).notifications;
+                  if (notifApi?.notify) {
+                    await notifApi.notify({
+                      title: `OrgFy Auto-Failover [${s.agente}]`,
+                      body: failoverRes.message,
+                    });
+                  }
+                } catch {
+                  // Notificação nativa opcional
+                }
+                const otherFlags = (s.flags || []).filter((f) => f !== "TEMPESTADE_5XX");
+                if (otherFlags.length === 0) {
+                  healedSessionIds.add(s.session_id);
+                }
+              }
+            } catch (err) {
+              console.warn("[ORGFY] Falha no auto-failover direto de modelo:", { agente: s.agente, err });
+            }
+          }
+        }
+
         const activeCrit = radar.sessoes.filter(
-          (s) => (typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15) && s.severidade === "critical"
+          (s) =>
+            !healedSessionIds.has(s.session_id) &&
+            (typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15) &&
+            s.severidade === "critical"
         );
         const activeDup = radar.sessoes.filter(
           (s) => (typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15) && (s.flags || []).includes("SESSAO_DUPLICADA")
@@ -1351,8 +1433,8 @@ export async function stopAgentSession(
   };
 }
 
-const DEFAULT_WATCHDOG_INTERVAL_MS = 3 * 60 * 1000; // 3 min
-const DEFAULT_WATCHDOG_INITIAL_DELAY_MS = 12 * 1000; // 12s após carregar o plugin
+const DEFAULT_WATCHDOG_INTERVAL_MS = 45 * 1000; // 45s para detecção rápida de tempestade 5xx/429
+const DEFAULT_WATCHDOG_INITIAL_DELAY_MS = 10 * 1000; // 10s após carregar o plugin
 let radarWatchdogTimer: any = null;
 let radarWatchdogInitialTimer: any = null;
 let radarWatchdogRunning = false;

@@ -272,39 +272,69 @@ def main() -> int:
             last_event_content = ""
             compactions = 0
             errors_5xx = 0
+            recent_provider_errors = 0
+            last_provider_error_ts = None
+            last_provider_error_text = ""
+            now_epoch = now.timestamp()
 
             for idx, (role, ts, cj) in enumerate(msgs):
                 raw_cj = cj or ""
                 if "Your context was compacted" in raw_cj:
                     compactions += 1
-                # Conta 5xx apenas em erros reais de provider/tool (ignora notas antigas em mem_get/mem_set)
-                if (
-                    ("503 Service Unavailable" in raw_cj or "502 " in raw_cj or "No available accounts" in raw_cj)
-                    and "buzz__mem_" not in raw_cj
-                ):
+                # Conta erros de provider (502/503/504/429/rate limit/no available accounts) ignorando notas de memória
+                low_cj = raw_cj.lower()
+                has_provider_err_marker = any(
+                    mk in low_cj
+                    for mk in (
+                        "503 service unavailable",
+                        "502 bad gateway",
+                        "504 gateway timeout",
+                        "no available accounts",
+                        "rate limit exceeded",
+                        "upstream rate limit",
+                        "too many requests",
+                        "http 429",
+                        "(429 ",
+                    )
+                )
+                is_real_provider_err = False
+                if has_provider_err_marker and "buzz__mem_" not in raw_cj:
                     try:
                         cj_items = json.loads(raw_cj)
                     except Exception:
                         cj_items = []
-                    is_real_5xx = False
                     if isinstance(cj_items, list):
                         for it in cj_items:
                             if not isinstance(it, dict):
                                 continue
                             it_type = it.get("type")
                             if it_type == "error":
-                                is_real_5xx = True
+                                is_real_provider_err = True
+                                last_provider_error_text = str(it.get("message") or "")[:180]
                                 break
                             if it_type == "toolResponse" and _is_error_response([it]):
-                                is_real_5xx = True
+                                is_real_provider_err = True
+                                last_provider_error_text = str(it.get("toolResult") or "")[:180]
                                 break
                             if it_type == "text" and role != "assistant":
                                 txt_low = str(it.get("text") or "").lower()
-                                if ("503 service unavailable" in txt_low or "no available accounts" in txt_low) and "version:" not in txt_low:
-                                    is_real_5xx = True
+                                if (
+                                    "503 service unavailable" in txt_low
+                                    or "no available accounts" in txt_low
+                                    or "rate limit exceeded" in txt_low
+                                ) and "version:" not in txt_low:
+                                    is_real_provider_err = True
+                                    last_provider_error_text = str(it.get("text") or "")[:180]
                                     break
-                    if is_real_5xx:
+                    if is_real_provider_err:
                         errors_5xx += 1
+                        if isinstance(ts, (int, float)) and (now_epoch - ts) <= 600:
+                            recent_provider_errors += 1
+                            last_provider_error_ts = int(ts)
+                elif role == "assistant" and not is_real_provider_err:
+                    # Resposta bem-sucedida do assistente zera a sequência de erros recentes do provider
+                    if '"type":"text"' in raw_cj or '"type":"toolRequest"' in raw_cj:
+                        recent_provider_errors = 0
 
                 if role == "user":
                     # Ancora APENAS em <mention> real (ignora <turn-context> de compactação/retry)
@@ -440,6 +470,9 @@ def main() -> int:
                 "closed_ev": closed_ev,
                 "compactions": compactions,
                 "errors_5xx": errors_5xx,
+                "recent_provider_errors": recent_provider_errors,
+                "last_provider_error_ts": last_provider_error_ts,
+                "last_provider_error_text": last_provider_error_text,
                 "turno_min": turno_min,
                 "thread_lifetime_min": thread_lifetime_min,
                 "age_upd_min": age_upd_min,
@@ -512,10 +545,10 @@ def main() -> int:
                 flags.append("COLISAO_WORKTREE")
                 severidade = "critical"
 
-            # 8. Tempestade de 502/503
-            if item["errors_5xx"] >= 3:
+            # 8. Tempestade de erros de provider (502/503/504/429/No available accounts)
+            if item["recent_provider_errors"] >= 2 or item["errors_5xx"] >= 3:
                 flags.append("TEMPESTADE_5XX")
-                if item["errors_5xx"] >= 5:
+                if item["recent_provider_errors"] >= 2 or item["errors_5xx"] >= 4:
                     severidade = "critical"
                 elif severidade == "ok":
                     severidade = "warn"
@@ -559,6 +592,9 @@ def main() -> int:
                     "item_fechado_evidencia": item["closed_ev"],
                     "compactions": item["compactions"],
                     "errors_5xx": item["errors_5xx"],
+                    "recent_provider_errors": item["recent_provider_errors"],
+                    "last_provider_error_ts": item["last_provider_error_ts"],
+                    "last_provider_error_text": item["last_provider_error_text"],
                     "duracao_min": item["turno_min"],
                     "thread_lifetime_min": item["thread_lifetime_min"],
                     "ultima_atualizacao_min": item["age_upd_min"],

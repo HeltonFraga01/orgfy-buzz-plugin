@@ -85,6 +85,93 @@ const SHARED_USAGE_PATHS = [
   "/Users/heltonfraga/.buzz/.scratch/nm_usage.json",
   "~/.buzz/.scratch/nm_usage.json",
 ];
+export const MODEL_QUARANTINE_PATH = "/Users/heltonfraga/.buzz/.scratch/orgfy-model-quarantine.json";
+const DEFAULT_QUARANTINE_TTL_MS = 20 * 60 * 1000;
+
+export interface QuarantinedModelRecord {
+  model: string;
+  failedAt: number;
+  expiresAt: number;
+  reason?: string;
+}
+
+const modelQuarantineMemory = new Map<string, QuarantinedModelRecord>();
+
+export function clearModelQuarantineForTests(): void {
+  modelQuarantineMemory.clear();
+}
+
+export async function quarantineFailedModel(
+  ctx: Context,
+  modelId: string,
+  reason: string = "provider_5xx_or_429",
+  ttlMs: number = DEFAULT_QUARANTINE_TTL_MS,
+  nowMs: number = Date.now()
+): Promise<void> {
+  const norm = String(modelId || "").trim().toLowerCase();
+  if (!norm) return;
+  modelQuarantineMemory.set(norm, {
+    model: String(modelId).trim(),
+    failedAt: nowMs,
+    expiresAt: nowMs + ttlMs,
+    reason,
+  });
+  const host = (ctx as any)?.host;
+  if (typeof host?.writeFile === "function") {
+    try {
+      const obj: Record<string, QuarantinedModelRecord> = {};
+      for (const [k, v] of modelQuarantineMemory.entries()) {
+        if (v.expiresAt > nowMs) obj[k] = v;
+      }
+      await host.writeFile(MODEL_QUARANTINE_PATH, JSON.stringify(obj, null, 2));
+    } catch {
+      // Persistência opcional
+    }
+  }
+}
+
+export async function getQuarantinedModels(
+  ctx: Context,
+  nowMs: number = Date.now()
+): Promise<Set<string>> {
+  const host = (ctx as any)?.host;
+  if (typeof host?.readFile === "function") {
+    try {
+      const raw = await host.readFile(MODEL_QUARANTINE_PATH);
+      if (raw) {
+        const parsed = JSON.parse(decodeHostBytes(raw));
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          for (const [k, v] of Object.entries(parsed as Record<string, any>)) {
+            if (
+              v &&
+              typeof v.expiresAt === "number" &&
+              v.expiresAt > nowMs &&
+              !modelQuarantineMemory.has(k.toLowerCase())
+            ) {
+              modelQuarantineMemory.set(k.toLowerCase(), {
+                model: String(v.model || k),
+                failedAt: Number(v.failedAt || nowMs),
+                expiresAt: v.expiresAt,
+                reason: typeof v.reason === "string" ? v.reason : undefined,
+              });
+            }
+          }
+        }
+      }
+    } catch {
+      // Arquivo pode não existir ainda
+    }
+  }
+  const active = new Set<string>();
+  for (const [k, v] of modelQuarantineMemory.entries()) {
+    if (v.expiresAt <= nowMs) {
+      modelQuarantineMemory.delete(k);
+    } else {
+      active.add(k);
+    }
+  }
+  return active;
+}
 
 function decodeHostBytes(raw: unknown): string {
   if (typeof raw === "string") return raw;
@@ -482,14 +569,75 @@ export async function executeSmartModelFailover(
       ? String((matchedAgent.config as any).model || "")
       : "") || (input.failed_model || null);
 
-  const excludeSet = new Set<string>();
+  // Quarentena (20 min) dos modelos que acabaram de falhar para eliminar ping-pong entre dois modelos em 503
+  if (failedNorm) {
+    await quarantineFailedModel(ctx, input.failed_model || failedNorm, "reported_failed");
+  }
+  if (applyChange && previousModel) {
+    await quarantineFailedModel(ctx, previousModel, "agent_failover_source");
+  }
+  const quarantined = await getQuarantinedModels(ctx);
+
+  const excludeSet = new Set<string>(quarantined);
   if (failedNorm) excludeSet.add(failedNorm);
   if (previousModel) excludeSet.add(previousModel.toLowerCase());
 
-  // 1. Primeiro verifica o ranking real compartilhado pelo NexusMind Gateway (zero erro de CSP)
-  const sharedRanking = await loadSharedNexusMindRanking(ctx, excludeSet, preferFree);
+  // 1. Primeiro verifica o ranking real compartilhado pelo NexusMind Gateway
+  let sharedRanking = await loadSharedNexusMindRanking(ctx, excludeSet, preferFree);
+  // Se todos os modelos do ranking estiverem em quarentena, relaxa quarentena mantendo apenas o modelo atual excluído
+  if (sharedRanking.length === 0 && quarantined.size > 0) {
+    const minimalExclude = new Set<string>();
+    if (failedNorm) minimalExclude.add(failedNorm);
+    if (previousModel) minimalExclude.add(previousModel.toLowerCase());
+    sharedRanking = await loadSharedNexusMindRanking(ctx, minimalExclude, preferFree);
+  }
 
-  // 2. Se o host permitir chamadas diretas ao NexusMind (ex: testes ou rede liberada), faz probe ao vivo
+  // 1b. Quando ctx.host.request está disponível, valida ao vivo os top candidatos do ranking compartilhado
+  // para NUNCA migrar o agente para um modelo que também esteja retornando 503/429 neste momento.
+  const host = (ctx as any)?.host;
+  let verifiedShared: ModelCandidateScore[] = [];
+  if (sharedRanking.length > 0 && typeof host?.request === "function") {
+    const toVerify = sharedRanking.slice(0, maxProbes);
+    let gotAnyHttpResponse = false;
+    for (const cand of toVerify) {
+      const prov =
+        NEXUSMIND_PROVIDERS.find((p) => p.id === cand.provider) ||
+        NEXUSMIND_PROVIDERS.find((p) => p.id === inferProviderId(cand.model)) ||
+        NEXUSMIND_PROVIDERS[0];
+      const res = await probeModelLive(ctx, cand.model, prov);
+      if (res.online || (res.error && /^HTTP\s+\d{3}/.test(res.error))) {
+        gotAnyHttpResponse = true;
+      }
+      if (res.online) {
+        verifiedShared.push({
+          ...cand,
+          provider: prov.id,
+          latencyMs: res.latencyMs,
+          online: true,
+          source: "live_probe",
+        });
+        // Primeiro candidato mais bem ranqueado que respondeu HTTP 200 vence imediatamente
+        break;
+      } else {
+        if (res.error && /^HTTP\s+(429|502|503|504)/.test(res.error)) {
+          await quarantineFailedModel(ctx, cand.model, res.error);
+        }
+        verifiedShared.push({
+          ...cand,
+          latencyMs: res.latencyMs,
+          online: false,
+          source: "live_probe",
+          error: res.error,
+        });
+      }
+    }
+    if (!gotAnyHttpResponse) {
+      // Host bloqueou rede/CSP (offline) -> mantém ranking compartilhado sem descartar
+      verifiedShared = [];
+    }
+  }
+
+  // 2. Se não houver ranking compartilhado, descobre catálogo direto e faz probe ao vivo
   let probed: ModelCandidateScore[] = [];
   if (sharedRanking.length === 0) {
     const catalog = await discoverNexusMindCatalog(ctx);
@@ -511,6 +659,9 @@ export async function executeSmartModelFailover(
       probed = await Promise.all(
         preRanked.map(async (cand) => {
           const res = await probeModelLive(ctx, cand.id, cand.provider);
+          if (!res.online && res.error && /^HTTP\s+(429|502|503|504)/.test(res.error)) {
+            await quarantineFailedModel(ctx, cand.id, res.error);
+          }
           const combinedScore = res.online
             ? computeCombinedModelScore(cand.intelligenceScore, res.latencyMs)
             : -1;
@@ -535,7 +686,12 @@ export async function executeSmartModelFailover(
     }
   }
 
-  const finalRanking = sharedRanking.length > 0 ? sharedRanking : probed;
+  const finalRanking =
+    verifiedShared.length > 0
+      ? verifiedShared
+      : sharedRanking.length > 0
+      ? sharedRanking
+      : probed;
   const winner = finalRanking.find((p) => p.online) || null;
 
   if (!winner) {

@@ -18,6 +18,7 @@
   "host": {
     "networkOrigins": [
       "https://api.cortexx.digital",
+      "https://api.nexusmind.digital",
       "https://orgfy.communities.buzz.xyz"
     ],
     "files": true,

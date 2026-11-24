@@ -844,3 +844,143 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     next: step2.progress.nextPendingStepId,
   }));
 }
+
+// 16. Auto-Failover Autônomo no Watchdog (TEMPESTADE_5XX -> probe ao vivo -> quarentena anti-ping-pong -> ctx.agents.save + retrigger)
+{
+  const autoTools = new Map();
+  const autoSaves = [];
+  const autoWakes = [];
+  const autoStops = [];
+  const probedModels = [];
+  let bentoModel = "gemini-3.1-flash-lite";
+  let quarantineFile = "{}";
+
+  const fakeKpis = JSON.stringify({
+    schema_version: "1.0.0",
+    gerado_em: new Date().toISOString(),
+    janela_dias: 30,
+    fluxo: { vazao_total_feito: 10, fila_revisao_atual: 0 },
+    qualidade: { fpy_real_pct: 100 },
+    economia: { status_orcamento: "OK", uso_teto_diario_pct: 5 },
+    higiene: { wip_total_ativo: 1, orphan_wip_count: 0, estagnados_nivel_3: 0 },
+    alertas_ativos: [],
+  });
+  const fakeRadar503 = JSON.stringify({
+    ok: true,
+    gerado_em: new Date().toISOString(),
+    resumo: { criticos: 1, criticos_ativos: 1, avisos: 0, duplicadas: 0 },
+    sessoes: [
+      {
+        session_id: "20261124_auto503",
+        agente: "OrgFy Bento",
+        agent_pubkey: "d24eb749d921ee4f3465073252abc3779faa92dee1d333e40d6b03c6fb814711",
+        severidade: "critical",
+        ativa: true,
+        ultima_atualizacao_min: 1.0,
+        duracao_min: 8.0,
+        shells: 2,
+        errors_5xx: 5,
+        recent_provider_errors: 3,
+        last_provider_error_ts: Math.floor(Date.now() / 1000),
+        flags: ["TEMPESTADE_5XX"],
+        channel_id: "e445491d-2fb3-4ebd-8e2e-f6813c33fb03",
+        thread_root: "4406f509983396ed055d9739185f30bface744d032df4d1452035e6e4c00c7cd",
+      },
+    ],
+  });
+  const fakeRanking = JSON.stringify({
+    version: 2,
+    policy: {
+      strategy: "balanced",
+      forceFree: false,
+      autoAssignBlocked: ["claude-opus-5-5"],
+    },
+    models: [
+      { rank: 1, model: "claude-opus-5-5", group: "nexusmind_anthropic", score: 95, online: true, autoAssignBlocked: true },
+      { rank: 2, model: "mistralai/mistral-large-4-1t-a52b", group: "nexusmind_openai", score: 87, online: true, autoAssignBlocked: false },
+      { rank: 3, model: "gemini-3.1-flash-lite", group: "nexusmind_antigravity", score: 80, online: true, autoAssignBlocked: false },
+      { rank: 4, model: "gemini-2.5-flash-thinking", group: "nexusmind_antigravity", score: 78, online: true, autoAssignBlocked: false },
+      { rank: 5, model: "gemini-3-flash", group: "nexusmind_antigravity", score: 76, online: true, autoAssignBlocked: false },
+    ],
+  });
+
+  orgfyMod.apply({
+    react: { createElement: () => null },
+    pages: { register: () => {} },
+    settingsCards: { register: () => {} },
+    panels: { register: () => {} },
+    navigation: { open: async () => ({ status: "opened" }) },
+    notifications: { notify: async () => {} },
+    agents: {
+      addInstructions: () => {},
+      addTool: (t) => autoTools.set(t.name, t),
+      registerHook: () => {},
+      snapshot: () => ({
+        agents: [
+          {
+            key: "local:orgfy-bento",
+            pubkey: "d24eb749d921ee4f3465073252abc3779faa92dee1d333e40d6b03c6fb814711",
+            name: "OrgFy Bento",
+            place: "here",
+            config: { model: bentoModel, provider: "nexusmind_antigravity" },
+          },
+        ],
+        running: [],
+      }),
+      session: async (agentKey, place, action) => autoStops.push({ agentKey, place, action }),
+      save: async (agentKey, change) => {
+        autoSaves.push({ agentKey, change });
+        bentoModel = change.config.model;
+      },
+      wake: async (agentKey, payload) => autoWakes.push({ agentKey, payload }),
+    },
+    host: {
+      request: async (req) => {
+        const body = JSON.parse(req.body || "{}");
+        probedModels.push(body.model);
+        // Simula mistral-large também em 503 No available accounts
+        if (body.model === "mistralai/mistral-large-4-1t-a52b") {
+          return { status: 503, body: JSON.stringify({ error: { message: "No available accounts" } }) };
+        }
+        return { status: 200, body: JSON.stringify({ choices: [{ message: { content: "ok" } }] }) };
+      },
+      readFile: async (p) => {
+        if (p.endsWith("kpis-esteira.json")) return new TextEncoder().encode(fakeKpis);
+        if (p.endsWith("goose-loop-radar.json")) return new TextEncoder().encode(fakeRadar503);
+        if (p.endsWith("nexusmind-model-ranking.json")) return new TextEncoder().encode(fakeRanking);
+        if (p.endsWith("orgfy-model-quarantine.json")) return new TextEncoder().encode(quarantineFile);
+        return new Uint8Array(fs.readFileSync(p));
+      },
+      writeFile: async (p, content) => {
+        if (p.endsWith("orgfy-model-quarantine.json")) quarantineFile = String(content);
+      },
+      serveMcp: async () => ({ url: "mcp://test-auto503", close: () => {} }),
+    },
+  });
+
+  const govAuto = autoTools.get("orgfy_governanca_avaliar");
+  const autoRes = JSON.parse(await govAuto.call({}, {}, { dry_run: false, auto_wake: true, bypass_cooldown: true }));
+  assert.equal(autoRes.ok, true);
+  assert.equal(autoStops.length, 1, "deve interromper sessão travada em 503 antes de trocar");
+  assert.equal(autoSaves.length, 1, "deve salvar novo modelo automaticamente via ctx.agents.save");
+  assert.equal(autoSaves[0].change.config.model, "gemini-2.5-flash-thinking", "deve pular claude-opus (blocked), mistral-large (503 no probe) e gemini-3.1-flash-lite (atual)");
+  assert.ok(probedModels.includes("mistralai/mistral-large-4-1t-a52b"), "deve testar ao vivo mistral-large antes de trocar");
+  assert.ok(probedModels.includes("gemini-2.5-flash-thinking"), "deve validar gemini-2.5-flash-thinking ao vivo");
+  assert.equal(autoWakes.length, 1, "deve re-disparar o agente automaticamente na thread original");
+  assert.equal(autoWakes[0].payload.root, "4406f509983396ed055d9739185f30bface744d032df4d1452035e6e4c00c7cd");
+
+  // Segundo failover consecutivo: NÃO pode fazer ping-pong voltando para mistral-large ou gemini-3.1-flash-lite (ambos em quarentena)
+  const failoverAuto = autoTools.get("orgfy_model_failover");
+  const secondRes = JSON.parse(await failoverAuto.call({}, {}, {
+    agente: "OrgFy Bento",
+    apply: true,
+    retrigger: false,
+  }));
+  assert.equal(secondRes.ok, true);
+  assert.equal(secondRes.selectedModel, "gemini-3-flash", "quarentena deve impedir ping-pong para modelos que falharam recentemente");
+  console.log("[AUTO-FAILOVER WATCHDOG + LIVE PROBE + ANTI-PINGPONG OK]", JSON.stringify({
+    first: autoSaves[0].change.config.model,
+    second: secondRes.selectedModel,
+    probed: probedModels,
+  }));
+}

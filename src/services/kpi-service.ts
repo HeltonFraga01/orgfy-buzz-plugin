@@ -299,6 +299,9 @@ export interface GooseLoopSession {
   item_fechado_evidencia?: string | null;
   compactions?: number;
   errors_5xx?: number;
+  recent_provider_errors?: number;
+  last_provider_error_ts?: number | null;
+  last_provider_error_text?: string | null;
   duracao_min: number;
   thread_lifetime_min?: number;
   ultima_atualizacao_min: number;
