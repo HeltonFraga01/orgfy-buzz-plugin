@@ -209,14 +209,33 @@ async function loadSharedNexusMindRanking(
   }
 
   if (parsed && Array.isArray(parsed.models)) {
+    const policy = parsed.policy && typeof parsed.policy === "object" ? parsed.policy : {};
+    const effectivePreferFree = preferFree || Boolean(policy.forceFree);
+    const blockedAuto = new Set(
+      (Array.isArray(policy.autoAssignBlocked) ? policy.autoAssignBlocked : []).map((x: any) =>
+        String(x || "").trim().toLowerCase()
+      )
+    );
+    const maxCost =
+      typeof policy.maxCostPerReqUsd === "number" && policy.maxCostPerReqUsd > 0
+        ? policy.maxCostPerReqUsd
+        : null;
+    const pinnedModel =
+      policy.tierPins && typeof policy.tierPins === "object"
+        ? String(policy.tierPins.geral || policy.tierPins.tier2_balanced || "").trim()
+        : "";
+
     const candidates: ModelCandidateScore[] = [];
     for (const m of parsed.models) {
       const mid = String(m?.model || "").trim();
-      if (!mid || m.isDisabled || disabled.has(mid) || excludeSet.has(mid.toLowerCase())) continue;
+      if (!mid || m.isDisabled || m.autoAssignBlocked || disabled.has(mid) || excludeSet.has(mid.toLowerCase())) continue;
+      if (blockedAuto.has(mid.toLowerCase())) continue;
       if (m.online === false) continue; // Pula modelos que falharam no ping real do NexusMind
+      if (maxCost !== null && typeof m.avgCostUsd === "number" && m.avgCostUsd > 0 && m.avgCostUsd > maxCost) continue;
       const free = isFreeModelId(mid);
-      if (preferFree && !free) continue;
-      if (!preferFree && free) continue;
+      if (effectivePreferFree && !free) continue;
+      if (!effectivePreferFree && free) continue;
+      const isPinned = Boolean(pinnedModel && mid === pinnedModel);
       candidates.push({
         model: mid,
         provider: String(m.group || inferProviderId(mid)),
@@ -230,7 +249,7 @@ async function loadSharedNexusMindRanking(
             : typeof m.avgDurationMs === "number"
             ? m.avgDurationMs
             : null,
-        combinedScore: Number(m.score ?? estimateModelIntelligence(mid)),
+        combinedScore: isPinned ? 1000 : Number(m.score ?? estimateModelIntelligence(mid)),
         online: true,
         calls: Number(m.calls || 0),
         source: "nexusmind_ranking",

@@ -4174,21 +4174,33 @@ async function loadSharedNexusMindRanking(ctx, excludeSet, preferFree) {
     }
   }
   if (parsed && Array.isArray(parsed.models)) {
+    const policy = parsed.policy && typeof parsed.policy === "object" ? parsed.policy : {};
+    const effectivePreferFree = preferFree || Boolean(policy.forceFree);
+    const blockedAuto = new Set(
+      (Array.isArray(policy.autoAssignBlocked) ? policy.autoAssignBlocked : []).map(
+        (x) => String(x || "").trim().toLowerCase()
+      )
+    );
+    const maxCost = typeof policy.maxCostPerReqUsd === "number" && policy.maxCostPerReqUsd > 0 ? policy.maxCostPerReqUsd : null;
+    const pinnedModel = policy.tierPins && typeof policy.tierPins === "object" ? String(policy.tierPins.geral || policy.tierPins.tier2_balanced || "").trim() : "";
     const candidates = [];
     for (const m of parsed.models) {
       const mid = String((m == null ? void 0 : m.model) || "").trim();
-      if (!mid || m.isDisabled || disabled.has(mid) || excludeSet.has(mid.toLowerCase())) continue;
+      if (!mid || m.isDisabled || m.autoAssignBlocked || disabled.has(mid) || excludeSet.has(mid.toLowerCase())) continue;
+      if (blockedAuto.has(mid.toLowerCase())) continue;
       if (m.online === false) continue;
+      if (maxCost !== null && typeof m.avgCostUsd === "number" && m.avgCostUsd > 0 && m.avgCostUsd > maxCost) continue;
       const free = isFreeModelId(mid);
-      if (preferFree && !free) continue;
-      if (!preferFree && free) continue;
+      if (effectivePreferFree && !free) continue;
+      if (!effectivePreferFree && free) continue;
+      const isPinned = Boolean(pinnedModel && mid === pinnedModel);
       candidates.push({
         model: mid,
         provider: String(m.group || inferProviderId(mid)),
         isFree: free,
         intelligenceScore: Number(m.capabilityScore || estimateModelIntelligence(mid)),
         latencyMs: typeof m.pingLatencyMs === "number" ? m.pingLatencyMs : typeof m.avgFirstTokenMs === "number" ? m.avgFirstTokenMs : typeof m.avgDurationMs === "number" ? m.avgDurationMs : null,
-        combinedScore: Number(m.score ?? estimateModelIntelligence(mid)),
+        combinedScore: isPinned ? 1e3 : Number(m.score ?? estimateModelIntelligence(mid)),
         online: true,
         calls: Number(m.calls || 0),
         source: "nexusmind_ranking"
@@ -14535,7 +14547,7 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
     );
   }
   const ORGFY_PAGE_ICON = "data:image/svg+xml;base64," + btoa(
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="orgfy" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#059669"/><stop offset="100%" stop-color="#0f766e"/></linearGradient></defs><rect width="64" height="64" rx="16" fill="url(#orgfy)"/><polygon points="32,12 50,22.5 50,41.5 32,52 14,41.5 14,22.5" fill="none" stroke="#ffffff" stroke-width="3.5" stroke-linejoin="round"/><polyline points="14,22.5 32,33 50,22.5" fill="none" stroke="#ffffff" stroke-width="3.5" stroke-linejoin="round"/><line x1="32" y1="33" x2="32" y2="52" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round"/><circle cx="32" cy="33" r="4" fill="#a7f3d0"/></svg>'
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#e6e6e6" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 20 6.5 20 17.5 12 22 4 17.5 4 6.5 12 2"/><polyline points="4 6.5 12 11.5 20 6.5"/><line x1="12" y1="11.5" x2="12" y2="22"/></svg>'
   );
   ctx.pages.register({
     id: "orgfy",
