@@ -729,6 +729,94 @@ export async function fetchLiveKanbanSnapshot(
     // Worktree discovery opcional
   }
 
+  // 5. Mescla cards recém-criados (orgfy-cards-index.json + REPOS/orgfy/cards/*.md recentes)
+  //    Garante que toda issue criada via orgfy_card_create / buzz-issue-guard.sh apareça imediatamente no Kanban
+  try {
+    const parseCardMdFields = (md: string) => {
+      const titleM = md.match(/^#\s+(.+)$/m);
+      const execM = md.match(/(?:-\s+)?(?:\*\*)?Executor(?:\*\*)?:\s*([^\n\r|]+)/i);
+      const revM = md.match(/(?:-\s+)?(?:\*\*)?Revisor(?:\*\*)?:\s*([^\n\r|]+)/i);
+      const decM = md.match(/(?:-\s+)?(?:\*\*)?Decisor(?:\*\*)?:\s*([^\n\r|]+)/i);
+      const branchM = md.match(/(?:-\s+)?(?:\*\*)?Branch(?:\*\*)?:\s*`?([a-zA-Z0-9._/-]+)`?/i);
+      const wtM = md.match(/(?:-\s+)?(?:\*\*)?Workspace(?:\*\*)?:\s*(?:worktree:)?`?([^\s`\n\r]+)`?/i);
+      const objM = md.match(/##\s*(?:1\.\s*)?Objetivo[\s\S]*?\n+([^\n#]+)/i);
+      const acM = md.match(/##\s*(?:8\.\s*)?Comando de aceite[\s\S]*?```(?:bash|sh)?\s*\n([^\n`]+)/i);
+      return {
+        title: titleM ? titleM[1].trim() : undefined,
+        executor: execM ? execM[1].replace(/\*/g, "").trim() : undefined,
+        revisor: revM ? revM[1].replace(/\*/g, "").trim() : undefined,
+        decisor: decM ? decM[1].replace(/\*/g, "").trim() : undefined,
+        branch: branchM ? branchM[1].trim() : undefined,
+        worktreePath: wtM ? wtM[1].trim() : undefined,
+        objetivo: objM ? objM[1].trim() : undefined,
+        acceptanceCommand: acM ? acM[1].trim() : undefined,
+      };
+    };
+
+    if (ctx?.host?.readFile) {
+      const rawIdx = await ctx.host.readFile("/Users/heltonfraga/.buzz/.scratch/orgfy-cards-index.json");
+      const idxTxt =
+        typeof rawIdx === "string"
+          ? rawIdx
+          : rawIdx instanceof Uint8Array
+          ? new TextDecoder("utf-8").decode(rawIdx)
+          : String(rawIdx ?? "");
+      const parsedIdx = JSON.parse(idxTxt);
+      if (parsedIdx && typeof parsedIdx === "object" && !Array.isArray(parsedIdx)) {
+        for (const [rawKey, entry] of Object.entries(parsedIdx as Record<string, any>)) {
+          const fullId = String(entry?.issue_id || rawKey || "").trim().toLowerCase();
+          if (!/^[0-9a-f]{64}$/i.test(fullId)) continue;
+          const shortId = fullId.slice(0, 8);
+          if (mergedSet.has(fullId) || mergedSet.has(shortId) || cardMap.has(shortId)) continue;
+
+          const relCardPath = String(entry?.card_path || "").replace(/^\/Users\/heltonfraga\/\.buzz\/REPOS\/orgfy\//, "").trim();
+          let fields: ReturnType<typeof parseCardMdFields> = {
+            title: undefined,
+            executor: undefined,
+            revisor: undefined,
+            decisor: undefined,
+            branch: undefined,
+            worktreePath: undefined,
+            objetivo: undefined,
+            acceptanceCommand: undefined,
+          };
+          if (relCardPath) {
+            const md = await readOrgfyText(ctx, relCardPath);
+            if (md) fields = parseCardMdFields(md);
+          }
+
+          const aceiteRecord = aceites[fullId] || aceites[shortId] || null;
+          const hasFrozenAceite = Boolean(aceiteRecord);
+          const stage: PipelineCard["stage"] = hasFrozenAceite ? "despachado" : "triagem";
+          const title = String(entry?.title || fields.title || `Issue #${shortId}`).trim();
+
+          cardMap.set(shortId, {
+            id: `card-${shortId}`,
+            issueId: shortId,
+            fullIssueId: fullId,
+            owner: String(entry?.owner || DEFAULT_ORGFY_OWNER).toLowerCase(),
+            title,
+            priority: title.includes("P0") ? "P0" : title.includes("P1") ? "P1" : "P2",
+            empresa: String(entry?.repo_id || "orgfy"),
+            executor: resolveAgentDisplay(fields.executor, "A definir"),
+            revisor: resolveAgentDisplay(fields.revisor, "A definir"),
+            decisor: fields.decisor || "OrgFy Iris",
+            tier: "tier_1_exec_barato",
+            stage,
+            objetivo: fields.objetivo || title,
+            acceptanceCommand: (typeof aceiteRecord === "object" && aceiteRecord?.comando) || fields.acceptanceCommand,
+            acceptanceHash: (typeof aceiteRecord === "object" && aceiteRecord?.hash_comando) || undefined,
+            branch: fields.branch,
+            worktreePath: fields.worktreePath || `.worktrees/${shortId}`,
+            createdAt: Number(entry?.created_at || Date.now()),
+          });
+        }
+      }
+    }
+  } catch {
+    // Índice orgfy-cards-index.json opcional
+  }
+
   let result = Array.from(cardMap.values());
   if (filter?.empresa && filter.empresa !== "all") {
     result = result.filter((c) => !c.empresa || c.empresa === filter.empresa);

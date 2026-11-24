@@ -119,7 +119,7 @@ async function fetchLiveEsteiraState(ctx, empresa) {
   };
 }
 async function fetchLiveKanbanSnapshot(ctx, filter) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
   const [live, canvasText] = await Promise.all([
     fetchLiveEsteiraState(ctx, filter == null ? void 0 : filter.empresa),
     readOrgfyText(ctx, ".scratch/canvas_atual.md")
@@ -530,6 +530,81 @@ async function fetchLiveKanbanSnapshot(ctx, filter) {
             commitSha: headMatch ? headMatch[1].slice(0, 7) : void 0,
             worktreePath: wtRelPath,
             updatedAt: Date.now()
+          });
+        }
+      }
+    }
+  } catch {
+  }
+  try {
+    const parseCardMdFields = (md) => {
+      const titleM = md.match(/^#\s+(.+)$/m);
+      const execM = md.match(/(?:-\s+)?(?:\*\*)?Executor(?:\*\*)?:\s*([^\n\r|]+)/i);
+      const revM = md.match(/(?:-\s+)?(?:\*\*)?Revisor(?:\*\*)?:\s*([^\n\r|]+)/i);
+      const decM = md.match(/(?:-\s+)?(?:\*\*)?Decisor(?:\*\*)?:\s*([^\n\r|]+)/i);
+      const branchM = md.match(/(?:-\s+)?(?:\*\*)?Branch(?:\*\*)?:\s*`?([a-zA-Z0-9._/-]+)`?/i);
+      const wtM = md.match(/(?:-\s+)?(?:\*\*)?Workspace(?:\*\*)?:\s*(?:worktree:)?`?([^\s`\n\r]+)`?/i);
+      const objM = md.match(/##\s*(?:1\.\s*)?Objetivo[\s\S]*?\n+([^\n#]+)/i);
+      const acM = md.match(/##\s*(?:8\.\s*)?Comando de aceite[\s\S]*?```(?:bash|sh)?\s*\n([^\n`]+)/i);
+      return {
+        title: titleM ? titleM[1].trim() : void 0,
+        executor: execM ? execM[1].replace(/\*/g, "").trim() : void 0,
+        revisor: revM ? revM[1].replace(/\*/g, "").trim() : void 0,
+        decisor: decM ? decM[1].replace(/\*/g, "").trim() : void 0,
+        branch: branchM ? branchM[1].trim() : void 0,
+        worktreePath: wtM ? wtM[1].trim() : void 0,
+        objetivo: objM ? objM[1].trim() : void 0,
+        acceptanceCommand: acM ? acM[1].trim() : void 0
+      };
+    };
+    if ((_j = ctx == null ? void 0 : ctx.host) == null ? void 0 : _j.readFile) {
+      const rawIdx = await ctx.host.readFile("/Users/heltonfraga/.buzz/.scratch/orgfy-cards-index.json");
+      const idxTxt = typeof rawIdx === "string" ? rawIdx : rawIdx instanceof Uint8Array ? new TextDecoder("utf-8").decode(rawIdx) : String(rawIdx ?? "");
+      const parsedIdx = JSON.parse(idxTxt);
+      if (parsedIdx && typeof parsedIdx === "object" && !Array.isArray(parsedIdx)) {
+        for (const [rawKey, entry] of Object.entries(parsedIdx)) {
+          const fullId = String((entry == null ? void 0 : entry.issue_id) || rawKey || "").trim().toLowerCase();
+          if (!/^[0-9a-f]{64}$/i.test(fullId)) continue;
+          const shortId = fullId.slice(0, 8);
+          if (mergedSet.has(fullId) || mergedSet.has(shortId) || cardMap.has(shortId)) continue;
+          const relCardPath = String((entry == null ? void 0 : entry.card_path) || "").replace(/^\/Users\/heltonfraga\/\.buzz\/REPOS\/orgfy\//, "").trim();
+          let fields = {
+            title: void 0,
+            executor: void 0,
+            revisor: void 0,
+            decisor: void 0,
+            branch: void 0,
+            worktreePath: void 0,
+            objetivo: void 0,
+            acceptanceCommand: void 0
+          };
+          if (relCardPath) {
+            const md = await readOrgfyText(ctx, relCardPath);
+            if (md) fields = parseCardMdFields(md);
+          }
+          const aceiteRecord = aceites[fullId] || aceites[shortId] || null;
+          const hasFrozenAceite = Boolean(aceiteRecord);
+          const stage = hasFrozenAceite ? "despachado" : "triagem";
+          const title = String((entry == null ? void 0 : entry.title) || fields.title || `Issue #${shortId}`).trim();
+          cardMap.set(shortId, {
+            id: `card-${shortId}`,
+            issueId: shortId,
+            fullIssueId: fullId,
+            owner: String((entry == null ? void 0 : entry.owner) || DEFAULT_ORGFY_OWNER).toLowerCase(),
+            title,
+            priority: title.includes("P0") ? "P0" : title.includes("P1") ? "P1" : "P2",
+            empresa: String((entry == null ? void 0 : entry.repo_id) || "orgfy"),
+            executor: resolveAgentDisplay(fields.executor, "A definir"),
+            revisor: resolveAgentDisplay(fields.revisor, "A definir"),
+            decisor: fields.decisor || "OrgFy Iris",
+            tier: "tier_1_exec_barato",
+            stage,
+            objetivo: fields.objetivo || title,
+            acceptanceCommand: typeof aceiteRecord === "object" && (aceiteRecord == null ? void 0 : aceiteRecord.comando) || fields.acceptanceCommand,
+            acceptanceHash: typeof aceiteRecord === "object" && (aceiteRecord == null ? void 0 : aceiteRecord.hash_comando) || void 0,
+            branch: fields.branch,
+            worktreePath: fields.worktreePath || `.worktrees/${shortId}`,
+            createdAt: Number((entry == null ? void 0 : entry.created_at) || Date.now())
           });
         }
       }
