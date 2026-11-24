@@ -1356,9 +1356,9 @@ function filterGooseLoopRadar(payload, opts) {
     total_exibidas: filtered.length,
     sessoes: filtered,
     protocolo_resolucao: [
-      "LOOP_SUSPEITO / STALLED_THINKING / >20m ou >25 shells sem progresso real: NUNCA aguardar indefinidamente. Inspecione ultimo_shell e chame IMEDIATAMENTE orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', release_issue_id? }) para cortar o desperdício de tokens.",
-      "SESSAO_DUPLICADA: Não envie novas cobranças paralelas; identifique qual sessão está em trabalho obsoleto/inútil e encerre-a com orgfy_session_stop(action='interrupt').",
-      "EXPLORACAO_CLI_HELP: Se o agente repetir --help sem avançar, interrompa via orgfy_session_stop e envie 1 instrução cirúrgica com a sintaxe exata."
+      "COMANDO_REPETIDO / ERRO_REPETIDO / STALLED_THINKING (critico): Loop real confirmado no turno atual (mesmo comando >=3x sem mudança de estado, >=3 erros consecutivos ou thinking travado >=10m). Inspecione ultimo_shell e chame orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', release_issue_id? }).",
+      "SESSAO_DUPLICADA (warn): Só dispara em colisão real na mesma thread_root ou mesmo worktree (threads diferentes = paralelismo legítimo). Encerre a sessão redundante com orgfy_session_stop.",
+      "TURNO_LONGO (warn): Turno longo com comandos distintos indica trabalho produtivo; só interrompa se ultimo_shell confirmar tarefa obsoleta (ex: PR já fechado)."
     ]
   };
 }
@@ -3267,8 +3267,8 @@ function renderIntelligenceTab(props) {
                             fontWeight: "700",
                             padding: "1px 5px",
                             borderRadius: "4px",
-                            backgroundColor: fl === "OK" ? "rgba(16, 185, 129, 0.15)" : fl === "LOOP_SUSPEITO" || fl === "STALLED_THINKING" ? "rgba(239, 68, 68, 0.22)" : "rgba(245, 158, 11, 0.22)",
-                            color: fl === "OK" ? "#10b981" : fl === "LOOP_SUSPEITO" || fl === "STALLED_THINKING" ? "#f87171" : "#fbbf24"
+                            backgroundColor: fl === "OK" ? "rgba(16, 185, 129, 0.15)" : fl === "COMANDO_REPETIDO" || fl === "ERRO_REPETIDO" || fl === "LOOP_SUSPEITO" || fl === "STALLED_THINKING" ? "rgba(239, 68, 68, 0.22)" : "rgba(245, 158, 11, 0.22)",
+                            color: fl === "OK" ? "#10b981" : fl === "COMANDO_REPETIDO" || fl === "ERRO_REPETIDO" || fl === "LOOP_SUSPEITO" || fl === "STALLED_THINKING" ? "#f87171" : "#fbbf24"
                           }
                         },
                         fl

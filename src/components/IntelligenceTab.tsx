@@ -769,13 +769,13 @@ export function renderIntelligenceTab(props: IntelligenceTabProps) {
                                 backgroundColor:
                                   fl === "OK"
                                     ? "rgba(16, 185, 129, 0.15)"
-                                    : fl === "LOOP_SUSPEITO" || fl === "STALLED_THINKING"
+                                    : fl === "COMANDO_REPETIDO" || fl === "ERRO_REPETIDO" || fl === "LOOP_SUSPEITO" || fl === "STALLED_THINKING"
                                     ? "rgba(239, 68, 68, 0.22)"
                                     : "rgba(245, 158, 11, 0.22)",
                                 color:
                                   fl === "OK"
                                     ? "#10b981"
-                                    : fl === "LOOP_SUSPEITO" || fl === "STALLED_THINKING"
+                                    : fl === "COMANDO_REPETIDO" || fl === "ERRO_REPETIDO" || fl === "LOOP_SUSPEITO" || fl === "STALLED_THINKING"
                                     ? "#f87171"
                                     : "#fbbf24",
                               },

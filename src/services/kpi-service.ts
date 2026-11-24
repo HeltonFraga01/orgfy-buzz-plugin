@@ -294,10 +294,15 @@ export interface GooseLoopSession {
   channel_id?: string | null;
   thread_root?: string | null;
   agent_pubkey?: string | null;
+  worktree?: string | null;
   duracao_min: number;
+  thread_lifetime_min?: number;
   ultima_atualizacao_min: number;
   msgs: number;
   shells: number;
+  comandos_unicos_pct?: number;
+  max_repeticao_recente?: number;
+  erros_consecutivos?: number;
   help_calls: number;
   severidade: "ok" | "warn" | "critical";
   flags: string[];
@@ -406,9 +411,9 @@ export function filterGooseLoopRadar(
     total_exibidas: filtered.length,
     sessoes: filtered,
     protocolo_resolucao: [
-      "LOOP_SUSPEITO / STALLED_THINKING / >20m ou >25 shells sem progresso real: NUNCA aguardar indefinidamente. Inspecione ultimo_shell e chame IMEDIATAMENTE orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', release_issue_id? }) para cortar o desperdício de tokens.",
-      "SESSAO_DUPLICADA: Não envie novas cobranças paralelas; identifique qual sessão está em trabalho obsoleto/inútil e encerre-a com orgfy_session_stop(action='interrupt').",
-      "EXPLORACAO_CLI_HELP: Se o agente repetir --help sem avançar, interrompa via orgfy_session_stop e envie 1 instrução cirúrgica com a sintaxe exata.",
+      "COMANDO_REPETIDO / ERRO_REPETIDO / STALLED_THINKING (critico): Loop real confirmado no turno atual (mesmo comando >=3x sem mudança de estado, >=3 erros consecutivos ou thinking travado >=10m). Inspecione ultimo_shell e chame orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', release_issue_id? }).",
+      "SESSAO_DUPLICADA (warn): Só dispara em colisão real na mesma thread_root ou mesmo worktree (threads diferentes = paralelismo legítimo). Encerre a sessão redundante com orgfy_session_stop.",
+      "TURNO_LONGO (warn): Turno longo com comandos distintos indica trabalho produtivo; só interrompa se ultimo_shell confirmar tarefa obsoleta (ex: PR já fechado).",
     ],
   };
 }
