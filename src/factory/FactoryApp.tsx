@@ -54,6 +54,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     const [tab, setTab] = React.useState<FactoryTab>("overview");
     const [dmAgentKey, setDmAgentKey] = React.useState<string>("");
     const [openingDm, setOpeningDm] = React.useState<boolean>(false);
+    const [relayTick, setRelayTick] = React.useState<number>(0);
     const [status, setStatus] = React.useState<FactoryStatusPayload>(() => buildEmptyFactoryStatus("orgfy"));
     const [holding, setHolding] = React.useState<HoldingControlPlaneSnapshot | null>(null);
     const [loading, setLoading] = React.useState<boolean>(true);
@@ -62,6 +63,17 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     const [activeHelpKey, setActiveHelpKey] = React.useState<string | null>(null);
     const [selectedItem, setSelectedItem] = React.useState<FactoryWorkItem | null>(null);
     const [confirmKill, setConfirmKill] = React.useState<boolean>(false);
+
+    // Ref para o abridor nativo de abas laterais do Buzz (ctx.conversation.ui.Tabs)
+    const openSideTabRef = React.useRef<
+      ((target: { channelId: string; threadId?: string; messageId?: string }, options?: { keep?: boolean; markRead?: boolean }) => boolean) | null
+    >(null);
+
+    React.useEffect(() => {
+      const relay = (ctx as any)?.relay;
+      if (typeof relay?.subscribe !== "function") return;
+      return relay.subscribe(() => setRelayTick((n) => n + 1));
+    }, []);
 
     // Estados das páginas
     const [scorecardView, setScorecardView] = React.useState<"builders" | "reviewers" | "pairs">("builders");
@@ -197,6 +209,15 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       const canal = status.tenantManifest?.canal || emp?.canal;
       const scope = resolveBuzzScope();
       try {
+        // 1. Prioridade máxima: abre o canal na barra lateral nativa do Buzz (ctx.conversation.ui.Tabs) sem sair do plugin
+        if (canal && openSideTabRef.current) {
+          const openedSide = openSideTabRef.current({ channelId: canal }, { keep: true });
+          if (openedSide) {
+            notify(`Canal de ${tenant} aberto na barra lateral do Buzz.`);
+            return;
+          }
+        }
+        // 2. Fallback caso ui.Tabs ainda não esteja montado
         if (canal && scope && (ctx as any).navigation?.open) {
           const res = await (ctx as any).navigation.open({
             version: 1,
@@ -313,6 +334,16 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
             }
           }
 
+          // 1. Prioridade máxima: abre o chat nativo do Buzz NA BARRA LATERAL (sem sair do plugin!)
+          if (channelId && openSideTabRef.current) {
+            const openedSide = openSideTabRef.current({ channelId }, { keep: true });
+            if (openedSide) {
+              notify(`Chat lateral com ${agentName} aberto.`);
+              return;
+            }
+          }
+
+          // 2. Fallback caso ui.Tabs ainda não esteja disponível nesta sessão
           if (channelId && scope && (ctx as any)?.navigation?.open) {
             const res = await (ctx as any).navigation.open({
               version: 1,
@@ -391,12 +422,27 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       { id: "settings", label: PT_BR.nav.settings },
     ];
 
-    return h(
+    const NativeTabs = (ctx as any)?.conversation?.ui?.Tabs;
+    const relaySnap = React.useMemo(() => {
+      try {
+        return typeof (ctx as any)?.relay?.snapshot === "function" ? (ctx as any).relay.snapshot() : null;
+      } catch {
+        return null;
+      }
+    }, [relayTick, status.lastTickAt]);
+    const useNativeSideTabs = Boolean(NativeTabs && relaySnap?.session && relaySnap?.scope);
+
+    const pageContent = h(
       "div",
       {
         ref: hostRef,
         "data-orgfy-factory-root": "true",
-        style: { width: "100%", height: "100vh", maxHeight: "100vh", overflow: "hidden" },
+        style: {
+          width: "100%",
+          height: useNativeSideTabs ? "100%" : "100vh",
+          maxHeight: useNativeSideTabs ? "100%" : "100vh",
+          overflow: "hidden",
+        },
       },
       h("style", { "data-orgfy-factory-inline-fallback": "true" }, FACTORY_SHADOW_CSS),
       h(
@@ -578,7 +624,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                   disabled: openingDm,
                   onClick: () => handleOpenAgentDmInBuzz(selectedDmAgent),
                 },
-                openingDm ? "Abrindo..." : "Abrir DM ↗"
+                openingDm ? "Abrindo..." : "Chat lateral"
               )
             ),
             toast && h("span", { className: "of-pill", "data-tone": "done" }, toast),
@@ -717,5 +763,21 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         onOpenInBuzz: handleOpenInBuzz,
       })
     );
+
+    if (useNativeSideTabs) {
+      return h(NativeTabs, {
+        id: "orgfy-factory",
+        session: relaySnap.session,
+        scope: relaySnap.scope,
+        label: PT_BR.appTitle,
+        children: (open: any) => {
+          openSideTabRef.current = open;
+          return pageContent;
+        },
+      });
+    }
+
+    openSideTabRef.current = null;
+    return pageContent;
   };
 }

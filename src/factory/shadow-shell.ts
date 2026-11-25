@@ -59,8 +59,8 @@ export const FACTORY_SHADOW_CSS = `
   display: grid;
   grid-template-columns: 236px minmax(0, 1fr);
   width: 100%;
-  height: 100vh;
-  max-height: 100vh;
+  height: 100%;
+  min-height: 0;
   background: var(--background);
   color: var(--foreground);
   overflow: hidden;
