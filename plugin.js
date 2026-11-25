@@ -1322,6 +1322,28 @@ function filterGooseLoopRadar(payload, opts) {
     ]
   };
 }
+const ORGFY_FAILOVER_REQUEST_EVENT = "orgfy.failover.requested";
+async function reconcileAgentsViaBuzzApi(ctx, opts = {}) {
+  const agentsApi = ctx == null ? void 0 : ctx.agents;
+  const snap = typeof (agentsApi == null ? void 0 : agentsApi.snapshot) === "function" ? agentsApi.snapshot() : null;
+  const list = Array.isArray(snap == null ? void 0 : snap.agents) ? snap.agents : [];
+  const updated = [];
+  for (const ag of list) {
+    const cfg = (ag == null ? void 0 : ag.config) && typeof ag.config === "object" ? { ...ag.config } : {};
+    const prov = cfg.provider || (ag == null ? void 0 : ag.provider) || null;
+    const model = cfg.model || (ag == null ? void 0 : ag.model) || null;
+    const mlow = String(model || "").trim().toLowerCase();
+    const needsFix = !prov || !model || isFreeModelId(mlow) || isUnsupportedAgentModel(mlow) || prov === "nexusmind_openai" && mlow.startsWith("antigravity/");
+    if (!needsFix) continue;
+    const nextModel = mlow.includes("flash") || mlow.includes("haiku") ? "claude-haiku-5-5" : "claude-sonnet-4-6";
+    const nextProv = "nexusmind_anthropic";
+    if (!opts.dryRun && typeof (agentsApi == null ? void 0 : agentsApi.save) === "function") {
+      await agentsApi.save(ag.key, { config: { ...cfg, provider: nextProv, model: nextModel } });
+    }
+    updated.push({ key: String(ag.key || ag.name || ""), from: `${prov}/${model}`, to: `${nextProv}/${nextModel}` });
+  }
+  return { total: list.length, updated };
+}
 const VERIFIED_TOOLCALL_FAILOVER_CHAIN = [
   { model: "claude-sonnet-4-6", provider: "nexusmind_anthropic", measuredLatencyMs: 2947, role: "primary_execution" },
   { model: "claude-haiku-5-5", provider: "nexusmind_anthropic", measuredLatencyMs: 1800, role: "fast_execution" },
@@ -1739,6 +1761,7 @@ function findAgentInSnapshot(agentsApi, query, pubkey) {
   return pkLower && pool.find((a) => String(a.pubkey || "").toLowerCase() === pkLower) || qLower && pool.find((a) => String(a.key || "").toLowerCase() === qLower) || qLower && pool.find((a) => String(a.name || "").toLowerCase() === qLower) || (qLower ? pool.find((a) => String(a.name || "").toLowerCase().includes(qLower)) : void 0);
 }
 async function executeSmartModelFailover(ctx, input = {}) {
+  var _a, _b, _c;
   const preferFree = Boolean(input.prefer_free);
   const applyChange = Boolean(input.apply);
   const retrigger = input.retrigger !== false;
@@ -1888,6 +1911,48 @@ async function executeSmartModelFailover(ctx, input = {}) {
         candidatesTested: finalRanking.length,
         ranking: finalRanking,
         message: `Melhor modelo eleito (${winner.model}, ${sourceTag}), mas agente '${input.agente || input.agent_pubkey || ""}' não encontrado no Buzz Desktop.`
+      };
+    }
+    const failoverPayload = {
+      event: ORGFY_FAILOVER_REQUEST_EVENT,
+      agentKey: matchedAgent.key,
+      agentName: matchedAgent.name || matchedAgent.key,
+      previousModel,
+      selectedModel: winner.model,
+      selectedProvider: winner.provider,
+      ts: Date.now()
+    };
+    try {
+      (_b = (_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.emit) == null ? void 0 : _b.call(_a, ORGFY_FAILOVER_REQUEST_EVENT, failoverPayload);
+      if (typeof (globalThis == null ? void 0 : globalThis.dispatchEvent) === "function" && typeof (globalThis == null ? void 0 : globalThis.CustomEvent) === "function") {
+        globalThis.dispatchEvent(new globalThis.CustomEvent(ORGFY_FAILOVER_REQUEST_EVENT, { detail: failoverPayload }));
+      }
+    } catch {
+    }
+    const nexusDelegator = (_c = ctx == null ? void 0 : ctx.nexusmind) == null ? void 0 : _c.applyBestModel;
+    if (input.delegate_only || typeof nexusDelegator === "function") {
+      if (typeof nexusDelegator === "function") {
+        await nexusDelegator({
+          agente: matchedAgent.name || matchedAgent.key,
+          model: winner.model,
+          provider: winner.provider
+        });
+      }
+      return {
+        ok: true,
+        mode: "delegated",
+        delegatedToNexusMind: true,
+        agentName: matchedAgent.name || matchedAgent.key,
+        agentKey: matchedAgent.key,
+        previousModel,
+        selectedModel: winner.model,
+        selectedProvider: winner.provider,
+        selectedLatencyMs: winner.latencyMs,
+        selectedIntelligenceScore: winner.intelligenceScore,
+        retriggered: false,
+        candidatesTested: finalRanking.length,
+        ranking: finalRanking,
+        message: `Failover de ${matchedAgent.name || matchedAgent.key} delegado ao NexusMind (${winner.provider}/${winner.model} · ${sourceTag}).`
       };
     }
     if (typeof (agentsApi == null ? void 0 : agentsApi.save) !== "function") {
@@ -15708,6 +15773,7 @@ export {
   AVAILABLE_AGENTS,
   INITIAL_PIPELINE_CARDS,
   INITIAL_REGRAS_PROBATORIAS,
+  ORGFY_FAILOVER_REQUEST_EVENT,
   SVG,
   TENANTS,
   THEME,
@@ -15723,6 +15789,7 @@ export {
   cleanupAttentionOnStageChange,
   createCanonicalCard,
   executeCardProgress,
+  executeSmartModelFailover,
   getBuzzNativeState,
   getOrgfyPipelineEvents,
   getTelemetrySnapshot,
@@ -15731,6 +15798,7 @@ export {
   isUnsupportedAgentModel,
   parseCardProgress,
   reconcileAgentPresenceAndLocks,
+  reconcileAgentsViaBuzzApi,
   registerBuzzNativeIntegrations,
   resetPresenceStateForTests,
   resetTelemetryForTests,

@@ -13,12 +13,15 @@ export interface ModelCandidateScore {
   error?: string;
 }
 
+export const ORGFY_FAILOVER_REQUEST_EVENT = "orgfy.failover.requested";
+
 export interface ModelFailoverInput {
   agente?: string;
   agent_pubkey?: string | null;
   failed_model?: string | null;
   prefer_free?: boolean;
   apply?: boolean;
+  delegate_only?: boolean;
   retrigger?: boolean;
   channel_id?: string | null;
   thread_root?: string | null;
@@ -28,7 +31,8 @@ export interface ModelFailoverInput {
 
 export interface ModelFailoverResult {
   ok: boolean;
-  mode: "dry_run" | "applied";
+  mode: "dry_run" | "applied" | "delegated";
+  delegatedToNexusMind?: boolean;
   agentName: string | null;
   agentKey: string | null;
   previousModel: string | null;
@@ -40,6 +44,36 @@ export interface ModelFailoverResult {
   candidatesTested: number;
   ranking: ModelCandidateScore[];
   message: string;
+}
+
+export async function reconcileAgentsViaBuzzApi(
+  ctx: Context,
+  opts: { dryRun?: boolean } = {}
+): Promise<{ total: number; updated: Array<{ key: string; from: string; to: string }> }> {
+  const agentsApi = (ctx as any)?.agents;
+  const snap = typeof agentsApi?.snapshot === "function" ? agentsApi.snapshot() : null;
+  const list: any[] = Array.isArray(snap?.agents) ? snap.agents : [];
+  const updated: Array<{ key: string; from: string; to: string }> = [];
+  for (const ag of list) {
+    const cfg = ag?.config && typeof ag.config === "object" ? { ...ag.config } : {};
+    const prov = cfg.provider || ag?.provider || null;
+    const model = cfg.model || ag?.model || null;
+    const mlow = String(model || "").trim().toLowerCase();
+    const needsFix =
+      !prov ||
+      !model ||
+      isFreeModelId(mlow) ||
+      isUnsupportedAgentModel(mlow) ||
+      (prov === "nexusmind_openai" && mlow.startsWith("antigravity/"));
+    if (!needsFix) continue;
+    const nextModel = mlow.includes("flash") || mlow.includes("haiku") ? "claude-haiku-5-5" : "claude-sonnet-4-6";
+    const nextProv = "nexusmind_anthropic";
+    if (!opts.dryRun && typeof agentsApi?.save === "function") {
+      await agentsApi.save(ag.key, { config: { ...cfg, provider: nextProv, model: nextModel } });
+    }
+    updated.push({ key: String(ag.key || ag.name || ""), from: `${prov}/${model}`, to: `${nextProv}/${nextModel}` });
+  }
+  return { total: list.length, updated };
 }
 
 interface ProviderGroupConfig {
@@ -815,6 +849,50 @@ export async function executeSmartModelFailover(
         candidatesTested: finalRanking.length,
         ranking: finalRanking,
         message: `Melhor modelo eleito (${winner.model}, ${sourceTag}), mas agente '${input.agente || input.agent_pubkey || ""}' não encontrado no Buzz Desktop.`,
+      };
+    }
+
+    // R4.6: emite evento orgfy.failover.requested e delega escrita ao NexusMind quando ativo/solicitado
+    const failoverPayload = {
+      event: ORGFY_FAILOVER_REQUEST_EVENT,
+      agentKey: matchedAgent.key,
+      agentName: matchedAgent.name || matchedAgent.key,
+      previousModel,
+      selectedModel: winner.model,
+      selectedProvider: winner.provider,
+      ts: Date.now(),
+    };
+    try {
+      (ctx as any)?.host?.emit?.(ORGFY_FAILOVER_REQUEST_EVENT, failoverPayload);
+      if (typeof (globalThis as any)?.dispatchEvent === "function" && typeof (globalThis as any)?.CustomEvent === "function") {
+        (globalThis as any).dispatchEvent(new (globalThis as any).CustomEvent(ORGFY_FAILOVER_REQUEST_EVENT, { detail: failoverPayload }));
+      }
+    } catch {}
+
+    const nexusDelegator = (ctx as any)?.nexusmind?.applyBestModel;
+    if (input.delegate_only || typeof nexusDelegator === "function") {
+      if (typeof nexusDelegator === "function") {
+        await nexusDelegator({
+          agente: matchedAgent.name || matchedAgent.key,
+          model: winner.model,
+          provider: winner.provider,
+        });
+      }
+      return {
+        ok: true,
+        mode: "delegated",
+        delegatedToNexusMind: true,
+        agentName: matchedAgent.name || matchedAgent.key,
+        agentKey: matchedAgent.key,
+        previousModel,
+        selectedModel: winner.model,
+        selectedProvider: winner.provider,
+        selectedLatencyMs: winner.latencyMs,
+        selectedIntelligenceScore: winner.intelligenceScore,
+        retriggered: false,
+        candidatesTested: finalRanking.length,
+        ranking: finalRanking,
+        message: `Failover de ${matchedAgent.name || matchedAgent.key} delegado ao NexusMind (${winner.provider}/${winner.model} · ${sourceTag}).`,
       };
     }
 
