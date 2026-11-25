@@ -1322,12 +1322,18 @@ function filterGooseLoopRadar(payload, opts) {
     ]
   };
 }
+const VERIFIED_TOOLCALL_FAILOVER_CHAIN = [
+  { model: "claude-sonnet-4-6", provider: "nexusmind_anthropic", measuredLatencyMs: 2947, role: "primary_execution" },
+  { model: "claude-haiku-5-5", provider: "nexusmind_anthropic", measuredLatencyMs: 1800, role: "fast_execution" },
+  { model: "gemini-2.5-flash", provider: "nexusmind_antigravity", measuredLatencyMs: 1977, role: "secondary_fast" },
+  { model: "gemini-3.8-flash-medium", provider: "nexusmind_antigravity", measuredLatencyMs: 2986, role: "last_resort" }
+];
 const NEXUSMIND_PROVIDERS = [
   {
-    id: "nexusmind_openai",
-    apiKey: "sk-2ee0581e607d02f3485e0efcad2ff686e2b889720f63497813b8fb45eb9d0f08",
-    baseUrl: "https://api.nexusmind.digital/v1",
-    isAnthropic: false
+    id: "nexusmind_anthropic",
+    apiKey: "sk-bd4137aa79f121bbf4e110d788a7f587b68b49432d333ad9abd88051ba393b1c",
+    baseUrl: "https://api.nexusmind.digital",
+    isAnthropic: true
   },
   {
     id: "nexusmind_antigravity",
@@ -1336,16 +1342,10 @@ const NEXUSMIND_PROVIDERS = [
     isAnthropic: false
   },
   {
-    id: "nexusmind_grok",
-    apiKey: "sk-f37b255eada36a40a2520cc43700e6583e9773d16b3543a77a147ce87043a3df",
+    id: "nexusmind_openai",
+    apiKey: "sk-2ee0581e607d02f3485e0efcad2ff686e2b889720f63497813b8fb45eb9d0f08",
     baseUrl: "https://api.nexusmind.digital/v1",
     isAnthropic: false
-  },
-  {
-    id: "nexusmind_anthropic",
-    apiKey: "sk-bd4137aa79f121bbf4e110d788a7f587b68b49432d333ad9abd88051ba393b1c",
-    baseUrl: "https://api.nexusmind.digital",
-    isAnthropic: true
   }
 ];
 const DEFAULT_ORGFY_CHANNEL$2 = "e445491d-2fb3-4ebd-8e2e-f6813c33fb03";
@@ -1444,7 +1444,7 @@ function isFreeModelId(modelId) {
 function isUnsupportedAgentModel(modelId) {
   const m = String(modelId || "").trim().toLowerCase();
   if (!m) return true;
-  return m === "haiku" || m.includes("claude-opus-5-5") || m.includes("minimax-m3.1-flash") || m.startsWith("auto/") || m.includes("tab_jump") || m.includes("autocomplete") || m.includes("fim-") || m.includes("embedding") || m.includes("rerank") || m.includes("whisper") || m.includes("tts") || m.includes("imagen") || m.includes("dall-e") || m.includes("moderation");
+  return m === "haiku" || m === "grok-4.5" || m.includes("mistral-large-4-1t-a52b") || m.includes("claude-opus-5-5") || m.includes("minimax-m3.1-flash") || m.startsWith("auto/") || m.includes("tab_jump") || m.includes("autocomplete") || m.includes("fim-") || m.includes("embedding") || m.includes("rerank") || m.includes("whisper") || m.includes("tts") || m.includes("imagen") || m.includes("dall-e") || m.includes("moderation");
 }
 function estimateModelIntelligence(modelId) {
   const m = String(modelId || "").toLowerCase();
@@ -15711,6 +15711,7 @@ export {
   SVG,
   TENANTS,
   THEME,
+  VERIFIED_TOOLCALL_FAILOVER_CHAIN,
   apply,
   applyStepUpdateToMarkdown,
   buildBuzzAttentionContract,
@@ -15727,6 +15728,7 @@ export {
   getTelemetrySnapshot,
   hydrateIssueDetail,
   inject,
+  isUnsupportedAgentModel,
   parseCardProgress,
   reconcileAgentPresenceAndLocks,
   registerBuzzNativeIntegrations,

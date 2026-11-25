@@ -971,8 +971,8 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
   assert.ok(autoStops.some((s) => s.action === "interrupt"), "deve interromper sessão travada em 503 antes de trocar");
   assert.ok(autoStops.some((s) => s.action === "new"), "deve renovar a sessão ('new') após trocar o modelo antes do wake");
   assert.equal(autoSaves.length, 1, "deve salvar novo modelo automaticamente via ctx.agents.save");
-  assert.equal(autoSaves[0].change.config.model, "gemini-2.5-flash-thinking", "deve pular claude-opus (blocked), mistral-large (503 no probe) e gemini-3.1-flash-lite (atual)");
-  assert.ok(probedModels.includes("mistralai/mistral-large-4-1t-a52b"), "deve testar ao vivo mistral-large antes de trocar");
+  assert.equal(autoSaves[0].change.config.model, "gemini-2.5-flash-thinking", "deve pular claude-opus (blocked), mistral-large (bloqueado em B3 por timeout >20s) e gemini-3.1-flash-lite (atual)");
+  assert.ok(!probedModels.includes("mistralai/mistral-large-4-1t-a52b"), "B3: mistral-large-4-1t-a52b deve ser excluído do failover sem desperdiçar probe");
   assert.ok(probedModels.includes("gemini-2.5-flash-thinking"), "deve validar gemini-2.5-flash-thinking ao vivo");
   assert.equal(autoWakes.length, 1, "deve re-disparar o agente automaticamente na thread original");
   assert.equal(autoWakes[0].payload.root, "4406f509983396ed055d9739185f30bface744d032df4d1452035e6e4c00c7cd");
@@ -1458,4 +1458,23 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     woke: dispRes.wokeAgent,
     cleaned: cleanup.lockReleased,
   }));
+
+  // B3: Cadeia de failover verificada com tool_call real (probe 2026-11-25)
+  assert.ok(Array.isArray(orgfyMod.VERIFIED_TOOLCALL_FAILOVER_CHAIN), "B3: VERIFIED_TOOLCALL_FAILOVER_CHAIN deve ser exportada");
+  const chainModels = orgfyMod.VERIFIED_TOOLCALL_FAILOVER_CHAIN.map((c) => c.model);
+  assert.deepEqual(chainModels, [
+    "claude-sonnet-4-6",
+    "claude-haiku-5-5",
+    "gemini-2.5-flash",
+    "gemini-3.8-flash-medium",
+  ]);
+  assert.equal(orgfyMod.isUnsupportedAgentModel("grok-4.5"), true, "B3: grok-4.5 (503) deve ser bloqueado no failover");
+  assert.equal(
+    orgfyMod.isUnsupportedAgentModel("mistralai/mistral-large-4-1t-a52b"),
+    true,
+    "B3: mistral-large-4-1t-a52b (timeout >20s) deve ser bloqueado no failover"
+  );
+  assert.equal(orgfyMod.isUnsupportedAgentModel("claude-sonnet-4-6"), false);
+  assert.equal(orgfyMod.isUnsupportedAgentModel("claude-haiku-5-5"), false);
+  console.log("[B3 FAILOVER CHAIN VERIFIED OK]", JSON.stringify({ chainModels }));
 }
