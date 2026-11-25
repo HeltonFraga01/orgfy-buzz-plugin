@@ -9375,7 +9375,7 @@ async function fetchHoldingControlPlane(ctx) {
     activeLocks
   };
 }
-const fmtTokens = (n) => {
+const fmtTokens$1 = (n) => {
   if (n === null || !Number.isFinite(n)) return "--";
   if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
   if (n >= 1e3) return `${Math.round(n / 1e3)}k`;
@@ -9562,7 +9562,7 @@ function renderBoardHoldingTab(props) {
                 "div",
                 null,
                 h("div", { style: { fontSize: "9px", color: "#6b7280" } }, "TETO/DIA"),
-                h("div", { style: { fontWeight: "700", color: "#f3f4f6", fontFamily: "monospace" } }, `${fmtTokens(emp.budgetTokensDiario)} tok`)
+                h("div", { style: { fontWeight: "700", color: "#f3f4f6", fontFamily: "monospace" } }, `${fmtTokens$1(emp.budgetTokensDiario)} tok`)
               ),
               h(
                 "div",
@@ -10120,7 +10120,7 @@ function renderOrgChartTab(props) {
     )
   );
 }
-const TENANTS$1 = [
+const TENANTS = [
   { id: "all", name: "Holding OrgFy", badge: "Cross-Workspace", slug: "all" },
   { id: "orgfy", name: "OrgFy Core", badge: "Core Framework", slug: "orgfy" },
   { id: "lumen-iptv", name: "Lumen IPTV", badge: "Subsidiária IPTV", slug: "lumen-iptv" },
@@ -13531,8 +13531,36 @@ function parseEvalTable(md) {
   }
   return map;
 }
+function describeOrgfyRole(papelRaw) {
+  const p = String(papelRaw || "").trim().toLowerCase();
+  const map = {
+    ceo: { funcao: "CEO Master · Orquestrador da Holding", categoria: "lideranca" },
+    ceo_holding: { funcao: "CEO Master · Orquestrador da Holding", categoria: "lideranca" },
+    ceo_empresa: { funcao: "CEO da Empresa · Direção & Decisão", categoria: "lideranca" },
+    coo: { funcao: "COO · Operações, Despacho & Auto-cura", categoria: "lideranca" },
+    arquiteto: { funcao: "Arquiteto · Design Técnico & Revisão Estrutural", categoria: "lideranca" },
+    backend: { funcao: "Executor Backend · APIs & Serviços", categoria: "execucao" },
+    frontend: { funcao: "Executor Frontend · Interface & UX", categoria: "execucao" },
+    infra: { funcao: "Executor Infra · CI/CD, Deploy & Runtime", categoria: "execucao" },
+    executor: { funcao: "Executor · Implementação em Worktree", categoria: "execucao" },
+    release: { funcao: "Release · Empacotamento & Entrega", categoria: "execucao" },
+    prompts: { funcao: "Engenharia de Prompts & Regras", categoria: "execucao" },
+    growth: { funcao: "Growth & Aquisição", categoria: "execucao" },
+    pesquisa: { funcao: "Pesquisa Técnica & Descoberta", categoria: "execucao" },
+    qa: { funcao: "Revisor de Código & QA (Gate L-01)", categoria: "revisao" },
+    revisor_codigo: { funcao: "Revisor de Código & QA (Gate L-01)", categoria: "revisao" },
+    revisor_metodo: { funcao: "Revisor de Método & Specsfy (L-01)", categoria: "revisao" },
+    revisor_seguranca: { funcao: "Revisor de Segurança & Auditoria", categoria: "revisao" },
+    seguranca: { funcao: "Revisor de Segurança & Auditoria", categoria: "revisao" },
+    revisor_ui: { funcao: "Revisor de UI & Acessibilidade", categoria: "revisao" },
+    oraculo: { funcao: "Oráculo · Scout & Inteligência", categoria: "operacao" },
+    po: { funcao: "Product Owner · Escopo & Critérios L-22", categoria: "operacao" },
+    cron: { funcao: "Cron · Rotinas Agendadas da Esteira", categoria: "operacao" }
+  };
+  return map[p] || { funcao: p ? `Agente · ${p}` : "Agente da Esteira", categoria: "execucao" };
+}
 async function hydrateFactoryStatusFromFiles(ctx, slug) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x2, _y2, _z2, _A, _B, _C;
   const base = buildEmptyFactoryStatus(slug);
   const host = ctx == null ? void 0 : ctx.host;
   const [kpiRes, cards, empresaJson, boardJson, evalMd, projectMd, agentsMd, regrasJson] = await Promise.all([
@@ -13558,18 +13586,30 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
   const snap = ((_b = (_a = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) || {};
   const runningList = Array.isArray(snap.running) ? snap.running : [];
   const allAgents = Array.isArray(snap.agents) ? snap.agents : [];
+  const runningKeys = new Set(runningList.map((a) => String((a == null ? void 0 : a.key) || (a == null ? void 0 : a.name) || "").toLowerCase()));
+  const runningPubkeys = new Set(runningList.map((a) => String((a == null ? void 0 : a.pubkey) || "").toLowerCase()).filter(Boolean));
   const liveByName = /* @__PURE__ */ new Map();
+  const liveByPubkey = /* @__PURE__ */ new Map();
   for (const a of allAgents) {
     if (a == null ? void 0 : a.name) liveByName.set(String(a.name).toLowerCase(), a);
+    if (a == null ? void 0 : a.pubkey) liveByPubkey.set(String(a.pubkey).toLowerCase(), a);
   }
   const evalMap = parseEvalTable(evalMd);
   const modelos = [];
+  const tenantAgents = [];
   const agentesObj = (empresaJson == null ? void 0 : empresaJson.agentes) && typeof empresaJson.agentes === "object" ? empresaJson.agentes : {};
   for (const [agName, info] of Object.entries(agentesObj)) {
-    const live = liveByName.get(agName.toLowerCase());
+    const manifestPk = typeof (info == null ? void 0 : info.pubkey) === "string" ? info.pubkey.trim() : "";
+    const live = manifestPk && liveByPubkey.get(manifestPk.toLowerCase()) || liveByName.get(agName.toLowerCase()) || null;
     const modelo = String(((_c = live == null ? void 0 : live.config) == null ? void 0 : _c.model) || (info == null ? void 0 : info.model) || "").trim() || null;
     const provider = String(((_d = live == null ? void 0 : live.config) == null ? void 0 : _d.provider) || (info == null ? void 0 : info.provider) || "").trim() || null;
     const ev = modelo ? evalMap.get(modelo.toLowerCase()) || evalMap.get((modelo.split("/").pop() || "").toLowerCase()) : void 0;
+    const roleMeta = describeOrgfyRole(info == null ? void 0 : info.papel);
+    const liveKey = String((live == null ? void 0 : live.key) || "");
+    const livePk = String((live == null ? void 0 : live.pubkey) || manifestPk || "");
+    const isRunning = Boolean(
+      liveKey && runningKeys.has(liveKey.toLowerCase()) || livePk && runningPubkeys.has(livePk.toLowerCase()) || runningKeys.has(agName.toLowerCase())
+    );
     modelos.push({
       agente: agName,
       papel: (info == null ? void 0 : info.papel) || null,
@@ -13578,7 +13618,39 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
       toolcall_eval: (ev == null ? void 0 : ev.score) || null,
       abaixo_minimo: Boolean(ev == null ? void 0 : ev.abaixo)
     });
+    tenantAgents.push({
+      name: agName,
+      papel: String((info == null ? void 0 : info.papel) || "executor"),
+      funcao: roleMeta.funcao,
+      categoria: roleMeta.categoria,
+      pubkey: livePk,
+      model: modelo || "indisponível",
+      provider: provider || "buzz",
+      parallelism: Number((info == null ? void 0 : info.parallelism) ?? 1),
+      running: isRunning,
+      inBuzz: Boolean(live),
+      agentKey: liveKey || `manifest:${slug}:${agName}`
+    });
   }
+  const tenantManifest = {
+    slug,
+    nome: String(((_e = empresaJson == null ? void 0 : empresaJson.hierarquia) == null ? void 0 : _e.workspace_buzz) || (empresaJson == null ? void 0 : empresaJson.empresa) || slug),
+    repoId: String((empresaJson == null ? void 0 : empresaJson.repo_id) || slug),
+    nivel: String(((_f = empresaJson == null ? void 0 : empresaJson.hierarquia) == null ? void 0 : _f.nivel) || "subsidiaria"),
+    canal: typeof (empresaJson == null ? void 0 : empresaJson.canal) === "string" ? empresaJson.canal : null,
+    ceoEmpresa: String(((_g = empresaJson == null ? void 0 : empresaJson.hierarquia) == null ? void 0 : _g.ceo_empresa) || ((_h = empresaJson == null ? void 0 : empresaJson.papeis) == null ? void 0 : _h.ceo_empresa) || "OrgFy Iris"),
+    coo: String(((_i = empresaJson == null ? void 0 : empresaJson.papeis) == null ? void 0 : _i.coo) || "OrgFy Bento"),
+    modoExecucao: String((empresaJson == null ? void 0 : empresaJson.modo_execucao_workers) || "efemero_headless"),
+    ciModo: String(((_j = empresaJson == null ? void 0 : empresaJson.ci_runner) == null ? void 0 : _j.modo_padrao) || "local"),
+    ciCmd: Array.isArray((_k = empresaJson == null ? void 0 : empresaJson.ci_runner) == null ? void 0 : _k.cmd) ? empresaJson.ci_runner.cmd.join(" ") : "—",
+    probesObrigatorios: Boolean((_l = empresaJson == null ? void 0 : empresaJson.probes_caixa_preta) == null ? void 0 : _l.obrigatorio_no_gate),
+    probesCount: Array.isArray((_m2 = empresaJson == null ? void 0 : empresaJson.probes_caixa_preta) == null ? void 0 : _m2.probes_padrao) ? empresaJson.probes_caixa_preta.probes_padrao.length : 0,
+    budgetTokensDiario: typeof ((_n = empresaJson == null ? void 0 : empresaJson.governanca_orcamento) == null ? void 0 : _n.budget_tokens_diario) === "number" ? empresaJson.governanca_orcamento.budget_tokens_diario : null,
+    tokensPorCard: typeof ((_o = empresaJson == null ? void 0 : empresaJson.governanca_orcamento) == null ? void 0 : _o.tokens_planejados_por_card) === "number" ? empresaJson.governanca_orcamento.tokens_planejados_por_card : null,
+    cpiMinimo: typeof ((_p = empresaJson == null ? void 0 : empresaJson.governanca_orcamento) == null ? void 0 : _p.cpi_minimo) === "number" ? empresaJson.governanca_orcamento.cpi_minimo : null,
+    revisoresPorSuperficie: (empresaJson == null ? void 0 : empresaJson.revisores_por_superficie) && typeof empresaJson.revisores_por_superficie === "object" ? empresaJson.revisores_por_superficie : {},
+    agentes: tenantAgents
+  };
   const toWorkItem = (c) => ({
     id: String(c.fullIssueId || c.issueId || c.id),
     title: String(c.title || "Card"),
@@ -13608,30 +13680,30 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
     loopState: killSwitch ? "stopped" : drainOn ? "draining" : inProgress.length > 0 || runningList.length > 0 ? "building" : "idle",
     pausedReason: (controle == null ? void 0 : controle.pausedReason) || null,
     limits: {
-      maxConcurrentSessions: Number(((_e = controle == null ? void 0 : controle.limits) == null ? void 0 : _e.agentes) ?? 4),
-      maxMergesPerDay: Number(((_f = controle == null ? void 0 : controle.limits) == null ? void 0 : _f.mergesDia) ?? 20),
-      dailyBudget: { usd: Number(((_g = controle == null ? void 0 : controle.limits) == null ? void 0 : _g.gastoDiaUsd) ?? 50) },
-      pauseAfterConsecutiveFailures: Number(((_h = controle == null ? void 0 : controle.limits) == null ? void 0 : _h.falhasSeguidas) ?? 3),
+      maxConcurrentSessions: Number(((_q = controle == null ? void 0 : controle.limits) == null ? void 0 : _q.agentes) ?? 4),
+      maxMergesPerDay: Number(((_r = controle == null ? void 0 : controle.limits) == null ? void 0 : _r.mergesDia) ?? 20),
+      dailyBudget: { usd: Number(((_s = controle == null ? void 0 : controle.limits) == null ? void 0 : _s.gastoDiaUsd) ?? 50) },
+      pauseAfterConsecutiveFailures: Number(((_t = controle == null ? void 0 : controle.limits) == null ? void 0 : _t.falhasSeguidas) ?? 3),
       autoMerge: Boolean((controle == null ? void 0 : controle.autoMerge) ?? false),
       mergePolicy: (controle == null ? void 0 : controle.mergePolicy) === "fast" ? "fast" : "strict"
     },
     spendToday: {
-      tokens: Number(((_i = kpis == null ? void 0 : kpis.economia) == null ? void 0 : _i.tokens_hoje) ?? 0),
-      usd: Number(((_j = kpis == null ? void 0 : kpis.economia) == null ? void 0 : _j.custo_hoje_usd) ?? 0)
+      tokens: Number(((_u = kpis == null ? void 0 : kpis.economia) == null ? void 0 : _u.tokens_hoje) ?? 0),
+      usd: Number(((_v = kpis == null ? void 0 : kpis.economia) == null ? void 0 : _v.custo_hoje_usd) ?? 0)
     },
-    mergesToday: Number(((_k = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _k.vazao_hoje) ?? 0),
+    mergesToday: Number(((_w = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _w.vazao_hoje) ?? 0),
     stats: {
-      mergedToday: Number(((_l = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _l.vazao_hoje) ?? 0),
+      mergedToday: Number(((_x2 = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _x2.vazao_hoje) ?? 0),
       failedToday: 0,
       revertedToday: 0,
       medianMergeMs7d: null,
-      merged7d: Number(((_m2 = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _m2.vazao_7d) ?? recent.length)
+      merged7d: Number(((_y2 = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _y2.vazao_7d) ?? recent.length)
     },
-    activeSessions: runningList.length,
+    activeSessions: tenantAgents.filter((a) => a.running).length,
     wip: {
       openPrs: inProgress.length,
-      limit: Number(((_n = controle == null ? void 0 : controle.limits) == null ? void 0 : _n.prsAbertos) ?? 6),
-      holding: inProgress.length >= Number(((_o = controle == null ? void 0 : controle.limits) == null ? void 0 : _o.prsAbertos) ?? 6),
+      limit: Number(((_z2 = controle == null ? void 0 : controle.limits) == null ? void 0 : _z2.prsAbertos) ?? 6),
+      holding: inProgress.length >= Number(((_A = controle == null ? void 0 : controle.limits) == null ? void 0 : _A.prsAbertos) ?? 6),
       waitingOnProvider: 0,
       note: null
     },
@@ -13640,11 +13712,12 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
     recent,
     viewRecent: recent,
     visionExists: Boolean(projectMd || boardJson || empresaJson),
+    tenantManifest,
     orgfyVision: {
       projectMd: projectMd ? projectMd.slice(0, 2400) : null,
       agentsMd: agentsMd ? agentsMd.slice(0, 2400) : null,
-      invariantes: Array.isArray((_p = boardJson == null ? void 0 : boardJson.protocolo_governanca) == null ? void 0 : _p.invariantes) ? boardJson.protocolo_governanca.invariantes : [],
-      cadeiaComando: Array.isArray((_q = boardJson == null ? void 0 : boardJson.protocolo_governanca) == null ? void 0 : _q.cadeia_comando) ? boardJson.protocolo_governanca.cadeia_comando : [],
+      invariantes: Array.isArray((_B = boardJson == null ? void 0 : boardJson.protocolo_governanca) == null ? void 0 : _B.invariantes) ? boardJson.protocolo_governanca.invariantes : [],
+      cadeiaComando: Array.isArray((_C = boardJson == null ? void 0 : boardJson.protocolo_governanca) == null ? void 0 : _C.cadeia_comando) ? boardJson.protocolo_governanca.cadeia_comando : [],
       fluxoEscalada: (boardJson == null ? void 0 : boardJson.fluxo_escalada) && typeof boardJson.fluxo_escalada === "object" ? boardJson.fluxo_escalada : {},
       regrasProbatorias: Object.entries((regrasJson == null ? void 0 : regrasJson.regras) || {}).map(([id, r]) => ({
         id,
@@ -13952,6 +14025,59 @@ const FACTORY_SHADOW_CSS = `
   border-bottom: 1px solid var(--border);
   background: var(--panel);
   flex-shrink: 0;
+}
+
+.of-project-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.of-project-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 18px;
+  padding: 0 18px;
+  height: 38px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+
+.of-project-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  padding: 0 2px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+
+.of-project-tab:hover {
+  color: var(--foreground);
+}
+
+.of-project-tab[data-active="true"] {
+  color: var(--foreground);
+  font-weight: 600;
+  border-bottom-color: var(--primary);
 }
 
 .of-main {
@@ -15459,7 +15585,7 @@ function cardStateOf(item) {
   return "idle";
 }
 function renderFactoryBoardAndFloor(props) {
-  var _a, _b;
+  var _a, _b, _c, _d, _e, _f;
   const {
     h,
     tenant,
@@ -15515,10 +15641,10 @@ function renderFactoryBoardAndFloor(props) {
       color: "var(--status-done)"
     },
     {
-      label: "Agentes ativos",
-      value: `${liveCrew.filter((a) => a.running).length}/${status.limits.maxConcurrentSessions}`,
-      detail: `${liveCrew.length} no plantel`,
-      pct: Math.min(100, liveCrew.filter((a) => a.running).length / Math.max(1, status.limits.maxConcurrentSessions) * 100),
+      label: "Agentes da empresa",
+      value: `${(((_c = status.tenantManifest) == null ? void 0 : _c.agentes) || []).filter((a) => a.running).length}/${(((_d = status.tenantManifest) == null ? void 0 : _d.agentes) || []).length || liveCrew.length}`,
+      detail: `${(((_e = status.tenantManifest) == null ? void 0 : _e.agentes) || []).filter((a) => a.inBuzz).length} no Buzz`,
+      pct: Math.min(100, (((_f = status.tenantManifest) == null ? void 0 : _f.agentes) || []).filter((a) => a.running).length / Math.max(1, status.limits.maxConcurrentSessions) * 100),
       color: "var(--status-running)"
     },
     {
@@ -15724,12 +15850,15 @@ function renderFactoryBoardAndFloor(props) {
         })
       )
     ) : (
-      // Modo Andar (Floor): Motor 3D Three.js 1:1 oficial do CodeDen (Oficina + Mirante + Crew + Fit)
+      // Modo Andar (Floor): Motor 3D Three.js 1:1 oficial do CodeDen isolado por empresa (key=tenant)
       props.Floor3D ? h(props.Floor3D, {
+        key: tenant,
+        tenant,
         status,
         liveCrew,
         focus: storeyFocus,
-        onSelectItem
+        onSelectItem,
+        onOpenAgentDm: props.onOpenAgentDm
       }) : h(
         "div",
         { className: "of-card-pad" },
@@ -47329,13 +47458,23 @@ function toCodeDenStage(item) {
   return "intake";
 }
 function adaptStatusFor3D(status, liveCrew) {
+  var _a;
   const sessions = /* @__PURE__ */ new Map();
   let pmSessionId = null;
   let scoutSessionId = null;
-  for (const agent of liveCrew) {
+  const tenantAgents = ((_a = status.tenantManifest) == null ? void 0 : _a.agentes) || [];
+  const pool = tenantAgents.length > 0 ? tenantAgents.map((a) => ({
+    key: a.agentKey,
+    name: a.name,
+    model: a.model,
+    provider: a.provider,
+    running: a.running,
+    papel: a.papel
+  })) : liveCrew.map((a) => ({ ...a, papel: "" }));
+  for (const agent of pool) {
     const sid = agent.key;
-    const isPm = /bento|iris|coo|ceo|pm/i.test(agent.name);
-    const isScout = /oraculo|oráculo|scout/i.test(agent.name);
+    const isPm = agent.papel === "coo" || agent.papel === "ceo_empresa" || /bento|iris|coo|ceo|pm/i.test(agent.name);
+    const isScout = agent.papel === "oraculo" || /oraculo|oráculo|scout/i.test(agent.name);
     if (isPm && !pmSessionId) pmSessionId = sid;
     if (isScout && !scoutSessionId) scoutSessionId = sid;
     sessions.set(sid, {
@@ -47429,13 +47568,13 @@ function adaptStatusFor3D(status, liveCrew) {
       rounds: 2,
       lenses: DISCOVERY_AREAS.map((area) => ({
         area,
-        sessionId: `scout-${area}`,
+        sessionId: `scout-${status.projectId}-${area}`,
         status: status.loopState === "discovering" ? "running" : "idle",
         active: status.loopState === "discovering",
         reported: false
       })),
       provider: "claude",
-      model: "claude-sonnet-5-5",
+      model: "claude-sonnet-4-6",
       lastRoundAt: null
     }
   };
@@ -47454,8 +47593,8 @@ function adaptStatusFor3D(status, liveCrew) {
 function createFloor3DComponent(ctx) {
   const React = ctx.react;
   const h = React.createElement;
-  return function CodeDenFloor3D({ status, liveCrew, focus, onSelectItem }) {
-    var _a;
+  return function CodeDenFloor3D({ tenant, status, liveCrew, focus, onSelectItem, onOpenAgentDm }) {
+    var _a, _b, _c, _d;
     const hostRef = React.useRef(null);
     const stageRef = React.useRef(null);
     const seatingRef = React.useRef(NO_SEATING);
@@ -47464,6 +47603,8 @@ function createFloor3DComponent(ctx) {
     const [rosterOpen, setRosterOpen] = React.useState(true);
     const [hoveredKey, setHoveredKey] = React.useState(null);
     const [selectedKey, setSelectedKey] = React.useState(null);
+    const tenantAgents = ((_a = status.tenantManifest) == null ? void 0 : _a.agentes) || [];
+    const empresaNome = ((_b = status.tenantManifest) == null ? void 0 : _b.nome) || tenant;
     const adapted = React.useMemo(() => adaptStatusFor3D(status, liveCrew), [status, liveCrew]);
     const { scene, layout } = React.useMemo(() => {
       let nextLayout = layoutRef.current;
@@ -47535,11 +47676,13 @@ function createFloor3DComponent(ctx) {
     }, [focus]);
     React.useEffect(() => {
       var _a2;
-      (_a2 = stageRef.current) == null ? void 0 : _a2.setInset(rosterOpen ? 236 : 0);
+      (_a2 = stageRef.current) == null ? void 0 : _a2.setInset(rosterOpen ? 248 : 0);
     }, [rosterOpen]);
-    const workshopAgents = scene.agents.filter((a) => a.role !== "scout" && a.role !== "area");
-    const lookoutAgents = scene.agents.filter((a) => a.role === "scout" || a.role === "area");
+    const leadershipAndExec = tenantAgents.filter((a) => a.categoria === "lideranca" || a.categoria === "execucao");
+    const reviewAndOps = tenantAgents.filter((a) => a.categoria === "revisao" || a.categoria === "operacao");
     const activeHoverAgent = scene.agents.find((a) => a.key === (hoveredKey || selectedKey)) || null;
+    const runningCount = tenantAgents.filter((a) => a.running).length;
+    const inBuzzCount = tenantAgents.filter((a) => a.inBuzz).length;
     if (webglLost) {
       return h(
         "div",
@@ -47548,6 +47691,51 @@ function createFloor3DComponent(ctx) {
         h("div", { className: "of-muted", style: { marginTop: "6px" } }, "O Andar 3D requer WebGL ativo; use a aba Board para acompanhar os cards.")
       );
     }
+    const renderCrewRow = (ag) => h(
+      "div",
+      {
+        key: ag.agentKey || ag.name,
+        className: "of-nav-btn",
+        "data-active": selectedKey === ag.agentKey ? "true" : "false",
+        style: { alignItems: "flex-start", padding: "6px 8px" },
+        onClick: () => {
+          var _a2;
+          setSelectedKey(ag.agentKey);
+          (_a2 = stageRef.current) == null ? void 0 : _a2.select(ag.agentKey);
+        }
+      },
+      h(
+        "div",
+        { style: { display: "flex", flexDirection: "column", gap: "2px", minWidth: 0, flex: 1 } },
+        h(
+          "span",
+          { style: { display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "11.5px", fontWeight: 600 } },
+          h("span", {
+            className: "of-dot",
+            "data-tone": ag.running ? "running" : ag.inBuzz ? "done" : "idle",
+            title: ag.running ? "Em execução no Buzz" : ag.inBuzz ? "Disponível no Buzz" : "A provisionar"
+          }),
+          h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, ag.name)
+        ),
+        h("span", { className: "of-muted", style: { fontSize: "10px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, ag.funcao),
+        h("span", { className: "of-mono of-muted", style: { fontSize: "9.5px" } }, ag.model)
+      ),
+      onOpenAgentDm && ag.pubkey && h(
+        "button",
+        {
+          type: "button",
+          className: "of-btn",
+          "data-variant": "ghost",
+          title: `Abrir DM nativa com ${ag.name} no Buzz`,
+          style: { padding: "2px 5px", fontSize: "10px", color: "var(--primary)", flexShrink: 0 },
+          onClick: (e) => {
+            e.stopPropagation();
+            onOpenAgentDm({ key: ag.agentKey, pubkey: ag.pubkey, name: ag.name });
+          }
+        },
+        "DM ↗"
+      )
+    );
     return h(
       "div",
       { style: { display: "flex", flexDirection: "column", gap: "8px", flex: 1, minHeight: "560px" } },
@@ -47573,11 +47761,11 @@ function createFloor3DComponent(ctx) {
               top: "10px",
               left: "10px",
               bottom: "10px",
-              width: "224px",
+              width: "238px",
               zIndex: 20,
               borderRadius: "10px",
               border: "1px solid var(--border)",
-              background: "rgba(15, 17, 22, 0.88)",
+              background: "rgba(15, 17, 22, 0.90)",
               backdropFilter: "blur(8px)",
               display: "flex",
               flexDirection: "column",
@@ -47593,11 +47781,11 @@ function createFloor3DComponent(ctx) {
                 justifyContent: "space-between",
                 padding: "8px 10px",
                 borderBottom: "1px solid var(--border)",
-                fontSize: "12px",
-                fontWeight: 600
+                fontSize: "11.5px",
+                fontWeight: 700
               }
             },
-            h("span", null, `Crew · ${scene.agents.length}`),
+            h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, `Equipe ${empresaNome} · ${tenantAgents.length}`),
             h(
               "button",
               {
@@ -47612,66 +47800,11 @@ function createFloor3DComponent(ctx) {
           ),
           h(
             "div",
-            { style: { flex: 1, overflowY: "auto", padding: "8px", display: "flex", flexDirection: "column", gap: "8px" } },
-            h("div", { className: "of-meter-label" }, `WORKSHOP · ${workshopAgents.length}`),
-            workshopAgents.map(
-              (a) => {
-                var _a2;
-                return h(
-                  "button",
-                  {
-                    key: a.key,
-                    type: "button",
-                    className: "of-nav-btn",
-                    "data-active": selectedKey === a.key ? "true" : "false",
-                    onClick: () => {
-                      var _a3;
-                      setSelectedKey(a.key);
-                      (_a3 = stageRef.current) == null ? void 0 : _a3.select(a.key);
-                    }
-                  },
-                  h(
-                    "div",
-                    { style: { display: "flex", flexDirection: "column", gap: "2px", minWidth: 0 } },
-                    h(
-                      "span",
-                      { style: { display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: 600 } },
-                      h("span", { className: "of-dot", "data-tone": a.status === "working" ? "running" : a.status === "blocked" ? "failed" : "idle" }),
-                      h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, a.role === "pm" ? "Project manager" : ((_a2 = a.card) == null ? void 0 : _a2.item.title) || a.key)
-                    ),
-                    h("span", { className: "of-mono of-muted", style: { fontSize: "10px" } }, `${a.provider || "orgfy"} · ${a.model || "ativo"}`)
-                  )
-                );
-              }
-            ),
-            h("div", { className: "of-meter-label", style: { marginTop: "6px" } }, `LOOKOUT · ${lookoutAgents.length}`),
-            lookoutAgents.map(
-              (a) => h(
-                "button",
-                {
-                  key: a.key,
-                  type: "button",
-                  className: "of-nav-btn",
-                  "data-active": selectedKey === a.key ? "true" : "false",
-                  onClick: () => {
-                    var _a2;
-                    setSelectedKey(a.key);
-                    (_a2 = stageRef.current) == null ? void 0 : _a2.select(a.key);
-                  }
-                },
-                h(
-                  "div",
-                  { style: { display: "flex", flexDirection: "column", gap: "2px", minWidth: 0 } },
-                  h(
-                    "span",
-                    { style: { display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: 600 } },
-                    h("span", { className: "of-dot", "data-tone": a.status === "working" ? "running" : "idle" }),
-                    h("span", null, a.role === "scout" ? "Scout (Oráculo)" : a.area || a.key)
-                  ),
-                  h("span", { className: "of-mono of-muted", style: { fontSize: "10px" } }, `${a.provider || "claude"} · ${a.model || "idle"}`)
-                )
-              )
-            )
+            { style: { flex: 1, overflowY: "auto", padding: "8px", display: "flex", flexDirection: "column", gap: "4px" } },
+            h("div", { className: "of-meter-label", style: { padding: "2px 4px" } }, `OFICINA & LIDERANÇA · ${leadershipAndExec.length}`),
+            leadershipAndExec.length === 0 ? h("div", { className: "of-muted", style: { padding: "4px 6px", fontSize: "10.5px" } }, "Sem agentes no manifesto.") : leadershipAndExec.map(renderCrewRow),
+            h("div", { className: "of-meter-label", style: { marginTop: "8px", padding: "2px 4px" } }, `REVISORES L-01 & MIRANTE · ${reviewAndOps.length}`),
+            reviewAndOps.length === 0 ? h("div", { className: "of-muted", style: { padding: "4px 6px", fontSize: "10.5px" } }, "Sem revisores definidos.") : reviewAndOps.map(renderCrewRow)
           )
         ) : h(
           "button",
@@ -47681,7 +47814,7 @@ function createFloor3DComponent(ctx) {
             style: { position: "absolute", top: "10px", left: "10px", zIndex: 20 },
             onClick: () => setRosterOpen(true)
           },
-          `Crew (${scene.agents.length}) ›`
+          `Equipe ${empresaNome} (${tenantAgents.length}) ›`
         ),
         activeHoverAgent && h(
           "div",
@@ -47699,7 +47832,7 @@ function createFloor3DComponent(ctx) {
               fontSize: "11.5px"
             }
           },
-          h("div", { style: { fontWeight: 700 } }, activeHoverAgent.role === "pm" ? "Project manager" : activeHoverAgent.role === "scout" ? "Scout (Oráculo)" : ((_a = activeHoverAgent.card) == null ? void 0 : _a.item.title) || activeHoverAgent.area || activeHoverAgent.key),
+          h("div", { style: { fontWeight: 700 } }, activeHoverAgent.role === "pm" ? `${((_c = status.tenantManifest) == null ? void 0 : _c.coo) || "COO"} (${empresaNome})` : activeHoverAgent.role === "scout" ? "Oráculo · Scout" : ((_d = activeHoverAgent.card) == null ? void 0 : _d.item.title) || activeHoverAgent.area || activeHoverAgent.key),
           h("div", { className: "of-mono of-muted", style: { marginTop: "2px" } }, `${activeHoverAgent.status} · ${activeHoverAgent.model || "padrão"}`),
           activeHoverAgent.progress && h("div", { className: "of-muted", style: { marginTop: "4px" } }, activeHoverAgent.progress)
         ),
@@ -47727,16 +47860,12 @@ function createFloor3DComponent(ctx) {
       h(
         "div",
         { className: "of-muted", style: { textAlign: "center", fontSize: "11px" } },
-        sceneSummary(scene)
+        `Fábrica ${empresaNome} (${tenant}) · ${inBuzzCount}/${tenantAgents.length} agentes no Buzz · ${runningCount} ativo(s) agora · ${sceneSummary(scene)}`
       )
     );
   };
 }
-const TENANTS = [
-  { id: "orgfy", name: "OrgFy Core (Engenharia & Método)", desc: "Esteira determinística principal, CI 7/7 e governança L-01/L-22." },
-  { id: "lumen-iptv", name: "Lumen IPTV", desc: "Operação multi-tenant ativa na Holding Cortexx." },
-  { id: "saas-tributario", name: "SaaS Tributário", desc: "Empresa planejada no portfólio da Holding." }
-];
+const CHART_COLORS = ["var(--chart-2)", "var(--chart-1)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"];
 const AUTONOMY_MODES = [
   {
     id: "manual",
@@ -47749,8 +47878,8 @@ const AUTONOMY_MODES = [
   {
     id: "assisted",
     label: "Assistido",
-    summary: "Você, o PM e automações encontram trabalho; você revisa e faz merge de cada PR.",
-    finds: "Você, PM e automações",
+    summary: "Você, o COO e automações encontram trabalho; você revisa e faz merge de cada PR.",
+    finds: "Você, COO e automações",
     merges: "Você",
     experimental: false
   },
@@ -47765,19 +47894,27 @@ const AUTONOMY_MODES = [
   {
     id: "dark_factory",
     label: "Dark Factory",
-    summary: "Fábrica de Software + Oráculo agendado revisando o app contra docs/VISION.md e abrindo issues.",
+    summary: "Fábrica de Software + Oráculo agendado revisando o workspace contra Canvas/PROJECT.md e abrindo issues.",
     finds: "Oráculo, você e confiáveis",
     merges: "Você (ou auto-merge)",
     experimental: true
   }
 ];
+function fmtTokens(n) {
+  if (typeof n !== "number" || !Number.isFinite(n)) return PT_BR.labels.unavailable;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${Math.round(n / 1e3)}k`;
+  return String(n);
+}
 function renderFactorySecondaryPage(props) {
-  var _a, _b, _c;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o;
   const {
     h,
     tab,
     tenant,
+    holding,
     onSelectTenant,
+    onOpenAgentDm,
     status,
     liveCrew,
     onSelectItem,
@@ -47795,41 +47932,125 @@ function renderFactorySecondaryPage(props) {
     onSelectModeQuick
   } = props;
   if (tab === "holding") {
+    const empresas = (holding == null ? void 0 : holding.empresas) || [];
+    const boardAreas = (holding == null ? void 0 : holding.conselho) || [];
+    const approvals = (holding == null ? void 0 : holding.approvals) || [];
     return h(
       "div",
-      { style: { display: "flex", flexDirection: "column", gap: "12px" } },
+      { style: { display: "flex", flexDirection: "column", gap: "14px" } },
       h(
         "div",
-        { className: "of-card-pad" },
-        h("div", { style: { fontSize: "15px", fontWeight: 700 } }, "Holding Cortexx · Portfólio Multi-Tenant"),
-        h("div", { className: "of-muted", style: { marginTop: "2px" } }, "Selecione uma empresa para abrir sua Fábrica (dados vivos de fabrica_status.py --empresa <tenant>).")
+        { className: "of-card-pad", style: { display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "10px" } },
+        h(
+          "div",
+          null,
+          h("div", { style: { fontSize: "15px", fontWeight: 700 } }, "Conselho da Holding Cortexx · Portfólio Multi-Empresa"),
+          h(
+            "div",
+            { className: "of-muted", style: { marginTop: "3px" } },
+            `Fundador: ${((_a = holding == null ? void 0 : holding.fundador) == null ? void 0 : _a.nome) || "Helton Fraga"} · CEO Holding: ${((_b = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _b.nome) || "OrgFy Iris"} · ${empresas.length} empresas no portfólio · ${approvals.filter((a) => a.status === "pendente").length} aprovação(ões) pendente(s)`
+          )
+        ),
+        onOpenAgentDm && h(
+          "button",
+          {
+            type: "button",
+            className: "of-btn",
+            "data-variant": "primary",
+            onClick: () => {
+              var _a2, _b2;
+              return onOpenAgentDm({ name: ((_a2 = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _a2.nome) || "OrgFy Iris", pubkey: ((_b2 = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _b2.pubkey) || "" });
+            }
+          },
+          `Falar com ${((_c = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _c.nome) || "OrgFy Iris"} ↗`
+        )
       ),
       h(
         "div",
         { className: "of-grid-3" },
-        TENANTS.map(
-          (t) => h(
-            "button",
+        empresas.length === 0 ? h("div", { className: "of-card-pad of-muted" }, "Carregando manifestos de empresas/*.json...") : empresas.map(
+          (emp) => h(
+            "div",
             {
-              key: t.id,
-              type: "button",
+              key: emp.slug,
               className: "of-card-pad",
               style: {
-                textAlign: "left",
-                cursor: "pointer",
-                color: "var(--foreground)",
-                borderColor: tenant === t.id ? "rgba(245,158,11,0.55)" : void 0
-              },
-              onClick: () => onSelectTenant(t.id)
+                display: "flex",
+                flexDirection: "column",
+                gap: "10px",
+                borderColor: tenant === emp.slug ? "var(--primary)" : void 0
+              }
             },
             h(
               "div",
               { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" } },
-              h("strong", { style: { fontSize: "13.5px" } }, t.name),
-              tenant === t.id && h("span", { className: "of-pill", "data-tone": "warn" }, "Ativo")
+              h(
+                "div",
+                { style: { display: "inline-flex", alignItems: "center", gap: "8px" } },
+                h("span", { className: "of-project-tile" }, (emp.workspaceBuzz || emp.nome).charAt(0).toUpperCase()),
+                h("strong", { style: { fontSize: "13.5px" } }, emp.workspaceBuzz || emp.nome)
+              ),
+              h("span", { className: "of-pill", "data-tone": emp.estagio === "operacional" ? "done" : "idle" }, emp.estagio.toUpperCase())
             ),
-            h("div", { className: "of-muted", style: { marginTop: "6px", lineHeight: 1.4 } }, t.desc),
-            h("div", { className: "of-mono of-muted", style: { marginTop: "10px", fontSize: "10.5px" } }, `tenant: ${t.id}`)
+            h(
+              "div",
+              { className: "of-muted", style: { fontSize: "11px" } },
+              `Liderança: ${emp.ceoEmpresa || "OrgFy Iris"} · Canal: ${emp.canal ? emp.canal.slice(0, 8) + "…" : "pendente"}`
+            ),
+            h(
+              "div",
+              { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" } },
+              h(
+                "div",
+                { className: "of-surface", style: { padding: "7px 9px" } },
+                h("div", { className: "of-meter-label" }, "Agentes"),
+                h("div", { className: "of-num", style: { fontSize: "14px", fontWeight: 700, marginTop: "2px" } }, `${emp.agentesProntos}/${emp.agentesTotal}`)
+              ),
+              h(
+                "div",
+                { className: "of-surface", style: { padding: "7px 9px" } },
+                h("div", { className: "of-meter-label" }, "Teto/dia"),
+                h("div", { className: "of-num", style: { fontSize: "14px", fontWeight: 700, marginTop: "2px" } }, `${fmtTokens(emp.budgetTokensDiario)} tok`)
+              )
+            ),
+            emp.pendenciasOnboarding && emp.pendenciasOnboarding.length > 0 ? h(
+              "div",
+              { className: "of-surface", style: { padding: "7px 9px", borderColor: "rgba(245,158,11,0.35)", fontSize: "11px", color: "var(--status-waiting)" } },
+              emp.pendenciasOnboarding.slice(0, 2).map((p, i) => h("div", { key: i }, `• ${p}`))
+            ) : h("div", { style: { fontSize: "11px", color: "var(--status-done)" } }, "✓ Manifesto, canal e chaves operacionais validados."),
+            h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                "data-variant": tenant === emp.slug ? "primary" : void 0,
+                style: { marginTop: "auto", justifyContent: "center" },
+                onClick: () => onSelectTenant(emp.slug)
+              },
+              `Abrir Fábrica de ${emp.workspaceBuzz || emp.nome} →`
+            )
+          )
+        )
+      ),
+      boardAreas.length > 0 && h(
+        "div",
+        { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "8px" } },
+        h("div", { className: "of-meter-label" }, "Conselho Funcional (empresas/board.json)"),
+        h(
+          "div",
+          { className: "of-grid-2" },
+          boardAreas.map(
+            (area) => h(
+              "div",
+              { key: area.id, className: "of-surface", style: { padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" } },
+              h(
+                "div",
+                null,
+                h("div", { style: { fontSize: "12.5px", fontWeight: 600 } }, area.area),
+                h("div", { className: "of-muted", style: { fontSize: "11px" } }, area.responsavel)
+              ),
+              h("span", { className: "of-pill", "data-tone": area.status === "ativo" ? "done" : "idle" }, area.status.toUpperCase())
+            )
           )
         )
       )
@@ -47894,10 +48115,12 @@ function renderFactorySecondaryPage(props) {
     );
   }
   if (tab === "costs") {
-    const economia = ((_a = status.kpis) == null ? void 0 : _a.economia) || null;
-    const qualidade = ((_b = status.kpis) == null ? void 0 : _b.qualidade) || null;
+    const economia = ((_d = status.kpis) == null ? void 0 : _d.economia) || null;
+    const qualidade = ((_e = status.kpis) == null ? void 0 : _e.qualidade) || null;
     const porModelo = Array.isArray(economia == null ? void 0 : economia.por_modelo) ? economia.por_modelo : [];
+    const totalCost = porModelo.reduce((acc, r) => acc + Number(r.custo_usd || 0), 0);
     const maxCost = Math.max(0.01, ...porModelo.map((r) => Number(r.custo_usd || 0)));
+    const empresas = (holding == null ? void 0 : holding.empresas) || [];
     return h(
       "div",
       { style: { display: "flex", flexDirection: "column", gap: "14px" } },
@@ -47906,74 +48129,103 @@ function renderFactorySecondaryPage(props) {
         { style: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" } },
         h(
           "div",
-          { className: "of-segmented" },
-          ["7d", "30d", "90d"].map(
-            (r) => h(
-              "button",
-              {
-                key: r,
-                type: "button",
-                className: "of-seg-btn",
-                "data-active": costRange === r ? "true" : "false",
-                onClick: () => setCostRange(r)
-              },
-              r
+          { style: { display: "inline-flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
+          h(
+            "div",
+            { className: "of-segmented" },
+            ["7d", "30d", "90d"].map(
+              (r) => h(
+                "button",
+                {
+                  key: r,
+                  type: "button",
+                  className: "of-seg-btn",
+                  "data-active": costRange === r ? "true" : "false",
+                  onClick: () => setCostRange(r)
+                },
+                r
+              )
             )
-          )
+          ),
+          h("span", { className: "of-pill", "data-tone": "done" }, `Empresa em foco: ${((_f = status.tenantManifest) == null ? void 0 : _f.nome) || tenant}`)
         ),
-        h("span", { className: "of-muted" }, `Fonte real: kpis-esteira.json (${((_c = status.kpis) == null ? void 0 : _c.gerado_em) || PT_BR.labels.unavailable})`)
+        h("span", { className: "of-muted" }, `Fonte real: kpis-esteira.json (${((_g = status.kpis) == null ? void 0 : _g.gerado_em) || PT_BR.labels.unavailable})`)
       ),
       h(
         "div",
         { className: "of-surface", style: { padding: "8px 12px", fontSize: "11.5px", color: "var(--muted-foreground)" } },
-        "Valores equivalentes de API calculados diretamente do kpis-esteira.json (sem dados sintéticos; campos ausentes aparecem como indisponível)."
+        "Custos equivalentes de API calculados a partir de kpis-esteira.json (sem dados sintéticos; modelos gratuitos/assinatura aparecem com $0.00 quando sem cobrança por token)."
       ),
-      // 5 KPIs principais (UsageTotals)
+      // 5 KPIs principais (UsageTotals do CodeDen)
       h(
         "div",
         { className: "of-stats-6" },
         [
           {
-            label: "Custo amostra (USD)",
-            val: typeof (economia == null ? void 0 : economia.custo_usd_total_amostra) === "number" ? `$${economia.custo_usd_total_amostra.toFixed(2)}` : PT_BR.labels.unavailable
+            label: "Custo equivalente API",
+            val: typeof (economia == null ? void 0 : economia.custo_usd_total_amostra) === "number" ? `$${economia.custo_usd_total_amostra.toFixed(2)}` : PT_BR.labels.unavailable,
+            sub: `gasto hoje: $${status.spendToday.usd.toFixed(2)}`
           },
           {
             label: "Tokens (7d)",
-            val: typeof (economia == null ? void 0 : economia.tokens_7d) === "number" ? economia.tokens_7d.toLocaleString("pt-BR") : PT_BR.labels.unavailable
+            val: fmtTokens(economia == null ? void 0 : economia.tokens_7d),
+            sub: `orçamento/dia: ${fmtTokens((_h = status.tenantManifest) == null ? void 0 : _h.budgetTokensDiario)}`
           },
           {
-            label: "Cache hit",
-            val: typeof (economia == null ? void 0 : economia.cache_hit_ratio_pct) === "number" ? `${economia.cache_hit_ratio_pct.toFixed(1)}%` : PT_BR.labels.unavailable
+            label: "Cache hit rate",
+            val: typeof (economia == null ? void 0 : economia.cache_hit_ratio_pct) === "number" ? `${economia.cache_hit_ratio_pct.toFixed(1)}%` : PT_BR.labels.unavailable,
+            sub: "reaproveitamento de contexto"
           },
           {
-            label: "Gasto hoje",
-            val: `$${status.spendToday.usd.toFixed(2)}`
+            label: "Merges (7d)",
+            val: String(status.stats.merged7d),
+            sub: `hoje: ${status.mergesToday}`
           },
           {
             label: "FPY real",
-            val: typeof (qualidade == null ? void 0 : qualidade.fpy_real_pct) === "number" ? `${qualidade.fpy_real_pct.toFixed(1)}%` : PT_BR.labels.unavailable
+            val: typeof (qualidade == null ? void 0 : qualidade.fpy_real_pct) === "number" ? `${qualidade.fpy_real_pct.toFixed(1)}%` : PT_BR.labels.unavailable,
+            sub: `CPI mín: ${((_i = status.tenantManifest) == null ? void 0 : _i.cpiMinimo) ?? 0.85}`
           }
         ].map(
           (k) => h(
             "div",
-            { key: k.label, className: "of-card-pad", style: { padding: "10px 12px" } },
+            { key: k.label, className: "of-card-pad", style: { padding: "11px 13px" } },
             h("div", { className: "of-meter-label" }, k.label),
-            h("div", { className: "of-num", style: { fontSize: "19px", fontWeight: 700, marginTop: "4px" } }, k.val)
+            h("div", { className: "of-num", style: { fontSize: "20px", fontWeight: 700, marginTop: "4px" } }, k.val),
+            h("div", { className: "of-muted", style: { fontSize: "10.5px", marginTop: "2px" } }, k.sub)
           )
         )
       ),
-      // Tabela Breakdown por modelo com barras horizontais
+      // Barra empilhada visual de participação por modelo + Tabela Breakdown (1:1 CodeDen SpendCard)
       h(
         "div",
-        { className: "of-card-pad" },
-        h("div", { style: { fontSize: "13px", fontWeight: 700, marginBottom: "10px" } }, "Quebra por modelo (kpis-esteira.json)"),
+        { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "12px" } },
+        h(
+          "div",
+          { style: { display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" } },
+          h("div", { style: { fontSize: "13.5px", fontWeight: 700 } }, "Distribuição de gasto por modelo (kpis-esteira.json)"),
+          h("span", { className: "of-muted" }, `${porModelo.length} modelos na amostra`)
+        ),
+        porModelo.length > 0 && h(
+          "div",
+          { style: { display: "flex", height: "14px", borderRadius: "6px", overflow: "hidden", background: "var(--muted)", gap: "1px" } },
+          porModelo.slice(0, 8).map((row, idx) => {
+            const usd = Number(row.custo_usd || 0);
+            const pct = totalCost > 0 ? Math.max(1, usd / totalCost * 100) : 100 / Math.max(1, porModelo.length);
+            return h("div", {
+              key: `${row.modelo || idx}`,
+              title: `${row.modelo}: $${usd.toFixed(3)} (${pct.toFixed(1)}%)`,
+              style: { width: `${pct}%`, background: CHART_COLORS[idx % CHART_COLORS.length] }
+            });
+          })
+        ),
         porModelo.length === 0 ? h("div", { className: "of-muted" }, PT_BR.labels.unavailable) : h(
           "table",
           { className: "of-table" },
           h(
             "thead",
             null,
-            h("tr", null, h("th", null, "Modelo"), h("th", null, "Chamadas"), h("th", null, "Custo USD"), h("th", null, "Participação"), h("th", null, "Cache"))
+            h("tr", null, h("th", null, "Modelo"), h("th", null, "Participação"), h("th", null, "%"), h("th", null, "Custo USD"), h("th", null, "Chamadas"), h("th", null, "Cache"))
           ),
           h(
             "tbody",
@@ -47981,26 +48233,59 @@ function renderFactorySecondaryPage(props) {
             porModelo.slice(0, 15).map((row, idx) => {
               const usd = Number(row.custo_usd || 0);
               const w = Math.min(100, usd / maxCost * 100);
+              const sharePct = totalCost > 0 ? usd / totalCost * 100 : 0;
+              const color = CHART_COLORS[idx % CHART_COLORS.length];
               return h(
                 "tr",
                 { key: `${row.modelo || idx}` },
-                h("td", { className: "of-mono" }, String(row.modelo || PT_BR.labels.unavailable)),
-                h("td", { className: "of-mono of-num" }, String(row.requisicoes ?? row.chamadas ?? PT_BR.labels.unavailable)),
-                h("td", { className: "of-mono of-num" }, typeof row.custo_usd === "number" ? `$${usd.toFixed(3)}` : PT_BR.labels.unavailable),
                 h(
                   "td",
-                  { style: { width: "160px" } },
-                  h("div", { className: "of-bar-track", style: { marginTop: 0 } }, h("div", { className: "of-bar-fill", style: { width: `${w}%`, background: "var(--chart-1)" } }))
+                  { className: "of-mono", style: { display: "flex", alignItems: "center", gap: "7px" } },
+                  h("span", { style: { width: "8px", height: "8px", borderRadius: "2px", background: color, flexShrink: 0 } }),
+                  String(row.modelo || PT_BR.labels.unavailable)
                 ),
+                h(
+                  "td",
+                  { style: { width: "170px" } },
+                  h("div", { className: "of-bar-track", style: { marginTop: 0, height: "6px" } }, h("div", { className: "of-bar-fill", style: { width: `${w}%`, background: color } }))
+                ),
+                h("td", { className: "of-mono of-num of-muted" }, sharePct > 0 && sharePct < 1 ? "<1%" : `${Math.round(sharePct)}%`),
+                h("td", { className: "of-mono of-num" }, typeof row.custo_usd === "number" ? `$${usd.toFixed(2)}` : PT_BR.labels.unavailable),
+                h("td", { className: "of-mono of-num" }, String(row.requisicoes ?? row.chamadas ?? PT_BR.labels.unavailable)),
                 h("td", { className: "of-mono of-num" }, typeof row.cache_hit_pct === "number" ? `${row.cache_hit_pct.toFixed(1)}%` : PT_BR.labels.unavailable)
               );
             })
+          )
+        )
+      ),
+      empresas.length > 0 && h(
+        "div",
+        { className: "of-card-pad" },
+        h("div", { style: { fontSize: "13px", fontWeight: 700, marginBottom: "8px" } }, "Tetos de orçamento por empresa (empresas/*.json)"),
+        h(
+          "table",
+          { className: "of-table" },
+          h("thead", null, h("tr", null, h("th", null, "Empresa"), h("th", null, "Estágio"), h("th", null, "Agentes"), h("th", null, "Teto diário de tokens"))),
+          h(
+            "tbody",
+            null,
+            empresas.map(
+              (e) => h(
+                "tr",
+                { key: e.slug },
+                h("td", { style: { fontWeight: 600 } }, e.workspaceBuzz || e.nome),
+                h("td", null, h("span", { className: "of-pill", "data-tone": e.estagio === "operacional" ? "done" : "idle" }, e.estagio)),
+                h("td", { className: "of-mono" }, `${e.agentesProntos}/${e.agentesTotal}`),
+                h("td", { className: "of-mono" }, `${fmtTokens(e.budgetTokensDiario)} tokens/dia`)
+              )
+            )
           )
         )
       )
     );
   }
   if (tab === "automations") {
+    const tm = status.tenantManifest;
     return h(
       "div",
       { style: { display: "flex", flexDirection: "column", gap: "12px" } },
@@ -48008,9 +48293,9 @@ function renderFactorySecondaryPage(props) {
         "div",
         { className: "of-segmented", style: { width: "fit-content" } },
         [
-          { id: "automations", label: "Automações" },
-          { id: "runs", label: "Execuções" },
-          { id: "templates", label: "Templates" }
+          { id: "automations", label: "Processos & Workflows" },
+          { id: "runs", label: "CI & Probes da Empresa" },
+          { id: "templates", label: "Governança & Regras" }
         ].map(
           (t) => h(
             "button",
@@ -48025,7 +48310,29 @@ function renderFactorySecondaryPage(props) {
           )
         )
       ),
-      h(
+      autoTab === "runs" ? h(
+        "div",
+        { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+        h("div", { style: { fontSize: "13.5px", fontWeight: 700 } }, `CI Runner & Probes Caixa-Preta · ${(tm == null ? void 0 : tm.nome) || tenant}`),
+        h(
+          "div",
+          { className: "of-grid-2" },
+          h(
+            "div",
+            { className: "of-surface", style: { padding: "10px 12px" } },
+            h("div", { className: "of-meter-label" }, "CI Runner"),
+            h("div", { style: { fontWeight: 700, marginTop: "4px" } }, (tm == null ? void 0 : tm.ciModo) || PT_BR.labels.unavailable),
+            h("div", { className: "of-mono of-muted", style: { marginTop: "4px" } }, `cmd: ${(tm == null ? void 0 : tm.ciCmd) || "—"}`)
+          ),
+          h(
+            "div",
+            { className: "of-surface", style: { padding: "10px 12px" } },
+            h("div", { className: "of-meter-label" }, "Probes Caixa-Preta no Gate"),
+            h("div", { style: { fontWeight: 700, marginTop: "4px" } }, (tm == null ? void 0 : tm.probesObrigatorios) ? `Obrigatórios (${tm.probesCount})` : "Opcional neste tenant"),
+            h("div", { className: "of-muted", style: { marginTop: "4px" } }, `Modo de workers: ${(tm == null ? void 0 : tm.modoExecucao) || "efemero_headless"}`)
+          )
+        )
+      ) : h(
         "div",
         { className: "of-grid-2" },
         h(
@@ -48039,7 +48346,7 @@ function renderFactorySecondaryPage(props) {
               "div",
               null,
               h("div", { style: { fontWeight: 600, fontSize: "12.5px" } }, status.launchAgent || "com.orgfy.esteira-minima"),
-              h("div", { className: "of-muted" }, "Coordenador da esteira (runner fixado em tag v13.0.0)")
+              h("div", { className: "of-muted" }, "Coordenador da esteira (respeita Kill Switch e Dreno de controle-<tenant>.json)")
             ),
             h("span", { className: "of-pill", "data-tone": status.coordenador === "ativo" ? "done" : "failed" }, status.coordenador)
           ),
@@ -48052,47 +48359,125 @@ function renderFactorySecondaryPage(props) {
               h("div", { style: { fontWeight: 600, fontSize: "12.5px" } }, "Rotina CEO (Workflow Buzz Kind 30620)"),
               h("div", { className: "of-muted" }, "YAML: .buzz/workflows/orgfy-rotina-ceo.yaml · Canal #esteira-orgfy")
             ),
-            h("span", { className: "of-pill", "data-tone": "waiting" }, "Configurar no Buzz Desktop")
+            h("span", { className: "of-pill", "data-tone": "waiting" }, "Nativo no Buzz")
           )
         ),
         h(
           "div",
-          { className: "of-card-pad" },
-          h("div", { style: { fontSize: "13.5px", fontWeight: 700, marginBottom: "8px" } }, "Regras de operação"),
-          h("div", { className: "of-muted", style: { lineHeight: 1.55 } }, "Os processos respeitam imediatamente o Kill Switch e o modo Dreno definidos em controle-<tenant>.json (Fase 1).")
+          { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "8px" } },
+          h("div", { style: { fontSize: "13.5px", fontWeight: 700 } }, "Regras determinísticas de operação"),
+          h("div", { className: "of-muted", style: { lineHeight: 1.55 } }, "• Kill Switch e Dreno em estado/controle-<tenant>.json interrompem novos despachos imediatamente."),
+          h("div", { className: "of-muted", style: { lineHeight: 1.55 } }, "• Failover de modelos é delegado exclusivamente ao NexusMind (evento orgfy.failover.requested)."),
+          h("div", { className: "of-muted", style: { lineHeight: 1.55 } }, "• Gate L-01 exige revisor independente por superfície (código, método, segurança, UI, arquitetura).")
         )
       )
     );
   }
   if (tab === "agents") {
+    const tenantAgents = ((_j = status.tenantManifest) == null ? void 0 : _j.agentes) || [];
     const modelos = status.modelos || [];
+    const revisoresSurf = Object.entries(((_k = status.tenantManifest) == null ? void 0 : _k.revisoresPorSuperficie) || {});
+    const empresaNome = ((_l = status.tenantManifest) == null ? void 0 : _l.nome) || tenant;
     return h(
       "div",
       { style: { display: "flex", flexDirection: "column", gap: "12px" } },
       h(
         "div",
-        { className: "of-segmented", style: { width: "fit-content" } },
-        [
-          { id: "eval", label: `Eval & Modelos (${modelos.length})` },
-          { id: "memory", label: "Plantel ao vivo" },
-          { id: "skills", label: "Skills" },
-          { id: "mcp", label: "MCP (21 tools)" },
-          { id: "hooks", label: "Hooks" }
-        ].map(
-          (t) => h(
-            "button",
-            {
-              key: t.id,
-              type: "button",
-              className: "of-seg-btn",
-              "data-active": agentTab === t.id ? "true" : "false",
-              onClick: () => setAgentTab(t.id)
-            },
-            t.label
+        { style: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" } },
+        h(
+          "div",
+          { className: "of-segmented", style: { width: "fit-content" } },
+          [
+            { id: "memory", label: `Plantel ${empresaNome} (${tenantAgents.length})` },
+            { id: "eval", label: `Eval & Modelos R5.1 (${modelos.length})` },
+            { id: "skills", label: `Revisores L-01 (${revisoresSurf.length})` },
+            { id: "mcp", label: "MCP (21 tools)" }
+          ].map(
+            (t) => h(
+              "button",
+              {
+                key: t.id,
+                type: "button",
+                className: "of-seg-btn",
+                "data-active": agentTab === t.id ? "true" : "false",
+                onClick: () => setAgentTab(t.id)
+              },
+              t.label
+            )
           )
+        ),
+        h(
+          "span",
+          { className: "of-muted" },
+          `Fonte: empresas/${tenant}.json × Buzz Desktop (${tenantAgents.filter((a) => a.inBuzz).length}/${tenantAgents.length} provisionados)`
         )
       ),
-      agentTab === "eval" ? h(
+      agentTab === "memory" ? h(
+        "div",
+        { className: "of-card-pad" },
+        h("div", { style: { fontSize: "14px", fontWeight: 700, marginBottom: "4px" } }, `Agentes de ${empresaNome}`),
+        h("div", { className: "of-muted", style: { marginBottom: "10px" } }, "Cada agente abaixo vem do manifesto oficial desta empresa cruzado com o estado ao vivo no Buzz Desktop. Clique em DM ↗ para conversar na janela nativa do Buzz."),
+        tenantAgents.length === 0 ? h("div", { className: "of-muted" }, `Nenhum agente encontrado em empresas/${tenant}.json.`) : h(
+          "table",
+          { className: "of-table" },
+          h(
+            "thead",
+            null,
+            h("tr", null, h("th", null, "Agente"), h("th", null, "Função & Papel"), h("th", null, "Modelo (Buzz)"), h("th", null, "Status"), h("th", null, "Ação"))
+          ),
+          h(
+            "tbody",
+            null,
+            tenantAgents.map(
+              (a) => h(
+                "tr",
+                { key: a.name },
+                h(
+                  "td",
+                  { style: { fontWeight: 600 } },
+                  h(
+                    "span",
+                    { style: { display: "inline-flex", alignItems: "center", gap: "6px" } },
+                    h("span", { className: "of-dot", "data-tone": a.running ? "running" : a.inBuzz ? "done" : "idle" }),
+                    a.name
+                  )
+                ),
+                h(
+                  "td",
+                  null,
+                  h("div", { style: { fontSize: "12px" } }, a.funcao),
+                  h("div", { className: "of-mono of-muted", style: { fontSize: "10px" } }, `papel: ${a.papel} · paralelismo: ${a.parallelism}x`)
+                ),
+                h("td", { className: "of-mono" }, a.model),
+                h(
+                  "td",
+                  null,
+                  h(
+                    "span",
+                    { className: "of-pill", "data-tone": a.running ? "running" : a.inBuzz ? "done" : "waiting" },
+                    a.running ? "Em execução" : a.inBuzz ? "No Buzz" : "A provisionar"
+                  )
+                ),
+                h(
+                  "td",
+                  null,
+                  onOpenAgentDm && a.pubkey ? h(
+                    "button",
+                    {
+                      type: "button",
+                      className: "of-btn",
+                      "data-variant": "ghost",
+                      style: { color: "var(--primary)", padding: "3px 8px" },
+                      onClick: () => onOpenAgentDm({ key: a.agentKey, pubkey: a.pubkey, name: a.name })
+                    },
+                    "DM ↗"
+                  ) : h("span", { className: "of-muted" }, "—")
+                )
+              )
+            )
+          )
+        )
+      ) : agentTab === "eval" ? h(
         "div",
         { className: "of-card-pad" },
         h("div", { style: { fontSize: "14px", fontWeight: 700, marginBottom: "4px" } }, PT_BR.labels.modelsTitle),
@@ -48100,11 +48485,7 @@ function renderFactorySecondaryPage(props) {
         modelos.length === 0 ? h("div", { className: "of-muted" }, PT_BR.labels.unavailable) : h(
           "table",
           { className: "of-table" },
-          h(
-            "thead",
-            null,
-            h("tr", null, h("th", null, "Agente"), h("th", null, "Papel"), h("th", null, "Modelo"), h("th", null, "Tool call (R5.1)"))
-          ),
+          h("thead", null, h("tr", null, h("th", null, "Agente"), h("th", null, "Papel"), h("th", null, "Modelo"), h("th", null, "Tool call (R5.1)"))),
           h(
             "tbody",
             null,
@@ -48128,29 +48509,29 @@ function renderFactorySecondaryPage(props) {
             )
           )
         )
-      ) : h(
+      ) : agentTab === "skills" ? h(
         "div",
         { className: "of-card-pad" },
-        h("div", { style: { fontSize: "13.5px", fontWeight: 700, marginBottom: "8px" } }, `Plantel ao vivo (${liveCrew.length} agentes no Buzz)`),
-        liveCrew.length === 0 ? h("div", { className: "of-muted" }, "Nenhum agente retornado por ctx.agents.snapshot().") : h(
-          "table",
-          { className: "of-table" },
-          h("thead", null, h("tr", null, h("th", null, "Agente"), h("th", null, "Provider"), h("th", null, "Modelo"), h("th", null, "Estado"))),
-          h(
-            "tbody",
-            null,
-            liveCrew.map(
-              (a) => h(
-                "tr",
-                { key: a.key },
-                h("td", { style: { fontWeight: 600 } }, a.name),
-                h("td", { className: "of-mono of-muted" }, a.provider || "—"),
-                h("td", { className: "of-mono" }, a.model),
-                h("td", null, h("span", { className: "of-pill", "data-tone": a.running ? "running" : "idle" }, a.running ? "Ativo" : "Livre"))
-              )
+        h("div", { style: { fontSize: "14px", fontWeight: 700, marginBottom: "6px" } }, `Matriz de Revisores Independentes (L-01) · ${empresaNome}`),
+        h("div", { className: "of-muted", style: { marginBottom: "10px" } }, "Regra L-01: o executor nunca pode revisar a própria entrega. Cada superfície tem revisor titular definido no manifesto da empresa."),
+        revisoresSurf.length === 0 ? h("div", { className: "of-muted" }, PT_BR.labels.unavailable) : h(
+          "div",
+          { className: "of-grid-3" },
+          revisoresSurf.map(
+            ([superficie, revisor]) => h(
+              "div",
+              { key: superficie, className: "of-surface", style: { padding: "10px 12px" } },
+              h("div", { className: "of-meter-label" }, superficie),
+              h("div", { style: { fontSize: "13px", fontWeight: 700, marginTop: "3px" } }, revisor)
             )
           )
         )
+      ) : h(
+        "div",
+        { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "8px" } },
+        h("div", { style: { fontSize: "14px", fontWeight: 700 } }, "Unified Tool Registry · 21 Agent Tools MCP"),
+        h("div", { className: "of-muted" }, "Todas as sessões de agentes no Buzz recebem automaticamente as ferramentas determinísticas do OrgFy: orgfy_roster_live, orgfy_handoff_pack, orgfy_smart_dispatch, orgfy_card_create, orgfy_card_progress, orgfy_checkout_lock, orgfy_gate, orgfy_loop_radar, orgfy_session_stop e orgfy_model_failover."),
+        h("div", { className: "of-muted" }, `Total de agentes registrados globalmente no Buzz Desktop: ${liveCrew.length}.`)
       )
     );
   }
@@ -48170,7 +48551,7 @@ function renderFactorySecondaryPage(props) {
         h(
           "div",
           null,
-          h("div", { style: { fontSize: "14.5px", fontWeight: 700 } }, `Canvas, Visão & Regras Injetadas · ${tenant}`),
+          h("div", { style: { fontSize: "14.5px", fontWeight: 700 } }, `Canvas, Visão & Regras Injetadas · ${((_m2 = status.tenantManifest) == null ? void 0 : _m2.nome) || tenant}`),
           h("div", { className: "of-muted", style: { marginTop: "2px" } }, "Fontes reais do OrgFy: empresas/board.json (Conselho), PROJECT.md + AGENTS.md + Canvas do canal no Buzz (Workspace) e regras-probatorias.json + ctx.agents.addInstructions (Agentes).")
         ),
         props.onOpenChannelInBuzz && h(
@@ -48215,13 +48596,11 @@ function renderFactorySecondaryPage(props) {
         h(
           "section",
           { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-          h("div", { className: "of-meter-label" }, `2. Workspace & Canvas (${tenant})`),
+          h("div", { className: "of-meter-label" }, `2. Workspace & Canvas (${((_n = status.tenantManifest) == null ? void 0 : _n.nome) || tenant})`),
           papeis.length > 0 && h(
             "div",
             { style: { display: "flex", flexWrap: "wrap", gap: "6px" } },
-            papeis.map(
-              ([papel, agente]) => h("span", { key: papel, className: "of-pill" }, `${papel}: ${agente}`)
-            )
+            papeis.map(([papel, agente]) => h("span", { key: papel, className: "of-pill" }, `${papel}: ${agente}`))
           ),
           h(
             "div",
@@ -48285,7 +48664,7 @@ function renderFactorySecondaryPage(props) {
     h(
       "div",
       { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-      h("div", { style: { fontSize: "14px", fontWeight: 700 } }, "Modo de autonomia (Escada CodeDen)"),
+      h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Modo de autonomia · ${((_o = status.tenantManifest) == null ? void 0 : _o.nome) || tenant}`),
       h("div", { className: "of-muted" }, "Suba um degrau por vez. Áreas protegidas e regra L-01 sempre permanecem ativas."),
       h(
         "div",
@@ -48302,8 +48681,8 @@ function renderFactorySecondaryPage(props) {
                 textAlign: "left",
                 cursor: "pointer",
                 color: "var(--foreground)",
-                borderColor: settingsForm.mode === m.id ? "rgba(245,158,11,0.65)" : void 0,
-                background: settingsForm.mode === m.id ? "rgba(245,158,11,0.06)" : void 0
+                borderColor: settingsForm.mode === m.id ? "var(--primary)" : void 0,
+                background: settingsForm.mode === m.id ? "var(--primary-soft)" : void 0
               },
               onClick: () => {
                 setSettingsForm({ mode: m.id });
@@ -48323,7 +48702,6 @@ function renderFactorySecondaryPage(props) {
         )
       )
     ),
-    // LimitsEditor completo gravando em controle-<tenant>.json
     h(
       "div",
       { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "12px" } },
@@ -48411,6 +48789,7 @@ function renderFactorySecondaryPage(props) {
     )
   );
 }
+const GLOBAL_TABS = /* @__PURE__ */ new Set(["holding", "inbox", "costs", "automations"]);
 const DEFAULT_WORKSPACES = [
   { slug: "orgfy", nome: "OrgFy Core", estagio: "operacional" },
   { slug: "lumen-iptv", nome: "Lumen IPTV", estagio: "operacional" },
@@ -48421,7 +48800,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
   const h = React.createElement;
   const Floor3D = createFloor3DComponent(ctx);
   return function OrgFyFactoryApp() {
-    var _a;
+    var _a, _b, _c, _d, _e;
     const [tenant, setTenant] = React.useState("orgfy");
     const [tab, setTab] = React.useState("overview");
     const [dmAgentKey, setDmAgentKey] = React.useState("");
@@ -48441,7 +48820,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
     const [inboxFilter, setInboxFilter] = React.useState("all");
     const [costRange, setCostRange] = React.useState("30d");
     const [autoTab, setAutoTab] = React.useState("automations");
-    const [agentTab, setAgentTab] = React.useState("eval");
+    const [agentTab, setAgentTab] = React.useState("memory");
     const [settingsForm, setSettingsFormState] = React.useState({
       mode: "software_factory",
       autoMerge: false,
@@ -48467,7 +48846,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
     }, []);
     const refresh = React.useCallback(
       async (targetTenant = tenant) => {
-        var _a2, _b;
+        var _a2, _b2;
         setLoading(true);
         const [res, holdSnap] = await Promise.all([
           fetchFactoryStatus(ctx, targetTenant),
@@ -48483,7 +48862,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
           gastoDiaUsd: ((_a2 = res.status.limits.dailyBudget) == null ? void 0 : _a2.usd) ?? 50,
           mergesDia: res.status.limits.maxMergesPerDay ?? 20,
           agentesMax: res.status.limits.maxConcurrentSessions ?? 4,
-          prsAbertos: ((_b = res.status.wip) == null ? void 0 : _b.limit) ?? 6,
+          prsAbertos: ((_b2 = res.status.wip) == null ? void 0 : _b2.limit) ?? 6,
           falhasSeguidas: res.status.limits.pauseAfterConsecutiveFailures ?? 3
         });
         setLoading(false);
@@ -48528,17 +48907,17 @@ function createFactoryAppComponent(ctx, opts = {}) {
       [tenant, notify2]
     );
     const resolveBuzzScope = React.useCallback(() => {
-      var _a2, _b, _c, _d;
+      var _a2, _b2, _c2, _d2;
       try {
         const navSnap = typeof ((_a2 = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a2.snapshot) === "function" ? ctx.navigation.snapshot() : null;
-        const navScope = (_c = (_b = navSnap == null ? void 0 : navSnap.entry) == null ? void 0 : _b.target) == null ? void 0 : _c.scope;
+        const navScope = (_c2 = (_b2 = navSnap == null ? void 0 : navSnap.entry) == null ? void 0 : _b2.target) == null ? void 0 : _c2.scope;
         if ((navScope == null ? void 0 : navScope.viewer) && (navScope == null ? void 0 : navScope.communityOrigin)) {
           return { viewer: String(navScope.viewer), communityOrigin: String(navScope.communityOrigin) };
         }
       } catch {
       }
       try {
-        const relaySnap = typeof ((_d = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _d.snapshot) === "function" ? ctx.relay.snapshot() : null;
+        const relaySnap = typeof ((_d2 = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _d2.snapshot) === "function" ? ctx.relay.snapshot() : null;
         if ((relaySnap == null ? void 0 : relaySnap.viewer) && (relaySnap == null ? void 0 : relaySnap.origin)) {
           return { viewer: String(relaySnap.viewer), communityOrigin: String(relaySnap.origin) };
         }
@@ -48547,12 +48926,12 @@ function createFactoryAppComponent(ctx, opts = {}) {
       return null;
     }, []);
     const handleOpenChannelInBuzz = React.useCallback(async () => {
-      var _a2;
+      var _a2, _b2;
       const emp = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant);
-      const canal = emp == null ? void 0 : emp.canal;
+      const canal = ((_a2 = status.tenantManifest) == null ? void 0 : _a2.canal) || (emp == null ? void 0 : emp.canal);
       const scope = resolveBuzzScope();
       try {
-        if (canal && scope && ((_a2 = ctx.navigation) == null ? void 0 : _a2.open)) {
+        if (canal && scope && ((_b2 = ctx.navigation) == null ? void 0 : _b2.open)) {
           const res = await ctx.navigation.open({
             version: 1,
             kind: "conversation",
@@ -48572,20 +48951,20 @@ function createFactoryAppComponent(ctx, opts = {}) {
       } catch {
       }
       notify2(`Workspace ativo: ${tenant}${canal ? ` (canal ${canal.slice(0, 8)}…)` : ""}.`);
-    }, [holding, tenant, resolveBuzzScope, notify2]);
+    }, [holding, status.tenantManifest, tenant, resolveBuzzScope, notify2]);
     const liveCrew = React.useMemo(() => {
-      var _a2, _b;
+      var _a2, _b2;
       try {
-        const snap = ((_b = (_a2 = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _a2.snapshot) == null ? void 0 : _b.call(_a2)) || {};
+        const snap = ((_b2 = (_a2 = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _a2.snapshot) == null ? void 0 : _b2.call(_a2)) || {};
         const runningSet = new Set((snap.running || []).map((a) => String((a == null ? void 0 : a.key) || (a == null ? void 0 : a.name))));
         return (snap.agents || []).map((a) => {
-          var _a3, _b2;
+          var _a3, _b3;
           return {
             key: String((a == null ? void 0 : a.key) || (a == null ? void 0 : a.name) || ""),
             pubkey: typeof (a == null ? void 0 : a.pubkey) === "string" ? a.pubkey : "",
             name: String((a == null ? void 0 : a.name) || (a == null ? void 0 : a.key) || "Agente"),
             model: ((_a3 = a == null ? void 0 : a.config) == null ? void 0 : _a3.model) || PT_BR.labels.unavailable,
-            provider: ((_b2 = a == null ? void 0 : a.config) == null ? void 0 : _b2.provider) || "",
+            provider: ((_b3 = a == null ? void 0 : a.config) == null ? void 0 : _b3.provider) || "",
             running: runningSet.has(String((a == null ? void 0 : a.key) || (a == null ? void 0 : a.name)))
           };
         });
@@ -48593,26 +48972,44 @@ function createFactoryAppComponent(ctx, opts = {}) {
         return [];
       }
     }, [status.lastTickAt]);
+    const tenantAgents = ((_a = status.tenantManifest) == null ? void 0 : _a.agentes) || [];
+    const dmPool = React.useMemo(() => {
+      if (!GLOBAL_TABS.has(tab) && tenantAgents.length > 0) {
+        return tenantAgents.map((a) => ({
+          key: a.agentKey,
+          pubkey: a.pubkey,
+          name: a.name,
+          label: `${a.name} · ${a.papel}${a.running ? " ●" : ""}`
+        }));
+      }
+      return liveCrew.map((a) => ({
+        key: a.key,
+        pubkey: a.pubkey || "",
+        name: a.name,
+        label: `${a.name}${a.running ? " ●" : ""}`
+      }));
+    }, [tab, tenantAgents, liveCrew]);
     const defaultDmAgentKey = React.useMemo(() => {
-      var _a2;
-      const coo = liveCrew.find((a) => /bento/i.test(a.name) && !/arquiteto/i.test(a.name));
+      var _a2, _b2;
+      const cooName = (((_a2 = status.tenantManifest) == null ? void 0 : _a2.coo) || "OrgFy Bento").toLowerCase();
+      const coo = dmPool.find((a) => a.name.toLowerCase() === cooName);
       if (coo) return coo.key;
-      const iris = liveCrew.find((a) => /iris/i.test(a.name));
+      const iris = dmPool.find((a) => /iris/i.test(a.name));
       if (iris) return iris.key;
-      return ((_a2 = liveCrew[0]) == null ? void 0 : _a2.key) || "";
-    }, [liveCrew]);
+      return ((_b2 = dmPool[0]) == null ? void 0 : _b2.key) || "";
+    }, [dmPool, status.tenantManifest]);
     React.useEffect(() => {
-      if (liveCrew.length > 0 && (!dmAgentKey || !liveCrew.some((a) => a.key === dmAgentKey))) {
+      if (dmPool.length > 0 && (!dmAgentKey || !dmPool.some((a) => a.key === dmAgentKey))) {
         setDmAgentKey(defaultDmAgentKey);
       }
-    }, [liveCrew, dmAgentKey, defaultDmAgentKey]);
+    }, [dmPool, dmAgentKey, defaultDmAgentKey]);
     const selectedDmAgent = React.useMemo(
-      () => liveCrew.find((a) => a.key === dmAgentKey) || liveCrew[0] || null,
-      [liveCrew, dmAgentKey]
+      () => dmPool.find((a) => a.key === dmAgentKey) || dmPool[0] || null,
+      [dmPool, dmAgentKey]
     );
     const handleOpenAgentDmInBuzz = React.useCallback(
       async (targetAgent) => {
-        var _a2, _b, _c, _d, _e;
+        var _a2, _b2, _c2, _d2, _e2;
         const agent = targetAgent || selectedDmAgent;
         const agentName = (agent == null ? void 0 : agent.name) || "Agente";
         const pubkey = ((agent == null ? void 0 : agent.pubkey) || "").trim();
@@ -48622,9 +49019,9 @@ function createFactoryAppComponent(ctx, opts = {}) {
           const relaySnap = typeof ((_a2 = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a2.snapshot) === "function" ? ctx.relay.snapshot() : null;
           const session = relaySnap == null ? void 0 : relaySnap.session;
           let channelId = null;
-          if ((_b = session == null ? void 0 : session.channels) == null ? void 0 : _b.list) {
+          if ((_b2 = session == null ? void 0 : session.channels) == null ? void 0 : _b2.list) {
             try {
-              const list = ((_c = session.channels.list()) == null ? void 0 : _c.channels) || [];
+              const list = ((_c2 = session.channels.list()) == null ? void 0 : _c2.channels) || [];
               const lowerName = agentName.toLowerCase();
               const existing = list.find((ch) => {
                 if ((ch == null ? void 0 : ch.channelType) !== "dm" && (ch == null ? void 0 : ch.channelType) !== "solo") return false;
@@ -48638,7 +49035,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
             } catch {
             }
           }
-          if (!channelId && pubkey && ((_d = session == null ? void 0 : session.directMessages) == null ? void 0 : _d.available) && typeof session.directMessages.open === "function") {
+          if (!channelId && pubkey && ((_d2 = session == null ? void 0 : session.directMessages) == null ? void 0 : _d2.available) && typeof session.directMessages.open === "function") {
             const ac = new AbortController();
             const timeout = setTimeout(() => ac.abort(), 8e3);
             try {
@@ -48647,7 +49044,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
               clearTimeout(timeout);
             }
           }
-          if (channelId && scope && ((_e = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _e.open)) {
+          if (channelId && scope && ((_e2 = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _e2.open)) {
             const res = await ctx.navigation.open({
               version: 1,
               kind: "conversation",
@@ -48673,7 +49070,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
       },
       [selectedDmAgent, resolveBuzzScope, notify2]
     );
-    const masterAgentName = ((_a = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _a.nome) || "OrgFy Iris";
+    const masterAgentName = ((_b = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _b.nome) || "OrgFy Iris";
     const masterLive = liveCrew.find((a) => a.name.toLowerCase().includes("iris")) || liveCrew[0] || null;
     const workspaces = (holding == null ? void 0 : holding.empresas) && holding.empresas.length > 0 ? holding.empresas.map((e) => ({
       slug: e.slug,
@@ -48681,9 +49078,16 @@ function createFactoryAppComponent(ctx, opts = {}) {
       estagio: e.estagio,
       agentesInfo: `${e.agentesProntos}/${e.agentesTotal}`
     })) : DEFAULT_WORKSPACES.map((w) => ({ ...w, agentesInfo: "" }));
+    const activeWorkspace = workspaces.find((w) => w.slug === tenant) || workspaces[0];
+    const empresaNome = ((_c = status.tenantManifest) == null ? void 0 : _c.nome) || (activeWorkspace == null ? void 0 : activeWorkspace.nome) || tenant;
+    const empresaRepo = ((_d = status.tenantManifest) == null ? void 0 : _d.repoId) || tenant;
+    const isGlobalView = GLOBAL_TABS.has(tab);
     const pendingApprovals = ((holding == null ? void 0 : holding.approvals) || []).filter((a) => a.status === "pendente").length;
     const abaixoMinimoCount = (status.modelos || []).filter((m) => m.abaixo_minimo).length;
     const inboxCount = status.held.length + [...status.inProgress, ...status.recent].filter((i) => i.stage === "escalated" || i.stage === "failed" || i.stage === "reverted").length;
+    const tenantActiveAgentsCount = tenantAgents.filter((a) => a.running).length;
+    const tenantTotalAgentsCount = tenantAgents.length;
+    const boardCount = status.backlog.length + status.inProgress.length;
     const renderNavBtn = (id, label, badge, tone) => h(
       "button",
       {
@@ -48696,6 +49100,14 @@ function createFactoryAppComponent(ctx, opts = {}) {
       h("span", null, label),
       badge && h("span", { className: "of-nav-badge", "data-tone": tone }, badge)
     );
+    const projectTabs = [
+      { id: "overview", label: PT_BR.nav.overview },
+      { id: "board", label: "Fábrica · Board", badge: String(boardCount) },
+      { id: "floor", label: "Andar 3D", badge: `${tenantActiveAgentsCount}/${tenantTotalAgentsCount}` },
+      { id: "agents", label: "Agentes", badge: abaixoMinimoCount > 0 ? `⚠ ${abaixoMinimoCount}` : String(tenantTotalAgentsCount), tone: abaixoMinimoCount > 0 ? "danger" : void 0 },
+      { id: "vision", label: "Canvas / Visão" },
+      { id: "settings", label: PT_BR.nav.settings }
+    ];
     return h(
       "div",
       {
@@ -48707,7 +49119,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
       h(
         "div",
         { className: "of-shell" },
-        // Sidebar OrgFy: CEO Master -> Holding/Conselho & Inbox -> Workspaces -> Fábrica -> Operação
+        // Sidebar limpa 1:1 CodeDen: CEO Master -> Holding Global (Conselho, Inbox, Uso & Custos, Automações) -> Empresas (Workspaces)
         h(
           "aside",
           { className: "of-sidebar" },
@@ -48758,57 +49170,42 @@ function createFactoryAppComponent(ctx, opts = {}) {
             ),
             h("div", { className: "of-mono of-muted", style: { fontSize: "10px" } }, masterLive ? masterLive.model : "Ativa no Buzz")
           ),
-          h("div", { className: "of-nav-group-label" }, "Holding & Conselho"),
+          h("div", { className: "of-nav-group-label" }, "Holding & Global"),
           h(
             "nav",
             { className: "of-nav" },
             renderNavBtn("holding", "Conselho (Board)", pendingApprovals > 0 ? String(pendingApprovals) : void 0, pendingApprovals > 0 ? "warn" : void 0),
-            renderNavBtn("inbox", PT_BR.nav.inbox, inboxCount > 0 ? String(inboxCount) : void 0, inboxCount > 0 ? "warn" : void 0)
+            renderNavBtn("inbox", PT_BR.nav.inbox, inboxCount > 0 ? String(inboxCount) : void 0, inboxCount > 0 ? "warn" : void 0),
+            renderNavBtn("costs", "Uso & Custos"),
+            renderNavBtn("automations", PT_BR.nav.automations)
           ),
           h("div", { className: "of-nav-group-label" }, "Empresas · Workspaces"),
           h(
             "nav",
             { className: "of-nav" },
-            workspaces.map(
-              (w) => h(
+            workspaces.map((w) => {
+              const isSelectedEmpresa = !isGlobalView && tenant === w.slug;
+              return h(
                 "button",
                 {
                   key: w.slug,
                   type: "button",
                   className: "of-nav-btn",
-                  "data-active": tenant === w.slug ? "true" : "false",
+                  "data-active": isSelectedEmpresa ? "true" : "false",
                   onClick: () => {
                     setTenant(w.slug);
-                    if (tab === "holding") setTab("overview");
+                    if (GLOBAL_TABS.has(tab)) setTab("overview");
                   }
                 },
                 h(
                   "span",
-                  { style: { display: "inline-flex", alignItems: "center", gap: "6px", overflow: "hidden" } },
-                  h("span", { className: "of-dot", "data-tone": w.estagio === "operacional" ? "done" : "idle" }),
+                  { style: { display: "inline-flex", alignItems: "center", gap: "7px", overflow: "hidden" } },
+                  h("span", { className: "of-project-tile", style: { width: "18px", height: "18px", fontSize: "10px" } }, w.nome.charAt(0).toUpperCase()),
                   h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, w.nome)
                 ),
                 w.agentesInfo && h("span", { className: "of-nav-badge" }, w.agentesInfo)
-              )
-            )
-          ),
-          h("div", { className: "of-nav-group-label" }, `Fábrica · ${tenant}`),
-          h(
-            "nav",
-            { className: "of-nav" },
-            renderNavBtn("overview", PT_BR.nav.overview),
-            renderNavBtn("board", PT_BR.nav.board, String(status.backlog.length + status.inProgress.length)),
-            renderNavBtn("floor", "Andar 3D", String(liveCrew.filter((a) => a.running).length))
-          ),
-          h("div", { className: "of-nav-group-label" }, "Operação"),
-          h(
-            "nav",
-            { className: "of-nav" },
-            renderNavBtn("costs", PT_BR.nav.costs),
-            renderNavBtn("vision", "Canvas / Visão"),
-            renderNavBtn("agents", PT_BR.nav.agents, abaixoMinimoCount > 0 ? `⚠ ${abaixoMinimoCount}` : void 0, abaixoMinimoCount > 0 ? "danger" : void 0),
-            renderNavBtn("automations", PT_BR.nav.automations),
-            renderNavBtn("settings", PT_BR.nav.settings)
+              );
+            })
           ),
           opts.onOpenClassicCockpit && h(
             "button",
@@ -48821,19 +49218,44 @@ function createFactoryAppComponent(ctx, opts = {}) {
             "Control Room clássico"
           )
         ),
-        // Área principal em tela cheia (sem painel lateral redundante — usa DM nativa do Buzz)
+        // Área principal em tela cheia: Header + Abas Horizontais da Empresa (1:1 CodeDen)
         h(
           "div",
           { className: "of-workspace" },
           h(
             "header",
             { className: "of-page-header" },
-            h("strong", { style: { fontSize: "13.5px" } }, tab === "vision" ? "Canvas / Visão" : tab === "floor" ? "Andar 3D" : PT_BR.nav[tab] || PT_BR.appTitle),
-            h("span", { className: "of-mono of-muted" }, `/ ${tenant}`),
+            isGlobalView ? h(
+              "div",
+              { style: { display: "inline-flex", alignItems: "center", gap: "8px" } },
+              h("strong", { style: { fontSize: "14px" } }, tab === "holding" ? "Conselho da Holding (Board)" : tab === "costs" ? "Uso & Custos · Holding" : PT_BR.nav[tab] || PT_BR.appTitle),
+              h("span", { className: "of-mono of-muted" }, "· Cortexx")
+            ) : h(
+              "div",
+              { style: { display: "inline-flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
+              h("span", { className: "of-project-tile" }, empresaNome.charAt(0).toUpperCase()),
+              h("strong", { style: { fontSize: "14px" } }, empresaNome),
+              h("span", { className: "of-mono of-muted", style: { fontSize: "11px" } }, `repo: ${empresaRepo}`),
+              h(
+                "span",
+                { className: "of-pill", "data-tone": status.killSwitch ? "failed" : "done" },
+                status.killSwitch ? "Kill Switch ativo" : PT_BR.modes[status.mode] || status.mode
+              )
+            ),
             h(
               "div",
-              { style: { marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: "6px" } },
-              h(
+              { style: { marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: "6px", flexWrap: "wrap" } },
+              !isGlobalView && h(
+                "button",
+                {
+                  type: "button",
+                  className: "of-btn",
+                  "data-variant": tab === "floor" ? "primary" : "ghost",
+                  onClick: () => setTab(tab === "floor" ? "overview" : "floor")
+                },
+                `Andar 3D (${tenantTotalAgentsCount})`
+              ),
+              !isGlobalView && h(
                 "button",
                 {
                   type: "button",
@@ -48850,11 +49272,9 @@ function createFactoryAppComponent(ctx, opts = {}) {
                   "aria-label": "Selecionar agente para DM no Buzz",
                   value: dmAgentKey,
                   onChange: (e) => setDmAgentKey(e.target.value),
-                  style: { width: "auto", maxWidth: "200px", padding: "4px 8px", fontSize: "11.5px" }
+                  style: { width: "auto", maxWidth: "210px", padding: "4px 8px", fontSize: "11.5px" }
                 },
-                liveCrew.length > 0 ? liveCrew.map(
-                  (a) => h("option", { key: a.key, value: a.key }, `${a.name}${a.running ? " ●" : ""}`)
-                ) : h("option", { value: "" }, "OrgFy Bento (COO)")
+                dmPool.length > 0 ? dmPool.map((a) => h("option", { key: a.key, value: a.key }, a.label)) : h("option", { value: "" }, ((_e = status.tenantManifest) == null ? void 0 : _e.coo) || "OrgFy Bento (COO)")
               ),
               h(
                 "button",
@@ -48870,6 +49290,26 @@ function createFactoryAppComponent(ctx, opts = {}) {
             ),
             toast && h("span", { className: "of-pill", "data-tone": "done" }, toast),
             error2 && !toast && h("span", { className: "of-pill", "data-tone": "failed" }, `Aviso: ${error2}`)
+          ),
+          // Barra de Abas Horizontais da Empresa (igual ao CodeDen ProjectPage!)
+          !isGlobalView && h(
+            "div",
+            { className: "of-project-tabs", role: "tablist", "aria-label": `Navegação de ${empresaNome}` },
+            projectTabs.map(
+              (pt) => h(
+                "button",
+                {
+                  key: pt.id,
+                  type: "button",
+                  role: "tab",
+                  className: "of-project-tab",
+                  "data-active": tab === pt.id ? "true" : "false",
+                  onClick: () => setTab(pt.id)
+                },
+                h("span", null, pt.label),
+                pt.badge && h("span", { className: "of-nav-badge", "data-tone": pt.tone }, pt.badge)
+              )
+            )
           ),
           h(
             "div",
@@ -48918,6 +49358,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
                 selectedAgentKey,
                 onSelectAgentKey: setSelectedAgentKey,
                 onSelectItem: setSelectedItem,
+                onOpenAgentDm: handleOpenAgentDmInBuzz,
                 onRefresh: () => refresh(tenant),
                 loading,
                 Floor3D
@@ -48925,10 +49366,12 @@ function createFactoryAppComponent(ctx, opts = {}) {
                 h,
                 tab,
                 tenant,
+                holding,
                 onSelectTenant: (t) => {
                   setTenant(t);
                   setTab("overview");
                 },
+                onOpenAgentDm: handleOpenAgentDmInBuzz,
                 status,
                 liveCrew,
                 onSelectItem: setSelectedItem,
@@ -50902,7 +51345,7 @@ export {
   ORGFY_FAILOVER_REQUEST_EVENT,
   PT_BR,
   SVG,
-  TENANTS$1 as TENANTS,
+  TENANTS,
   THEME,
   VERIFIED_TOOLCALL_FAILOVER_CHAIN,
   apply,

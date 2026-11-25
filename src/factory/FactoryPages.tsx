@@ -1,19 +1,21 @@
 // Adaptado de CodeDen (MIT) commit b0b2a5a: apps/web/src/routes/inbox.tsx, reports/index.tsx, automations.tsx, agents.tsx, vision.tsx, components/factory/autonomy-dialog.tsx, limits-editor.tsx
-// Páginas secundárias fiéis ao CodeDen: Holding, Inbox, Custos, Automações, Agentes (com eval R5.1 < 8/10 em vermelho), Visão e Configurações (Autonomy + LimitsEditor).
+// Páginas secundárias 100% adaptadas ao motor OrgFy: Conselho (Board), Inbox, Uso & Custos, Automações, Agentes por Empresa (com papel, modelo vivo e DM ↗), Canvas / Visão e Configurações.
 
 import type { AutonomyMode, FactoryStatusPayload, FactoryWorkItem } from "./factory-adapter";
 import type { LiveCrewAgent } from "./FactoryBoardAndFloor";
+import type { HoldingControlPlaneSnapshot } from "../services/holding-service";
 import { PT_BR } from "../i18n/pt-BR";
 
 export interface FactorySecondaryPagesProps {
   h: any;
   tab: "holding" | "inbox" | "costs" | "automations" | "agents" | "vision" | "settings";
   tenant: string;
+  holding: HoldingControlPlaneSnapshot | null;
   onSelectTenant: (t: string) => void;
+  onOpenAgentDm?: (agent: { key?: string; pubkey?: string; name?: string }) => void;
   status: FactoryStatusPayload;
   liveCrew: LiveCrewAgent[];
   onSelectItem: (item: FactoryWorkItem) => void;
-  // Estados de filtros/abas internas
   inboxFilter: "all" | "asks" | "reviews" | "problems";
   setInboxFilter: (f: "all" | "asks" | "reviews" | "problems") => void;
   costRange: "7d" | "30d" | "90d";
@@ -22,7 +24,6 @@ export interface FactorySecondaryPagesProps {
   setAutoTab: (t: "automations" | "runs" | "templates") => void;
   agentTab: "eval" | "memory" | "skills" | "mcp" | "hooks";
   setAgentTab: (t: "eval" | "memory" | "skills" | "mcp" | "hooks") => void;
-  // Configurações reais (controle-<tenant>.json)
   settingsForm: {
     mode: AutonomyMode;
     autoMerge: boolean;
@@ -39,11 +40,7 @@ export interface FactorySecondaryPagesProps {
   onOpenChannelInBuzz?: () => void;
 }
 
-const TENANTS = [
-  { id: "orgfy", name: "OrgFy Core (Engenharia & Método)", desc: "Esteira determinística principal, CI 7/7 e governança L-01/L-22." },
-  { id: "lumen-iptv", name: "Lumen IPTV", desc: "Operação multi-tenant ativa na Holding Cortexx." },
-  { id: "saas-tributario", name: "SaaS Tributário", desc: "Empresa planejada no portfólio da Holding." },
-];
+const CHART_COLORS = ["var(--chart-2)", "var(--chart-1)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"];
 
 const AUTONOMY_MODES: Array<{
   id: AutonomyMode;
@@ -64,8 +61,8 @@ const AUTONOMY_MODES: Array<{
   {
     id: "assisted",
     label: "Assistido",
-    summary: "Você, o PM e automações encontram trabalho; você revisa e faz merge de cada PR.",
-    finds: "Você, PM e automações",
+    summary: "Você, o COO e automações encontram trabalho; você revisa e faz merge de cada PR.",
+    finds: "Você, COO e automações",
     merges: "Você",
     experimental: false,
   },
@@ -80,19 +77,28 @@ const AUTONOMY_MODES: Array<{
   {
     id: "dark_factory",
     label: "Dark Factory",
-    summary: "Fábrica de Software + Oráculo agendado revisando o app contra docs/VISION.md e abrindo issues.",
+    summary: "Fábrica de Software + Oráculo agendado revisando o workspace contra Canvas/PROJECT.md e abrindo issues.",
     finds: "Oráculo, você e confiáveis",
     merges: "Você (ou auto-merge)",
     experimental: true,
   },
 ];
 
+function fmtTokens(n: number | null | undefined): string {
+  if (typeof n !== "number" || !Number.isFinite(n)) return PT_BR.labels.unavailable;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
+  return String(n);
+}
+
 export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
   const {
     h,
     tab,
     tenant,
+    holding,
     onSelectTenant,
+    onOpenAgentDm,
     status,
     liveCrew,
     onSelectItem,
@@ -110,46 +116,134 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
     onSelectModeQuick,
   } = props;
 
-  // ── 1. HOLDING ──
+  // ── 1. CONSELHO DA HOLDING (BOARD) — 100% REAL DE empresas/board.json + empresas/*.json ──
   if (tab === "holding") {
+    const empresas = holding?.empresas || [];
+    const boardAreas = holding?.conselho || [];
+    const approvals = holding?.approvals || [];
+
     return h(
       "div",
-      { style: { display: "flex", flexDirection: "column", gap: "12px" } },
+      { style: { display: "flex", flexDirection: "column", gap: "14px" } },
       h(
         "div",
-        { className: "of-card-pad" },
-        h("div", { style: { fontSize: "15px", fontWeight: 700 } }, "Holding Cortexx · Portfólio Multi-Tenant"),
-        h("div", { className: "of-muted", style: { marginTop: "2px" } }, "Selecione uma empresa para abrir sua Fábrica (dados vivos de fabrica_status.py --empresa <tenant>).")
+        { className: "of-card-pad", style: { display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "10px" } },
+        h(
+          "div",
+          null,
+          h("div", { style: { fontSize: "15px", fontWeight: 700 } }, "Conselho da Holding Cortexx · Portfólio Multi-Empresa"),
+          h(
+            "div",
+            { className: "of-muted", style: { marginTop: "3px" } },
+            `Fundador: ${holding?.fundador?.nome || "Helton Fraga"} · CEO Holding: ${holding?.ceoHolding?.nome || "OrgFy Iris"} · ${empresas.length} empresas no portfólio · ${approvals.filter((a) => a.status === "pendente").length} aprovação(ões) pendente(s)`
+          )
+        ),
+        onOpenAgentDm &&
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-variant": "primary",
+              onClick: () => onOpenAgentDm({ name: holding?.ceoHolding?.nome || "OrgFy Iris", pubkey: holding?.ceoHolding?.pubkey || "" }),
+            },
+            `Falar com ${holding?.ceoHolding?.nome || "OrgFy Iris"} ↗`
+          )
       ),
       h(
         "div",
         { className: "of-grid-3" },
-        TENANTS.map((t) =>
+        empresas.length === 0
+          ? h("div", { className: "of-card-pad of-muted" }, "Carregando manifestos de empresas/*.json...")
+          : empresas.map((emp) =>
+              h(
+                "div",
+                {
+                  key: emp.slug,
+                  className: "of-card-pad",
+                  style: {
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "10px",
+                    borderColor: tenant === emp.slug ? "var(--primary)" : undefined,
+                  },
+                },
+                h(
+                  "div",
+                  { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" } },
+                  h(
+                    "div",
+                    { style: { display: "inline-flex", alignItems: "center", gap: "8px" } },
+                    h("span", { className: "of-project-tile" }, (emp.workspaceBuzz || emp.nome).charAt(0).toUpperCase()),
+                    h("strong", { style: { fontSize: "13.5px" } }, emp.workspaceBuzz || emp.nome)
+                  ),
+                  h("span", { className: "of-pill", "data-tone": emp.estagio === "operacional" ? "done" : "idle" }, emp.estagio.toUpperCase())
+                ),
+                h(
+                  "div",
+                  { className: "of-muted", style: { fontSize: "11px" } },
+                  `Liderança: ${emp.ceoEmpresa || "OrgFy Iris"} · Canal: ${emp.canal ? emp.canal.slice(0, 8) + "…" : "pendente"}`
+                ),
+                h(
+                  "div",
+                  { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" } },
+                  h(
+                    "div",
+                    { className: "of-surface", style: { padding: "7px 9px" } },
+                    h("div", { className: "of-meter-label" }, "Agentes"),
+                    h("div", { className: "of-num", style: { fontSize: "14px", fontWeight: 700, marginTop: "2px" } }, `${emp.agentesProntos}/${emp.agentesTotal}`)
+                  ),
+                  h(
+                    "div",
+                    { className: "of-surface", style: { padding: "7px 9px" } },
+                    h("div", { className: "of-meter-label" }, "Teto/dia"),
+                    h("div", { className: "of-num", style: { fontSize: "14px", fontWeight: 700, marginTop: "2px" } }, `${fmtTokens(emp.budgetTokensDiario)} tok`)
+                  )
+                ),
+                emp.pendenciasOnboarding && emp.pendenciasOnboarding.length > 0
+                  ? h(
+                      "div",
+                      { className: "of-surface", style: { padding: "7px 9px", borderColor: "rgba(245,158,11,0.35)", fontSize: "11px", color: "var(--status-waiting)" } },
+                      emp.pendenciasOnboarding.slice(0, 2).map((p: string, i: number) => h("div", { key: i }, `• ${p}`))
+                    )
+                  : h("div", { style: { fontSize: "11px", color: "var(--status-done)" } }, "✓ Manifesto, canal e chaves operacionais validados."),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "of-btn",
+                    "data-variant": tenant === emp.slug ? "primary" : undefined,
+                    style: { marginTop: "auto", justifyContent: "center" },
+                    onClick: () => onSelectTenant(emp.slug),
+                  },
+                  `Abrir Fábrica de ${emp.workspaceBuzz || emp.nome} →`
+                )
+              )
+            )
+      ),
+      boardAreas.length > 0 &&
+        h(
+          "div",
+          { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "8px" } },
+          h("div", { className: "of-meter-label" }, "Conselho Funcional (empresas/board.json)"),
           h(
-            "button",
-            {
-              key: t.id,
-              type: "button",
-              className: "of-card-pad",
-              style: {
-                textAlign: "left",
-                cursor: "pointer",
-                color: "var(--foreground)",
-                borderColor: tenant === t.id ? "rgba(245,158,11,0.55)" : undefined,
-              },
-              onClick: () => onSelectTenant(t.id),
-            },
-            h(
-              "div",
-              { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" } },
-              h("strong", { style: { fontSize: "13.5px" } }, t.name),
-              tenant === t.id && h("span", { className: "of-pill", "data-tone": "warn" }, "Ativo")
-            ),
-            h("div", { className: "of-muted", style: { marginTop: "6px", lineHeight: 1.4 } }, t.desc),
-            h("div", { className: "of-mono of-muted", style: { marginTop: "10px", fontSize: "10.5px" } }, `tenant: ${t.id}`)
+            "div",
+            { className: "of-grid-2" },
+            boardAreas.map((area) =>
+              h(
+                "div",
+                { key: area.id, className: "of-surface", style: { padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center" } },
+                h(
+                  "div",
+                  null,
+                  h("div", { style: { fontSize: "12.5px", fontWeight: 600 } }, area.area),
+                  h("div", { className: "of-muted", style: { fontSize: "11px" } }, area.responsavel)
+                ),
+                h("span", { className: "of-pill", "data-tone": area.status === "ativo" ? "done" : "idle" }, area.status.toUpperCase())
+              )
+            )
           )
         )
-      )
     );
   }
 
@@ -224,12 +318,14 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
     );
   }
 
-  // ── 3. CUSTOS (routes/reports/index.tsx) ──
+  // ── 3. USO & CUSTOS (1:1 CodeDen Usage & Cost adaptado a kpis-esteira.json + orçamento por empresa) ──
   if (tab === "costs") {
     const economia = status.kpis?.economia || null;
     const qualidade = status.kpis?.qualidade || null;
     const porModelo = Array.isArray(economia?.por_modelo) ? economia.por_modelo : [];
+    const totalCost = porModelo.reduce((acc: number, r: any) => acc + Number(r.custo_usd || 0), 0);
     const maxCost = Math.max(0.01, ...porModelo.map((r: any) => Number(r.custo_usd || 0)));
+    const empresas = holding?.empresas || [];
 
     return h(
       "div",
@@ -239,67 +335,97 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
         { style: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" } },
         h(
           "div",
-          { className: "of-segmented" },
-          (["7d", "30d", "90d"] as const).map((r) =>
-            h(
-              "button",
-              {
-                key: r,
-                type: "button",
-                className: "of-seg-btn",
-                "data-active": costRange === r ? "true" : "false",
-                onClick: () => setCostRange(r),
-              },
-              r
+          { style: { display: "inline-flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
+          h(
+            "div",
+            { className: "of-segmented" },
+            (["7d", "30d", "90d"] as const).map((r) =>
+              h(
+                "button",
+                {
+                  key: r,
+                  type: "button",
+                  className: "of-seg-btn",
+                  "data-active": costRange === r ? "true" : "false",
+                  onClick: () => setCostRange(r),
+                },
+                r
+              )
             )
-          )
+          ),
+          h("span", { className: "of-pill", "data-tone": "done" }, `Empresa em foco: ${status.tenantManifest?.nome || tenant}`)
         ),
         h("span", { className: "of-muted" }, `Fonte real: kpis-esteira.json (${status.kpis?.gerado_em || PT_BR.labels.unavailable})`)
       ),
       h(
         "div",
         { className: "of-surface", style: { padding: "8px 12px", fontSize: "11.5px", color: "var(--muted-foreground)" } },
-        "Valores equivalentes de API calculados diretamente do kpis-esteira.json (sem dados sintéticos; campos ausentes aparecem como indisponível)."
+        "Custos equivalentes de API calculados a partir de kpis-esteira.json (sem dados sintéticos; modelos gratuitos/assinatura aparecem com $0.00 quando sem cobrança por token)."
       ),
-      // 5 KPIs principais (UsageTotals)
+      // 5 KPIs principais (UsageTotals do CodeDen)
       h(
         "div",
         { className: "of-stats-6" },
         [
           {
-            label: "Custo amostra (USD)",
+            label: "Custo equivalente API",
             val: typeof economia?.custo_usd_total_amostra === "number" ? `$${economia.custo_usd_total_amostra.toFixed(2)}` : PT_BR.labels.unavailable,
+            sub: `gasto hoje: $${status.spendToday.usd.toFixed(2)}`,
           },
           {
             label: "Tokens (7d)",
-            val: typeof economia?.tokens_7d === "number" ? economia.tokens_7d.toLocaleString("pt-BR") : PT_BR.labels.unavailable,
+            val: fmtTokens(economia?.tokens_7d),
+            sub: `orçamento/dia: ${fmtTokens(status.tenantManifest?.budgetTokensDiario)}`,
           },
           {
-            label: "Cache hit",
+            label: "Cache hit rate",
             val: typeof economia?.cache_hit_ratio_pct === "number" ? `${economia.cache_hit_ratio_pct.toFixed(1)}%` : PT_BR.labels.unavailable,
+            sub: "reaproveitamento de contexto",
           },
           {
-            label: "Gasto hoje",
-            val: `$${status.spendToday.usd.toFixed(2)}`,
+            label: "Merges (7d)",
+            val: String(status.stats.merged7d),
+            sub: `hoje: ${status.mergesToday}`,
           },
           {
             label: "FPY real",
             val: typeof qualidade?.fpy_real_pct === "number" ? `${qualidade.fpy_real_pct.toFixed(1)}%` : PT_BR.labels.unavailable,
+            sub: `CPI mín: ${status.tenantManifest?.cpiMinimo ?? 0.85}`,
           },
         ].map((k) =>
           h(
             "div",
-            { key: k.label, className: "of-card-pad", style: { padding: "10px 12px" } },
+            { key: k.label, className: "of-card-pad", style: { padding: "11px 13px" } },
             h("div", { className: "of-meter-label" }, k.label),
-            h("div", { className: "of-num", style: { fontSize: "19px", fontWeight: 700, marginTop: "4px" } }, k.val)
+            h("div", { className: "of-num", style: { fontSize: "20px", fontWeight: 700, marginTop: "4px" } }, k.val),
+            h("div", { className: "of-muted", style: { fontSize: "10.5px", marginTop: "2px" } }, k.sub)
           )
         )
       ),
-      // Tabela Breakdown por modelo com barras horizontais
+      // Barra empilhada visual de participação por modelo + Tabela Breakdown (1:1 CodeDen SpendCard)
       h(
         "div",
-        { className: "of-card-pad" },
-        h("div", { style: { fontSize: "13px", fontWeight: 700, marginBottom: "10px" } }, "Quebra por modelo (kpis-esteira.json)"),
+        { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "12px" } },
+        h(
+          "div",
+          { style: { display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" } },
+          h("div", { style: { fontSize: "13.5px", fontWeight: 700 } }, "Distribuição de gasto por modelo (kpis-esteira.json)"),
+          h("span", { className: "of-muted" }, `${porModelo.length} modelos na amostra`)
+        ),
+        porModelo.length > 0 &&
+          h(
+            "div",
+            { style: { display: "flex", height: "14px", borderRadius: "6px", overflow: "hidden", background: "var(--muted)", gap: "1px" } },
+            porModelo.slice(0, 8).map((row: any, idx: number) => {
+              const usd = Number(row.custo_usd || 0);
+              const pct = totalCost > 0 ? Math.max(1, (usd / totalCost) * 100) : 100 / Math.max(1, porModelo.length);
+              return h("div", {
+                key: `${row.modelo || idx}`,
+                title: `${row.modelo}: $${usd.toFixed(3)} (${pct.toFixed(1)}%)`,
+                style: { width: `${pct}%`, background: CHART_COLORS[idx % CHART_COLORS.length] },
+              });
+            })
+          ),
         porModelo.length === 0
           ? h("div", { className: "of-muted" }, PT_BR.labels.unavailable)
           : h(
@@ -308,7 +434,7 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
               h(
                 "thead",
                 null,
-                h("tr", null, h("th", null, "Modelo"), h("th", null, "Chamadas"), h("th", null, "Custo USD"), h("th", null, "Participação"), h("th", null, "Cache"))
+                h("tr", null, h("th", null, "Modelo"), h("th", null, "Participação"), h("th", null, "%"), h("th", null, "Custo USD"), h("th", null, "Chamadas"), h("th", null, "Cache"))
               ),
               h(
                 "tbody",
@@ -316,28 +442,62 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                 porModelo.slice(0, 15).map((row: any, idx: number) => {
                   const usd = Number(row.custo_usd || 0);
                   const w = Math.min(100, (usd / maxCost) * 100);
+                  const sharePct = totalCost > 0 ? (usd / totalCost) * 100 : 0;
+                  const color = CHART_COLORS[idx % CHART_COLORS.length];
                   return h(
                     "tr",
                     { key: `${row.modelo || idx}` },
-                    h("td", { className: "of-mono" }, String(row.modelo || PT_BR.labels.unavailable)),
-                    h("td", { className: "of-mono of-num" }, String(row.requisicoes ?? row.chamadas ?? PT_BR.labels.unavailable)),
-                    h("td", { className: "of-mono of-num" }, typeof row.custo_usd === "number" ? `$${usd.toFixed(3)}` : PT_BR.labels.unavailable),
                     h(
                       "td",
-                      { style: { width: "160px" } },
-                      h("div", { className: "of-bar-track", style: { marginTop: 0 } }, h("div", { className: "of-bar-fill", style: { width: `${w}%`, background: "var(--chart-1)" } }))
+                      { className: "of-mono", style: { display: "flex", alignItems: "center", gap: "7px" } },
+                      h("span", { style: { width: "8px", height: "8px", borderRadius: "2px", background: color, flexShrink: 0 } }),
+                      String(row.modelo || PT_BR.labels.unavailable)
                     ),
+                    h(
+                      "td",
+                      { style: { width: "170px" } },
+                      h("div", { className: "of-bar-track", style: { marginTop: 0, height: "6px" } }, h("div", { className: "of-bar-fill", style: { width: `${w}%`, background: color } }))
+                    ),
+                    h("td", { className: "of-mono of-num of-muted" }, sharePct > 0 && sharePct < 1 ? "<1%" : `${Math.round(sharePct)}%`),
+                    h("td", { className: "of-mono of-num" }, typeof row.custo_usd === "number" ? `$${usd.toFixed(2)}` : PT_BR.labels.unavailable),
+                    h("td", { className: "of-mono of-num" }, String(row.requisicoes ?? row.chamadas ?? PT_BR.labels.unavailable)),
                     h("td", { className: "of-mono of-num" }, typeof row.cache_hit_pct === "number" ? `${row.cache_hit_pct.toFixed(1)}%` : PT_BR.labels.unavailable)
                   );
                 })
               )
             )
-      )
+      ),
+      empresas.length > 0 &&
+        h(
+          "div",
+          { className: "of-card-pad" },
+          h("div", { style: { fontSize: "13px", fontWeight: 700, marginBottom: "8px" } }, "Tetos de orçamento por empresa (empresas/*.json)"),
+          h(
+            "table",
+            { className: "of-table" },
+            h("thead", null, h("tr", null, h("th", null, "Empresa"), h("th", null, "Estágio"), h("th", null, "Agentes"), h("th", null, "Teto diário de tokens"))),
+            h(
+              "tbody",
+              null,
+              empresas.map((e) =>
+                h(
+                  "tr",
+                  { key: e.slug },
+                  h("td", { style: { fontWeight: 600 } }, e.workspaceBuzz || e.nome),
+                  h("td", null, h("span", { className: "of-pill", "data-tone": e.estagio === "operacional" ? "done" : "idle" }, e.estagio)),
+                  h("td", { className: "of-mono" }, `${e.agentesProntos}/${e.agentesTotal}`),
+                  h("td", { className: "of-mono" }, `${fmtTokens(e.budgetTokensDiario)} tokens/dia`)
+                )
+              )
+            )
+          )
+        )
     );
   }
 
-  // ── 4. AUTOMAÇÕES (routes/automations.tsx) ──
+  // ── 4. AUTOMAÇÕES (100% REAIS DO ORGFY: LaunchAgents + Workflow Buzz + CI Runner + Probes) ──
   if (tab === "automations") {
+    const tm = status.tenantManifest;
     return h(
       "div",
       { style: { display: "flex", flexDirection: "column", gap: "12px" } },
@@ -345,9 +505,9 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
         "div",
         { className: "of-segmented", style: { width: "fit-content" } },
         ([
-          { id: "automations", label: "Automações" },
-          { id: "runs", label: "Execuções" },
-          { id: "templates", label: "Templates" },
+          { id: "automations", label: "Processos & Workflows" },
+          { id: "runs", label: "CI & Probes da Empresa" },
+          { id: "templates", label: "Governança & Regras" },
         ] as const).map((t) =>
           h(
             "button",
@@ -362,76 +522,185 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
           )
         )
       ),
-      h(
-        "div",
-        { className: "of-grid-2" },
-        h(
-          "div",
-          { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-          h("div", { style: { fontSize: "13.5px", fontWeight: 700 } }, "Processos agendados (máx. 2 LaunchAgents)"),
-          h(
+      autoTab === "runs"
+        ? h(
             "div",
-            { className: "of-surface", style: { padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" } },
+            { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+            h("div", { style: { fontSize: "13.5px", fontWeight: 700 } }, `CI Runner & Probes Caixa-Preta · ${tm?.nome || tenant}`),
             h(
               "div",
-              null,
-              h("div", { style: { fontWeight: 600, fontSize: "12.5px" } }, status.launchAgent || "com.orgfy.esteira-minima"),
-              h("div", { className: "of-muted" }, "Coordenador da esteira (runner fixado em tag v13.0.0)")
-            ),
-            h("span", { className: "of-pill", "data-tone": status.coordenador === "ativo" ? "done" : "failed" }, status.coordenador)
-          ),
-          h(
-            "div",
-            { className: "of-surface", style: { padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" } },
-            h(
-              "div",
-              null,
-              h("div", { style: { fontWeight: 600, fontSize: "12.5px" } }, "Rotina CEO (Workflow Buzz Kind 30620)"),
-              h("div", { className: "of-muted" }, "YAML: .buzz/workflows/orgfy-rotina-ceo.yaml · Canal #esteira-orgfy")
-            ),
-            h("span", { className: "of-pill", "data-tone": "waiting" }, "Configurar no Buzz Desktop")
+              { className: "of-grid-2" },
+              h(
+                "div",
+                { className: "of-surface", style: { padding: "10px 12px" } },
+                h("div", { className: "of-meter-label" }, "CI Runner"),
+                h("div", { style: { fontWeight: 700, marginTop: "4px" } }, tm?.ciModo || PT_BR.labels.unavailable),
+                h("div", { className: "of-mono of-muted", style: { marginTop: "4px" } }, `cmd: ${tm?.ciCmd || "—"}`)
+              ),
+              h(
+                "div",
+                { className: "of-surface", style: { padding: "10px 12px" } },
+                h("div", { className: "of-meter-label" }, "Probes Caixa-Preta no Gate"),
+                h("div", { style: { fontWeight: 700, marginTop: "4px" } }, tm?.probesObrigatorios ? `Obrigatórios (${tm.probesCount})` : "Opcional neste tenant"),
+                h("div", { className: "of-muted", style: { marginTop: "4px" } }, `Modo de workers: ${tm?.modoExecucao || "efemero_headless"}`)
+              )
+            )
           )
-        ),
-        h(
-          "div",
-          { className: "of-card-pad" },
-          h("div", { style: { fontSize: "13.5px", fontWeight: 700, marginBottom: "8px" } }, "Regras de operação"),
-          h("div", { className: "of-muted", style: { lineHeight: 1.55 } }, "Os processos respeitam imediatamente o Kill Switch e o modo Dreno definidos em controle-<tenant>.json (Fase 1).")
-        )
-      )
+        : h(
+            "div",
+            { className: "of-grid-2" },
+            h(
+              "div",
+              { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+              h("div", { style: { fontSize: "13.5px", fontWeight: 700 } }, "Processos agendados (máx. 2 LaunchAgents)"),
+              h(
+                "div",
+                { className: "of-surface", style: { padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" } },
+                h(
+                  "div",
+                  null,
+                  h("div", { style: { fontWeight: 600, fontSize: "12.5px" } }, status.launchAgent || "com.orgfy.esteira-minima"),
+                  h("div", { className: "of-muted" }, "Coordenador da esteira (respeita Kill Switch e Dreno de controle-<tenant>.json)")
+                ),
+                h("span", { className: "of-pill", "data-tone": status.coordenador === "ativo" ? "done" : "failed" }, status.coordenador)
+              ),
+              h(
+                "div",
+                { className: "of-surface", style: { padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" } },
+                h(
+                  "div",
+                  null,
+                  h("div", { style: { fontWeight: 600, fontSize: "12.5px" } }, "Rotina CEO (Workflow Buzz Kind 30620)"),
+                  h("div", { className: "of-muted" }, "YAML: .buzz/workflows/orgfy-rotina-ceo.yaml · Canal #esteira-orgfy")
+                ),
+                h("span", { className: "of-pill", "data-tone": "waiting" }, "Nativo no Buzz")
+              )
+            ),
+            h(
+              "div",
+              { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "8px" } },
+              h("div", { style: { fontSize: "13.5px", fontWeight: 700 } }, "Regras determinísticas de operação"),
+              h("div", { className: "of-muted", style: { lineHeight: 1.55 } }, "• Kill Switch e Dreno em estado/controle-<tenant>.json interrompem novos despachos imediatamente."),
+              h("div", { className: "of-muted", style: { lineHeight: 1.55 } }, "• Failover de modelos é delegado exclusivamente ao NexusMind (evento orgfy.failover.requested)."),
+              h("div", { className: "of-muted", style: { lineHeight: 1.55 } }, "• Gate L-01 exige revisor independente por superfície (código, método, segurança, UI, arquitetura).")
+            )
+          )
     );
   }
 
-  // ── 5. AGENTES (routes/agents.tsx + PRD v15 §9 eval < 8/10 em vermelho) ──
+  // ── 5. AGENTES DA EMPRESA (100% REAL DE empresas/<tenant>.json × ctx.agents.snapshot() + DM ↗ + Eval R5.1) ──
   if (tab === "agents") {
+    const tenantAgents = status.tenantManifest?.agentes || [];
     const modelos = status.modelos || [];
+    const revisoresSurf = Object.entries(status.tenantManifest?.revisoresPorSuperficie || {});
+    const empresaNome = status.tenantManifest?.nome || tenant;
+
     return h(
       "div",
       { style: { display: "flex", flexDirection: "column", gap: "12px" } },
       h(
         "div",
-        { className: "of-segmented", style: { width: "fit-content" } },
-        ([
-          { id: "eval", label: `Eval & Modelos (${modelos.length})` },
-          { id: "memory", label: "Plantel ao vivo" },
-          { id: "skills", label: "Skills" },
-          { id: "mcp", label: "MCP (21 tools)" },
-          { id: "hooks", label: "Hooks" },
-        ] as const).map((t) =>
-          h(
-            "button",
-            {
-              key: t.id,
-              type: "button",
-              className: "of-seg-btn",
-              "data-active": agentTab === t.id ? "true" : "false",
-              onClick: () => setAgentTab(t.id),
-            },
-            t.label
+        { style: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" } },
+        h(
+          "div",
+          { className: "of-segmented", style: { width: "fit-content" } },
+          ([
+            { id: "memory", label: `Plantel ${empresaNome} (${tenantAgents.length})` },
+            { id: "eval", label: `Eval & Modelos R5.1 (${modelos.length})` },
+            { id: "skills", label: `Revisores L-01 (${revisoresSurf.length})` },
+            { id: "mcp", label: "MCP (21 tools)" },
+          ] as const).map((t) =>
+            h(
+              "button",
+              {
+                key: t.id,
+                type: "button",
+                className: "of-seg-btn",
+                "data-active": agentTab === t.id ? "true" : "false",
+                onClick: () => setAgentTab(t.id),
+              },
+              t.label
+            )
           )
+        ),
+        h(
+          "span",
+          { className: "of-muted" },
+          `Fonte: empresas/${tenant}.json × Buzz Desktop (${tenantAgents.filter((a) => a.inBuzz).length}/${tenantAgents.length} provisionados)`
         )
       ),
-      agentTab === "eval"
+      agentTab === "memory"
+        ? h(
+            "div",
+            { className: "of-card-pad" },
+            h("div", { style: { fontSize: "14px", fontWeight: 700, marginBottom: "4px" } }, `Agentes de ${empresaNome}`),
+            h("div", { className: "of-muted", style: { marginBottom: "10px" } }, "Cada agente abaixo vem do manifesto oficial desta empresa cruzado com o estado ao vivo no Buzz Desktop. Clique em DM ↗ para conversar na janela nativa do Buzz."),
+            tenantAgents.length === 0
+              ? h("div", { className: "of-muted" }, `Nenhum agente encontrado em empresas/${tenant}.json.`)
+              : h(
+                  "table",
+                  { className: "of-table" },
+                  h(
+                    "thead",
+                    null,
+                    h("tr", null, h("th", null, "Agente"), h("th", null, "Função & Papel"), h("th", null, "Modelo (Buzz)"), h("th", null, "Status"), h("th", null, "Ação"))
+                  ),
+                  h(
+                    "tbody",
+                    null,
+                    tenantAgents.map((a) =>
+                      h(
+                        "tr",
+                        { key: a.name },
+                        h(
+                          "td",
+                          { style: { fontWeight: 600 } },
+                          h(
+                            "span",
+                            { style: { display: "inline-flex", alignItems: "center", gap: "6px" } },
+                            h("span", { className: "of-dot", "data-tone": a.running ? "running" : a.inBuzz ? "done" : "idle" }),
+                            a.name
+                          )
+                        ),
+                        h(
+                          "td",
+                          null,
+                          h("div", { style: { fontSize: "12px" } }, a.funcao),
+                          h("div", { className: "of-mono of-muted", style: { fontSize: "10px" } }, `papel: ${a.papel} · paralelismo: ${a.parallelism}x`)
+                        ),
+                        h("td", { className: "of-mono" }, a.model),
+                        h(
+                          "td",
+                          null,
+                          h(
+                            "span",
+                            { className: "of-pill", "data-tone": a.running ? "running" : a.inBuzz ? "done" : "waiting" },
+                            a.running ? "Em execução" : a.inBuzz ? "No Buzz" : "A provisionar"
+                          )
+                        ),
+                        h(
+                          "td",
+                          null,
+                          onOpenAgentDm && a.pubkey
+                            ? h(
+                                "button",
+                                {
+                                  type: "button",
+                                  className: "of-btn",
+                                  "data-variant": "ghost",
+                                  style: { color: "var(--primary)", padding: "3px 8px" },
+                                  onClick: () => onOpenAgentDm({ key: a.agentKey, pubkey: a.pubkey, name: a.name }),
+                                },
+                                "DM ↗"
+                              )
+                            : h("span", { className: "of-muted" }, "—")
+                        )
+                      )
+                    )
+                  )
+                )
+          )
+        : agentTab === "eval"
         ? h(
             "div",
             { className: "of-card-pad" },
@@ -442,11 +711,7 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
               : h(
                   "table",
                   { className: "of-table" },
-                  h(
-                    "thead",
-                    null,
-                    h("tr", null, h("th", null, "Agente"), h("th", null, "Papel"), h("th", null, "Modelo"), h("th", null, "Tool call (R5.1)"))
-                  ),
+                  h("thead", null, h("tr", null, h("th", null, "Agente"), h("th", null, "Papel"), h("th", null, "Modelo"), h("th", null, "Tool call (R5.1)"))),
                   h(
                     "tbody",
                     null,
@@ -463,11 +728,7 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                           h(
                             "span",
                             { className: "of-pill", "data-tone": m.abaixo_minimo ? "failed" : m.toolcall_eval ? "done" : "idle" },
-                            m.toolcall_eval
-                              ? m.abaixo_minimo
-                                ? `${m.toolcall_eval} · ${PT_BR.labels.evalBelowMin}`
-                                : m.toolcall_eval
-                              : PT_BR.labels.unavailable
+                            m.toolcall_eval ? (m.abaixo_minimo ? `${m.toolcall_eval} · ${PT_BR.labels.evalBelowMin}` : m.toolcall_eval) : PT_BR.labels.unavailable
                           )
                         )
                       )
@@ -475,31 +736,33 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                   )
                 )
           )
-        : h(
+        : agentTab === "skills"
+        ? h(
             "div",
             { className: "of-card-pad" },
-            h("div", { style: { fontSize: "13.5px", fontWeight: 700, marginBottom: "8px" } }, `Plantel ao vivo (${liveCrew.length} agentes no Buzz)`),
-            liveCrew.length === 0
-              ? h("div", { className: "of-muted" }, "Nenhum agente retornado por ctx.agents.snapshot().")
+            h("div", { style: { fontSize: "14px", fontWeight: 700, marginBottom: "6px" } }, `Matriz de Revisores Independentes (L-01) · ${empresaNome}`),
+            h("div", { className: "of-muted", style: { marginBottom: "10px" } }, "Regra L-01: o executor nunca pode revisar a própria entrega. Cada superfície tem revisor titular definido no manifesto da empresa."),
+            revisoresSurf.length === 0
+              ? h("div", { className: "of-muted" }, PT_BR.labels.unavailable)
               : h(
-                  "table",
-                  { className: "of-table" },
-                  h("thead", null, h("tr", null, h("th", null, "Agente"), h("th", null, "Provider"), h("th", null, "Modelo"), h("th", null, "Estado"))),
-                  h(
-                    "tbody",
-                    null,
-                    liveCrew.map((a) =>
-                      h(
-                        "tr",
-                        { key: a.key },
-                        h("td", { style: { fontWeight: 600 } }, a.name),
-                        h("td", { className: "of-mono of-muted" }, a.provider || "—"),
-                        h("td", { className: "of-mono" }, a.model),
-                        h("td", null, h("span", { className: "of-pill", "data-tone": a.running ? "running" : "idle" }, a.running ? "Ativo" : "Livre"))
-                      )
+                  "div",
+                  { className: "of-grid-3" },
+                  revisoresSurf.map(([superficie, revisor]) =>
+                    h(
+                      "div",
+                      { key: superficie, className: "of-surface", style: { padding: "10px 12px" } },
+                      h("div", { className: "of-meter-label" }, superficie),
+                      h("div", { style: { fontSize: "13px", fontWeight: 700, marginTop: "3px" } }, revisor)
                     )
                   )
                 )
+          )
+        : h(
+            "div",
+            { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "8px" } },
+            h("div", { style: { fontSize: "14px", fontWeight: 700 } }, "Unified Tool Registry · 21 Agent Tools MCP"),
+            h("div", { className: "of-muted" }, "Todas as sessões de agentes no Buzz recebem automaticamente as ferramentas determinísticas do OrgFy: orgfy_roster_live, orgfy_handoff_pack, orgfy_smart_dispatch, orgfy_card_create, orgfy_card_progress, orgfy_checkout_lock, orgfy_gate, orgfy_loop_radar, orgfy_session_stop e orgfy_model_failover."),
+            h("div", { className: "of-muted" }, `Total de agentes registrados globalmente no Buzz Desktop: ${liveCrew.length}.`)
           )
     );
   }
@@ -521,7 +784,7 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
         h(
           "div",
           null,
-          h("div", { style: { fontSize: "14.5px", fontWeight: 700 } }, `Canvas, Visão & Regras Injetadas · ${tenant}`),
+          h("div", { style: { fontSize: "14.5px", fontWeight: 700 } }, `Canvas, Visão & Regras Injetadas · ${status.tenantManifest?.nome || tenant}`),
           h("div", { className: "of-muted", style: { marginTop: "2px" } }, "Fontes reais do OrgFy: empresas/board.json (Conselho), PROJECT.md + AGENTS.md + Canvas do canal no Buzz (Workspace) e regras-probatorias.json + ctx.agents.addInstructions (Agentes).")
         ),
         props.onOpenChannelInBuzz &&
@@ -571,14 +834,12 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
         h(
           "section",
           { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-          h("div", { className: "of-meter-label" }, `2. Workspace & Canvas (${tenant})`),
+          h("div", { className: "of-meter-label" }, `2. Workspace & Canvas (${status.tenantManifest?.nome || tenant})`),
           papeis.length > 0 &&
             h(
               "div",
               { style: { display: "flex", flexWrap: "wrap", gap: "6px" } },
-              papeis.map(([papel, agente]) =>
-                h("span", { key: papel, className: "of-pill" }, `${papel}: ${agente}`)
-              )
+              papeis.map(([papel, agente]) => h("span", { key: papel, className: "of-pill" }, `${papel}: ${agente}`))
             ),
           h(
             "div",
@@ -639,14 +900,14 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
     );
   }
 
-  // ── 7. CONFIGURAÇÕES (autonomy-dialog.tsx + limits-editor.tsx) ──
+  // ── 7. CONFIGURAÇÕES (autonomy-dialog.tsx + limits-editor.tsx + governança do manifesto) ──
   return h(
     "div",
     { style: { display: "flex", flexDirection: "column", gap: "14px", maxWidth: "880px" } },
     h(
       "div",
       { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-      h("div", { style: { fontSize: "14px", fontWeight: 700 } }, "Modo de autonomia (Escada CodeDen)"),
+      h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Modo de autonomia · ${status.tenantManifest?.nome || tenant}`),
       h("div", { className: "of-muted" }, "Suba um degrau por vez. Áreas protegidas e regra L-01 sempre permanecem ativas."),
       h(
         "div",
@@ -663,8 +924,8 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                 textAlign: "left",
                 cursor: "pointer",
                 color: "var(--foreground)",
-                borderColor: settingsForm.mode === m.id ? "rgba(245,158,11,0.65)" : undefined,
-                background: settingsForm.mode === m.id ? "rgba(245,158,11,0.06)" : undefined,
+                borderColor: settingsForm.mode === m.id ? "var(--primary)" : undefined,
+                background: settingsForm.mode === m.id ? "var(--primary-soft)" : undefined,
               },
               onClick: () => {
                 setSettingsForm({ mode: m.id });
@@ -684,8 +945,6 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
         )
       )
     ),
-
-    // LimitsEditor completo gravando em controle-<tenant>.json
     h(
       "div",
       { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "12px" } },

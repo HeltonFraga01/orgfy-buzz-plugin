@@ -1,5 +1,5 @@
 // Adaptado de CodeDen (MIT) commit b0b2a5a: apps/web/src/components/factory-view/floor/floor-scene.tsx, roster.tsx, cards.tsx
-// Componente React que monta o motor 3D Three.js oficial do CodeDen (Workshop + Lookout isométrico) 1:1 dentro do Buzz Desktop.
+// Componente React que monta o motor 3D Three.js oficial do CodeDen (Workshop + Lookout isométrico) 1:1 isolado por empresa do OrgFy.
 
 import type { Context } from "@buzz/author";
 import type { FactoryStatusPayload, FactoryWorkItem as OrgfyWorkItem } from "../factory-adapter";
@@ -44,10 +44,24 @@ function adaptStatusFor3D(
   let pmSessionId: string | null = null;
   let scoutSessionId: string | null = null;
 
-  for (const agent of liveCrew) {
+  // Usa preferencialmente os agentes reais DAQUELA empresa (empresas/<tenant>.json × Buzz)
+  const tenantAgents = status.tenantManifest?.agentes || [];
+  const pool =
+    tenantAgents.length > 0
+      ? tenantAgents.map((a) => ({
+          key: a.agentKey,
+          name: a.name,
+          model: a.model,
+          provider: a.provider,
+          running: a.running,
+          papel: a.papel,
+        }))
+      : liveCrew.map((a) => ({ ...a, papel: "" }));
+
+  for (const agent of pool) {
     const sid = agent.key;
-    const isPm = /bento|iris|coo|ceo|pm/i.test(agent.name);
-    const isScout = /oraculo|oráculo|scout/i.test(agent.name);
+    const isPm = agent.papel === "coo" || agent.papel === "ceo_empresa" || /bento|iris|coo|ceo|pm/i.test(agent.name);
+    const isScout = agent.papel === "oraculo" || /oraculo|oráculo|scout/i.test(agent.name);
     if (isPm && !pmSessionId) pmSessionId = sid;
     if (isScout && !scoutSessionId) scoutSessionId = sid;
     sessions.set(sid, {
@@ -118,7 +132,6 @@ function adaptStatusFor3D(
     }
   }
 
-  // Sempre inclui o Lookout (2º andar) com os 8 pods e o Oráculo/Scout para espelhar 1:1 o Andar 3D oficial
   const f: FactoryStatus = {
     projectId: status.projectId,
     mode: "dark_factory",
@@ -151,13 +164,13 @@ function adaptStatusFor3D(
       rounds: 2,
       lenses: DISCOVERY_AREAS.map((area) => ({
         area,
-        sessionId: `scout-${area}`,
+        sessionId: `scout-${status.projectId}-${area}`,
         status: status.loopState === "discovering" ? "running" : "idle",
         active: status.loopState === "discovering",
         reported: false,
       })),
       provider: "claude",
-      model: "claude-sonnet-5-5",
+      model: "claude-sonnet-4-6",
       lastRoundAt: null,
     },
   };
@@ -176,17 +189,19 @@ function adaptStatusFor3D(
 }
 
 export interface Floor3DProps {
+  tenant: string;
   status: FactoryStatusPayload;
   liveCrew: LiveCrewAgent[];
   focus: StoreyFocus;
   onSelectItem: (item: OrgfyWorkItem) => void;
+  onOpenAgentDm?: (agent: { key?: string; pubkey?: string; name?: string }) => void;
 }
 
 export function createFloor3DComponent(ctx: Context) {
   const React = ctx.react;
   const h = React.createElement;
 
-  return function CodeDenFloor3D({ status, liveCrew, focus, onSelectItem }: Floor3DProps) {
+  return function CodeDenFloor3D({ tenant, status, liveCrew, focus, onSelectItem, onOpenAgentDm }: Floor3DProps) {
     const hostRef = React.useRef<HTMLDivElement | null>(null);
     const stageRef = React.useRef<FloorStage | null>(null);
     const seatingRef = React.useRef<Seating>(NO_SEATING);
@@ -195,6 +210,9 @@ export function createFloor3DComponent(ctx: Context) {
     const [rosterOpen, setRosterOpen] = React.useState<boolean>(true);
     const [hoveredKey, setHoveredKey] = React.useState<string | null>(null);
     const [selectedKey, setSelectedKey] = React.useState<string | null>(null);
+
+    const tenantAgents = status.tenantManifest?.agentes || [];
+    const empresaNome = status.tenantManifest?.nome || tenant;
 
     const adapted = React.useMemo(() => adaptStatusFor3D(status, liveCrew), [status, liveCrew]);
     const { scene, layout } = React.useMemo(() => {
@@ -263,12 +281,14 @@ export function createFloor3DComponent(ctx: Context) {
     }, [focus]);
 
     React.useEffect(() => {
-      stageRef.current?.setInset(rosterOpen ? 236 : 0);
+      stageRef.current?.setInset(rosterOpen ? 248 : 0);
     }, [rosterOpen]);
 
-    const workshopAgents = scene.agents.filter((a: SceneAgent) => a.role !== "scout" && a.role !== "area");
-    const lookoutAgents = scene.agents.filter((a: SceneAgent) => a.role === "scout" || a.role === "area");
+    const leadershipAndExec = tenantAgents.filter((a) => a.categoria === "lideranca" || a.categoria === "execucao");
+    const reviewAndOps = tenantAgents.filter((a) => a.categoria === "revisao" || a.categoria === "operacao");
     const activeHoverAgent = scene.agents.find((a: SceneAgent) => a.key === (hoveredKey || selectedKey)) || null;
+    const runningCount = tenantAgents.filter((a) => a.running).length;
+    const inBuzzCount = tenantAgents.filter((a) => a.inBuzz).length;
 
     if (webglLost) {
       return h(
@@ -278,6 +298,54 @@ export function createFloor3DComponent(ctx: Context) {
         h("div", { className: "of-muted", style: { marginTop: "6px" } }, "O Andar 3D requer WebGL ativo; use a aba Board para acompanhar os cards.")
       );
     }
+
+    const renderCrewRow = (ag: (typeof tenantAgents)[number]) =>
+      h(
+        "div",
+        {
+          key: ag.agentKey || ag.name,
+          className: "of-nav-btn",
+          "data-active": selectedKey === ag.agentKey ? "true" : "false",
+          style: { alignItems: "flex-start", padding: "6px 8px" },
+          onClick: () => {
+            setSelectedKey(ag.agentKey);
+            stageRef.current?.select(ag.agentKey);
+          },
+        },
+        h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: "2px", minWidth: 0, flex: 1 } },
+          h(
+            "span",
+            { style: { display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "11.5px", fontWeight: 600 } },
+            h("span", {
+              className: "of-dot",
+              "data-tone": ag.running ? "running" : ag.inBuzz ? "done" : "idle",
+              title: ag.running ? "Em execução no Buzz" : ag.inBuzz ? "Disponível no Buzz" : "A provisionar",
+            }),
+            h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, ag.name)
+          ),
+          h("span", { className: "of-muted", style: { fontSize: "10px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, ag.funcao),
+          h("span", { className: "of-mono of-muted", style: { fontSize: "9.5px" } }, ag.model)
+        ),
+        onOpenAgentDm &&
+          ag.pubkey &&
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-variant": "ghost",
+              title: `Abrir DM nativa com ${ag.name} no Buzz`,
+              style: { padding: "2px 5px", fontSize: "10px", color: "var(--primary)", flexShrink: 0 },
+              onClick: (e: any) => {
+                e.stopPropagation();
+                onOpenAgentDm({ key: ag.agentKey, pubkey: ag.pubkey, name: ag.name });
+              },
+            },
+            "DM ↗"
+          )
+      );
 
     return h(
       "div",
@@ -305,11 +373,11 @@ export function createFloor3DComponent(ctx: Context) {
                   top: "10px",
                   left: "10px",
                   bottom: "10px",
-                  width: "224px",
+                  width: "238px",
                   zIndex: 20,
                   borderRadius: "10px",
                   border: "1px solid var(--border)",
-                  background: "rgba(15, 17, 22, 0.88)",
+                  background: "rgba(15, 17, 22, 0.90)",
                   backdropFilter: "blur(8px)",
                   display: "flex",
                   flexDirection: "column",
@@ -325,11 +393,11 @@ export function createFloor3DComponent(ctx: Context) {
                     justifyContent: "space-between",
                     padding: "8px 10px",
                     borderBottom: "1px solid var(--border)",
-                    fontSize: "12px",
-                    fontWeight: 600,
+                    fontSize: "11.5px",
+                    fontWeight: 700,
                   },
                 },
-                h("span", null, `Crew · ${scene.agents.length}`),
+                h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, `Equipe ${empresaNome} · ${tenantAgents.length}`),
                 h(
                   "button",
                   {
@@ -344,61 +412,15 @@ export function createFloor3DComponent(ctx: Context) {
               ),
               h(
                 "div",
-                { style: { flex: 1, overflowY: "auto", padding: "8px", display: "flex", flexDirection: "column", gap: "8px" } },
-                h("div", { className: "of-meter-label" }, `WORKSHOP · ${workshopAgents.length}`),
-                workshopAgents.map((a: SceneAgent) =>
-                  h(
-                    "button",
-                    {
-                      key: a.key,
-                      type: "button",
-                      className: "of-nav-btn",
-                      "data-active": selectedKey === a.key ? "true" : "false",
-                      onClick: () => {
-                        setSelectedKey(a.key);
-                        stageRef.current?.select(a.key);
-                      },
-                    },
-                    h(
-                      "div",
-                      { style: { display: "flex", flexDirection: "column", gap: "2px", minWidth: 0 } },
-                      h(
-                        "span",
-                        { style: { display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: 600 } },
-                        h("span", { className: "of-dot", "data-tone": a.status === "working" ? "running" : a.status === "blocked" ? "failed" : "idle" }),
-                        h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, a.role === "pm" ? "Project manager" : a.card?.item.title || a.key)
-                      ),
-                      h("span", { className: "of-mono of-muted", style: { fontSize: "10px" } }, `${a.provider || "orgfy"} · ${a.model || "ativo"}`)
-                    )
-                  )
-                ),
-                h("div", { className: "of-meter-label", style: { marginTop: "6px" } }, `LOOKOUT · ${lookoutAgents.length}`),
-                lookoutAgents.map((a: SceneAgent) =>
-                  h(
-                    "button",
-                    {
-                      key: a.key,
-                      type: "button",
-                      className: "of-nav-btn",
-                      "data-active": selectedKey === a.key ? "true" : "false",
-                      onClick: () => {
-                        setSelectedKey(a.key);
-                        stageRef.current?.select(a.key);
-                      },
-                    },
-                    h(
-                      "div",
-                      { style: { display: "flex", flexDirection: "column", gap: "2px", minWidth: 0 } },
-                      h(
-                        "span",
-                        { style: { display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: 600 } },
-                        h("span", { className: "of-dot", "data-tone": a.status === "working" ? "running" : "idle" }),
-                        h("span", null, a.role === "scout" ? "Scout (Oráculo)" : a.area || a.key)
-                      ),
-                      h("span", { className: "of-mono of-muted", style: { fontSize: "10px" } }, `${a.provider || "claude"} · ${a.model || "idle"}`)
-                    )
-                  )
-                )
+                { style: { flex: 1, overflowY: "auto", padding: "8px", display: "flex", flexDirection: "column", gap: "4px" } },
+                h("div", { className: "of-meter-label", style: { padding: "2px 4px" } }, `OFICINA & LIDERANÇA · ${leadershipAndExec.length}`),
+                leadershipAndExec.length === 0
+                  ? h("div", { className: "of-muted", style: { padding: "4px 6px", fontSize: "10.5px" } }, "Sem agentes no manifesto.")
+                  : leadershipAndExec.map(renderCrewRow),
+                h("div", { className: "of-meter-label", style: { marginTop: "8px", padding: "2px 4px" } }, `REVISORES L-01 & MIRANTE · ${reviewAndOps.length}`),
+                reviewAndOps.length === 0
+                  ? h("div", { className: "of-muted", style: { padding: "4px 6px", fontSize: "10.5px" } }, "Sem revisores definidos.")
+                  : reviewAndOps.map(renderCrewRow)
               )
             )
           : h(
@@ -409,7 +431,7 @@ export function createFloor3DComponent(ctx: Context) {
                 style: { position: "absolute", top: "10px", left: "10px", zIndex: 20 },
                 onClick: () => setRosterOpen(true),
               },
-              `Crew (${scene.agents.length}) ›`
+              `Equipe ${empresaNome} (${tenantAgents.length}) ›`
             ),
 
         activeHoverAgent &&
@@ -429,7 +451,7 @@ export function createFloor3DComponent(ctx: Context) {
                 fontSize: "11.5px",
               },
             },
-            h("div", { style: { fontWeight: 700 } }, activeHoverAgent.role === "pm" ? "Project manager" : activeHoverAgent.role === "scout" ? "Scout (Oráculo)" : activeHoverAgent.card?.item.title || activeHoverAgent.area || activeHoverAgent.key),
+            h("div", { style: { fontWeight: 700 } }, activeHoverAgent.role === "pm" ? `${status.tenantManifest?.coo || "COO"} (${empresaNome})` : activeHoverAgent.role === "scout" ? "Oráculo · Scout" : activeHoverAgent.card?.item.title || activeHoverAgent.area || activeHoverAgent.key),
             h("div", { className: "of-mono of-muted", style: { marginTop: "2px" } }, `${activeHoverAgent.status} · ${activeHoverAgent.model || "padrão"}`),
             activeHoverAgent.progress && h("div", { className: "of-muted", style: { marginTop: "4px" } }, activeHoverAgent.progress)
           ),
@@ -455,7 +477,7 @@ export function createFloor3DComponent(ctx: Context) {
       h(
         "div",
         { className: "of-muted", style: { textAlign: "center", fontSize: "11px" } },
-        sceneSummary(scene)
+        `Fábrica ${empresaNome} (${tenant}) · ${inBuzzCount}/${tenantAgents.length} agentes no Buzz · ${runningCount} ativo(s) agora · ${sceneSummary(scene)}`
       )
     );
   };

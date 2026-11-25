@@ -43,6 +43,40 @@ export interface AgentModelEvalRow {
   abaixo_minimo: boolean;
 }
 
+export interface TenantAgentSpec {
+  name: string;
+  papel: string;
+  funcao: string;
+  categoria: "lideranca" | "execucao" | "revisao" | "operacao";
+  pubkey: string;
+  model: string;
+  provider: string;
+  parallelism: number;
+  running: boolean;
+  inBuzz: boolean;
+  agentKey: string;
+}
+
+export interface TenantManifestInfo {
+  slug: string;
+  nome: string;
+  repoId: string;
+  nivel: string;
+  canal: string | null;
+  ceoEmpresa: string;
+  coo: string;
+  modoExecucao: string;
+  ciModo: string;
+  ciCmd: string;
+  probesObrigatorios: boolean;
+  probesCount: number;
+  budgetTokensDiario: number | null;
+  tokensPorCard: number | null;
+  cpiMinimo: number | null;
+  revisoresPorSuperficie: Record<string, string>;
+  agentes: TenantAgentSpec[];
+}
+
 export interface FactoryStatusPayload {
   projectId: string;
   mode: AutonomyMode;
@@ -98,6 +132,7 @@ export interface FactoryStatusPayload {
     higiene?: Record<string, any> | null;
   };
   modelos?: AgentModelEvalRow[];
+  tenantManifest?: TenantManifestInfo;
   orgfyVision?: {
     projectMd: string | null;
     agentsMd: string | null;
@@ -205,6 +240,38 @@ function parseEvalTable(md: string | null): Map<string, { score: string; abaixo:
   return map;
 }
 
+function describeOrgfyRole(papelRaw: string | null | undefined): {
+  funcao: string;
+  categoria: "lideranca" | "execucao" | "revisao" | "operacao";
+} {
+  const p = String(papelRaw || "").trim().toLowerCase();
+  const map: Record<string, { funcao: string; categoria: "lideranca" | "execucao" | "revisao" | "operacao" }> = {
+    ceo: { funcao: "CEO Master · Orquestrador da Holding", categoria: "lideranca" },
+    ceo_holding: { funcao: "CEO Master · Orquestrador da Holding", categoria: "lideranca" },
+    ceo_empresa: { funcao: "CEO da Empresa · Direção & Decisão", categoria: "lideranca" },
+    coo: { funcao: "COO · Operações, Despacho & Auto-cura", categoria: "lideranca" },
+    arquiteto: { funcao: "Arquiteto · Design Técnico & Revisão Estrutural", categoria: "lideranca" },
+    backend: { funcao: "Executor Backend · APIs & Serviços", categoria: "execucao" },
+    frontend: { funcao: "Executor Frontend · Interface & UX", categoria: "execucao" },
+    infra: { funcao: "Executor Infra · CI/CD, Deploy & Runtime", categoria: "execucao" },
+    executor: { funcao: "Executor · Implementação em Worktree", categoria: "execucao" },
+    release: { funcao: "Release · Empacotamento & Entrega", categoria: "execucao" },
+    prompts: { funcao: "Engenharia de Prompts & Regras", categoria: "execucao" },
+    growth: { funcao: "Growth & Aquisição", categoria: "execucao" },
+    pesquisa: { funcao: "Pesquisa Técnica & Descoberta", categoria: "execucao" },
+    qa: { funcao: "Revisor de Código & QA (Gate L-01)", categoria: "revisao" },
+    revisor_codigo: { funcao: "Revisor de Código & QA (Gate L-01)", categoria: "revisao" },
+    revisor_metodo: { funcao: "Revisor de Método & Specsfy (L-01)", categoria: "revisao" },
+    revisor_seguranca: { funcao: "Revisor de Segurança & Auditoria", categoria: "revisao" },
+    seguranca: { funcao: "Revisor de Segurança & Auditoria", categoria: "revisao" },
+    revisor_ui: { funcao: "Revisor de UI & Acessibilidade", categoria: "revisao" },
+    oraculo: { funcao: "Oráculo · Scout & Inteligência", categoria: "operacao" },
+    po: { funcao: "Product Owner · Escopo & Critérios L-22", categoria: "operacao" },
+    cron: { funcao: "Cron · Rotinas Agendadas da Esteira", categoria: "operacao" },
+  };
+  return map[p] || { funcao: p ? `Agente · ${p}` : "Agente da Esteira", categoria: "execucao" };
+}
+
 /**
  * Hidratação direta 100% viva via ctx.host.readFile (sem depender de host.spawn).
  * Funciona sempre dentro do Buzz Desktop, lendo kpis-esteira.json, controle-<tenant>.json,
@@ -239,19 +306,37 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
   const snap = (ctx as any)?.agents?.snapshot?.() || {};
   const runningList: any[] = Array.isArray(snap.running) ? snap.running : [];
   const allAgents: any[] = Array.isArray(snap.agents) ? snap.agents : [];
+  const runningKeys = new Set(runningList.map((a: any) => String(a?.key || a?.name || "").toLowerCase()));
+  const runningPubkeys = new Set(runningList.map((a: any) => String(a?.pubkey || "").toLowerCase()).filter(Boolean));
   const liveByName = new Map<string, any>();
+  const liveByPubkey = new Map<string, any>();
   for (const a of allAgents) {
     if (a?.name) liveByName.set(String(a.name).toLowerCase(), a);
+    if (a?.pubkey) liveByPubkey.set(String(a.pubkey).toLowerCase(), a);
   }
 
   const evalMap = parseEvalTable(evalMd);
   const modelos: AgentModelEvalRow[] = [];
+  const tenantAgents: TenantAgentSpec[] = [];
   const agentesObj = empresaJson?.agentes && typeof empresaJson.agentes === "object" ? empresaJson.agentes : {};
   for (const [agName, info] of Object.entries(agentesObj as Record<string, any>)) {
-    const live = liveByName.get(agName.toLowerCase());
+    const manifestPk = typeof info?.pubkey === "string" ? info.pubkey.trim() : "";
+    const live =
+      (manifestPk && liveByPubkey.get(manifestPk.toLowerCase())) ||
+      liveByName.get(agName.toLowerCase()) ||
+      null;
     const modelo = String(live?.config?.model || info?.model || "").trim() || null;
     const provider = String(live?.config?.provider || info?.provider || "").trim() || null;
     const ev = modelo ? evalMap.get(modelo.toLowerCase()) || evalMap.get((modelo.split("/").pop() || "").toLowerCase()) : undefined;
+    const roleMeta = describeOrgfyRole(info?.papel);
+    const liveKey = String(live?.key || "");
+    const livePk = String(live?.pubkey || manifestPk || "");
+    const isRunning = Boolean(
+      (liveKey && runningKeys.has(liveKey.toLowerCase())) ||
+      (livePk && runningPubkeys.has(livePk.toLowerCase())) ||
+      runningKeys.has(agName.toLowerCase())
+    );
+
     modelos.push({
       agente: agName,
       papel: info?.papel || null,
@@ -260,7 +345,41 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
       toolcall_eval: ev?.score || null,
       abaixo_minimo: Boolean(ev?.abaixo),
     });
+
+    tenantAgents.push({
+      name: agName,
+      papel: String(info?.papel || "executor"),
+      funcao: roleMeta.funcao,
+      categoria: roleMeta.categoria,
+      pubkey: livePk,
+      model: modelo || "indisponível",
+      provider: provider || "buzz",
+      parallelism: Number(info?.parallelism ?? 1),
+      running: isRunning,
+      inBuzz: Boolean(live),
+      agentKey: liveKey || `manifest:${slug}:${agName}`,
+    });
   }
+
+  const tenantManifest: TenantManifestInfo = {
+    slug,
+    nome: String(empresaJson?.hierarquia?.workspace_buzz || empresaJson?.empresa || slug),
+    repoId: String(empresaJson?.repo_id || slug),
+    nivel: String(empresaJson?.hierarquia?.nivel || "subsidiaria"),
+    canal: typeof empresaJson?.canal === "string" ? empresaJson.canal : null,
+    ceoEmpresa: String(empresaJson?.hierarquia?.ceo_empresa || empresaJson?.papeis?.ceo_empresa || "OrgFy Iris"),
+    coo: String(empresaJson?.papeis?.coo || "OrgFy Bento"),
+    modoExecucao: String(empresaJson?.modo_execucao_workers || "efemero_headless"),
+    ciModo: String(empresaJson?.ci_runner?.modo_padrao || "local"),
+    ciCmd: Array.isArray(empresaJson?.ci_runner?.cmd) ? empresaJson.ci_runner.cmd.join(" ") : "—",
+    probesObrigatorios: Boolean(empresaJson?.probes_caixa_preta?.obrigatorio_no_gate),
+    probesCount: Array.isArray(empresaJson?.probes_caixa_preta?.probes_padrao) ? empresaJson.probes_caixa_preta.probes_padrao.length : 0,
+    budgetTokensDiario: typeof empresaJson?.governanca_orcamento?.budget_tokens_diario === "number" ? empresaJson.governanca_orcamento.budget_tokens_diario : null,
+    tokensPorCard: typeof empresaJson?.governanca_orcamento?.tokens_planejados_por_card === "number" ? empresaJson.governanca_orcamento.tokens_planejados_por_card : null,
+    cpiMinimo: typeof empresaJson?.governanca_orcamento?.cpi_minimo === "number" ? empresaJson.governanca_orcamento.cpi_minimo : null,
+    revisoresPorSuperficie: empresaJson?.revisores_por_superficie && typeof empresaJson.revisores_por_superficie === "object" ? empresaJson.revisores_por_superficie : {},
+    agentes: tenantAgents,
+  };
 
   const toWorkItem = (c: any): FactoryWorkItem => ({
     id: String(c.fullIssueId || c.issueId || c.id),
@@ -327,7 +446,7 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
       medianMergeMs7d: null,
       merged7d: Number((kpis as any)?.fluxo?.vazao_7d ?? recent.length),
     },
-    activeSessions: runningList.length,
+    activeSessions: tenantAgents.filter((a) => a.running).length,
     wip: {
       openPrs: inProgress.length,
       limit: Number(controle?.limits?.prsAbertos ?? 6),
@@ -340,6 +459,7 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
     recent,
     viewRecent: recent,
     visionExists: Boolean(projectMd || boardJson || empresaJson),
+    tenantManifest,
     orgfyVision: {
       projectMd: projectMd ? projectMd.slice(0, 2400) : null,
       agentsMd: agentsMd ? agentsMd.slice(0, 2400) : null,

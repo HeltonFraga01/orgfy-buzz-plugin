@@ -1,5 +1,5 @@
 // Adaptado de CodeDen (MIT) commit b0b2a5a: apps/web/src/components/shell/app-shell.tsx e routes/project.tsx
-// Shell nativo do Buzz para a OrgFy Factory: cores dinâmicas do Buzz, CEO Master, Conselho (Board), Workspaces, Andar 3D em tela cheia e DM nativa de agentes no Buzz.
+// Shell nativo do Buzz para a OrgFy Factory: Sidebar global (CEO Master, Conselho, Inbox, Custos, Automações, Empresas) + Menu Superior com abas por Empresa e DM nativa do Buzz.
 
 import type { Context } from "@buzz/author";
 import { PT_BR } from "../i18n/pt-BR";
@@ -23,14 +23,16 @@ import { fetchHoldingControlPlane, type HoldingControlPlaneSnapshot } from "../s
 type FactoryTab =
   | "holding"
   | "inbox"
+  | "costs"
+  | "automations"
   | "overview"
   | "board"
   | "floor"
-  | "costs"
-  | "automations"
   | "agents"
   | "vision"
   | "settings";
+
+const GLOBAL_TABS = new Set<FactoryTab>(["holding", "inbox", "costs", "automations"]);
 
 const DEFAULT_WORKSPACES = [
   { slug: "orgfy", nome: "OrgFy Core", estagio: "operacional" },
@@ -69,7 +71,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     const [inboxFilter, setInboxFilter] = React.useState<"all" | "asks" | "reviews" | "problems">("all");
     const [costRange, setCostRange] = React.useState<"7d" | "30d" | "90d">("30d");
     const [autoTab, setAutoTab] = React.useState<"automations" | "runs" | "templates">("automations");
-    const [agentTab, setAgentTab] = React.useState<"eval" | "memory" | "skills" | "mcp" | "hooks">("eval");
+    const [agentTab, setAgentTab] = React.useState<"eval" | "memory" | "skills" | "mcp" | "hooks">("memory");
 
     const [settingsForm, setSettingsFormState] = React.useState<{
       mode: AutonomyMode;
@@ -133,7 +135,6 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       [tenant]
     );
 
-    // useFactoryStatus(tenant): poll 5s + invalidação em eventos do relay
     React.useEffect(() => {
       let disposed = false;
       const run = () => {
@@ -193,7 +194,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
 
     const handleOpenChannelInBuzz = React.useCallback(async () => {
       const emp = holding?.empresas.find((e) => e.slug === tenant);
-      const canal = emp?.canal;
+      const canal = status.tenantManifest?.canal || emp?.canal;
       const scope = resolveBuzzScope();
       try {
         if (canal && scope && (ctx as any).navigation?.open) {
@@ -215,7 +216,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         }
       } catch {}
       notify(`Workspace ativo: ${tenant}${canal ? ` (canal ${canal.slice(0, 8)}…)` : ""}.`);
-    }, [holding, tenant, resolveBuzzScope, notify]);
+    }, [holding, status.tenantManifest, tenant, resolveBuzzScope, notify]);
 
     const liveCrew: LiveCrewAgent[] = React.useMemo(() => {
       try {
@@ -234,23 +235,43 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       }
     }, [status.lastTickAt]);
 
+    // Agentes filtrados para a empresa ativa (empresas/<tenant>.json × Buzz)
+    const tenantAgents = status.tenantManifest?.agentes || [];
+    const dmPool = React.useMemo(() => {
+      if (!GLOBAL_TABS.has(tab) && tenantAgents.length > 0) {
+        return tenantAgents.map((a) => ({
+          key: a.agentKey,
+          pubkey: a.pubkey,
+          name: a.name,
+          label: `${a.name} · ${a.papel}${a.running ? " ●" : ""}`,
+        }));
+      }
+      return liveCrew.map((a) => ({
+        key: a.key,
+        pubkey: a.pubkey || "",
+        name: a.name,
+        label: `${a.name}${a.running ? " ●" : ""}`,
+      }));
+    }, [tab, tenantAgents, liveCrew]);
+
     const defaultDmAgentKey = React.useMemo(() => {
-      const coo = liveCrew.find((a) => /bento/i.test(a.name) && !/arquiteto/i.test(a.name));
+      const cooName = (status.tenantManifest?.coo || "OrgFy Bento").toLowerCase();
+      const coo = dmPool.find((a) => a.name.toLowerCase() === cooName);
       if (coo) return coo.key;
-      const iris = liveCrew.find((a) => /iris/i.test(a.name));
+      const iris = dmPool.find((a) => /iris/i.test(a.name));
       if (iris) return iris.key;
-      return liveCrew[0]?.key || "";
-    }, [liveCrew]);
+      return dmPool[0]?.key || "";
+    }, [dmPool, status.tenantManifest]);
 
     React.useEffect(() => {
-      if (liveCrew.length > 0 && (!dmAgentKey || !liveCrew.some((a) => a.key === dmAgentKey))) {
+      if (dmPool.length > 0 && (!dmAgentKey || !dmPool.some((a) => a.key === dmAgentKey))) {
         setDmAgentKey(defaultDmAgentKey);
       }
-    }, [liveCrew, dmAgentKey, defaultDmAgentKey]);
+    }, [dmPool, dmAgentKey, defaultDmAgentKey]);
 
     const selectedDmAgent = React.useMemo(
-      () => liveCrew.find((a) => a.key === dmAgentKey) || liveCrew[0] || null,
-      [liveCrew, dmAgentKey]
+      () => dmPool.find((a) => a.key === dmAgentKey) || dmPool[0] || null,
+      [dmPool, dmAgentKey]
     );
 
     const handleOpenAgentDmInBuzz = React.useCallback(
@@ -266,7 +287,6 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
 
           let channelId: string | null = null;
 
-          // 1. Procura DM ou Solo chat já aberto com o agente na lista de canais do Buzz
           if (session?.channels?.list) {
             try {
               const list = session.channels.list()?.channels || [];
@@ -283,7 +303,6 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
             } catch {}
           }
 
-          // 2. Abre/cria a DM nativa pelo Buzz (session.directMessages.open)
           if (!channelId && pubkey && session?.directMessages?.available && typeof session.directMessages.open === "function") {
             const ac = new AbortController();
             const timeout = setTimeout(() => ac.abort(), 8000);
@@ -294,7 +313,6 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
             }
           }
 
-          // 3. Navega diretamente para a tela nativa de conversa DM do Buzz
           if (channelId && scope && (ctx as any)?.navigation?.open) {
             const res = await (ctx as any).navigation.open({
               version: 1,
@@ -336,11 +354,19 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
           }))
         : DEFAULT_WORKSPACES.map((w) => ({ ...w, agentesInfo: "" }));
 
+    const activeWorkspace = workspaces.find((w) => w.slug === tenant) || workspaces[0];
+    const empresaNome = status.tenantManifest?.nome || activeWorkspace?.nome || tenant;
+    const empresaRepo = status.tenantManifest?.repoId || tenant;
+    const isGlobalView = GLOBAL_TABS.has(tab);
+
     const pendingApprovals = (holding?.approvals || []).filter((a) => a.status === "pendente").length;
     const abaixoMinimoCount = (status.modelos || []).filter((m) => m.abaixo_minimo).length;
     const inboxCount =
       status.held.length +
       [...status.inProgress, ...status.recent].filter((i) => i.stage === "escalated" || i.stage === "failed" || i.stage === "reverted").length;
+    const tenantActiveAgentsCount = tenantAgents.filter((a) => a.running).length;
+    const tenantTotalAgentsCount = tenantAgents.length;
+    const boardCount = status.backlog.length + status.inProgress.length;
 
     const renderNavBtn = (id: FactoryTab, label: string, badge?: string, tone?: "warn" | "danger") =>
       h(
@@ -356,6 +382,15 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         badge && h("span", { className: "of-nav-badge", "data-tone": tone }, badge)
       );
 
+    const projectTabs: Array<{ id: FactoryTab; label: string; badge?: string; tone?: "warn" | "danger" }> = [
+      { id: "overview", label: PT_BR.nav.overview },
+      { id: "board", label: "Fábrica · Board", badge: String(boardCount) },
+      { id: "floor", label: "Andar 3D", badge: `${tenantActiveAgentsCount}/${tenantTotalAgentsCount}` },
+      { id: "agents", label: "Agentes", badge: abaixoMinimoCount > 0 ? `⚠ ${abaixoMinimoCount}` : String(tenantTotalAgentsCount), tone: abaixoMinimoCount > 0 ? "danger" : undefined },
+      { id: "vision", label: "Canvas / Visão" },
+      { id: "settings", label: PT_BR.nav.settings },
+    ];
+
     return h(
       "div",
       {
@@ -367,7 +402,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       h(
         "div",
         { className: "of-shell" },
-        // Sidebar OrgFy: CEO Master -> Holding/Conselho & Inbox -> Workspaces -> Fábrica -> Operação
+        // Sidebar limpa 1:1 CodeDen: CEO Master -> Holding Global (Conselho, Inbox, Uso & Custos, Automações) -> Empresas (Workspaces)
         h(
           "aside",
           { className: "of-sidebar" },
@@ -418,60 +453,43 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
             h("div", { className: "of-mono of-muted", style: { fontSize: "10px" } }, masterLive ? masterLive.model : "Ativa no Buzz")
           ),
 
-          h("div", { className: "of-nav-group-label" }, "Holding & Conselho"),
+          h("div", { className: "of-nav-group-label" }, "Holding & Global"),
           h(
             "nav",
             { className: "of-nav" },
             renderNavBtn("holding", "Conselho (Board)", pendingApprovals > 0 ? String(pendingApprovals) : undefined, pendingApprovals > 0 ? "warn" : undefined),
-            renderNavBtn("inbox", PT_BR.nav.inbox, inboxCount > 0 ? String(inboxCount) : undefined, inboxCount > 0 ? "warn" : undefined)
+            renderNavBtn("inbox", PT_BR.nav.inbox, inboxCount > 0 ? String(inboxCount) : undefined, inboxCount > 0 ? "warn" : undefined),
+            renderNavBtn("costs", "Uso & Custos"),
+            renderNavBtn("automations", PT_BR.nav.automations)
           ),
 
           h("div", { className: "of-nav-group-label" }, "Empresas · Workspaces"),
           h(
             "nav",
             { className: "of-nav" },
-            workspaces.map((w) =>
-              h(
+            workspaces.map((w) => {
+              const isSelectedEmpresa = !isGlobalView && tenant === w.slug;
+              return h(
                 "button",
                 {
                   key: w.slug,
                   type: "button",
                   className: "of-nav-btn",
-                  "data-active": tenant === w.slug ? "true" : "false",
+                  "data-active": isSelectedEmpresa ? "true" : "false",
                   onClick: () => {
                     setTenant(w.slug);
-                    if (tab === "holding") setTab("overview");
+                    if (GLOBAL_TABS.has(tab)) setTab("overview");
                   },
                 },
                 h(
                   "span",
-                  { style: { display: "inline-flex", alignItems: "center", gap: "6px", overflow: "hidden" } },
-                  h("span", { className: "of-dot", "data-tone": w.estagio === "operacional" ? "done" : "idle" }),
+                  { style: { display: "inline-flex", alignItems: "center", gap: "7px", overflow: "hidden" } },
+                  h("span", { className: "of-project-tile", style: { width: "18px", height: "18px", fontSize: "10px" } }, w.nome.charAt(0).toUpperCase()),
                   h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, w.nome)
                 ),
                 w.agentesInfo && h("span", { className: "of-nav-badge" }, w.agentesInfo)
-              )
-            )
-          ),
-
-          h("div", { className: "of-nav-group-label" }, `Fábrica · ${tenant}`),
-          h(
-            "nav",
-            { className: "of-nav" },
-            renderNavBtn("overview", PT_BR.nav.overview),
-            renderNavBtn("board", PT_BR.nav.board, String(status.backlog.length + status.inProgress.length)),
-            renderNavBtn("floor", "Andar 3D", String(liveCrew.filter((a) => a.running).length))
-          ),
-
-          h("div", { className: "of-nav-group-label" }, "Operação"),
-          h(
-            "nav",
-            { className: "of-nav" },
-            renderNavBtn("costs", PT_BR.nav.costs),
-            renderNavBtn("vision", "Canvas / Visão"),
-            renderNavBtn("agents", PT_BR.nav.agents, abaixoMinimoCount > 0 ? `⚠ ${abaixoMinimoCount}` : undefined, abaixoMinimoCount > 0 ? "danger" : undefined),
-            renderNavBtn("automations", PT_BR.nav.automations),
-            renderNavBtn("settings", PT_BR.nav.settings)
+              );
+            })
           ),
 
           opts.onOpenClassicCockpit &&
@@ -487,28 +505,57 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
             )
         ),
 
-        // Área principal em tela cheia (sem painel lateral redundante — usa DM nativa do Buzz)
+        // Área principal em tela cheia: Header + Abas Horizontais da Empresa (1:1 CodeDen)
         h(
           "div",
           { className: "of-workspace" },
           h(
             "header",
             { className: "of-page-header" },
-            h("strong", { style: { fontSize: "13.5px" } }, tab === "vision" ? "Canvas / Visão" : tab === "floor" ? "Andar 3D" : PT_BR.nav[tab] || PT_BR.appTitle),
-            h("span", { className: "of-mono of-muted" }, `/ ${tenant}`),
+            isGlobalView
+              ? h(
+                  "div",
+                  { style: { display: "inline-flex", alignItems: "center", gap: "8px" } },
+                  h("strong", { style: { fontSize: "14px" } }, tab === "holding" ? "Conselho da Holding (Board)" : tab === "costs" ? "Uso & Custos · Holding" : PT_BR.nav[tab] || PT_BR.appTitle),
+                  h("span", { className: "of-mono of-muted" }, "· Cortexx")
+                )
+              : h(
+                  "div",
+                  { style: { display: "inline-flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
+                  h("span", { className: "of-project-tile" }, empresaNome.charAt(0).toUpperCase()),
+                  h("strong", { style: { fontSize: "14px" } }, empresaNome),
+                  h("span", { className: "of-mono of-muted", style: { fontSize: "11px" } }, `repo: ${empresaRepo}`),
+                  h(
+                    "span",
+                    { className: "of-pill", "data-tone": status.killSwitch ? "failed" : "done" },
+                    status.killSwitch ? "Kill Switch ativo" : PT_BR.modes[status.mode] || status.mode
+                  )
+                ),
             h(
               "div",
-              { style: { marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: "6px" } },
-              h(
-                "button",
-                {
-                  type: "button",
-                  className: "of-btn",
-                  "data-variant": "ghost",
-                  onClick: handleOpenChannelInBuzz,
-                },
-                "Canal no Buzz ↗"
-              ),
+              { style: { marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: "6px", flexWrap: "wrap" } },
+              !isGlobalView &&
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "of-btn",
+                    "data-variant": tab === "floor" ? "primary" : "ghost",
+                    onClick: () => setTab(tab === "floor" ? "overview" : "floor"),
+                  },
+                  `Andar 3D (${tenantTotalAgentsCount})`
+                ),
+              !isGlobalView &&
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "of-btn",
+                    "data-variant": "ghost",
+                    onClick: handleOpenChannelInBuzz,
+                  },
+                  "Canal no Buzz ↗"
+                ),
               h(
                 "select",
                 {
@@ -516,13 +563,11 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                   "aria-label": "Selecionar agente para DM no Buzz",
                   value: dmAgentKey,
                   onChange: (e: any) => setDmAgentKey(e.target.value),
-                  style: { width: "auto", maxWidth: "200px", padding: "4px 8px", fontSize: "11.5px" },
+                  style: { width: "auto", maxWidth: "210px", padding: "4px 8px", fontSize: "11.5px" },
                 },
-                liveCrew.length > 0
-                  ? liveCrew.map((a) =>
-                      h("option", { key: a.key, value: a.key }, `${a.name}${a.running ? " ●" : ""}`)
-                    )
-                  : h("option", { value: "" }, "OrgFy Bento (COO)")
+                dmPool.length > 0
+                  ? dmPool.map((a) => h("option", { key: a.key, value: a.key }, a.label))
+                  : h("option", { value: "" }, status.tenantManifest?.coo || "OrgFy Bento (COO)")
               ),
               h(
                 "button",
@@ -539,6 +584,29 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
             toast && h("span", { className: "of-pill", "data-tone": "done" }, toast),
             error && !toast && h("span", { className: "of-pill", "data-tone": "failed" }, `Aviso: ${error}`)
           ),
+
+          // Barra de Abas Horizontais da Empresa (igual ao CodeDen ProjectPage!)
+          !isGlobalView &&
+            h(
+              "div",
+              { className: "of-project-tabs", role: "tablist", "aria-label": `Navegação de ${empresaNome}` },
+              projectTabs.map((pt) =>
+                h(
+                  "button",
+                  {
+                    key: pt.id,
+                    type: "button",
+                    role: "tab",
+                    className: "of-project-tab",
+                    "data-active": tab === pt.id ? "true" : "false",
+                    onClick: () => setTab(pt.id),
+                  },
+                  h("span", null, pt.label),
+                  pt.badge && h("span", { className: "of-nav-badge", "data-tone": pt.tone }, pt.badge)
+                )
+              )
+            ),
+
           h(
             "div",
             { style: { display: "flex", flex: 1, minHeight: 0, overflow: "hidden" } },
@@ -591,6 +659,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                     selectedAgentKey,
                     onSelectAgentKey: setSelectedAgentKey,
                     onSelectItem: setSelectedItem,
+                    onOpenAgentDm: handleOpenAgentDmInBuzz,
                     onRefresh: () => refresh(tenant),
                     loading,
                     Floor3D,
@@ -599,10 +668,12 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                     h,
                     tab,
                     tenant,
+                    holding,
                     onSelectTenant: (t) => {
                       setTenant(t);
                       setTab("overview");
                     },
+                    onOpenAgentDm: handleOpenAgentDmInBuzz,
                     status,
                     liveCrew,
                     onSelectItem: setSelectedItem,

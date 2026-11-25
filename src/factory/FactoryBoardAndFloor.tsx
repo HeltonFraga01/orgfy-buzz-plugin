@@ -25,6 +25,7 @@ export interface BoardAndFloorProps {
   selectedAgentKey: string | null;
   onSelectAgentKey: (k: string | null) => void;
   onSelectItem: (item: FactoryWorkItem) => void;
+  onOpenAgentDm?: (agent: { key?: string; pubkey?: string; name?: string }) => void;
   onRefresh: () => void;
   loading: boolean;
   Floor3D?: any;
@@ -125,10 +126,10 @@ export function renderFactoryBoardAndFloor(props: BoardAndFloorProps) {
       color: "var(--status-done)",
     },
     {
-      label: "Agentes ativos",
-      value: `${liveCrew.filter((a) => a.running).length}/${status.limits.maxConcurrentSessions}`,
-      detail: `${liveCrew.length} no plantel`,
-      pct: Math.min(100, (liveCrew.filter((a) => a.running).length / Math.max(1, status.limits.maxConcurrentSessions)) * 100),
+      label: "Agentes da empresa",
+      value: `${(status.tenantManifest?.agentes || []).filter((a) => a.running).length}/${(status.tenantManifest?.agentes || []).length || liveCrew.length}`,
+      detail: `${(status.tenantManifest?.agentes || []).filter((a) => a.inBuzz).length} no Buzz`,
+      pct: Math.min(100, ((status.tenantManifest?.agentes || []).filter((a) => a.running).length / Math.max(1, status.limits.maxConcurrentSessions)) * 100),
       color: "var(--status-running)",
     },
     {
@@ -346,13 +347,16 @@ export function renderFactoryBoardAndFloor(props: BoardAndFloorProps) {
             })
           )
         )
-      : // Modo Andar (Floor): Motor 3D Three.js 1:1 oficial do CodeDen (Oficina + Mirante + Crew + Fit)
+      : // Modo Andar (Floor): Motor 3D Three.js 1:1 oficial do CodeDen isolado por empresa (key=tenant)
         props.Floor3D
         ? h(props.Floor3D, {
+            key: tenant,
+            tenant,
             status,
             liveCrew,
             focus: storeyFocus,
             onSelectItem,
+            onOpenAgentDm: props.onOpenAgentDm,
           })
         : h(
             "div",
