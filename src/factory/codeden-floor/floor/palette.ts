@@ -60,16 +60,20 @@ function token(style: CSSStyleDeclaration | null, name: string, fallback: Rgb): 
   return (value && cssToSrgb(value)) || fallback;
 }
 
-/** The palette for the document's current theme. */
+/** The palette for the document's current theme (Buzz Desktop defaults to dark). */
 export function readPalette(
   root: HTMLElement | null = globalThis.document?.documentElement,
 ): FloorPalette {
-  const dark = root?.classList.contains("dark") ?? false;
   const style = root ? getComputedStyle(root) : null;
-  const primary = token(style, "--primary", ok(0.66, 0.165, 58));
-  const chart2 = token(style, "--chart-2", ok(0.6, 0.13, 230));
-  const chart3 = token(style, "--chart-3", ok(0.62, 0.14, 155));
-  const chart4 = token(style, "--chart-4", ok(0.6, 0.17, 300));
+  const dark = !(root?.classList.contains("light") || style?.colorScheme === "light");
+  const primary =
+    token(style, "--accent-primary", null as any) ||
+    token(style, "--brand-primary", null as any) ||
+    token(style, "--green-11", null as any) ||
+    token(style, "--primary", ok(0.76, 0.14, 155));
+  const chart2 = token(style, "--chart-2", ok(0.68, 0.13, 230));
+  const chart3 = token(style, "--chart-3", ok(0.72, 0.14, 155));
+  const chart4 = token(style, "--chart-4", ok(0.68, 0.16, 300));
   return {
     dark,
     floor: dark ? ok(0.3, 0.008, 264) : ok(0.93, 0.006, 80),

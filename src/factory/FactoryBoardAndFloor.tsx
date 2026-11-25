@@ -150,7 +150,7 @@ export function renderFactoryBoardAndFloor(props: BoardAndFloorProps) {
 
   return h(
     "div",
-    { style: { display: "flex", flexDirection: "column", gap: "12px" } },
+    { style: { display: "flex", flexDirection: "column", gap: "10px", flex: 1, minHeight: 0, height: viewMode === "floor" ? "100%" : undefined } },
     // 1. ViewHeader (view-header.tsx)
     h(
       "div",
@@ -229,29 +229,30 @@ export function renderFactoryBoardAndFloor(props: BoardAndFloorProps) {
       )
     ),
 
-    // 2. StatsStrip (stats-strip.tsx — 6 tiles)
-    h(
-      "div",
-      { className: "of-stats-6" },
-      statTiles.map((t) =>
-        h(
-          "div",
-          { key: t.label, className: "of-card-pad", style: { padding: "10px 12px" } },
-          h("div", { className: "of-meter-label" }, t.label),
+    // 2. StatsStrip (exibido no Board; oculto no Andar 3D para o 3D preencher 100% da tela, igual ao CodeDen)
+    viewMode === "board" &&
+      h(
+        "div",
+        { className: "of-stats-6" },
+        statTiles.map((t) =>
           h(
             "div",
-            { style: { display: "flex", alignItems: "baseline", gap: "6px", marginTop: "3px" } },
-            h("span", { className: "of-num", style: { fontSize: "17px", fontWeight: 700 } }, t.value),
-            t.detail && h("span", { className: "of-muted", style: { fontSize: "10.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, t.detail)
-          ),
-          h(
-            "div",
-            { className: "of-bar-track" },
-            h("div", { className: "of-bar-fill", style: { width: `${t.pct}%`, background: t.color } })
+            { key: t.label, className: "of-card-pad", style: { padding: "10px 12px" } },
+            h("div", { className: "of-meter-label" }, t.label),
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "baseline", gap: "6px", marginTop: "3px" } },
+              h("span", { className: "of-num", style: { fontSize: "17px", fontWeight: 700 } }, t.value),
+              t.detail && h("span", { className: "of-muted", style: { fontSize: "10.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, t.detail)
+            ),
+            h(
+              "div",
+              { className: "of-bar-track" },
+              h("div", { className: "of-bar-fill", style: { width: `${t.pct}%`, background: t.color } })
+            )
           )
         )
-      )
-    ),
+      ),
 
     // 3. Conteúdo: Board 6 colunas OU Andar 2 pisos (Oficina + Mirante)
     viewMode === "board"

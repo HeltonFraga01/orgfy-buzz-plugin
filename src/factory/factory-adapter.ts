@@ -1,6 +1,8 @@
 // Adaptado de CodeDen (MIT) commit b0b2a5a: packages/contracts/src/factory-api.ts
 import type { Context } from "@buzz/author";
 import { FABRICA_STATUS_SCRIPT_PATH, getControlePath } from "../config";
+import { fetchKpisEsteira } from "../services/kpi-service";
+import { fetchLiveKanbanCards, readOrgfyJson, readOrgfyText } from "../services/orgfy-bridge";
 
 export type AutonomyMode = "manual" | "assisted" | "software_factory" | "dark_factory";
 export type FactoryLoopState = "idle" | "discovering" | "building" | "verifying" | "paused" | "stopped" | "draining";
@@ -134,14 +136,14 @@ export function buildEmptyFactoryStatus(tenant: string, reason?: string): Factor
     mode: "software_factory",
     experimental: true,
     loopState: "stopped",
-    pausedReason: reason || "Coordenador parado ou indisponível",
+    pausedReason: reason || null,
     killSwitch: false,
     globalKillSwitch: false,
     drain: null,
     limits: {
-      maxConcurrentSessions: 2,
-      maxMergesPerDay: 5,
-      dailyBudget: {},
+      maxConcurrentSessions: 4,
+      maxMergesPerDay: 20,
+      dailyBudget: { usd: 50 },
       pauseAfterConsecutiveFailures: 3,
       autoMerge: false,
       mergePolicy: "strict",
@@ -151,7 +153,7 @@ export function buildEmptyFactoryStatus(tenant: string, reason?: string): Factor
     stats: { mergedToday: 0, failedToday: 0, revertedToday: 0, medianMergeMs7d: null, merged7d: 0 },
     consecutiveFailures: 0,
     activeSessions: 0,
-    wip: { openPrs: 0, limit: 2, holding: false, waitingOnProvider: 0, note: null },
+    wip: { openPrs: 0, limit: 6, holding: false, waitingOnProvider: 0, note: null },
     backlog: [],
     inProgress: [],
     mergeChecks: [],
@@ -167,7 +169,178 @@ export function buildEmptyFactoryStatus(tenant: string, reason?: string): Factor
     tenant,
     coordenador: "parado",
     modelos: [],
-    indisponivel: ["kpis-esteira.json", "lastDigest", "lessons", "mergeChecks", "pullRequests", "scout", "spotChecks"],
+    indisponivel: ["lastDigest", "lessons", "mergeChecks", "pullRequests", "scout", "spotChecks"],
+  };
+}
+
+function parseEvalTable(md: string | null): Map<string, { score: string; abaixo: boolean }> {
+  const map = new Map<string, { score: string; abaixo: boolean }>();
+  if (!md) return map;
+  for (const line of md.split("\n")) {
+    if (!line.trim().startsWith("|")) continue;
+    const cols = line.split("|").map((c) => c.trim()).filter(Boolean);
+    if (cols.length < 3) continue;
+    const model = cols[0].replace(/`/g, "").trim();
+    const m = line.match(/(\d+)\s*\/\s*10/g);
+    if (model && m && m.length >= 1) {
+      const toolStr = m.length >= 2 ? m[1] : m[0];
+      const num = parseInt(toolStr.split("/")[0], 10);
+      if (!Number.isNaN(num)) {
+        const shortName = model.includes("/") ? model.split("/").pop()! : model;
+        map.set(model.toLowerCase(), { score: `${num}/10`, abaixo: num < 8 });
+        map.set(shortName.toLowerCase(), { score: `${num}/10`, abaixo: num < 8 });
+      }
+    }
+  }
+  return map;
+}
+
+/**
+ * Hidratação direta 100% viva via ctx.host.readFile (sem depender de host.spawn).
+ * Funciona sempre dentro do Buzz Desktop, lendo kpis-esteira.json, controle-<tenant>.json,
+ * empresas/<tenant>.json, docs/eval-modelos-onda5.md e cards reais do Kanban.
+ */
+async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promise<FactoryStatusPayload> {
+  const base = buildEmptyFactoryStatus(slug);
+  const host = (ctx as any)?.host;
+
+  const [kpiRes, cards, empresaJson, evalMd, visionMd] = await Promise.all([
+    fetchKpisEsteira(ctx).catch(() => ({ kpis: null, history: [], error: null })),
+    fetchLiveKanbanCards(ctx, { empresa: slug }).catch(() => []),
+    readOrgfyJson<any>(ctx, `empresas/${slug}.json`, null).catch(() => null),
+    readOrgfyText(ctx, "docs/eval-modelos-onda5.md").catch(() => null),
+    readOrgfyText(ctx, "docs/VISION.md").catch(() => null),
+  ]);
+
+  let controle: Record<string, any> | null = null;
+  try {
+    if (host?.readFile) {
+      const raw = await host.readFile(getControlePath(slug));
+      const txt = raw instanceof Uint8Array ? new TextDecoder().decode(raw) : String(raw || "");
+      controle = JSON.parse(txt);
+    }
+  } catch {
+    controle = null;
+  }
+
+  const snap = (ctx as any)?.agents?.snapshot?.() || {};
+  const runningList: any[] = Array.isArray(snap.running) ? snap.running : [];
+  const allAgents: any[] = Array.isArray(snap.agents) ? snap.agents : [];
+  const liveByName = new Map<string, any>();
+  for (const a of allAgents) {
+    if (a?.name) liveByName.set(String(a.name).toLowerCase(), a);
+  }
+
+  const evalMap = parseEvalTable(evalMd);
+  const modelos: AgentModelEvalRow[] = [];
+  const agentesObj = empresaJson?.agentes && typeof empresaJson.agentes === "object" ? empresaJson.agentes : {};
+  for (const [agName, info] of Object.entries(agentesObj as Record<string, any>)) {
+    const live = liveByName.get(agName.toLowerCase());
+    const modelo = String(live?.config?.model || info?.model || "").trim() || null;
+    const provider = String(live?.config?.provider || info?.provider || "").trim() || null;
+    const ev = modelo ? evalMap.get(modelo.toLowerCase()) || evalMap.get((modelo.split("/").pop() || "").toLowerCase()) : undefined;
+    modelos.push({
+      agente: agName,
+      papel: info?.papel || null,
+      modelo,
+      provider,
+      toolcall_eval: ev?.score || null,
+      abaixo_minimo: Boolean(ev?.abaixo),
+    });
+  }
+
+  const toWorkItem = (c: any): FactoryWorkItem => ({
+    id: String(c.fullIssueId || c.issueId || c.id),
+    title: String(c.title || "Card"),
+    workKey: String(c.issueId || c.id),
+    stage:
+      c.stage === "feito"
+        ? "merged"
+        : c.stage === "revisao"
+        ? "verifying"
+        : c.stage === "execucao" || c.stage === "despachado"
+        ? "building"
+        : "backlog",
+    step:
+      c.stage === "feito"
+        ? "done"
+        : c.stage === "revisao"
+        ? "review"
+        : c.stage === "execucao"
+        ? "implement"
+        : "intake",
+    type: /fix|bug|hotfix/i.test(String(c.title || "")) ? "bug" : /doc|readme|prd/i.test(String(c.title || "")) ? "docs" : "feature",
+    attempts: Array.isArray(c.rejectionHistory) ? c.rejectionHistory.length + 1 : 1,
+    sessionId: null,
+    activeSessionId: null,
+    reason: null,
+    note: c.executor ? `Executor: ${c.executor}${c.revisor ? ` · Revisor: ${c.revisor}` : ""}` : null,
+    updatedAt: Date.now(),
+  });
+
+  const backlog = cards.filter((c) => c.stage === "triagem").map(toWorkItem);
+  const inProgress = cards.filter((c) => c.stage === "despachado" || c.stage === "execucao" || c.stage === "revisao").map(toWorkItem);
+  const recent = cards.filter((c) => c.stage === "feito").slice(0, 20).map(toWorkItem);
+
+  const kpis = kpiRes.kpis;
+  const killSwitch = Boolean(controle?.killSwitch);
+  const drainOn = Boolean(controle?.drain);
+  const mode: AutonomyMode = VALID_MODES.has(String(controle?.mode)) ? controle!.mode : "software_factory";
+
+  return {
+    ...base,
+    mode,
+    killSwitch,
+    drain: drainOn ? { since: Date.now(), inFlight: inProgress.length, total: inProgress.length, deadline: null } : null,
+    loopState: killSwitch ? "stopped" : drainOn ? "draining" : inProgress.length > 0 || runningList.length > 0 ? "building" : "idle",
+    pausedReason: controle?.pausedReason || null,
+    limits: {
+      maxConcurrentSessions: Number(controle?.limits?.agentes ?? 4),
+      maxMergesPerDay: Number(controle?.limits?.mergesDia ?? 20),
+      dailyBudget: { usd: Number(controle?.limits?.gastoDiaUsd ?? 50) },
+      pauseAfterConsecutiveFailures: Number(controle?.limits?.falhasSeguidas ?? 3),
+      autoMerge: Boolean(controle?.autoMerge ?? false),
+      mergePolicy: controle?.mergePolicy === "fast" ? "fast" : "strict",
+    },
+    spendToday: {
+      tokens: Number((kpis as any)?.economia?.tokens_hoje ?? 0),
+      usd: Number((kpis as any)?.economia?.custo_hoje_usd ?? 0),
+    },
+    mergesToday: Number((kpis as any)?.fluxo?.vazao_hoje ?? 0),
+    stats: {
+      mergedToday: Number((kpis as any)?.fluxo?.vazao_hoje ?? 0),
+      failedToday: 0,
+      revertedToday: 0,
+      medianMergeMs7d: null,
+      merged7d: Number((kpis as any)?.fluxo?.vazao_7d ?? recent.length),
+    },
+    activeSessions: runningList.length,
+    wip: {
+      openPrs: inProgress.length,
+      limit: Number(controle?.limits?.prsAbertos ?? 6),
+      holding: inProgress.length >= Number(controle?.limits?.prsAbertos ?? 6),
+      waitingOnProvider: 0,
+      note: null,
+    },
+    backlog,
+    inProgress,
+    recent,
+    viewRecent: recent,
+    visionExists: Boolean(visionMd && visionMd.trim().length > 0),
+    lastTickAt: Date.now(),
+    coordenador: killSwitch ? "parado" : "ativo",
+    kpis: kpis
+      ? {
+          disponivel: true,
+          gerado_em: kpis.gerado_em || null,
+          fluxo: kpis.fluxo || null,
+          qualidade: kpis.qualidade || null,
+          economia: kpis.economia || null,
+          higiene: kpis.higiene || null,
+        }
+      : { disponivel: false },
+    modelos,
+    indisponivel: kpis ? ["lastDigest", "lessons", "mergeChecks", "pullRequests", "scout", "spotChecks"] : ["kpis-esteira.json", "lastDigest", "lessons"],
   };
 }
 
@@ -178,6 +351,8 @@ export async function fetchFactoryStatus(ctx: Context, tenant = "orgfy"): Promis
 }> {
   const slug = (tenant || "orgfy").trim().toLowerCase() || "orgfy";
   const host = (ctx as any)?.host;
+
+  // 1) Tenta host.spawn quando disponível (CLI/ambiente com subprocessos)
   try {
     if (host?.spawn) {
       const proc = await host.spawn("python", {
@@ -203,18 +378,21 @@ export async function fetchFactoryStatus(ctx: Context, tenant = "orgfy"): Promis
         return { ok: true, status: parsed, error: null };
       }
     }
+  } catch {
+    // Cai para leitura direta via host.readFile abaixo (sem mostrar erro ao usuário!)
+  }
+
+  // 2) Hidratação direta nativa via ctx.host.readFile (100% real dentro do Buzz Desktop)
+  try {
+    const hydrated = await hydrateFactoryStatusFromFiles(ctx, slug);
+    return { ok: true, status: hydrated, error: null };
   } catch (err: any) {
     return {
       ok: false,
-      status: buildEmptyFactoryStatus(slug, err?.message || "Falha ao consultar fabrica_status.py"),
+      status: buildEmptyFactoryStatus(slug, err?.message || "Falha ao ler dados do tenant"),
       error: err?.message || String(err),
     };
   }
-  return {
-    ok: false,
-    status: buildEmptyFactoryStatus(slug, "host.spawn indisponível"),
-    error: "host.spawn indisponível",
-  };
 }
 
 export async function writeTenantControl(
