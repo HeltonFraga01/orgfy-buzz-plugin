@@ -210,6 +210,59 @@ export const FACTORY_SHADOW_CSS = `
   flex-shrink: 0;
 }
 
+.of-project-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.of-project-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 18px;
+  padding: 0 18px;
+  height: 38px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+
+.of-project-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  padding: 0 2px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+
+.of-project-tab:hover {
+  color: var(--foreground);
+}
+
+.of-project-tab[data-active="true"] {
+  color: var(--foreground);
+  font-weight: 600;
+  border-bottom-color: var(--primary);
+}
+
 .of-main {
   display: flex;
   flex-direction: column;
