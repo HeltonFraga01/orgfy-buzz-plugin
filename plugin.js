@@ -3905,17 +3905,31 @@ async function computeSha256Hex(text) {
   const part = h1.toString(16).padStart(8, "0") + h2.toString(16).padStart(8, "0");
   return part.repeat(4);
 }
+function defaultSpecsfySkillsForAto(ato) {
+  if (ato === "ato_1") return "specsfy-03-specify, specsfy-04-validate";
+  if (ato === "ato_2") return "specsfy-05-tasks, specsfy-06-tdd-bdd";
+  return "specsfy-07-implement, specsfy-documentator";
+}
+function resolveEffortZone(effort) {
+  if (effort <= 2) return "Z2 — atômico/cirúrgico";
+  if (effort <= 6) return "Z3 — mudança local com spec.md + Gates";
+  return "Z4 — alta complexidade/integração com spec.md + entrevista + DECIDIDO";
+}
 function renderCanonicalCardMarkdown(params) {
-  const { input, slug, branch, worktreePath, idempotencyKey, acceptanceHash, triage, attention } = params;
+  const { input, slug, branch, worktreePath, idempotencyKey, acceptanceHash, effort, ato, specPath, triage, attention } = params;
   const formato = input.formato || "v3";
   const rawTitulo = String(input.titulo || "").trim();
   const prefixTag = (input.id_tarefa || slug.toUpperCase()).trim();
   const alreadyPrefixed = rawTitulo.toLowerCase().startsWith(prefixTag.toLowerCase());
   const tituloCompleto = (alreadyPrefixed ? rawTitulo : `${prefixTag}: ${rawTitulo}`).slice(0, 100);
+  const defaultSkills = defaultSpecsfySkillsForAto(ato);
+  const rawSkills = String(input.skills || "").trim();
+  const skills = rawSkills ? /specsfy-/i.test(rawSkills) ? rawSkills : `${defaultSkills}, ${rawSkills}` : defaultSkills;
   const passos = Array.isArray(input.passos) && input.passos.length > 0 ? input.passos : [
-    "Ler arquivos autorizados e validar pré-condições",
-    "Implementar alteração estritamente em Escrita exclusiva",
-    "Executar comando de aceite L-22 e registrar prova real"
+    `Carregar skill Specsfy (${defaultSkills.split(",")[0].trim()}) e ler arquivos autorizados`,
+    "Confirmar/escrever teste automatizado em RED (falhando pelo motivo esperado antes da alteração)",
+    "Implementar alteração cirúrgica estritamente em Escrita exclusiva até GREEN + REFACTOR",
+    "Executar comando de aceite L-22 e suíte de regressão registrando prova real"
   ];
   const foraEscopo = Array.isArray(input.fora_escopo) && input.fora_escopo.length > 0 ? input.fora_escopo : [
     "Não refatorar arquivos fora de Escrita exclusiva",
@@ -3925,7 +3939,6 @@ function renderCanonicalCardMarkdown(params) {
   const escritaStr = input.escrita_exclusiva.join(", ");
   const decisor = input.decisor || "OrgFy Iris";
   const tempoMax = input.tempo_maximo || "3600s";
-  const skills = input.skills || "esteira-v4-metodo";
   const tipo = input.tipo || "execucao";
   const modoKanban = tipo === "execucao" || tipo === "infraestrutura" || tipo === "seguranca" ? "goal" : "simples";
   const goalMaxTurns = modoKanban === "goal" ? "20" : "n/a";
@@ -3942,9 +3955,10 @@ function renderCanonicalCardMarkdown(params) {
   );
   if (input.prova_negativa) {
     provaLinhas.push(`  Negativo: ${input.prova_negativa.replace(/^negativo:\s*/i, "")}`);
-  } else if (tocaFerramentasOuTestes) {
-    provaLinhas.push(`  Negativo: na base origin/main antes da alteração, '${input.acceptance_command.trim()}' deve falhar (exit != 0)`);
+  } else if (tocaFerramentasOuTestes || tipo === "execucao") {
+    provaLinhas.push(`  Negativo: na base origin/main antes da alteração (RED), '${input.acceptance_command.trim()}' deve falhar (exit != 0)`);
   }
+  const atoLabel = ato === "ato_1" ? "Ato I" : ato === "ato_2" ? "Ato II" : "Ato III";
   const lines = [
     `<!-- orgfy:card ${formato} -->`,
     `# ${tituloCompleto}`,
@@ -3953,9 +3967,12 @@ function renderCanonicalCardMarkdown(params) {
     input.objetivo || input.titulo,
     "",
     "## Estado",
-    `- **Contexto:** ${input.contexto || "Card gerado de forma determinística via orgfy_card_create (schema-first)."}`,
+    `- **Contexto:** ${input.contexto || "Card gerado de forma determinística via orgfy_card_create (schema-first + Specsfy)."}`,
     `- **Autoridade:** ${input.autoridade}`,
     `- **Decisão:** ${input.decisao}`,
+    `- **Ato:** ${atoLabel}`,
+    `- **Effort:** ${effort}/10 (${resolveEffortZone(effort)})`,
+    ...specPath ? [`- **Spec:** ${specPath}`] : [],
     "",
     "## Papéis e ambiente",
     `- **Tipo:** ${tipo}`,
@@ -4051,7 +4068,7 @@ function renderCanonicalCardMarkdown(params) {
   return lines.join("\n");
 }
 async function createCanonicalCard(ctx, input) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l;
   const slug = sanitizeSlug(input.slug || input.id_tarefa || input.titulo);
   const branch = `feat/${slug}`;
   const worktreePath = `.worktrees/${slug}`;
@@ -4092,6 +4109,9 @@ async function createCanonicalCard(ctx, input) {
       idempotencyKey,
       cardPath,
       acceptanceHashSha256: "",
+      effort: typeof input.effort === "number" ? input.effort : 2,
+      ato: input.ato || "ato_3",
+      specPath: input.spec_path || null,
       triage: fallbackTriage,
       attentionContract: attention,
       markdown: "",
@@ -4125,6 +4145,20 @@ async function createCanonicalCard(ctx, input) {
   if (!((_g = input.feito_quando) == null ? void 0 : _g.trim())) {
     return makeError("MISSING_FEITO_QUANDO", "Campo 'feito_quando' é obrigatório.");
   }
+  if (typeof input.effort === "number" && (input.effort < 1 || input.effort > 10 || !Number.isInteger(input.effort))) {
+    return makeError("INVALID_EFFORT", `Effort inválido (${input.effort}); informe inteiro de 1 a 10 conforme escala Specsfy.`);
+  }
+  const tipoNorm = input.tipo || "execucao";
+  const ato = input.ato || (tipoNorm === "spec" || tipoNorm === "pesquisa" ? "ato_1" : "ato_3");
+  const specFromAutoridade = ((_h = String(input.autoridade || "").match(/specs\/[a-z-]+\/[^\s\)\'\"\,]+(?:\/spec\.md)?/i)) == null ? void 0 : _h[0]) || null;
+  const resolvedSpecPath = ((_i = input.spec_path) == null ? void 0 : _i.trim()) || specFromAutoridade || null;
+  const hasSpecIdRef = /SPEC-\d{4}/i.test(`${input.autoridade || ""} ${input.id_tarefa || ""} ${input.titulo || ""}`);
+  if (typeof input.effort === "number" && input.effort >= 3 && (tipoNorm === "execucao" || tipoNorm === "infraestrutura" || tipoNorm === "seguranca") && !resolvedSpecPath && !hasSpecIdRef) {
+    return makeError(
+      "MISSING_SPECSFY_SPEC",
+      `Effort ${input.effort}/10 (Z3/Z4) exige 'spec_path' válido (specs/<estado>/<NNNN>-<slug>/spec.md) com Definition Gate e Plan Gate Passed. Para hotfix cirúrgico sem spec completa, use Effort 1 ou 2 (Z2).`
+    );
+  }
   const triage = await triageCardWithDecisions(ctx, {
     titulo: input.titulo,
     objetivo: input.objetivo,
@@ -4135,6 +4169,7 @@ async function createCanonicalCard(ctx, input) {
     executor: input.executor,
     revisor: input.revisor
   });
+  const inferredEffort = typeof input.effort === "number" ? input.effort : resolvedSpecPath || hasSpecIdRef ? Math.max(3, Math.min(10, triage.riscoScore * 2 - 1)) : 2;
   const effectivePolicy = input.attention_policy || triage.attentionPolicy;
   const attentionContract = buildBuzzAttentionContract({
     slug,
@@ -4153,6 +4188,9 @@ async function createCanonicalCard(ctx, input) {
     worktreePath,
     idempotencyKey,
     acceptanceHash: acceptanceHashSha256,
+    effort: inferredEffort,
+    ato,
+    specPath: resolvedSpecPath,
     triage,
     attention: attentionContract
   });
@@ -4161,14 +4199,14 @@ async function createCanonicalCard(ctx, input) {
   let lintOutput = null;
   const absCardPath = `${ORGFY_ABS_PATH}/${cardPath}`;
   const shouldWrite = input.write_file !== false;
-  if (shouldWrite && ((_h = ctx == null ? void 0 : ctx.host) == null ? void 0 : _h.writeFile)) {
+  if (shouldWrite && ((_j = ctx == null ? void 0 : ctx.host) == null ? void 0 : _j.writeFile)) {
     try {
       await ctx.host.writeFile(absCardPath, markdown);
       writtenToDisk = true;
     } catch (err) {
       lintOutput = `Falha ao gravar ${absCardPath}: ${(err == null ? void 0 : err.message) || err}`;
     }
-  } else if (shouldWrite && typeof ((_i = ctx == null ? void 0 : ctx.host) == null ? void 0 : _i.spawn) === "function") {
+  } else if (shouldWrite && typeof ((_k = ctx == null ? void 0 : ctx.host) == null ? void 0 : _k.spawn) === "function") {
     try {
       const b64 = typeof globalThis.Buffer !== "undefined" ? globalThis.Buffer.from(markdown, "utf-8").toString("base64") : btoa(unescape(encodeURIComponent(markdown)));
       const proc = await ctx.host.spawn("bash", {
@@ -4180,7 +4218,7 @@ async function createCanonicalCard(ctx, input) {
       lintOutput = `Falha ao gravar via spawn ${absCardPath}: ${(err == null ? void 0 : err.message) || err}`;
     }
   }
-  if (input.run_lint && writtenToDisk && ((_j = ctx == null ? void 0 : ctx.host) == null ? void 0 : _j.spawn)) {
+  if (input.run_lint && writtenToDisk && ((_l = ctx == null ? void 0 : ctx.host) == null ? void 0 : _l.spawn)) {
     try {
       let combined = "";
       const proc = await ctx.host.spawn("bash", {
@@ -4204,17 +4242,21 @@ async function createCanonicalCard(ctx, input) {
   const prefixPub = (input.id_tarefa || slug.toUpperCase()).trim();
   const tituloPub = (rawTituloPub.toLowerCase().startsWith(prefixPub.toLowerCase()) ? rawTituloPub : `${prefixPub}: ${rawTituloPub}`).slice(0, 100).replace(/"/g, "'");
   const tipoPub = input.tipo || "execucao";
-  const publishCommand = `cd "${ORGFY_ABS_PATH}" && ./ferramentas/buzz-issue-guard.sh --card "${cardPath}" --title "${tituloPub}" --gate gate:qa --tipo tipo:${tipoPub} --papel papel:backend`;
+  const gatePub = ato === "ato_1" ? "gate:spec" : ato === "ato_2" ? "gate:tasks" : tipoPub === "revisao" ? "gate:qa" : "gate:implementacao";
+  const publishCommand = `cd "${ORGFY_ABS_PATH}" && ./ferramentas/buzz-issue-guard.sh --card "${cardPath}" --title "${tituloPub}" --gate ${gatePub} --tipo tipo:${tipoPub} --papel papel:backend`;
   return {
     ok: lintPassed !== false,
     code: lintPassed === false ? "CARD_LINT_FAILED" : "OK",
-    message: lintPassed === false ? `Card gerado em ${cardPath}, mas reprovado pelo card-lint.sh.` : `Card '${slug}' gerado com sucesso (L-22 SHA-256 congelado, modelo ${triage.modeloTier}, Attention ${effectivePolicy}).`,
+    message: lintPassed === false ? `Card gerado em ${cardPath}, mas reprovado pelo card-lint.sh.` : `Card '${slug}' gerado com sucesso (Specsfy ${ato}, Effort ${inferredEffort}/10, L-22 SHA-256 congelado, modelo ${triage.modeloTier}).`,
     slug,
     branch,
     worktreePath,
     idempotencyKey,
     cardPath,
     acceptanceHashSha256,
+    effort: inferredEffort,
+    ato,
+    specPath: resolvedSpecPath,
     triage,
     attentionContract,
     markdown,
@@ -4386,6 +4428,10 @@ async function startOrgfyMcpServer(ctx, onStatusChange) {
           prova_positiva: { type: "string", description: "Comando e saída esperada positiva" },
           prova_negativa: { type: "string", description: "Comando e saída esperada negativa" },
           acceptance_command: { type: "string", description: "Comando executável de aceite L-22" },
+          effort: { type: "number", description: "Escala Specsfy Effort 1..10 (1-2: Z2 hotfix; 3-6: Z3 exige spec.md + Gates; 7-10: Z4)" },
+          spec_path: { type: "string", description: "Caminho real da spec pai (specs/<estado>/<NNNN>-<slug>/spec.md)" },
+          ato: { type: "string", enum: ["ato_1", "ato_2", "ato_3"], description: "Ato Specsfy (ato_1, ato_2 ou ato_3)" },
+          skills: { type: "string", description: "Skills Specsfy do Ato (auto-preenchidas se omitido)" },
           attention_policy: { type: "string", enum: ["timer_curto", "event_driven", "watchdog_longo"] },
           write_file: { type: "boolean", description: "Se true, grava em cards/<SLUG>.md" },
           run_lint: { type: "boolean", description: "Se true e write_file=true, valida com ./ferramentas/card-lint.sh" },
@@ -5680,6 +5726,10 @@ function buildUnifiedOrgfyTools(ctx) {
           prova_positiva: { type: "string" },
           prova_negativa: { type: "string" },
           acceptance_command: { type: "string" },
+          effort: { type: "number", description: "Escala Specsfy Effort 1..10 (1-2: Z2 hotfix cirúrgico; 3-6: Z3 exige spec.md + Definition/Plan Gate Passed; 7-10: Z4 exige + DECIDIDO)" },
+          spec_path: { type: "string", description: "Caminho real da spec pai (specs/<estado>/<NNNN>-<slug>/spec.md ou specs/inbox/<slug>.md)" },
+          ato: { type: "string", enum: ["ato_1", "ato_2", "ato_3"], description: "Ato Specsfy (ato_1: Definir, ato_2: Planejar/RED, ato_3: Implementar/GREEN)" },
+          skills: { type: "string", description: "Skills Specsfy do Ato (auto-preenchidas conforme matriz-skills-ato.json se omitido)" },
           attention_policy: { type: "string", enum: ["timer_curto", "event_driven", "watchdog_longo"] },
           channel_id: { type: "string" },
           thread_root: { type: "string" },
@@ -15042,7 +15092,7 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
         text: `Esteira OrgFy v12 (Holding Cortexx) — Governança Determinística & Ciclo Fechado:
 Você opera sobre a fábrica de software agêntica da holding Cortexx (empresas: orgfy, lumen-iptv, saas-tributario).
 Regras Invariantes:
-- Template Oficial OrgFy + Spec-Kit Obrigatório (FAIL-CLOSED): NUNCA crie issues com 'buzz issues create' direto nem markdown improvisado. Toda nova tarefa exige: (1) spec no Spec-Kit ('specs/.../spec.md' com 'Plan Gate: Passed' para 'gate:implementacao'), (2) geração pelo template canônico ('./ferramentas/orgfy-card-new'), (3) validação com './ferramentas/card-lint.sh <card.md>' (exit 0) e (4) publicação exclusivamente via './ferramentas/buzz-issue-guard.sh'.
+- Metodologia Specsfy + TDD Obrigatória por Nível/Effort (FAIL-CLOSED): NUNCA crie issues com 'buzz issues create' direto nem pule o Specsfy usando '--gate gate:qa'. Antes de abrir ou executar qualquer card: (1) carregue a skill Specsfy do Ato em '.agents/skills/' (Ato I: specsfy-01..04/interviewer; Ato II: specsfy-05/06-tdd-bdd; Ato III: specsfy-07-implement/documentator); (2) classifique Effort (1-10): Effort 1-2 (Z2 hotfix cirúrgico) exige prova TDD RED->GREEN + DECIDIDO ou specs/inbox/; Effort 3-6 (Z3) exige specs/<estado>/<NNNN>-<slug>/spec.md com Definition Gate: Passed e Plan Gate: Passed; Effort 7-10 (Z4) exige além disso entrevista estruturada e DECIDIDO explícito; (3) execute TDD real (teste falhando em RED pelo motivo certo -> alteração cirúrgica em Escrita exclusiva -> GREEN + REFACTOR); (4) gere via 'orgfy_card_create' (com effort, spec_path, ato), valide com './ferramentas/card-lint.sh' e publique exclusivamente via './ferramentas/buzz-issue-guard.sh'.
 - L-01 a L-90: Qualquer modificação de código deve ser estritamente rastreada e validada pela esteira determinística.
 - L-22: O comando de aceite é imutável e blindado por hash SHA-256 no momento do despacho. Nunca afrouxe critérios de aceite.
 - L-90: Regras probatórias RSI em .esteira/estado/regras-probatorias.json são avaliadas contra o FPY histórico (First Pass Yield).

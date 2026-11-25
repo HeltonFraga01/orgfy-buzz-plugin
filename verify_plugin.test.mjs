@@ -1093,3 +1093,44 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
   assert.ok(r2.skippedByCooldown.some((s) => s.includes("auto_failover_already_healed:OrgFy Cron")));
   console.log("[AUTO-FAILOVER 1ST CRASH 404 + DEDUP OK]", JSON.stringify({ switchedTo: cronSaves[0].change.config.model }));
 }
+
+// 18. Specsfy Enforcement em orgfy_card_create (Effort 1-10, spec_path obrigatório em Effort>=3, skills Specsfy, TDD, gate:implementacao)
+{
+  const blockedZ3 = await orgfyMod.createCanonicalCard({}, {
+    slug: "z3-sem-spec",
+    titulo: "Feature Z3 sem spec.md deve falhar",
+    autoridade: "DECIDIDO Iris",
+    decisao: "Aprovado",
+    executor: "OrgFy Otto",
+    revisor: "OrgFy Teo",
+    escrita_exclusiva: ["ferramentas/novo.py"],
+    feito_quando: "pytest exit 0",
+    acceptance_command: "pytest -q",
+    effort: 5,
+  });
+  assert.equal(blockedZ3.ok, false, "Effort >= 3 sem spec_path deve ser bloqueado fail-closed");
+  assert.equal(blockedZ3.code, "MISSING_SPECSFY_SPEC");
+
+  const validZ3 = await orgfyMod.createCanonicalCard({}, {
+    slug: "z3-com-spec",
+    titulo: "Implementar entrega Z3 com spec.md e TDD",
+    autoridade: "specs/completed/0009-saneamento-hermes/spec.md + DECIDIDO Iris",
+    decisao: "Aprovado",
+    executor: "OrgFy Otto",
+    revisor: "OrgFy Teo",
+    escrita_exclusiva: ["ferramentas/novo.py"],
+    feito_quando: "pytest exit 0",
+    acceptance_command: "pytest -q",
+    effort: 5,
+    spec_path: "specs/completed/0009-saneamento-hermes/spec.md",
+  });
+  assert.equal(validZ3.ok, true);
+  assert.equal(validZ3.effort, 5);
+  assert.equal(validZ3.ato, "ato_3");
+  assert.ok(validZ3.markdown.includes("specsfy-07-implement"), "deve injetar skill Specsfy do Ato III");
+  assert.ok(validZ3.markdown.includes("- **Effort:** 5/10"), "deve registrar Effort no card");
+  assert.ok(validZ3.markdown.includes("- **Spec:** specs/completed/0009-saneamento-hermes/spec.md"), "deve registrar Spec no card");
+  assert.ok(validZ3.markdown.includes("RED"), "passos padrão devem exigir ciclo TDD RED->GREEN");
+  assert.ok(validZ3.publishCommand.includes("--gate gate:implementacao"), "execucao não pode mais emitir --gate gate:qa");
+  console.log("[SPECSFY CARD-CREATOR ENFORCEMENT OK]", JSON.stringify({ effort: validZ3.effort, ato: validZ3.ato, gate: "gate:implementacao" }));
+}
