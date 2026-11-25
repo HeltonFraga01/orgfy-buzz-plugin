@@ -57,13 +57,12 @@ export async function sendDesktopNotification(ctx: any, title: string, body: str
     }
   }
 
-  // 2. Garante notificação nativa macOS via osascript no host
+  // 2. Garante notificação nativa macOS via osascript sem shell intermediário (B1)
   if (ctx?.host?.spawn) {
     try {
-      const safeTitle = title.replace(/"/g, '\\"');
-      const safeBody = body.replace(/"/g, '\\"');
-      await ctx.host.spawn("bash", {
-        args: [`osascript -e 'display notification "${safeBody}" with title "${safeTitle}" sound name "Glass"'`],
+      const script = `display notification ${JSON.stringify(String(body || ""))} with title ${JSON.stringify(String(title || ""))} sound name "Glass"`;
+      await ctx.host.spawn("osascript", {
+        args: ["-e", script],
       });
     } catch (_err) {}
   }

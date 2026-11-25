@@ -379,8 +379,9 @@ export function registerBuzzNativeIntegrations(ctx: Context | any): BuzzNativeSt
       };
       registerOtel("buzz.pi/pi", "beforeTool");
       registerOtel("buzz.pi/pi", "afterTool");
-      registerOtel("buzz.claude-code/claude-code", "beforeTool");
-      registerOtel("buzz.claude-code/claude-code", "afterTool");
+      registerOtel("buzz.claude-code/claude-code", "PreToolUse");
+      registerOtel("buzz.claude-code/claude-code", "PostToolUse");
+      registerOtel("buzz.claude-code/claude-code", "PostToolUseFailure");
       state.otelHookRegistered = true;
     }
   } catch (err) {

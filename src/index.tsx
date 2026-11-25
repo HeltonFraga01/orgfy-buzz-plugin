@@ -144,7 +144,10 @@ export {
 };
 import {
   executeSmartModelFailover,
+  VERIFIED_TOOLCALL_FAILOVER_CHAIN,
+  isUnsupportedAgentModel,
 } from "./services/model-failover";
+export { VERIFIED_TOOLCALL_FAILOVER_CHAIN, isUnsupportedAgentModel };
 import {
   fetchResolvedArchive,
   searchResolvedArchive,

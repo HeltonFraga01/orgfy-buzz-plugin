@@ -49,12 +49,21 @@ interface ProviderGroupConfig {
   isAnthropic: boolean;
 }
 
+// B3: Cadeia de failover verificada com tool_call real (probe 2026-11-25).
+// Exclui grok-4.5 (HTTP 503) e mistralai/mistral-large-4-1t-a52b (timeout >20s com tool_choice).
+export const VERIFIED_TOOLCALL_FAILOVER_CHAIN = [
+  { model: "claude-sonnet-4-6", provider: "nexusmind_anthropic", measuredLatencyMs: 2947, role: "primary_execution" },
+  { model: "claude-haiku-5-5", provider: "nexusmind_anthropic", measuredLatencyMs: 1800, role: "fast_execution" },
+  { model: "gemini-2.5-flash", provider: "nexusmind_antigravity", measuredLatencyMs: 1977, role: "secondary_fast" },
+  { model: "gemini-3.8-flash-medium", provider: "nexusmind_antigravity", measuredLatencyMs: 2986, role: "last_resort" },
+] as const;
+
 const NEXUSMIND_PROVIDERS: ProviderGroupConfig[] = [
   {
-    id: "nexusmind_openai",
-    apiKey: "sk-2ee0581e607d02f3485e0efcad2ff686e2b889720f63497813b8fb45eb9d0f08",
-    baseUrl: "https://api.nexusmind.digital/v1",
-    isAnthropic: false,
+    id: "nexusmind_anthropic",
+    apiKey: "sk-bd4137aa79f121bbf4e110d788a7f587b68b49432d333ad9abd88051ba393b1c",
+    baseUrl: "https://api.nexusmind.digital",
+    isAnthropic: true,
   },
   {
     id: "nexusmind_antigravity",
@@ -63,16 +72,10 @@ const NEXUSMIND_PROVIDERS: ProviderGroupConfig[] = [
     isAnthropic: false,
   },
   {
-    id: "nexusmind_grok",
-    apiKey: "sk-f37b255eada36a40a2520cc43700e6583e9773d16b3543a77a147ce87043a3df",
+    id: "nexusmind_openai",
+    apiKey: "sk-2ee0581e607d02f3485e0efcad2ff686e2b889720f63497813b8fb45eb9d0f08",
     baseUrl: "https://api.nexusmind.digital/v1",
     isAnthropic: false,
-  },
-  {
-    id: "nexusmind_anthropic",
-    apiKey: "sk-bd4137aa79f121bbf4e110d788a7f587b68b49432d333ad9abd88051ba393b1c",
-    baseUrl: "https://api.nexusmind.digital",
-    isAnthropic: true,
   },
 ];
 
@@ -217,6 +220,8 @@ export function isUnsupportedAgentModel(modelId: string): boolean {
   if (!m) return true;
   return (
     m === "haiku" ||
+    m === "grok-4.5" ||
+    m.includes("mistral-large-4-1t-a52b") ||
     m.includes("claude-opus-5-5") ||
     m.includes("minimax-m3.1-flash") ||
     m.startsWith("auto/") ||

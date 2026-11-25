@@ -1703,22 +1703,28 @@ export async function executeAgentModelFailover(
     };
   }
 
-  const host = (ctx as any).host;
-  const dir = options.stateDir || AGENT_STATE_DIR_DEFAULT;
-  const statePath = `${dir}/buzz.agent.v1%3A${options.agentPubkey}`;
-
+  const agentsApi = (ctx as any).agents;
   try {
-    const raw = await host.readFile(statePath);
-    const text =
-      typeof raw === "string"
-        ? raw
-        : raw instanceof Uint8Array
-        ? new TextDecoder("utf-8").decode(raw)
-        : raw instanceof ArrayBuffer
-        ? new TextDecoder("utf-8").decode(new Uint8Array(raw))
-        : String(raw ?? "");
-    const parsed = JSON.parse(text);
-    const cfg = (parsed.config = parsed.config || {});
+    const snap = agentsApi?.snapshot?.() || {};
+    const allAgents: any[] = [...(snap.running || []), ...(snap.agents || [])];
+    const target = allAgents.find(
+      (a) =>
+        String(a?.pubkey || "").toLowerCase() === String(options.agentPubkey || "").toLowerCase() ||
+        String(a?.name || "").toLowerCase() === String(options.agentName || "").toLowerCase()
+    );
+    if (!target || typeof agentsApi?.save !== "function") {
+      return {
+        ok: false,
+        code: "STATE_NOT_FOUND",
+        switched: false,
+        agentKey,
+        previous: null,
+        current: null,
+        wokeAgent: false,
+        message: `Failover bloqueado (B4): ctx.agents.save indisponível ou agente ${agentKey} não encontrado (escrita direta em agents/state removida).`,
+      };
+    }
+    const cfg = { ...(target.config && typeof target.config === "object" ? target.config : {}) };
     const previous: ModelFailoverEntry = {
       provider: String(cfg.provider || ""),
       model: String(cfg.model || ""),
@@ -1726,10 +1732,7 @@ export async function executeAgentModelFailover(
     const next = pickNextHealthyModel(previous.provider, previous.model);
     cfg.provider = next.provider;
     cfg.model = next.model;
-
-    if (host?.writeFile) {
-      await host.writeFile(statePath, JSON.stringify(parsed, null, 2));
-    }
+    await agentsApi.save(target.key, { config: cfg });
 
     try {
       const notifApi = (ctx as any).notifications;
@@ -1907,19 +1910,29 @@ export function registerGovernanceAgentHooks(ctx: Context): boolean {
           });
         }
       };
+      // B2: Registra apenas em harnesses/eventos reais do Buzz Desktop.
+      // Agentes Goose (sem suporte a hooks no host) são monitorados pelo startGovernanceRadarWatchdog via sessions.db (mode=ro).
       agentsApi.registerHook({
-        id: "orgfy-post-turn-governance",
-        harness: "all",
-        event: "turn.completed",
+        id: "orgfy-pi-after-tool-governance",
+        harness: "buzz.pi/pi",
+        event: "afterTool",
+        run: async (payload?: any) => {
+          await handleProviderHookFailover(payload);
+        },
+      });
+      agentsApi.registerHook({
+        id: "orgfy-claude-stop-governance",
+        harness: "buzz.claude-code/claude-code",
+        event: "Stop",
         run: async (payload?: any) => {
           await handleProviderHookFailover(payload);
           await evaluateGovernanceAndReact(ctx, { dryRun: false, autoWake: true, includeRadar: true });
         },
       });
       agentsApi.registerHook({
-        id: "orgfy-turn-failed-model-failover",
-        harness: "all",
-        event: "turn.failed",
+        id: "orgfy-claude-tool-failure-failover",
+        harness: "buzz.claude-code/claude-code",
+        event: "PostToolUseFailure",
         run: async (payload?: any) => {
           await handleProviderHookFailover(payload);
         },
