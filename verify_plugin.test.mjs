@@ -1457,3 +1457,75 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
   assert.equal(orgfyMod.isUnsupportedAgentModel("claude-haiku-5-5"), false);
   console.log("[B3 FAILOVER CHAIN VERIFIED OK]", JSON.stringify({ chainModels }));
 }
+
+// 25. Fase 2 (PRD v15): Adaptador FactoryStatus real (orgfy + lumen-iptv), Kill Switch/Drain, Isolamento CSS Shadow DOM e Atribuição MIT
+{
+  const { execFileSync } = await import("node:child_process");
+  const orgfyHome = process.env.ORGFY_HOME || process.env.HOME || "";
+  const fabricaScript = path.resolve(orgfyHome, ".buzz", "REPOS", "orgfy", "ferramentas", "esteira", "fabrica_status.py");
+
+  if (fs.existsSync(fabricaScript)) {
+    for (const tenantSlug of ["orgfy", "lumen-iptv"]) {
+      const rawOut = execFileSync("python3", [fabricaScript, "--empresa", tenantSlug, "--json"], {
+        encoding: "utf8",
+        env: { ...process.env, HOME: orgfyHome },
+      });
+      const parsed = orgfyMod.parseFactoryStatus(JSON.parse(rawOut));
+      assert.equal(parsed.projectId, tenantSlug);
+      assert.equal(parsed.tenant, tenantSlug);
+      assert.ok(Array.isArray(parsed.indisponivel));
+      assert.ok(["ativo", "parado"].includes(parsed.coordenador));
+    }
+  }
+
+  // Teste de persistência real de Kill Switch + Drain + Limites via writeTenantControl
+  const memControls = new Map();
+  const ctrlCtx = {
+    host: {
+      readFile: async (p) => {
+        if (memControls.has(p)) return new TextEncoder().encode(memControls.get(p));
+        throw new Error("ENOENT");
+      },
+      writeFile: async (p, content) => {
+        memControls.set(p, String(content));
+      },
+    },
+  };
+  const ksRes = await orgfyMod.writeTenantControl(ctrlCtx, "orgfy", {
+    killSwitch: true,
+    drain: true,
+    mode: "assisted",
+    pausedReason: "Teste Fase 2",
+    limits: { gastoDiaUsd: 25, mergesDia: 10 },
+  });
+  assert.equal(ksRes.ok, true);
+  assert.equal(ksRes.control.killSwitch, true);
+  assert.equal(ksRes.control.drain, true);
+  assert.equal(ksRes.control.mode, "assisted");
+  assert.equal(ksRes.control.limits.gastoDiaUsd, 25);
+  assert.ok(memControls.get(ksRes.path).includes("\"killSwitch\": true"));
+
+  // Isolamento CSS Shadow DOM: zero seletores globais body/html vazando para o Buzz
+  const css = orgfyMod.FACTORY_SHADOW_CSS;
+  assert.equal(typeof css, "string");
+  assert.ok(css.includes(":host"), "CSS da fábrica deve usar :host para Shadow DOM");
+  assert.ok(!/(^|\n)\s*(html|body|\*)\s*\{/m.test(css), "CSS da fábrica não pode vazar seletores globais html/body/*");
+
+  // Raia Docs mantém Revisor L-01 no diagrama pt-BR
+  assert.ok(
+    orgfyMod.PT_BR.pipelines.lanes.docs.steps.some((s) => s.id === "review_docs" && s.label === "Revisar"),
+    "Raia de Documentação deve manter etapa de Revisor (L-01)"
+  );
+
+  // Atribuição MIT obrigatória (THIRD_PARTY_NOTICES.md + cabeçalho em src/factory/*)
+  const noticesPath = path.resolve(__dirname, "THIRD_PARTY_NOTICES.md");
+  assert.ok(fs.existsSync(noticesPath), "THIRD_PARTY_NOTICES.md obrigatório");
+  assert.ok(fs.readFileSync(noticesPath, "utf8").includes("b0b2a5a"), "THIRD_PARTY_NOTICES.md deve citar commit b0b2a5a do CodeDen");
+  const factoryDir = path.resolve(__dirname, "src", "factory");
+  for (const f of fs.readdirSync(factoryDir).filter((n) => n.endsWith(".ts") || n.endsWith(".tsx"))) {
+    const firstLine = fs.readFileSync(path.join(factoryDir, f), "utf8").split("\n")[0] || "";
+    assert.ok(firstLine.includes("Adaptado de CodeDen (MIT) commit b0b2a5a"), `${f} deve conter atribuição MIT no cabeçalho`);
+  }
+
+  console.log("[FASE 2 FACTORY ADAPTER + KILL SWITCH + SHADOW CSS + MIT OK]");
+}

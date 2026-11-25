@@ -34,7 +34,11 @@ const KPI_SNAPSHOT_PATH = joinHome(".buzz", ".scratch", "kpis-esteira.json");
 const KPI_SCRIPT_PATH = joinHome(".buzz", "REPOS", "orgfy", "ferramentas", "esteira", "gerar_kpis_esteira.py");
 const GOOSE_LOOP_RADAR_SCRIPT_PATH = joinHome(".buzz", "REPOS", "orgfy-buzz-plugin", "scripts", "goose_loop_radar.py");
 const GOOSE_LOOP_RADAR_SNAPSHOT_PATH = joinHome(".buzz", ".scratch", "goose-loop-radar.json");
-joinHome(".buzz", "REPOS", "orgfy", "ferramentas", "esteira", "fabrica_status.py");
+const FABRICA_STATUS_SCRIPT_PATH = joinHome(".buzz", "REPOS", "orgfy", "ferramentas", "esteira", "fabrica_status.py");
+function getControlePath(tenant) {
+  const slug = tenant.trim().toLowerCase() || "orgfy";
+  return joinHome(".buzz", "REPOS", "orgfy", ".esteira", "estado", `controle-${slug}.json`);
+}
 const ORGFY_ABS_PATH = ORGFY_REPO_ROOT;
 async function readOrgfyJson(ctx, relativePath, fallback) {
   var _a;
@@ -13333,6 +13337,1634 @@ function renderKanbanColumn(p, title, cards, badgeBg, badgeColor, renderAction, 
     )
   );
 }
+const PT_BR = {
+  appTitle: "OrgFy Factory",
+  nav: {
+    holding: "Holding",
+    inbox: "Inbox",
+    overview: "Visão geral",
+    board: "Fábrica · Board",
+    floor: "Fábrica · Andar",
+    costs: "Custos",
+    automations: "Automações",
+    agents: "Agentes",
+    vision: "Visão",
+    settings: "Configurações"
+  },
+  loopState: {
+    idle: "Rodando (ocioso)",
+    discovering: "Oráculo ativo",
+    building: "Executando",
+    verifying: "Verificando",
+    paused: "Pausado",
+    stopped: "Loop parado",
+    draining: "Drenando"
+  },
+  modes: {
+    manual: "Manual",
+    assisted: "Assistido",
+    software_factory: "Fábrica de Software",
+    dark_factory: "Dark Factory"
+  },
+  actions: {
+    checkNow: "Verificar agora",
+    runScout: "Rodar Oráculo",
+    killSwitchOn: "Ativar Kill Switch",
+    killSwitchOff: "Liberar Kill Switch",
+    drainOn: "Drenar (terminar atual)",
+    drainOff: "Cancelar Dreno",
+    refresh: "Atualizar",
+    openPmChat: "Abrir chat com PM",
+    retry: "Tentar novamente",
+    dismiss: "Dispensar"
+  },
+  pipelines: {
+    title: "Pipelines ao vivo",
+    subtitle: "Cada chip #id mostra onde o item está agora; clique para abrir o card ou a sessão do agente.",
+    scoutLabel: "Oráculo · Encontrar melhorias",
+    scoutBadge: "Scout",
+    scoutHelp: "Timer/Watch do Oráculo que analisa o repositório do tenant contra docs/VISION.md e propõe melhorias.",
+    issueLabel: "Issue (Relay NIP-34)",
+    issueBadge: "Humano ou scout",
+    issueHelp: "Issues kind 1621 abertas por autores confiáveis listados em empresas/<tenant>.json.",
+    classifyLabel: "Identificar tipo",
+    classifyBadge: "LLM",
+    classifyHelp: "Classifica a Natureza do card (bug, feature ou docs) via NexusMind/Decisions e encaminha para a raia correta.",
+    mergeLabel: "Merge automático",
+    mergeBadge: "Auto-merge",
+    mergeHelp: "Integra na main após CI verde no SHA resultante (ferramentas/ci.sh), aceite L-22 íntegro e GATE do revisor designado.",
+    reviseLabel: "Refazer",
+    reviseHelp: "GATE recusado devolve o card ao executor e incrementa o contador de voltas; na 2ª recusa repetida aciona o COO.",
+    lanes: {
+      bug: {
+        title: "BUG",
+        steps: [
+          { id: "reproduce", label: "Reproduzir", badge: "Agente", help: "Cria teste que falha reproduzindo o bug (comando de aceite L-22)." },
+          { id: "fix", label: "Corrigir", badge: "Agente", help: "Implementa a correção em worktree isolada dentro da Escrita exclusiva." },
+          { id: "review", label: "Revisar", badge: "Revisor", help: "Revisor independente (L-01) valida diff, aceite congelado e emite GATE." }
+        ]
+      },
+      feature: {
+        title: "FEATURE",
+        steps: [
+          { id: "analyze", label: "Analisar", badge: "Agente", help: "Produz spec.md e aguarda aprovação de spec quando exigido pelo Effort." },
+          { id: "implement", label: "Implementar", badge: "Agente", help: "Executa TDD RED->GREEN no worktree isolado e abre PR kind 1618." },
+          { id: "review", label: "Revisar", badge: "Revisor", help: "Revisor independente (L-01) valida critérios, CI verde e emite GATE." }
+        ]
+      },
+      docs: {
+        title: "DOCUMENTAÇÃO",
+        steps: [
+          { id: "implement_docs", label: "Implementar", badge: "Agente", help: "Atualiza documentação e contratos no escopo exclusivo do card." },
+          { id: "checks", label: "Checks (CI)", badge: "CI", help: "Executa ferramentas/ci.sh (segredos, soul-lint, card-lint, L-01 e pytest)." },
+          { id: "review_docs", label: "Revisar", badge: "Revisor", help: "Decisão L-01 mantida para Docs: revisor independente confere e emite GATE." }
+        ]
+      }
+    }
+  },
+  labels: {
+    unavailable: "indisponível",
+    coordinatorActive: "Coordenador ativo",
+    coordinatorStopped: "Coordenador parado",
+    evalBelowMin: "ABAIXO DE 8/10",
+    noItems: "Nenhum item ativo nesta seção.",
+    spendToday: "Gasto hoje",
+    mergesToday: "Merges hoje",
+    merges7d: "Merges (7d)",
+    fpyReal: "FPY real",
+    unknownHistory: "Sem histórico",
+    quarantine: "Quarentena",
+    limitsTitle: "Limites operacionais (controle-<tenant>.json)",
+    modelsTitle: "Agentes & Eval de Tool Call (R5.1)"
+  }
+};
+const VALID_MODES = /* @__PURE__ */ new Set(["manual", "assisted", "software_factory", "dark_factory"]);
+const VALID_LOOP_STATES = /* @__PURE__ */ new Set(["idle", "discovering", "building", "verifying", "paused", "stopped", "draining"]);
+function parseFactoryStatus(raw) {
+  if (!raw || typeof raw !== "object") {
+    throw new Error("FactoryStatus inválido: objeto esperado");
+  }
+  const obj = raw;
+  if (typeof obj.projectId !== "string" || !obj.projectId) {
+    throw new Error("FactoryStatus inválido: projectId obrigatório");
+  }
+  if (!VALID_MODES.has(String(obj.mode))) {
+    throw new Error(`FactoryStatus inválido: mode=${obj.mode}`);
+  }
+  if (!VALID_LOOP_STATES.has(String(obj.loopState))) {
+    throw new Error(`FactoryStatus inválido: loopState=${obj.loopState}`);
+  }
+  if (typeof obj.killSwitch !== "boolean" || typeof obj.globalKillSwitch !== "boolean") {
+    throw new Error("FactoryStatus inválido: killSwitch/globalKillSwitch boolean obrigatórios");
+  }
+  if (!obj.spendToday || typeof obj.spendToday.tokens !== "number" || typeof obj.spendToday.usd !== "number") {
+    throw new Error("FactoryStatus inválido: spendToday.tokens/usd obrigatórios");
+  }
+  if (!Array.isArray(obj.backlog) || !Array.isArray(obj.inProgress) || !Array.isArray(obj.recent)) {
+    throw new Error("FactoryStatus inválido: backlog/inProgress/recent devem ser arrays");
+  }
+  return obj;
+}
+function buildEmptyFactoryStatus(tenant, reason) {
+  return {
+    projectId: tenant,
+    mode: "software_factory",
+    experimental: true,
+    loopState: "stopped",
+    pausedReason: reason || "Coordenador parado ou indisponível",
+    killSwitch: false,
+    globalKillSwitch: false,
+    drain: null,
+    limits: {
+      maxConcurrentSessions: 2,
+      maxMergesPerDay: 5,
+      dailyBudget: {},
+      pauseAfterConsecutiveFailures: 3,
+      autoMerge: false,
+      mergePolicy: "strict"
+    },
+    spendToday: { tokens: 0, usd: 0 },
+    mergesToday: 0,
+    stats: { mergedToday: 0, failedToday: 0, revertedToday: 0, medianMergeMs7d: null, merged7d: 0 },
+    consecutiveFailures: 0,
+    activeSessions: 0,
+    wip: { openPrs: 0, limit: 2, holding: false, waitingOnProvider: 0, note: null },
+    backlog: [],
+    inProgress: [],
+    mergeChecks: [],
+    pullRequests: [],
+    recent: [],
+    viewRecent: [],
+    ignored: [],
+    held: [],
+    visionExists: false,
+    lessons: [],
+    lastDigest: null,
+    lastTickAt: null,
+    tenant,
+    coordenador: "parado",
+    modelos: [],
+    indisponivel: ["kpis-esteira.json", "lastDigest", "lessons", "mergeChecks", "pullRequests", "scout", "spotChecks"]
+  };
+}
+async function fetchFactoryStatus(ctx, tenant = "orgfy") {
+  const slug = (tenant || "orgfy").trim().toLowerCase() || "orgfy";
+  const host = ctx == null ? void 0 : ctx.host;
+  try {
+    if (host == null ? void 0 : host.spawn) {
+      const proc = await host.spawn("python", {
+        args: [FABRICA_STATUS_SCRIPT_PATH, "--empresa", slug, "--json"]
+      });
+      let out = "";
+      if ((proc == null ? void 0 : proc.stdout) && typeof proc.stdout.getReader === "function") {
+        const reader = proc.stdout.getReader();
+        const dec = new TextDecoder();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          out += typeof value === "string" ? value : dec.decode(value, { stream: true });
+        }
+      } else if (typeof (proc == null ? void 0 : proc.stdout) === "string") {
+        out = proc.stdout;
+      }
+      if (proc == null ? void 0 : proc.exited) {
+        await Promise.race([proc.exited, new Promise((r) => setTimeout(r, 15e3))]);
+      }
+      if (out.trim()) {
+        const parsed = parseFactoryStatus(JSON.parse(out.trim()));
+        return { ok: true, status: parsed, error: null };
+      }
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      status: buildEmptyFactoryStatus(slug, (err == null ? void 0 : err.message) || "Falha ao consultar fabrica_status.py"),
+      error: (err == null ? void 0 : err.message) || String(err)
+    };
+  }
+  return {
+    ok: false,
+    status: buildEmptyFactoryStatus(slug, "host.spawn indisponível"),
+    error: "host.spawn indisponível"
+  };
+}
+async function writeTenantControl(ctx, tenant, patch) {
+  const slug = (tenant || "orgfy").trim().toLowerCase() || "orgfy";
+  const path = getControlePath(slug);
+  const host = ctx == null ? void 0 : ctx.host;
+  let current = {
+    tenant: slug,
+    mode: "software_factory",
+    killSwitch: false,
+    drain: false,
+    limits: { gastoDiaUsd: 50, mergesDia: 20, agentes: 4, prsAbertos: 6, falhasSeguidas: 3 },
+    pausedReason: null
+  };
+  try {
+    if (host == null ? void 0 : host.readFile) {
+      const raw = await host.readFile(path);
+      const txt = raw instanceof Uint8Array ? new TextDecoder().decode(raw) : String(raw || "");
+      const parsed = JSON.parse(txt);
+      if (parsed && typeof parsed === "object") current = { ...current, ...parsed };
+    }
+  } catch {
+  }
+  const next = {
+    ...current,
+    ...patch,
+    limits: { ...current.limits || {}, ...patch.limits || {} },
+    tenant: slug,
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  if (host == null ? void 0 : host.writeFile) {
+    await host.writeFile(path, JSON.stringify(next, null, 2) + "\n");
+    return { ok: true, path, control: next };
+  }
+  return { ok: false, path, control: next };
+}
+const FACTORY_SHADOW_CSS = `
+:host, [data-orgfy-factory-root="true"] {
+  --background: var(--surface-base, #0b0d10);
+  --card: var(--surface-panel, #111419);
+  --card-elevated: var(--surface-elevated, #161a21);
+  --foreground: var(--text-standard, #f3f4f6);
+  --muted-foreground: var(--text-tertiary, #9ca3af);
+  --border: var(--border-standard, rgba(255, 255, 255, 0.09));
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --primary: #f59e0b;
+  --primary-soft: rgba(245, 158, 11, 0.14);
+  --primary-foreground: #0b0d10;
+  --success: #10b981;
+  --success-soft: rgba(16, 185, 129, 0.14);
+  --destructive: var(--surface-status-danger, #ef4444);
+  --destructive-soft: rgba(239, 68, 68, 0.15);
+  --info: #38bdf8;
+  --info-soft: rgba(56, 189, 248, 0.14);
+  --radius: 10px;
+  --font-sans: inherit;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  display: block;
+  width: 100%;
+  height: 100%;
+  color: var(--foreground);
+  background: var(--background);
+  font-family: var(--font-sans);
+  box-sizing: border-box;
+}
+
+.of-shell {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  width: 100%;
+  height: 100vh;
+  max-height: 100vh;
+  background: var(--background);
+  color: var(--foreground);
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.of-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 12px;
+  background: var(--card);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+
+.of-brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 6px;
+}
+
+.of-brand-title {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--foreground);
+}
+
+.of-tenant-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.of-tenant-select {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--card-elevated);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.of-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.of-nav-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.of-nav-btn:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--foreground);
+}
+
+.of-nav-btn[data-active="true"] {
+  background: var(--primary-soft);
+  border-color: rgba(245, 158, 11, 0.35);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.of-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 22px;
+  gap: 16px;
+  box-sizing: border-box;
+}
+
+.of-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  box-sizing: border-box;
+}
+
+.of-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.of-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  border: 1px solid var(--border);
+  background: var(--card-elevated);
+  color: var(--foreground);
+}
+
+.of-pill[data-tone="ok"] {
+  background: var(--success-soft);
+  border-color: rgba(16, 185, 129, 0.4);
+  color: var(--success);
+}
+
+.of-pill[data-tone="warn"] {
+  background: var(--primary-soft);
+  border-color: rgba(245, 158, 11, 0.4);
+  color: var(--primary);
+}
+
+.of-pill[data-tone="danger"] {
+  background: var(--destructive-soft);
+  border-color: rgba(239, 68, 68, 0.45);
+  color: #f87171;
+}
+
+.of-pill[data-tone="muted"] {
+  color: var(--muted-foreground);
+}
+
+.of-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--card-elevated);
+  color: var(--foreground);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.of-btn:hover {
+  border-color: var(--border-strong);
+}
+
+.of-btn[data-variant="primary"] {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.of-btn[data-variant="danger"] {
+  background: var(--destructive-soft);
+  border-color: rgba(239, 68, 68, 0.5);
+  color: #f87171;
+}
+
+.of-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.of-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+}
+
+.of-kpi-label {
+  font-size: 11px;
+  color: var(--muted-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.of-kpi-value {
+  font-size: 22px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  margin-top: 4px;
+}
+
+.of-kpi-sub {
+  font-size: 11px;
+  color: var(--muted-foreground);
+  margin-top: 4px;
+}
+
+.of-pipeline-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.of-pipeline-entry {
+  display: flex;
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.of-pipeline-lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.of-lane {
+  display: grid;
+  grid-template-columns: 112px repeat(3, minmax(0, 1fr)) 130px;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.of-lane-tag {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  border-radius: 8px;
+  border: 1px dashed var(--border-strong);
+  color: var(--muted-foreground);
+  background: rgba(255, 255, 255, 0.02);
+  padding: 6px;
+}
+
+.of-node {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--card-elevated);
+  min-height: 76px;
+  box-sizing: border-box;
+}
+
+.of-node[data-empty="true"] {
+  opacity: 0.62;
+}
+
+.of-node[data-alert="true"] {
+  border-color: rgba(239, 68, 68, 0.55);
+}
+
+.of-node-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.of-node-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.of-node-badge {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  padding: 1px 6px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted-foreground);
+}
+
+.of-help-btn {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.of-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.of-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 10.5px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.of-chip[data-alert="true"] {
+  border-color: rgba(239, 68, 68, 0.55);
+  background: var(--destructive-soft);
+  color: #f87171;
+}
+
+.of-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.of-table th,
+.of-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.of-table th {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted-foreground);
+}
+
+.of-board-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+}
+
+.of-floor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 10px;
+}
+
+.of-muted {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.of-mono {
+  font-family: var(--font-mono);
+}
+`;
+function attachFactoryShadowStyles(hostEl) {
+  if (!hostEl || typeof hostEl.attachShadow !== "function") return null;
+  const shadow = hostEl.shadowRoot || hostEl.attachShadow({ mode: "open" });
+  if (!shadow.querySelector("style[data-orgfy-factory-css]")) {
+    const styleEl = hostEl.ownerDocument.createElement("style");
+    styleEl.setAttribute("data-orgfy-factory-css", "true");
+    styleEl.textContent = FACTORY_SHADOW_CSS;
+    shadow.appendChild(styleEl);
+  }
+  if (!shadow.querySelector("slot")) {
+    const slotEl = hostEl.ownerDocument.createElement("slot");
+    shadow.appendChild(slotEl);
+  }
+  return shadow;
+}
+function classifyLane(item) {
+  if (item.type === "bug" || item.type === "feature" || item.type === "docs") return item.type;
+  const t = `${item.title} ${item.workKey}`.toLowerCase();
+  if (t.includes("fix") || t.includes("bug") || t.includes("hotfix")) return "bug";
+  if (t.includes("doc") || t.includes("readme") || t.includes("prd")) return "docs";
+  return "feature";
+}
+function bucketStep(item, lane) {
+  const st = String(item.step || item.stage || "").toLowerCase();
+  if (item.stage === "merged") return "merge";
+  if (item.stage === "verifying" || item.stage === "watching" || st.includes("revis") || st.includes("gate") || st.includes("review")) {
+    return lane === "docs" ? "review_docs" : "review";
+  }
+  if (lane === "bug") {
+    if (st.includes("reprod") || item.stage === "backlog") return "reproduce";
+    return "fix";
+  }
+  if (lane === "docs") {
+    if (st.includes("check") || st.includes("ci")) return "checks";
+    return "implement_docs";
+  }
+  if (st.includes("anal") || st.includes("spec") || item.stage === "backlog") return "analyze";
+  return "implement";
+}
+function renderPipelineDiagram(props) {
+  const { h, status, activeHelpKey, onToggleHelp, onSelectItem } = props;
+  const allActive = [...status.backlog, ...status.inProgress];
+  const recentMerged = status.recent.filter((i) => i.stage === "merged").slice(0, 6);
+  const failedItems = [...status.inProgress, ...status.recent].filter(
+    (i) => i.stage === "failed" || i.stage === "escalated" || i.stage === "reverted"
+  );
+  const retryCount = allActive.reduce((acc, i) => acc + Math.max(0, (i.attempts || 1) - 1), 0);
+  const laneBuckets = {
+    reproduce: [],
+    fix: [],
+    review_bug: [],
+    analyze: [],
+    implement: [],
+    review_feature: [],
+    implement_docs: [],
+    checks: [],
+    review_docs: []
+  };
+  for (const item of status.inProgress) {
+    const lane = classifyLane(item);
+    const step = bucketStep(item, lane);
+    if (lane === "bug" && step === "review") laneBuckets.review_bug.push(item);
+    else if (lane === "feature" && step === "review") laneBuckets.review_feature.push(item);
+    else if (laneBuckets[step]) laneBuckets[step].push(item);
+  }
+  const loopTone = status.killSwitch || status.globalKillSwitch || status.loopState === "stopped" ? "danger" : status.loopState === "draining" || status.loopState === "paused" ? "warn" : "ok";
+  const loopLabel = PT_BR.loopState[status.loopState] || status.loopState;
+  const renderNode = (opts) => {
+    const hasAlert = opts.items.some((i) => i.stage === "failed" || i.stage === "escalated" || i.stage === "reverted");
+    const isEmpty = opts.items.length === 0;
+    const isHelpOpen = activeHelpKey === opts.keyId;
+    return h(
+      "div",
+      {
+        key: opts.keyId,
+        className: "of-node",
+        "data-empty": isEmpty ? "true" : "false",
+        "data-alert": hasAlert ? "true" : "false"
+      },
+      h(
+        "div",
+        { className: "of-node-head" },
+        h("span", { className: "of-node-title" }, opts.title),
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", gap: "4px" } },
+          h("span", { className: "of-node-badge" }, opts.badge),
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-help-btn",
+              title: opts.help,
+              onClick: () => onToggleHelp(isHelpOpen ? null : opts.keyId)
+            },
+            "?"
+          )
+        )
+      ),
+      isHelpOpen && h(
+        "div",
+        {
+          style: {
+            fontSize: "11px",
+            color: "var(--muted-foreground)",
+            background: "rgba(0,0,0,0.28)",
+            padding: "6px 8px",
+            borderRadius: "6px",
+            lineHeight: 1.35
+          }
+        },
+        opts.help
+      ),
+      opts.items.length > 0 ? h(
+        "div",
+        { className: "of-chip-row" },
+        opts.items.slice(0, 8).map((item) => {
+          const itemAlert = item.stage === "failed" || item.stage === "escalated" || item.stage === "reverted";
+          return h(
+            "button",
+            {
+              key: `${opts.keyId}-${item.id}`,
+              type: "button",
+              className: "of-chip",
+              "data-alert": itemAlert ? "true" : "false",
+              title: `${item.title} (${item.stage})`,
+              onClick: () => onSelectItem(item)
+            },
+            itemAlert ? "⚠ " : "",
+            `#${item.id.slice(0, 8)}`
+          );
+        })
+      ) : h("span", { className: "of-muted", style: { fontSize: "10.5px" } }, "—")
+    );
+  };
+  return h(
+    "section",
+    { className: "of-card of-pipeline-flow" },
+    h(
+      "div",
+      { className: "of-header-bar" },
+      h(
+        "div",
+        null,
+        h("div", { style: { fontSize: "14px", fontWeight: 700 } }, PT_BR.pipelines.title),
+        h("div", { className: "of-muted", style: { marginTop: "2px" } }, PT_BR.pipelines.subtitle)
+      ),
+      h(
+        "div",
+        { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
+        h("span", { className: "of-pill", "data-tone": loopTone }, loopLabel),
+        h(
+          "span",
+          { className: "of-pill", "data-tone": retryCount > 0 ? "warn" : "muted", title: PT_BR.pipelines.reviseHelp },
+          `↻ ${PT_BR.pipelines.reviseLabel}: ${retryCount}`
+        ),
+        failedItems.length > 0 && h("span", { className: "of-pill", "data-tone": "danger" }, `⚠ ${failedItems.length} atenção`)
+      )
+    ),
+    // Entrada: Oráculo ⇢ Issue ⇢ Identificar tipo
+    h(
+      "div",
+      { className: "of-pipeline-entry" },
+      h("div", { style: { flex: "1 1 200px" } }, renderNode({
+        keyId: "scout",
+        title: PT_BR.pipelines.scoutLabel,
+        badge: PT_BR.pipelines.scoutBadge,
+        help: PT_BR.pipelines.scoutHelp,
+        items: []
+      })),
+      h("div", { style: { flex: "1 1 200px" } }, renderNode({
+        keyId: "issue",
+        title: PT_BR.pipelines.issueLabel,
+        badge: PT_BR.pipelines.issueBadge,
+        help: PT_BR.pipelines.issueHelp,
+        items: status.backlog
+      })),
+      h("div", { style: { flex: "1 1 200px" } }, renderNode({
+        keyId: "classify",
+        title: PT_BR.pipelines.classifyLabel,
+        badge: PT_BR.pipelines.classifyBadge,
+        help: PT_BR.pipelines.classifyHelp,
+        items: status.backlog.slice(0, 4)
+      }))
+    ),
+    // 3 Raias: Bug, Feature, Documentação (L-01 mantido!) -> Merge
+    h(
+      "div",
+      { className: "of-pipeline-lanes" },
+      // Raia Bug
+      h(
+        "div",
+        { className: "of-lane" },
+        h("div", { className: "of-lane-tag" }, PT_BR.pipelines.lanes.bug.title),
+        renderNode({
+          keyId: "bug-reproduce",
+          title: PT_BR.pipelines.lanes.bug.steps[0].label,
+          badge: PT_BR.pipelines.lanes.bug.steps[0].badge,
+          help: PT_BR.pipelines.lanes.bug.steps[0].help,
+          items: laneBuckets.reproduce
+        }),
+        renderNode({
+          keyId: "bug-fix",
+          title: PT_BR.pipelines.lanes.bug.steps[1].label,
+          badge: PT_BR.pipelines.lanes.bug.steps[1].badge,
+          help: PT_BR.pipelines.lanes.bug.steps[1].help,
+          items: laneBuckets.fix
+        }),
+        renderNode({
+          keyId: "bug-review",
+          title: PT_BR.pipelines.lanes.bug.steps[2].label,
+          badge: PT_BR.pipelines.lanes.bug.steps[2].badge,
+          help: PT_BR.pipelines.lanes.bug.steps[2].help,
+          items: laneBuckets.review_bug
+        }),
+        renderNode({
+          keyId: "merge-bug",
+          title: PT_BR.pipelines.mergeLabel,
+          badge: PT_BR.pipelines.mergeBadge,
+          help: PT_BR.pipelines.mergeHelp,
+          items: recentMerged.filter((i) => classifyLane(i) === "bug")
+        })
+      ),
+      // Raia Feature
+      h(
+        "div",
+        { className: "of-lane" },
+        h("div", { className: "of-lane-tag" }, PT_BR.pipelines.lanes.feature.title),
+        renderNode({
+          keyId: "feat-analyze",
+          title: PT_BR.pipelines.lanes.feature.steps[0].label,
+          badge: PT_BR.pipelines.lanes.feature.steps[0].badge,
+          help: PT_BR.pipelines.lanes.feature.steps[0].help,
+          items: laneBuckets.analyze
+        }),
+        renderNode({
+          keyId: "feat-implement",
+          title: PT_BR.pipelines.lanes.feature.steps[1].label,
+          badge: PT_BR.pipelines.lanes.feature.steps[1].badge,
+          help: PT_BR.pipelines.lanes.feature.steps[1].help,
+          items: laneBuckets.implement
+        }),
+        renderNode({
+          keyId: "feat-review",
+          title: PT_BR.pipelines.lanes.feature.steps[2].label,
+          badge: PT_BR.pipelines.lanes.feature.steps[2].badge,
+          help: PT_BR.pipelines.lanes.feature.steps[2].help,
+          items: laneBuckets.review_feature
+        }),
+        renderNode({
+          keyId: "merge-feat",
+          title: PT_BR.pipelines.mergeLabel,
+          badge: PT_BR.pipelines.mergeBadge,
+          help: PT_BR.pipelines.mergeHelp,
+          items: recentMerged.filter((i) => classifyLane(i) === "feature")
+        })
+      ),
+      // Raia Docs (com Revisor L-01 mantido!)
+      h(
+        "div",
+        { className: "of-lane" },
+        h("div", { className: "of-lane-tag" }, PT_BR.pipelines.lanes.docs.title),
+        renderNode({
+          keyId: "docs-impl",
+          title: PT_BR.pipelines.lanes.docs.steps[0].label,
+          badge: PT_BR.pipelines.lanes.docs.steps[0].badge,
+          help: PT_BR.pipelines.lanes.docs.steps[0].help,
+          items: laneBuckets.implement_docs
+        }),
+        renderNode({
+          keyId: "docs-checks",
+          title: PT_BR.pipelines.lanes.docs.steps[1].label,
+          badge: PT_BR.pipelines.lanes.docs.steps[1].badge,
+          help: PT_BR.pipelines.lanes.docs.steps[1].help,
+          items: laneBuckets.checks
+        }),
+        renderNode({
+          keyId: "docs-review",
+          title: PT_BR.pipelines.lanes.docs.steps[2].label,
+          badge: PT_BR.pipelines.lanes.docs.steps[2].badge,
+          help: PT_BR.pipelines.lanes.docs.steps[2].help,
+          items: laneBuckets.review_docs
+        }),
+        renderNode({
+          keyId: "merge-docs",
+          title: PT_BR.pipelines.mergeLabel,
+          badge: PT_BR.pipelines.mergeBadge,
+          help: PT_BR.pipelines.mergeHelp,
+          items: recentMerged.filter((i) => classifyLane(i) === "docs")
+        })
+      )
+    )
+  );
+}
+const TENANT_OPTIONS = [
+  { id: "orgfy", label: "OrgFy Core" },
+  { id: "lumen-iptv", label: "Lumen IPTV" },
+  { id: "saas-tributario", label: "SaaS Tributário" }
+];
+function createFactoryAppComponent(ctx, opts = {}) {
+  const React = ctx.react;
+  const h = React.createElement;
+  return function OrgFyFactoryApp() {
+    var _a, _b, _c;
+    const [tenant, setTenant] = React.useState("orgfy");
+    const [tab, setTab] = React.useState("overview");
+    const [status, setStatus] = React.useState(() => buildEmptyFactoryStatus("orgfy"));
+    const [loading, setLoading] = React.useState(true);
+    const [error, setError] = React.useState(null);
+    const [toast, setToast] = React.useState(null);
+    const [activeHelpKey, setActiveHelpKey] = React.useState(null);
+    const [selectedItem, setSelectedItem] = React.useState(null);
+    const [confirmKill, setConfirmKill] = React.useState(false);
+    const [gastoDiaUsd, setGastoDiaUsd] = React.useState(50);
+    const [mergesDia, setMergesDia] = React.useState(20);
+    const [agentesMax, setAgentesMax] = React.useState(4);
+    const [falhasSeguidas, setFalhasSeguidas] = React.useState(3);
+    const hostRef = React.useRef(null);
+    React.useEffect(() => {
+      if (hostRef.current) {
+        attachFactoryShadowStyles(hostRef.current);
+      }
+    }, []);
+    const notify2 = React.useCallback((msg) => {
+      setToast(msg);
+      setTimeout(() => setToast(null), 3500);
+    }, []);
+    const refresh = React.useCallback(async (targetTenant = tenant) => {
+      var _a2;
+      setLoading(true);
+      const res = await fetchFactoryStatus(ctx, targetTenant);
+      setStatus(res.status);
+      setError(res.error);
+      setGastoDiaUsd(((_a2 = res.status.limits.dailyBudget) == null ? void 0 : _a2.usd) ?? 50);
+      setMergesDia(res.status.limits.maxMergesPerDay ?? 20);
+      setAgentesMax(res.status.limits.maxConcurrentSessions ?? 4);
+      setFalhasSeguidas(res.status.limits.pauseAfterConsecutiveFailures ?? 3);
+      setLoading(false);
+    }, [tenant]);
+    React.useEffect(() => {
+      let disposed = false;
+      const run = () => {
+        if (!disposed) refresh(tenant);
+      };
+      run();
+      const timer = setInterval(run, 5e3);
+      const unsub = subscribeRelayUpdates(() => run());
+      return () => {
+        disposed = true;
+        clearInterval(timer);
+        unsub();
+      };
+    }, [tenant, refresh]);
+    const handleControlUpdate = React.useCallback(
+      async (patch, message) => {
+        const res = await writeTenantControl(ctx, tenant, patch);
+        if (res.ok) {
+          notify2(message);
+          await refresh(tenant);
+        } else {
+          notify2("Falha ao gravar controle-<tenant>.json (host.writeFile indisponível).");
+        }
+      },
+      [tenant, notify2, refresh]
+    );
+    const handleSelectItem = React.useCallback(
+      async (item) => {
+        setSelectedItem(item);
+        if (item.id && /^[0-9a-f]{64}$/i.test(item.id)) {
+          await openIssueInBuzz(ctx, { id: item.id, dtag: tenant }).catch(() => false);
+        }
+      },
+      [tenant]
+    );
+    const liveCrew = React.useMemo(() => {
+      var _a2, _b2;
+      try {
+        const snap = ((_b2 = (_a2 = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _a2.snapshot) == null ? void 0 : _b2.call(_a2)) || {};
+        const runningSet = new Set((snap.running || []).map((a) => String((a == null ? void 0 : a.key) || (a == null ? void 0 : a.name))));
+        const list = (snap.agents || []).map((a) => {
+          var _a3, _b3;
+          return {
+            key: String((a == null ? void 0 : a.key) || (a == null ? void 0 : a.name) || ""),
+            name: String((a == null ? void 0 : a.name) || (a == null ? void 0 : a.key) || "Agente"),
+            model: ((_a3 = a == null ? void 0 : a.config) == null ? void 0 : _a3.model) || PT_BR.labels.unavailable,
+            provider: ((_b3 = a == null ? void 0 : a.config) == null ? void 0 : _b3.provider) || "",
+            running: runningSet.has(String((a == null ? void 0 : a.key) || (a == null ? void 0 : a.name)))
+          };
+        });
+        return list;
+      } catch {
+        return [];
+      }
+    }, [status.lastTickAt]);
+    const qualidade = ((_a = status.kpis) == null ? void 0 : _a.qualidade) || null;
+    const economia = ((_b = status.kpis) == null ? void 0 : _b.economia) || null;
+    ((_c = status.kpis) == null ? void 0 : _c.fluxo) || null;
+    const modelos = status.modelos || [];
+    const abaixoMinimoCount = modelos.filter((m) => m.abaixo_minimo).length;
+    const navItems = [
+      { id: "holding", label: PT_BR.nav.holding },
+      { id: "inbox", label: PT_BR.nav.inbox, badge: status.held.length ? String(status.held.length) : void 0 },
+      { id: "overview", label: PT_BR.nav.overview },
+      { id: "board", label: PT_BR.nav.board, badge: String(status.backlog.length + status.inProgress.length) },
+      { id: "floor", label: PT_BR.nav.floor, badge: String(liveCrew.filter((c) => c.running).length) },
+      { id: "costs", label: PT_BR.nav.costs },
+      { id: "automations", label: PT_BR.nav.automations },
+      { id: "agents", label: PT_BR.nav.agents, badge: abaixoMinimoCount > 0 ? `⚠ ${abaixoMinimoCount}` : void 0 },
+      { id: "vision", label: PT_BR.nav.vision },
+      { id: "settings", label: PT_BR.nav.settings }
+    ];
+    const renderOverview = () => h(
+      "div",
+      { style: { display: "flex", flexDirection: "column", gap: "14px" } },
+      // Cabeçalho e barra de ações
+      h(
+        "div",
+        { className: "of-card of-header-bar" },
+        h(
+          "div",
+          null,
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
+            h("strong", { style: { fontSize: "16px" } }, `${PT_BR.appTitle} · ${tenant}`),
+            h(
+              "span",
+              { className: "of-pill", "data-tone": status.coordenador === "ativo" ? "ok" : "danger" },
+              status.coordenador === "ativo" ? PT_BR.labels.coordinatorActive : PT_BR.labels.coordinatorStopped
+            ),
+            h("span", { className: "of-pill", "data-tone": "warn" }, PT_BR.modes[status.mode] || status.mode),
+            status.killSwitch && h("span", { className: "of-pill", "data-tone": "danger" }, "KILL SWITCH ATIVO")
+          ),
+          status.pausedReason && h("div", { className: "of-muted", style: { marginTop: "4px" } }, `Motivo: ${status.pausedReason}`)
+        ),
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
+          h(
+            "button",
+            { type: "button", className: "of-btn", onClick: () => refresh(tenant), disabled: loading },
+            loading ? "Atualizando..." : PT_BR.actions.checkNow
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              onClick: () => handleControlUpdate(
+                { drain: !status.drain },
+                status.drain ? "Dreno cancelado." : "Modo Dreno ativado (termina os itens em andamento)."
+              )
+            },
+            status.drain ? PT_BR.actions.drainOff : PT_BR.actions.drainOn
+          ),
+          !confirmKill ? h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-variant": "danger",
+              onClick: () => {
+                if (status.killSwitch) {
+                  handleControlUpdate({ killSwitch: false, pausedReason: null }, "Kill Switch liberado.");
+                } else {
+                  setConfirmKill(true);
+                }
+              }
+            },
+            status.killSwitch ? PT_BR.actions.killSwitchOff : PT_BR.actions.killSwitchOn
+          ) : h(
+            "div",
+            { style: { display: "flex", gap: "6px", alignItems: "center" } },
+            h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                "data-variant": "danger",
+                onClick: async () => {
+                  setConfirmKill(false);
+                  await handleControlUpdate(
+                    { killSwitch: true, pausedReason: "Kill Switch acionado pelo operador" },
+                    "Kill Switch ativado imediatamente."
+                  );
+                }
+              },
+              "Confirmar Kill Switch"
+            ),
+            h(
+              "button",
+              { type: "button", className: "of-btn", onClick: () => setConfirmKill(false) },
+              "Cancelar"
+            )
+          )
+        )
+      ),
+      // KPIs reais (de kpis-esteira.json — zero números inventados)
+      h(
+        "div",
+        { className: "of-kpi-grid" },
+        h(
+          "div",
+          { className: "of-card" },
+          h("div", { className: "of-kpi-label" }, PT_BR.labels.fpyReal),
+          h(
+            "div",
+            { className: "of-kpi-value" },
+            typeof (qualidade == null ? void 0 : qualidade.fpy_real_pct) === "number" ? `${qualidade.fpy_real_pct.toFixed(1)}%` : PT_BR.labels.unavailable
+          ),
+          h(
+            "div",
+            { className: "of-kpi-sub" },
+            typeof (qualidade == null ? void 0 : qualidade.pct_desconhecido) === "number" ? `${PT_BR.labels.unknownHistory}: ${qualidade.pct_desconhecido.toFixed(1)}%` : PT_BR.labels.unavailable
+          )
+        ),
+        h(
+          "div",
+          { className: "of-card" },
+          h("div", { className: "of-kpi-label" }, PT_BR.labels.merges7d),
+          h("div", { className: "of-kpi-value" }, String(status.stats.merged7d)),
+          h("div", { className: "of-kpi-sub" }, `${PT_BR.labels.mergesToday}: ${status.mergesToday}`)
+        ),
+        h(
+          "div",
+          { className: "of-card" },
+          h("div", { className: "of-kpi-label" }, PT_BR.labels.spendToday),
+          h("div", { className: "of-kpi-value" }, `$${status.spendToday.usd.toFixed(2)}`),
+          h("div", { className: "of-kpi-sub" }, `${status.spendToday.tokens.toLocaleString("pt-BR")} tokens`)
+        ),
+        h(
+          "div",
+          { className: "of-card" },
+          h("div", { className: "of-kpi-label" }, PT_BR.labels.quarantine),
+          h("div", { className: "of-kpi-value" }, String(status.quarentenaCount ?? 0)),
+          h("div", { className: "of-kpi-sub" }, `WIP ativo: ${status.inProgress.length}`)
+        )
+      ),
+      // Diagrama de Pipelines ao vivo (prioridade #1)
+      renderPipelineDiagram({
+        h,
+        status,
+        activeHelpKey,
+        onToggleHelp: setActiveHelpKey,
+        onSelectItem: handleSelectItem
+      }),
+      // Transparência de fontes indisponíveis
+      status.indisponivel.length > 0 && h(
+        "div",
+        { className: "of-card", style: { fontSize: "11.5px", color: "var(--muted-foreground)" } },
+        `Fontes indisponíveis neste tenant (exibidas como "${PT_BR.labels.unavailable}"): ${status.indisponivel.join(", ")}`
+      )
+    );
+    const renderBoard = () => {
+      const cols = [
+        { title: "Triagem / Backlog", items: status.backlog },
+        { title: "Executando", items: status.inProgress.filter((i) => i.stage === "building") },
+        { title: "Revisando (Gate L-01)", items: status.inProgress.filter((i) => i.stage === "verifying" || i.stage === "watching") },
+        { title: "Integrado recente", items: status.recent.filter((i) => i.stage === "merged").slice(0, 12) }
+      ];
+      return h(
+        "div",
+        { className: "of-board-grid" },
+        cols.map(
+          (col) => h(
+            "div",
+            { key: col.title, className: "of-card", style: { display: "flex", flexDirection: "column", gap: "8px" } },
+            h(
+              "div",
+              { style: { display: "flex", justifyContent: "space-between", fontSize: "12px", fontWeight: 700 } },
+              h("span", null, col.title),
+              h("span", { className: "of-mono of-muted" }, String(col.items.length))
+            ),
+            col.items.length === 0 ? h("div", { className: "of-muted" }, PT_BR.labels.noItems) : col.items.map(
+              (item) => h(
+                "button",
+                {
+                  key: item.id,
+                  type: "button",
+                  onClick: () => handleSelectItem(item),
+                  style: {
+                    textAlign: "left",
+                    padding: "8px 10px",
+                    borderRadius: "8px",
+                    border: "1px solid var(--border)",
+                    background: "var(--card-elevated)",
+                    color: "var(--foreground)",
+                    cursor: "pointer"
+                  }
+                },
+                h("div", { className: "of-mono", style: { fontSize: "11px", color: "var(--primary)" } }, `#${item.id.slice(0, 8)}`),
+                h("div", { style: { fontSize: "12px", fontWeight: 600, marginTop: "2px" } }, item.title)
+              )
+            )
+          )
+        )
+      );
+    };
+    const renderFloor = () => h(
+      "div",
+      { className: "of-card", style: { display: "flex", flexDirection: "column", gap: "12px" } },
+      h("div", { style: { fontSize: "14px", fontWeight: 700 } }, "Andar da Fábrica · Equipe ao vivo"),
+      h(
+        "div",
+        { className: "of-floor-grid" },
+        liveCrew.length === 0 ? h("div", { className: "of-muted" }, "Nenhum agente reportado por ctx.agents.snapshot().") : liveCrew.map(
+          (agent) => h(
+            "div",
+            {
+              key: agent.key,
+              className: "of-node",
+              "data-empty": agent.running ? "false" : "true"
+            },
+            h(
+              "div",
+              { className: "of-node-head" },
+              h("span", { className: "of-node-title" }, agent.name),
+              h("span", { className: "of-pill", "data-tone": agent.running ? "ok" : "muted" }, agent.running ? "Ativo" : "Ocioso")
+            ),
+            h("div", { className: "of-mono of-muted", style: { fontSize: "11px" } }, `${agent.provider ? `${agent.provider}/` : ""}${agent.model}`)
+          )
+        )
+      )
+    );
+    const renderCosts = () => {
+      const porModelo = Array.isArray(economia == null ? void 0 : economia.por_modelo) ? economia.por_modelo : [];
+      return h(
+        "div",
+        { style: { display: "flex", flexDirection: "column", gap: "12px" } },
+        h(
+          "div",
+          { className: "of-kpi-grid" },
+          h(
+            "div",
+            { className: "of-card" },
+            h("div", { className: "of-kpi-label" }, "Custo amostra (USD)"),
+            h(
+              "div",
+              { className: "of-kpi-value" },
+              typeof (economia == null ? void 0 : economia.custo_usd_total_amostra) === "number" ? `$${economia.custo_usd_total_amostra.toFixed(2)}` : PT_BR.labels.unavailable
+            )
+          ),
+          h(
+            "div",
+            { className: "of-card" },
+            h("div", { className: "of-kpi-label" }, "Cache hit"),
+            h(
+              "div",
+              { className: "of-kpi-value" },
+              typeof (economia == null ? void 0 : economia.cache_hit_ratio_pct) === "number" ? `${economia.cache_hit_ratio_pct.toFixed(1)}%` : PT_BR.labels.unavailable
+            )
+          ),
+          h(
+            "div",
+            { className: "of-card" },
+            h("div", { className: "of-kpi-label" }, "Tokens (7d)"),
+            h(
+              "div",
+              { className: "of-kpi-value" },
+              typeof (economia == null ? void 0 : economia.tokens_7d) === "number" ? economia.tokens_7d.toLocaleString("pt-BR") : PT_BR.labels.unavailable
+            )
+          )
+        ),
+        h(
+          "div",
+          { className: "of-card" },
+          h("div", { style: { fontSize: "13px", fontWeight: 700, marginBottom: "8px" } }, "Quebra real por modelo (kpis-esteira.json)"),
+          porModelo.length === 0 ? h("div", { className: "of-muted" }, PT_BR.labels.unavailable) : h(
+            "table",
+            { className: "of-table" },
+            h(
+              "thead",
+              null,
+              h("tr", null, h("th", null, "Modelo"), h("th", null, "Chamadas"), h("th", null, "Custo USD"), h("th", null, "Cache"))
+            ),
+            h(
+              "tbody",
+              null,
+              porModelo.slice(0, 15).map(
+                (row, idx) => h(
+                  "tr",
+                  { key: `${row.modelo || idx}` },
+                  h("td", { className: "of-mono" }, String(row.modelo || PT_BR.labels.unavailable)),
+                  h("td", { className: "of-mono" }, String(row.requisicoes ?? row.chamadas ?? PT_BR.labels.unavailable)),
+                  h("td", { className: "of-mono" }, typeof row.custo_usd === "number" ? `$${row.custo_usd.toFixed(3)}` : PT_BR.labels.unavailable),
+                  h("td", { className: "of-mono" }, typeof row.cache_hit_pct === "number" ? `${row.cache_hit_pct.toFixed(1)}%` : PT_BR.labels.unavailable)
+                )
+              )
+            )
+          )
+        )
+      );
+    };
+    const renderAgents = () => h(
+      "div",
+      { className: "of-card" },
+      h("div", { style: { fontSize: "14px", fontWeight: 700, marginBottom: "8px" } }, PT_BR.labels.modelsTitle),
+      h(
+        "div",
+        { className: "of-muted", style: { marginBottom: "10px" } },
+        "Agentes com nota de tool call abaixo de 8/10 no eval R5.1 ficam destacados em vermelho."
+      ),
+      modelos.length === 0 ? h("div", { className: "of-muted" }, PT_BR.labels.unavailable) : h(
+        "table",
+        { className: "of-table" },
+        h(
+          "thead",
+          null,
+          h("tr", null, h("th", null, "Agente"), h("th", null, "Papel"), h("th", null, "Modelo"), h("th", null, "Eval Tool Call"))
+        ),
+        h(
+          "tbody",
+          null,
+          modelos.map(
+            (m) => h(
+              "tr",
+              { key: m.agente },
+              h("td", { style: { fontWeight: 600 } }, m.agente),
+              h("td", null, m.papel || "—"),
+              h("td", { className: "of-mono" }, m.modelo || PT_BR.labels.unavailable),
+              h(
+                "td",
+                null,
+                h(
+                  "span",
+                  {
+                    className: "of-pill",
+                    "data-tone": m.abaixo_minimo ? "danger" : m.toolcall_eval ? "ok" : "muted"
+                  },
+                  m.toolcall_eval ? m.abaixo_minimo ? `${m.toolcall_eval} · ${PT_BR.labels.evalBelowMin}` : m.toolcall_eval : PT_BR.labels.unavailable
+                )
+              )
+            )
+          )
+        )
+      )
+    );
+    const renderSettings = () => h(
+      "div",
+      { style: { display: "flex", flexDirection: "column", gap: "12px" } },
+      h(
+        "div",
+        { className: "of-card" },
+        h("div", { style: { fontSize: "14px", fontWeight: 700, marginBottom: "8px" } }, "Modo de autonomia"),
+        h(
+          "div",
+          { style: { display: "flex", gap: "8px", flexWrap: "wrap" } },
+          ["manual", "assisted", "software_factory", "dark_factory"].map(
+            (mode) => h(
+              "button",
+              {
+                key: mode,
+                type: "button",
+                className: "of-btn",
+                "data-variant": status.mode === mode ? "primary" : void 0,
+                onClick: () => handleControlUpdate({ mode }, `Modo alterado para ${PT_BR.modes[mode]}.`)
+              },
+              PT_BR.modes[mode]
+            )
+          )
+        )
+      ),
+      h(
+        "div",
+        { className: "of-card", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+        h("div", { style: { fontSize: "14px", fontWeight: 700 } }, PT_BR.labels.limitsTitle),
+        h(
+          "div",
+          { className: "of-kpi-grid" },
+          h(
+            "label",
+            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "12px" } },
+            "Gasto/dia (USD)",
+            h("input", {
+              type: "number",
+              value: gastoDiaUsd,
+              onChange: (e) => setGastoDiaUsd(Number(e.target.value)),
+              className: "of-tenant-select"
+            })
+          ),
+          h(
+            "label",
+            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "12px" } },
+            "Merges/dia",
+            h("input", {
+              type: "number",
+              value: mergesDia,
+              onChange: (e) => setMergesDia(Number(e.target.value)),
+              className: "of-tenant-select"
+            })
+          ),
+          h(
+            "label",
+            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "12px" } },
+            "Agentes simultâneos",
+            h("input", {
+              type: "number",
+              value: agentesMax,
+              onChange: (e) => setAgentesMax(Number(e.target.value)),
+              className: "of-tenant-select"
+            })
+          ),
+          h(
+            "label",
+            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "12px" } },
+            "Pausar após falhas seguidas",
+            h("input", {
+              type: "number",
+              value: falhasSeguidas,
+              onChange: (e) => setFalhasSeguidas(Number(e.target.value)),
+              className: "of-tenant-select"
+            })
+          )
+        ),
+        h(
+          "div",
+          null,
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-variant": "primary",
+              onClick: () => handleControlUpdate(
+                { limits: { gastoDiaUsd, mergesDia, agentes: agentesMax, falhasSeguidas } },
+                `Limites salvos em controle-${tenant}.json.`
+              )
+            },
+            "Salvar limites"
+          )
+        )
+      )
+    );
+    const renderSimpleTab = () => {
+      if (tab === "holding") {
+        return h(
+          "div",
+          { className: "of-card" },
+          h("div", { style: { fontSize: "14px", fontWeight: 700, marginBottom: "8px" } }, "Holding Cortexx · Empresas"),
+          h(
+            "div",
+            { className: "of-kpi-grid" },
+            TENANT_OPTIONS.map(
+              (t) => h(
+                "button",
+                {
+                  key: t.id,
+                  type: "button",
+                  className: "of-card",
+                  style: { textAlign: "left", cursor: "pointer", color: "var(--foreground)" },
+                  onClick: () => {
+                    setTenant(t.id);
+                    setTab("overview");
+                  }
+                },
+                h("div", { style: { fontWeight: 700, fontSize: "13px" } }, t.label),
+                h("div", { className: "of-mono of-muted", style: { marginTop: "4px" } }, t.id)
+              )
+            )
+          )
+        );
+      }
+      if (tab === "inbox") {
+        return h(
+          "div",
+          { className: "of-card" },
+          h("div", { style: { fontSize: "14px", fontWeight: 700, marginBottom: "8px" } }, "Inbox · Aguardando sua decisão"),
+          status.held.length === 0 ? h("div", { className: "of-muted" }, "Nenhuma pendência bloqueando a fábrica agora.") : h("pre", { className: "of-mono", style: { fontSize: "11px" } }, JSON.stringify(status.held, null, 2))
+        );
+      }
+      if (tab === "automations") {
+        return h(
+          "div",
+          { className: "of-card", style: { display: "flex", flexDirection: "column", gap: "8px" } },
+          h("div", { style: { fontSize: "14px", fontWeight: 700 } }, "Automações & LaunchAgents"),
+          h("div", { className: "of-mono", style: { fontSize: "12px" } }, `Coordenador (${status.launchAgent || "com.orgfy.esteira-minima"}): ${status.coordenador}`),
+          h("div", { className: "of-muted" }, "Rotina CEO: configurar/verificar no Buzz Desktop (canal #esteira-orgfy).")
+        );
+      }
+      return h(
+        "div",
+        { className: "of-card" },
+        h("div", { style: { fontSize: "14px", fontWeight: 700, marginBottom: "6px" } }, "Visão do produto (docs/VISION.md)"),
+        h(
+          "div",
+          { className: "of-muted" },
+          status.visionExists ? "docs/VISION.md encontrado no repositório do tenant." : "docs/VISION.md não encontrado ainda (indisponível)."
+        )
+      );
+    };
+    return h(
+      "div",
+      {
+        ref: hostRef,
+        "data-orgfy-factory-root": "true",
+        style: { width: "100%", height: "100vh", maxHeight: "100vh", overflow: "hidden" }
+      },
+      h("style", { "data-orgfy-factory-inline-fallback": "true" }, FACTORY_SHADOW_CSS),
+      h(
+        "div",
+        { className: "of-shell" },
+        h(
+          "aside",
+          { className: "of-sidebar" },
+          h(
+            "div",
+            { className: "of-brand" },
+            h("span", { className: "of-brand-title" }, PT_BR.appTitle),
+            h("span", { className: "of-pill", "data-tone": status.coordenador === "ativo" ? "ok" : "danger" }, status.coordenador)
+          ),
+          h(
+            "div",
+            { className: "of-tenant-picker" },
+            h(
+              "select",
+              {
+                className: "of-tenant-select",
+                value: tenant,
+                onChange: (e) => setTenant(e.target.value)
+              },
+              TENANT_OPTIONS.map((t) => h("option", { key: t.id, value: t.id }, t.label))
+            )
+          ),
+          h(
+            "nav",
+            { className: "of-nav" },
+            navItems.map(
+              (item) => h(
+                "button",
+                {
+                  key: item.id,
+                  type: "button",
+                  className: "of-nav-btn",
+                  "data-active": tab === item.id ? "true" : "false",
+                  onClick: () => setTab(item.id)
+                },
+                h("span", null, item.label),
+                item.badge && h("span", { className: "of-mono", style: { fontSize: "10.5px" } }, item.badge)
+              )
+            )
+          ),
+          opts.onOpenClassicCockpit && h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              style: { marginTop: "auto", justifyContent: "center" },
+              onClick: opts.onOpenClassicCockpit
+            },
+            "Control Room clássico"
+          )
+        ),
+        h(
+          "main",
+          { className: "of-main" },
+          toast && h("div", { className: "of-pill", "data-tone": "ok", style: { alignSelf: "flex-end" } }, toast),
+          error && h("div", { className: "of-pill", "data-tone": "danger" }, `Aviso: ${error}`),
+          selectedItem && h(
+            "div",
+            { className: "of-card of-header-bar" },
+            h(
+              "div",
+              null,
+              h("span", { className: "of-mono", style: { color: "var(--primary)", marginRight: "8px" } }, `#${selectedItem.id.slice(0, 8)}`),
+              h("strong", null, selectedItem.title),
+              h("span", { className: "of-muted", style: { marginLeft: "8px" } }, `(${selectedItem.stage})`)
+            ),
+            h("button", { type: "button", className: "of-btn", onClick: () => setSelectedItem(null) }, "Fechar")
+          ),
+          tab === "overview" ? renderOverview() : tab === "board" ? renderBoard() : tab === "floor" ? renderFloor() : tab === "costs" ? renderCosts() : tab === "agents" ? renderAgents() : tab === "settings" ? renderSettings() : renderSimpleTab()
+        )
+      )
+    );
+  };
+}
 const inject = [
   "react",
   "pages",
@@ -15110,14 +16742,64 @@ function apply(ctx) {
   const ORGFY_PAGE_ICON = "data:image/svg+xml;base64," + btoa(
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 20 6.5 20 17.5 12 22 4 17.5 4 6.5 12 2"/><polyline points="4 6.5 12 11.5 20 6.5"/><line x1="12" y1="11.5" x2="12" y2="22"/></svg>'
   );
+  const OrgFyFactoryView = createFactoryAppComponent(ctx, {
+    onOpenClassicCockpit: () => {
+      try {
+        window.dispatchEvent(new CustomEvent("orgfy.view.toggle", { detail: { mode: "classic" } }));
+      } catch {
+      }
+    }
+  });
+  function OrgFyRoot() {
+    const [surface, setSurface] = React.useState("factory");
+    React.useEffect(() => {
+      const onToggle = (ev) => {
+        var _a2;
+        const next = ((_a2 = ev == null ? void 0 : ev.detail) == null ? void 0 : _a2.mode) === "classic" ? "classic" : "factory";
+        setSurface(next);
+      };
+      window.addEventListener("orgfy.view.toggle", onToggle);
+      return () => window.removeEventListener("orgfy.view.toggle", onToggle);
+    }, []);
+    if (surface === "classic") {
+      return h(
+        "div",
+        { style: { position: "relative", width: "100%", height: "100%" } },
+        h(
+          "button",
+          {
+            type: "button",
+            onClick: () => setSurface("factory"),
+            style: {
+              position: "fixed",
+              bottom: "14px",
+              right: "18px",
+              zIndex: 9999,
+              padding: "6px 12px",
+              borderRadius: "8px",
+              border: "1px solid rgba(245, 158, 11, 0.5)",
+              backgroundColor: "#f59e0b",
+              color: "#0b0d10",
+              fontWeight: 700,
+              fontSize: "11px",
+              cursor: "pointer"
+            }
+          },
+          "Voltar para OrgFy Factory"
+        ),
+        h(OrgFyCockpit, null)
+      );
+    }
+    return h(OrgFyFactoryView, null);
+  }
   ctx.pages.register({
     id: "orgfy",
-    title: "OrgFy Control Room",
+    title: "OrgFy Factory",
     layout: "workspace",
     primary: true,
     placement: "topbar",
     icon: ORGFY_PAGE_ICON,
-    component: OrgFyCockpit
+    component: OrgFyRoot
   });
   if (ctx.settingsCards) {
     ctx.settingsCards.register({
@@ -15207,16 +16889,20 @@ REGRAS POR PAPEL (APLIQUE APENAS O SEU):
 }
 export {
   AVAILABLE_AGENTS,
+  FACTORY_SHADOW_CSS,
   INITIAL_PIPELINE_CARDS,
   INITIAL_REGRAS_PROBATORIAS,
   ORGFY_FAILOVER_REQUEST_EVENT,
+  PT_BR,
   SVG,
   TENANTS,
   THEME,
   VERIFIED_TOOLCALL_FAILOVER_CHAIN,
   apply,
   applyStepUpdateToMarkdown,
+  attachFactoryShadowStyles,
   buildBuzzAttentionContract,
+  buildEmptyFactoryStatus,
   buildHandoffPack,
   buildLiveAgentRoster,
   buildUnifiedOrgfyTools,
@@ -15225,6 +16911,7 @@ export {
   cleanupAttentionOnStageChange,
   createCanonicalCard,
   executeCardProgress,
+  fetchFactoryStatus,
   getBuzzNativeState,
   getOrgfyPipelineEvents,
   getTelemetrySnapshot,
@@ -15232,6 +16919,7 @@ export {
   inject,
   isUnsupportedAgentModel,
   parseCardProgress,
+  parseFactoryStatus,
   reconcileAgentPresenceAndLocks,
   reconcileAgentsViaBuzzApi,
   registerBuzzNativeIntegrations,
@@ -15241,5 +16929,6 @@ export {
   resetThreadWakeGuardForTests,
   runOneShotDecisionDispatch,
   triageCardWithDecisions,
-  triageDiffWithDecisions
+  triageDiffWithDecisions,
+  writeTenantControl
 };

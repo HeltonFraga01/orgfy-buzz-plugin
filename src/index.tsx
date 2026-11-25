@@ -171,6 +171,25 @@ import { renderIssueDetailModal } from "./components/IssueDetailModal";
 import { renderInfraModals } from "./components/InfraModals";
 import { renderTemplatesRsiSection } from "./components/TemplatesRsiSection";
 import { renderKanbanColumn } from "./components/KanbanColumn";
+import { createFactoryAppComponent } from "./factory/FactoryApp";
+import {
+  parseFactoryStatus,
+  buildEmptyFactoryStatus,
+  fetchFactoryStatus,
+  writeTenantControl,
+} from "./factory/factory-adapter";
+import { FACTORY_SHADOW_CSS, attachFactoryShadowStyles } from "./factory/shadow-shell";
+import { PT_BR } from "./i18n/pt-BR";
+
+export {
+  parseFactoryStatus,
+  buildEmptyFactoryStatus,
+  fetchFactoryStatus,
+  writeTenantControl,
+  FACTORY_SHADOW_CSS,
+  attachFactoryShadowStyles,
+  PT_BR,
+};
 
 export const inject = [
   "react",
@@ -2147,15 +2166,65 @@ export function apply(ctx: Context) {
       '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 20 6.5 20 17.5 12 22 4 17.5 4 6.5 12 2"/><polyline points="4 6.5 12 11.5 20 6.5"/><line x1="12" y1="11.5" x2="12" y2="22"/></svg>'
     );
 
-  // Registra Página Principal com layout: "workspace" (Zero margens de documento)
+  const OrgFyFactoryView = createFactoryAppComponent(ctx, {
+    onOpenClassicCockpit: () => {
+      try {
+        window.dispatchEvent(new CustomEvent("orgfy.view.toggle", { detail: { mode: "classic" } }));
+      } catch {}
+    },
+  });
+
+  function OrgFyRoot() {
+    const [surface, setSurface] = React.useState<"factory" | "classic">("factory");
+    React.useEffect(() => {
+      const onToggle = (ev: any) => {
+        const next = ev?.detail?.mode === "classic" ? "classic" : "factory";
+        setSurface(next);
+      };
+      window.addEventListener("orgfy.view.toggle", onToggle);
+      return () => window.removeEventListener("orgfy.view.toggle", onToggle);
+    }, []);
+    if (surface === "classic") {
+      return h(
+        "div",
+        { style: { position: "relative", width: "100%", height: "100%" } },
+        h(
+          "button",
+          {
+            type: "button",
+            onClick: () => setSurface("factory"),
+            style: {
+              position: "fixed",
+              bottom: "14px",
+              right: "18px",
+              zIndex: 9999,
+              padding: "6px 12px",
+              borderRadius: "8px",
+              border: "1px solid rgba(245, 158, 11, 0.5)",
+              backgroundColor: "#f59e0b",
+              color: "#0b0d10",
+              fontWeight: 700,
+              fontSize: "11px",
+              cursor: "pointer",
+            },
+          },
+          "Voltar para OrgFy Factory"
+        ),
+        h(OrgFyCockpit, null)
+      );
+    }
+    return h(OrgFyFactoryView, null);
+  }
+
+  // Registra Página Principal com layout: "workspace" (OrgFy Factory v15 em Shadow DOM)
   ctx.pages.register({
     id: "orgfy",
-    title: "OrgFy Control Room",
+    title: "OrgFy Factory",
     layout: "workspace",
     primary: true,
     placement: "topbar",
     icon: ORGFY_PAGE_ICON,
-    component: OrgFyCockpit,
+    component: OrgFyRoot,
   });
 
   // Registra Card em Configurações
