@@ -13876,8 +13876,8 @@ const FACTORY_SHADOW_CSS = `
   display: grid;
   grid-template-columns: 236px minmax(0, 1fr);
   width: 100%;
-  height: 100vh;
-  max-height: 100vh;
+  height: 100%;
+  min-height: 0;
   background: var(--background);
   color: var(--foreground);
   overflow: hidden;
@@ -48800,11 +48800,12 @@ function createFactoryAppComponent(ctx, opts = {}) {
   const h = React.createElement;
   const Floor3D = createFloor3DComponent(ctx);
   return function OrgFyFactoryApp() {
-    var _a, _b, _c, _d, _e;
+    var _a, _b, _c, _d, _e, _f, _g;
     const [tenant, setTenant] = React.useState("orgfy");
     const [tab, setTab] = React.useState("overview");
     const [dmAgentKey, setDmAgentKey] = React.useState("");
     const [openingDm, setOpeningDm] = React.useState(false);
+    const [relayTick, setRelayTick] = React.useState(0);
     const [status, setStatus] = React.useState(() => buildEmptyFactoryStatus("orgfy"));
     const [holding, setHolding] = React.useState(null);
     const [loading, setLoading] = React.useState(true);
@@ -48813,6 +48814,12 @@ function createFactoryAppComponent(ctx, opts = {}) {
     const [activeHelpKey, setActiveHelpKey] = React.useState(null);
     const [selectedItem, setSelectedItem] = React.useState(null);
     const [confirmKill, setConfirmKill] = React.useState(false);
+    const openSideTabRef = React.useRef(null);
+    React.useEffect(() => {
+      const relay = ctx == null ? void 0 : ctx.relay;
+      if (typeof (relay == null ? void 0 : relay.subscribe) !== "function") return;
+      return relay.subscribe(() => setRelayTick((n) => n + 1));
+    }, []);
     const [scorecardView, setScorecardView] = React.useState("builders");
     const [scorecardDays, setScorecardDays] = React.useState(30);
     const [storeyFocus, setStoreyFocus] = React.useState("both");
@@ -48917,9 +48924,9 @@ function createFactoryAppComponent(ctx, opts = {}) {
       } catch {
       }
       try {
-        const relaySnap = typeof ((_d2 = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _d2.snapshot) === "function" ? ctx.relay.snapshot() : null;
-        if ((relaySnap == null ? void 0 : relaySnap.viewer) && (relaySnap == null ? void 0 : relaySnap.origin)) {
-          return { viewer: String(relaySnap.viewer), communityOrigin: String(relaySnap.origin) };
+        const relaySnap2 = typeof ((_d2 = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _d2.snapshot) === "function" ? ctx.relay.snapshot() : null;
+        if ((relaySnap2 == null ? void 0 : relaySnap2.viewer) && (relaySnap2 == null ? void 0 : relaySnap2.origin)) {
+          return { viewer: String(relaySnap2.viewer), communityOrigin: String(relaySnap2.origin) };
         }
       } catch {
       }
@@ -48931,6 +48938,13 @@ function createFactoryAppComponent(ctx, opts = {}) {
       const canal = ((_a2 = status.tenantManifest) == null ? void 0 : _a2.canal) || (emp == null ? void 0 : emp.canal);
       const scope = resolveBuzzScope();
       try {
+        if (canal && openSideTabRef.current) {
+          const openedSide = openSideTabRef.current({ channelId: canal }, { keep: true });
+          if (openedSide) {
+            notify2(`Canal de ${tenant} aberto na barra lateral do Buzz.`);
+            return;
+          }
+        }
         if (canal && scope && ((_b2 = ctx.navigation) == null ? void 0 : _b2.open)) {
           const res = await ctx.navigation.open({
             version: 1,
@@ -49016,8 +49030,8 @@ function createFactoryAppComponent(ctx, opts = {}) {
         setOpeningDm(true);
         try {
           const scope = resolveBuzzScope();
-          const relaySnap = typeof ((_a2 = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a2.snapshot) === "function" ? ctx.relay.snapshot() : null;
-          const session = relaySnap == null ? void 0 : relaySnap.session;
+          const relaySnap2 = typeof ((_a2 = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a2.snapshot) === "function" ? ctx.relay.snapshot() : null;
+          const session = relaySnap2 == null ? void 0 : relaySnap2.session;
           let channelId = null;
           if ((_b2 = session == null ? void 0 : session.channels) == null ? void 0 : _b2.list) {
             try {
@@ -49042,6 +49056,13 @@ function createFactoryAppComponent(ctx, opts = {}) {
               channelId = await session.directMessages.open([pubkey], ac.signal);
             } finally {
               clearTimeout(timeout);
+            }
+          }
+          if (channelId && openSideTabRef.current) {
+            const openedSide = openSideTabRef.current({ channelId }, { keep: true });
+            if (openedSide) {
+              notify2(`Chat lateral com ${agentName} aberto.`);
+              return;
             }
           }
           if (channelId && scope && ((_e2 = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _e2.open)) {
@@ -49108,12 +49129,27 @@ function createFactoryAppComponent(ctx, opts = {}) {
       { id: "vision", label: "Canvas / Visão" },
       { id: "settings", label: PT_BR.nav.settings }
     ];
-    return h(
+    const NativeTabs = (_f = (_e = ctx == null ? void 0 : ctx.conversation) == null ? void 0 : _e.ui) == null ? void 0 : _f.Tabs;
+    const relaySnap = React.useMemo(() => {
+      var _a2;
+      try {
+        return typeof ((_a2 = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a2.snapshot) === "function" ? ctx.relay.snapshot() : null;
+      } catch {
+        return null;
+      }
+    }, [relayTick, status.lastTickAt]);
+    const useNativeSideTabs = Boolean(NativeTabs && (relaySnap == null ? void 0 : relaySnap.session) && (relaySnap == null ? void 0 : relaySnap.scope));
+    const pageContent = h(
       "div",
       {
         ref: hostRef,
         "data-orgfy-factory-root": "true",
-        style: { width: "100%", height: "100vh", maxHeight: "100vh", overflow: "hidden" }
+        style: {
+          width: "100%",
+          height: useNativeSideTabs ? "100%" : "100vh",
+          maxHeight: useNativeSideTabs ? "100%" : "100vh",
+          overflow: "hidden"
+        }
       },
       h("style", { "data-orgfy-factory-inline-fallback": "true" }, FACTORY_SHADOW_CSS),
       h(
@@ -49274,7 +49310,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
                   onChange: (e) => setDmAgentKey(e.target.value),
                   style: { width: "auto", maxWidth: "210px", padding: "4px 8px", fontSize: "11.5px" }
                 },
-                dmPool.length > 0 ? dmPool.map((a) => h("option", { key: a.key, value: a.key }, a.label)) : h("option", { value: "" }, ((_e = status.tenantManifest) == null ? void 0 : _e.coo) || "OrgFy Bento (COO)")
+                dmPool.length > 0 ? dmPool.map((a) => h("option", { key: a.key, value: a.key }, a.label)) : h("option", { value: "" }, ((_g = status.tenantManifest) == null ? void 0 : _g.coo) || "OrgFy Bento (COO)")
               ),
               h(
                 "button",
@@ -49285,7 +49321,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
                   disabled: openingDm,
                   onClick: () => handleOpenAgentDmInBuzz(selectedDmAgent)
                 },
-                openingDm ? "Abrindo..." : "Abrir DM ↗"
+                openingDm ? "Abrindo..." : "Chat lateral"
               )
             ),
             toast && h("span", { className: "of-pill", "data-tone": "done" }, toast),
@@ -49413,6 +49449,20 @@ function createFactoryAppComponent(ctx, opts = {}) {
         onOpenInBuzz: handleOpenInBuzz
       })
     );
+    if (useNativeSideTabs) {
+      return h(NativeTabs, {
+        id: "orgfy-factory",
+        session: relaySnap.session,
+        scope: relaySnap.scope,
+        label: PT_BR.appTitle,
+        children: (open) => {
+          openSideTabRef.current = open;
+          return pageContent;
+        }
+      });
+    }
+    openSideTabRef.current = null;
+    return pageContent;
   };
 }
 const inject = [
