@@ -14058,10 +14058,16 @@ const FACTORY_SHADOW_CSS = `
   align-items: center;
   gap: 6px;
   height: 100%;
-  padding: 0 2px;
+  padding: 0 4px;
+  margin-bottom: -1px;
   border: none;
   border-bottom: 2px solid transparent;
-  background: transparent;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
   color: var(--muted-foreground);
   font-size: 12.5px;
   font-weight: 500;
@@ -14072,12 +14078,15 @@ const FACTORY_SHADOW_CSS = `
 
 .of-project-tab:hover {
   color: var(--foreground);
+  background: transparent !important;
 }
 
 .of-project-tab[data-active="true"] {
   color: var(--foreground);
   font-weight: 600;
   border-bottom-color: var(--primary);
+  border-radius: 0 !important;
+  background: transparent !important;
 }
 
 .of-main {
@@ -15320,6 +15329,48 @@ function renderFactoryOverviewPanel(props) {
           status.globalKillSwitch ? "Kill switch global ativado: nenhuma fábrica da Holding está rodando." : `Pausado: ${status.pausedReason}`
         )
       ),
+      // Telemetria ao vivo nativa do Buzz (session.agentActivity): turnos em execução agora
+      props.telemetry && props.telemetry.activeTurns.length > 0 && h(
+        "div",
+        { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "8px", borderColor: "rgba(56, 189, 248, 0.35)" } },
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" } },
+          h(
+            "span",
+            { style: { display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "11.5px", fontWeight: 700, color: "var(--status-running)" } },
+            h("span", { className: "of-dot", "data-tone": "running" }),
+            `Agora no Buzz · ${props.telemetry.activeTurns.length} agente(s) respondendo`
+          ),
+          h("span", { className: "of-mono of-muted", style: { fontSize: "10px" } }, `agentActivity: ${props.telemetry.activityStatus}`)
+        ),
+        h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: "6px" } },
+          props.telemetry.activeTurns.map(
+            (t) => h(
+              "div",
+              {
+                key: `${t.agentPubkey}-${t.channelId}-${t.messageId || t.startedAt}`,
+                style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", fontSize: "12px", padding: "6px 8px", borderRadius: "7px", background: "var(--card)", border: "1px solid var(--border)" }
+              },
+              h("span", { className: "of-dot", "data-tone": t.state === "error" ? "failed" : "running" }),
+              h("strong", null, t.agentName),
+              h("span", { className: "of-mono of-muted", style: { fontSize: "11px", flex: 1, minWidth: "140px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, t.stepLabel),
+              props.onOpenTurnInSideChat && t.channelId && h(
+                "button",
+                { type: "button", className: "of-btn", "data-variant": "ghost", style: { padding: "2px 7px", fontSize: "11px", color: "var(--primary)" }, onClick: () => props.onOpenTurnInSideChat(t) },
+                "Abrir chat lateral"
+              ),
+              props.onInterruptTurn && t.stoppable && h(
+                "button",
+                { type: "button", className: "of-btn", "data-variant": "danger", style: { padding: "2px 7px", fontSize: "11px" }, onClick: () => props.onInterruptTurn(t) },
+                "Parar"
+              )
+            )
+          )
+        )
+      ),
       // Seção Pipelines ao vivo
       h(
         "div",
@@ -15354,10 +15405,10 @@ function renderFactoryOverviewPanel(props) {
           warn: true
         }),
         Meter(h, {
-          label: "Agentes trabalhando",
-          value: status.activeSessions,
+          label: "Trabalhando agora",
+          value: typeof props.workingNowCount === "number" ? props.workingNowCount : 0,
           max: status.limits.maxConcurrentSessions,
-          display: `${status.activeSessions} / ${status.limits.maxConcurrentSessions}`,
+          display: `${typeof props.workingNowCount === "number" ? props.workingNowCount : 0} / ${status.limits.maxConcurrentSessions}`,
           warn: false
         }),
         Meter(h, {
@@ -15856,6 +15907,7 @@ function renderFactoryBoardAndFloor(props) {
         tenant,
         status,
         liveCrew,
+        telemetry: props.telemetry,
         focus: storeyFocus,
         onSelectItem,
         onOpenAgentDm: props.onOpenAgentDm
@@ -47593,7 +47645,7 @@ function adaptStatusFor3D(status, liveCrew) {
 function createFloor3DComponent(ctx) {
   const React = ctx.react;
   const h = React.createElement;
-  return function CodeDenFloor3D({ tenant, status, liveCrew, focus, onSelectItem, onOpenAgentDm }) {
+  return function CodeDenFloor3D({ tenant, status, liveCrew, telemetry, focus, onSelectItem, onOpenAgentDm }) {
     var _a, _b, _c, _d;
     const hostRef = React.useRef(null);
     const stageRef = React.useRef(null);
@@ -47681,7 +47733,8 @@ function createFloor3DComponent(ctx) {
     const leadershipAndExec = tenantAgents.filter((a) => a.categoria === "lideranca" || a.categoria === "execucao");
     const reviewAndOps = tenantAgents.filter((a) => a.categoria === "revisao" || a.categoria === "operacao");
     const activeHoverAgent = scene.agents.find((a) => a.key === (hoveredKey || selectedKey)) || null;
-    const runningCount = tenantAgents.filter((a) => a.running).length;
+    const turnOf = (ag) => ag.pubkey && (telemetry == null ? void 0 : telemetry.byPubkey) ? telemetry.byPubkey[ag.pubkey.toLowerCase()] || null : null;
+    const workingNowCount = tenantAgents.filter((a) => Boolean(turnOf(a))).length;
     const inBuzzCount = tenantAgents.filter((a) => a.inBuzz).length;
     if (webglLost) {
       return h(
@@ -47691,51 +47744,54 @@ function createFloor3DComponent(ctx) {
         h("div", { className: "of-muted", style: { marginTop: "6px" } }, "O Andar 3D requer WebGL ativo; use a aba Board para acompanhar os cards.")
       );
     }
-    const renderCrewRow = (ag) => h(
-      "div",
-      {
-        key: ag.agentKey || ag.name,
-        className: "of-nav-btn",
-        "data-active": selectedKey === ag.agentKey ? "true" : "false",
-        style: { alignItems: "flex-start", padding: "6px 8px" },
-        onClick: () => {
-          var _a2;
-          setSelectedKey(ag.agentKey);
-          (_a2 = stageRef.current) == null ? void 0 : _a2.select(ag.agentKey);
-        }
-      },
-      h(
+    const renderCrewRow = (ag) => {
+      const liveTurn = turnOf(ag);
+      return h(
         "div",
-        { style: { display: "flex", flexDirection: "column", gap: "2px", minWidth: 0, flex: 1 } },
-        h(
-          "span",
-          { style: { display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "11.5px", fontWeight: 600 } },
-          h("span", {
-            className: "of-dot",
-            "data-tone": ag.running ? "running" : ag.inBuzz ? "done" : "idle",
-            title: ag.running ? "Em execução no Buzz" : ag.inBuzz ? "Disponível no Buzz" : "A provisionar"
-          }),
-          h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, ag.name)
-        ),
-        h("span", { className: "of-muted", style: { fontSize: "10px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, ag.funcao),
-        h("span", { className: "of-mono of-muted", style: { fontSize: "9.5px" } }, ag.model)
-      ),
-      onOpenAgentDm && ag.pubkey && h(
-        "button",
         {
-          type: "button",
-          className: "of-btn",
-          "data-variant": "ghost",
-          title: `Abrir DM nativa com ${ag.name} no Buzz`,
-          style: { padding: "2px 5px", fontSize: "10px", color: "var(--primary)", flexShrink: 0 },
-          onClick: (e) => {
-            e.stopPropagation();
-            onOpenAgentDm({ key: ag.agentKey, pubkey: ag.pubkey, name: ag.name });
+          key: ag.agentKey || ag.name,
+          className: "of-nav-btn",
+          "data-active": selectedKey === ag.agentKey ? "true" : "false",
+          style: { alignItems: "flex-start", padding: "6px 8px" },
+          onClick: () => {
+            var _a2;
+            setSelectedKey(ag.agentKey);
+            (_a2 = stageRef.current) == null ? void 0 : _a2.select(ag.agentKey);
           }
         },
-        "DM ↗"
-      )
-    );
+        h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: "2px", minWidth: 0, flex: 1 } },
+          h(
+            "span",
+            { style: { display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "11.5px", fontWeight: 600 } },
+            h("span", {
+              className: "of-dot",
+              "data-tone": liveTurn ? liveTurn.state === "error" ? "failed" : "running" : ag.inBuzz ? "done" : "idle",
+              title: liveTurn ? liveTurn.stepLabel : ag.inBuzz ? "Disponível no Buzz" : "A provisionar"
+            }),
+            h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, ag.name)
+          ),
+          liveTurn ? h("span", { className: "of-mono", style: { fontSize: "9.5px", color: liveTurn.state === "error" ? "var(--status-failed)" : "var(--status-running)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, liveTurn.stepLabel) : h("span", { className: "of-muted", style: { fontSize: "10px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, ag.funcao),
+          h("span", { className: "of-mono of-muted", style: { fontSize: "9.5px" } }, ag.model)
+        ),
+        onOpenAgentDm && ag.pubkey && h(
+          "button",
+          {
+            type: "button",
+            className: "of-btn",
+            "data-variant": "ghost",
+            title: `Abrir DM nativa com ${ag.name} no Buzz`,
+            style: { padding: "2px 5px", fontSize: "10px", color: "var(--primary)", flexShrink: 0 },
+            onClick: (e) => {
+              e.stopPropagation();
+              onOpenAgentDm({ key: ag.agentKey, pubkey: ag.pubkey, name: ag.name });
+            }
+          },
+          "DM ↗"
+        )
+      );
+    };
     return h(
       "div",
       { style: { display: "flex", flexDirection: "column", gap: "8px", flex: 1, minHeight: "560px" } },
@@ -47860,7 +47916,7 @@ function createFloor3DComponent(ctx) {
       h(
         "div",
         { className: "of-muted", style: { textAlign: "center", fontSize: "11px" } },
-        `Fábrica ${empresaNome} (${tenant}) · ${inBuzzCount}/${tenantAgents.length} agentes no Buzz · ${runningCount} ativo(s) agora · ${sceneSummary(scene)}`
+        `Fábrica ${empresaNome} (${tenant}) · ${inBuzzCount}/${tenantAgents.length} no Buzz · ${workingNowCount} respondendo agora · ${sceneSummary(scene)}`
       )
     );
   };
@@ -48428,8 +48484,12 @@ function renderFactorySecondaryPage(props) {
           h(
             "tbody",
             null,
-            tenantAgents.map(
-              (a) => h(
+            tenantAgents.map((a) => {
+              var _a2, _b2;
+              const pkLower = (a.pubkey || "").toLowerCase();
+              const liveTurn = pkLower && ((_a2 = props.telemetry) == null ? void 0 : _a2.byPubkey) ? props.telemetry.byPubkey[pkLower] : null;
+              const presence = pkLower && ((_b2 = props.telemetry) == null ? void 0 : _b2.presenceByPubkey) ? props.telemetry.presenceByPubkey[pkLower] : void 0;
+              return h(
                 "tr",
                 { key: a.name },
                 h(
@@ -48438,7 +48498,7 @@ function renderFactorySecondaryPage(props) {
                   h(
                     "span",
                     { style: { display: "inline-flex", alignItems: "center", gap: "6px" } },
-                    h("span", { className: "of-dot", "data-tone": a.running ? "running" : a.inBuzz ? "done" : "idle" }),
+                    h("span", { className: "of-dot", "data-tone": liveTurn ? liveTurn.state === "error" ? "failed" : "running" : a.inBuzz ? "done" : "idle" }),
                     a.name
                   )
                 ),
@@ -48446,7 +48506,7 @@ function renderFactorySecondaryPage(props) {
                   "td",
                   null,
                   h("div", { style: { fontSize: "12px" } }, a.funcao),
-                  h("div", { className: "of-mono of-muted", style: { fontSize: "10px" } }, `papel: ${a.papel} · paralelismo: ${a.parallelism}x`)
+                  liveTurn ? h("div", { className: "of-mono", style: { fontSize: "10px", color: liveTurn.state === "error" ? "var(--status-failed)" : "var(--status-running)" } }, `⚡ ${liveTurn.stepLabel}`) : h("div", { className: "of-mono of-muted", style: { fontSize: "10px" } }, `papel: ${a.papel} · paralelismo: ${a.parallelism}x`)
                 ),
                 h("td", { className: "of-mono" }, a.model),
                 h(
@@ -48454,8 +48514,8 @@ function renderFactorySecondaryPage(props) {
                   null,
                   h(
                     "span",
-                    { className: "of-pill", "data-tone": a.running ? "running" : a.inBuzz ? "done" : "waiting" },
-                    a.running ? "Em execução" : a.inBuzz ? "No Buzz" : "A provisionar"
+                    { className: "of-pill", "data-tone": liveTurn ? liveTurn.state === "error" ? "failed" : "running" : a.inBuzz ? "done" : "waiting" },
+                    liveTurn ? "Respondendo agora" : presence === "online" ? "Online" : a.inBuzz ? "Disponível" : "A provisionar"
                   )
                 ),
                 h(
@@ -48473,8 +48533,8 @@ function renderFactorySecondaryPage(props) {
                     "DM ↗"
                   ) : h("span", { className: "of-muted" }, "—")
                 )
-              )
-            )
+              );
+            })
           )
         )
       ) : agentTab === "eval" ? h(
@@ -48601,6 +48661,16 @@ function renderFactorySecondaryPage(props) {
             "div",
             { style: { display: "flex", flexWrap: "wrap", gap: "6px" } },
             papeis.map(([papel, agente]) => h("span", { key: papel, className: "of-pill" }, `${papel}: ${agente}`))
+          ),
+          props.channelCanvas && h(
+            "div",
+            { className: "of-surface", style: { padding: "10px 12px", borderColor: "var(--primary)" } },
+            h("div", { className: "of-mono", style: { fontSize: "10.5px", color: "var(--primary)", marginBottom: "6px" } }, `Canvas ao vivo do canal no Buzz (session.canvas.read · ${tenant})`),
+            h(
+              "pre",
+              { className: "of-muted", style: { margin: 0, whiteSpace: "pre-wrap", fontSize: "11px", maxHeight: "180px", overflowY: "auto", fontFamily: "inherit", lineHeight: 1.45 } },
+              props.channelCanvas
+            )
           ),
           h(
             "div",
@@ -48789,23 +48859,191 @@ function renderFactorySecondaryPage(props) {
     )
   );
 }
+const EMPTY_TELEMETRY = {
+  connected: false,
+  activityStatus: "unavailable",
+  activeTurns: [],
+  byPubkey: {},
+  presenceByPubkey: {},
+  unreadByChannel: {}
+};
+function readBuzzLiveTelemetry(ctx, nameByPubkey) {
+  var _a, _b, _c, _d, _e, _f, _g, _h;
+  try {
+    const relaySnap = typeof ((_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) === "function" ? ctx.relay.snapshot() : null;
+    const session = relaySnap == null ? void 0 : relaySnap.session;
+    if (!session) return EMPTY_TELEMETRY;
+    const actSnap = (_c = (_b = session.agentActivity) == null ? void 0 : _b.snapshot) == null ? void 0 : _c.call(_b);
+    const now = Date.now();
+    const byPubkey = {};
+    const turns = [];
+    const localList = Array.isArray(actSnap == null ? void 0 : actSnap.local) ? actSnap.local : [];
+    for (const row of localList) {
+      if (!row || row.dismissed) continue;
+      if (row.state !== "working" && row.state !== "waiting" && row.state !== "error") continue;
+      const pk = String(row.agent || "").toLowerCase();
+      if (!pk) continue;
+      const stepTool = ((_d = row.step) == null ? void 0 : _d.tool) ? String(row.step.tool) : void 0;
+      const stepTarget = ((_e = row.step) == null ? void 0 : _e.target) ? String(row.step.target) : void 0;
+      const stepLabel = row.state === "error" ? `Erro: ${String(row.error || "falha no turno").slice(0, 72)}` : stepTool ? `${stepTool}${stepTarget ? ` · ${stepTarget.slice(0, 40)}` : ""}` : row.state === "waiting" ? "Iniciando turno..." : "Pensando...";
+      const item = {
+        agentPubkey: pk,
+        agentName: nameByPubkey.get(pk) || `Agente #${pk.slice(0, 8)}`,
+        channelId: String(row.channelId || ""),
+        threadRootId: row.threadRootId ? String(row.threadRootId) : void 0,
+        messageId: row.messageId ? String(row.messageId) : void 0,
+        state: row.state === "error" ? "error" : row.state === "waiting" ? "waiting" : "working",
+        stepLabel,
+        toolName: stepTool,
+        toolTarget: stepTarget,
+        startedAt: Number(row.startedAt || now),
+        error: row.error ? String(row.error) : void 0,
+        stoppable: Boolean(row.stoppable)
+      };
+      byPubkey[pk] = item;
+      turns.push(item);
+    }
+    const typingList = Array.isArray(actSnap == null ? void 0 : actSnap.typing) ? actSnap.typing : [];
+    for (const t of typingList) {
+      if (!t || !t.working) continue;
+      if (typeof t.expiresAt === "number" && t.expiresAt < now) continue;
+      const pk = String(t.agent || "").toLowerCase();
+      if (!pk || byPubkey[pk]) continue;
+      const item = {
+        agentPubkey: pk,
+        agentName: nameByPubkey.get(pk) || `Agente #${pk.slice(0, 8)}`,
+        channelId: String(t.channelId || ""),
+        threadRootId: t.threadRootId ? String(t.threadRootId) : void 0,
+        state: "typing",
+        stepLabel: "Respondendo no Buzz...",
+        startedAt: Number(t.startedAt || t.timestamp || now),
+        stoppable: false
+      };
+      byPubkey[pk] = item;
+      turns.push(item);
+    }
+    const remoteTurns = Array.isArray(actSnap == null ? void 0 : actSnap.turns) ? actSnap.turns : [];
+    for (const rt of remoteTurns) {
+      if (!rt || rt.state !== "working") continue;
+      const pk = String(rt.agent || "").toLowerCase();
+      if (!pk || byPubkey[pk]) continue;
+      const firstReq = Array.isArray(rt.requests) ? rt.requests[0] : null;
+      const item = {
+        agentPubkey: pk,
+        agentName: nameByPubkey.get(pk) || `Agente #${pk.slice(0, 8)}`,
+        channelId: String(rt.channelId || ""),
+        threadRootId: (firstReq == null ? void 0 : firstReq.threadRootId) ? String(firstReq.threadRootId) : void 0,
+        messageId: (firstReq == null ? void 0 : firstReq.messageId) ? String(firstReq.messageId) : void 0,
+        state: "working",
+        stepLabel: "Executando turno...",
+        startedAt: Number(rt.timestamp || now),
+        stoppable: false
+      };
+      byPubkey[pk] = item;
+      turns.push(item);
+    }
+    const presenceByPubkey = {};
+    if (typeof ((_f = session.presence) == null ? void 0 : _f.status) === "function") {
+      for (const pk of nameByPubkey.keys()) {
+        try {
+          const st = session.presence.status(pk);
+          if (st === "online" || st === "away" || st === "offline" || st === "unknown") {
+            presenceByPubkey[pk] = st;
+          }
+        } catch {
+        }
+      }
+    }
+    const unreadByChannel = {};
+    try {
+      const uSnap = (_h = (_g = session.unread) == null ? void 0 : _g.snapshot) == null ? void 0 : _h.call(_g);
+      if (uSnap && typeof uSnap === "object") {
+        const channelsMap = uSnap.channels || uSnap.byChannel;
+        if (channelsMap instanceof Map) {
+          for (const [cid, val] of channelsMap.entries()) {
+            const count = typeof val === "number" ? val : Number((val == null ? void 0 : val.count) ?? (val == null ? void 0 : val.unread) ?? 0);
+            if (count > 0) unreadByChannel[String(cid)] = count;
+          }
+        } else if (channelsMap && typeof channelsMap === "object") {
+          for (const [cid, val] of Object.entries(channelsMap)) {
+            const count = typeof val === "number" ? val : Number((val == null ? void 0 : val.count) ?? (val == null ? void 0 : val.unread) ?? 0);
+            if (count > 0) unreadByChannel[String(cid)] = count;
+          }
+        }
+      }
+    } catch {
+    }
+    return {
+      connected: (relaySnap == null ? void 0 : relaySnap.status) === "ready",
+      activityStatus: String((actSnap == null ? void 0 : actSnap.status) || "unavailable"),
+      activeTurns: turns,
+      byPubkey,
+      presenceByPubkey,
+      unreadByChannel
+    };
+  } catch {
+    return EMPTY_TELEMETRY;
+  }
+}
+async function interruptLiveTurn(ctx, turn) {
+  var _a, _b, _c, _d;
+  try {
+    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+    if (((_d = session == null ? void 0 : session.agentActivity) == null ? void 0 : _d.interrupt) && turn.agentPubkey && turn.channelId && turn.messageId) {
+      await session.agentActivity.interrupt(turn.agentPubkey, turn.channelId, turn.messageId);
+      return true;
+    }
+  } catch {
+  }
+  return false;
+}
+async function readBuzzMainAgentPubkey(ctx) {
+  var _a, _b, _c, _d;
+  try {
+    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+    if (typeof ((_d = session == null ? void 0 : session.mainAgent) == null ? void 0 : _d.read) === "function") {
+      const pk = await session.mainAgent.read();
+      return typeof pk === "string" && pk.trim() ? pk.trim().toLowerCase() : null;
+    }
+  } catch {
+  }
+  return null;
+}
+async function readBuzzChannelCanvas(ctx, channelId) {
+  var _a, _b, _c, _d;
+  if (!channelId) return null;
+  try {
+    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+    if (((_d = session == null ? void 0 : session.canvas) == null ? void 0 : _d.available) && typeof session.canvas.read === "function") {
+      const ev = await session.canvas.read(channelId);
+      if (ev && typeof ev.content === "string" && ev.content.trim()) {
+        return ev.content.trim();
+      }
+    }
+  } catch {
+  }
+  return null;
+}
 const GLOBAL_TABS = /* @__PURE__ */ new Set(["holding", "inbox", "costs", "automations"]);
 const DEFAULT_WORKSPACES = [
-  { slug: "orgfy", nome: "OrgFy Core", estagio: "operacional" },
-  { slug: "lumen-iptv", nome: "Lumen IPTV", estagio: "operacional" },
-  { slug: "saas-tributario", nome: "SaaS Tributário", estagio: "planejado" }
+  { slug: "orgfy", nome: "OrgFy Core", estagio: "operacional", canal: "" },
+  { slug: "lumen-iptv", nome: "Lumen IPTV", estagio: "operacional", canal: "" },
+  { slug: "saas-tributario", nome: "SaaS Tributário", estagio: "planejado", canal: "" }
 ];
 function createFactoryAppComponent(ctx, opts = {}) {
   const React = ctx.react;
   const h = React.createElement;
   const Floor3D = createFloor3DComponent(ctx);
   return function OrgFyFactoryApp() {
-    var _a, _b, _c, _d, _e, _f, _g;
+    var _a, _b, _c, _d, _e, _f, _g, _h;
     const [tenant, setTenant] = React.useState("orgfy");
     const [tab, setTab] = React.useState("overview");
     const [dmAgentKey, setDmAgentKey] = React.useState("");
     const [openingDm, setOpeningDm] = React.useState(false);
     const [relayTick, setRelayTick] = React.useState(0);
+    const [activityTick, setActivityTick] = React.useState(0);
+    const [mainAgentPubkey, setMainAgentPubkey] = React.useState(null);
+    const [channelCanvas, setChannelCanvas] = React.useState(null);
     const [status, setStatus] = React.useState(() => buildEmptyFactoryStatus("orgfy"));
     const [holding, setHolding] = React.useState(null);
     const [loading, setLoading] = React.useState(true);
@@ -48820,6 +49058,44 @@ function createFactoryAppComponent(ctx, opts = {}) {
       if (typeof (relay == null ? void 0 : relay.subscribe) !== "function") return;
       return relay.subscribe(() => setRelayTick((n) => n + 1));
     }, []);
+    React.useEffect(() => {
+      var _a2, _b2, _c2, _d2, _e2, _f3, _g2;
+      const session = (_c2 = (_b2 = (_a2 = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a2.snapshot) == null ? void 0 : _b2.call(_a2)) == null ? void 0 : _c2.session;
+      if (!session) return;
+      const disposers = [];
+      const bump = () => setActivityTick((n) => n + 1);
+      try {
+        if (typeof ((_d2 = session.agentActivity) == null ? void 0 : _d2.activate) === "function") disposers.push(session.agentActivity.activate());
+        if (typeof ((_e2 = session.agentActivity) == null ? void 0 : _e2.subscribe) === "function") disposers.push(session.agentActivity.subscribe(bump));
+        if (typeof ((_f3 = session.agentActivity) == null ? void 0 : _f3.subscribeWorking) === "function") disposers.push(session.agentActivity.subscribeWorking(bump));
+        if (typeof ((_g2 = session.unread) == null ? void 0 : _g2.subscribe) === "function") disposers.push(session.unread.subscribe(bump));
+      } catch {
+      }
+      readBuzzMainAgentPubkey(ctx).then((pk) => {
+        if (pk) setMainAgentPubkey(pk);
+      }).catch(() => {
+      });
+      return () => {
+        for (const d of disposers) {
+          try {
+            d();
+          } catch {
+          }
+        }
+      };
+    }, [relayTick]);
+    React.useEffect(() => {
+      var _a2, _b2;
+      let cancelled = false;
+      const canal = ((_a2 = status.tenantManifest) == null ? void 0 : _a2.canal) || ((_b2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _b2.canal) || null;
+      readBuzzChannelCanvas(ctx, canal).then((txt) => {
+        if (!cancelled) setChannelCanvas(txt);
+      }).catch(() => {
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, [tenant, (_a = status.tenantManifest) == null ? void 0 : _a.canal, holding, relayTick]);
     const [scorecardView, setScorecardView] = React.useState("builders");
     const [scorecardDays, setScorecardDays] = React.useState(30);
     const [storeyFocus, setStoreyFocus] = React.useState("both");
@@ -48985,24 +49261,67 @@ function createFactoryAppComponent(ctx, opts = {}) {
       } catch {
         return [];
       }
-    }, [status.lastTickAt]);
-    const tenantAgents = ((_a = status.tenantManifest) == null ? void 0 : _a.agentes) || [];
+    }, [status.lastTickAt, relayTick]);
+    const tenantAgents = ((_b = status.tenantManifest) == null ? void 0 : _b.agentes) || [];
+    const nameByPubkey = React.useMemo(() => {
+      const map = /* @__PURE__ */ new Map();
+      for (const a of liveCrew) {
+        if (a.pubkey) map.set(a.pubkey.toLowerCase(), a.name);
+      }
+      for (const a of tenantAgents) {
+        if (a.pubkey) map.set(a.pubkey.toLowerCase(), a.name);
+      }
+      return map;
+    }, [liveCrew, tenantAgents]);
+    const telemetry = React.useMemo(
+      () => readBuzzLiveTelemetry(ctx, nameByPubkey),
+      [nameByPubkey, activityTick, relayTick, status.lastTickAt]
+    );
+    const handleOpenTurnInSideChat = React.useCallback(
+      (turn) => {
+        if (turn.channelId && openSideTabRef.current) {
+          const ok2 = openSideTabRef.current(
+            { channelId: turn.channelId, threadId: turn.threadRootId, messageId: turn.messageId },
+            { keep: true }
+          );
+          if (ok2) {
+            notify2(`Conversa de ${turn.agentName} aberta na barra lateral.`);
+            return;
+          }
+        }
+        notify2(`Não foi possível abrir o chat lateral de ${turn.agentName}.`);
+      },
+      [notify2]
+    );
+    const handleInterruptTurn = React.useCallback(
+      async (turn) => {
+        const ok2 = await interruptLiveTurn(ctx, turn);
+        notify2(ok2 ? `Turno de ${turn.agentName} interrompido.` : `Não foi possível interromper o turno de ${turn.agentName}.`);
+      },
+      [notify2]
+    );
     const dmPool = React.useMemo(() => {
       if (!GLOBAL_TABS.has(tab) && tenantAgents.length > 0) {
-        return tenantAgents.map((a) => ({
-          key: a.agentKey,
-          pubkey: a.pubkey,
-          name: a.name,
-          label: `${a.name} · ${a.papel}${a.running ? " ●" : ""}`
-        }));
+        return tenantAgents.map((a) => {
+          const working = Boolean(a.pubkey && telemetry.byPubkey[a.pubkey.toLowerCase()]);
+          return {
+            key: a.agentKey,
+            pubkey: a.pubkey,
+            name: a.name,
+            label: `${a.name} · ${a.papel}${working ? " ⚡" : ""}`
+          };
+        });
       }
-      return liveCrew.map((a) => ({
-        key: a.key,
-        pubkey: a.pubkey || "",
-        name: a.name,
-        label: `${a.name}${a.running ? " ●" : ""}`
-      }));
-    }, [tab, tenantAgents, liveCrew]);
+      return liveCrew.map((a) => {
+        const working = Boolean(a.pubkey && telemetry.byPubkey[a.pubkey.toLowerCase()]);
+        return {
+          key: a.key,
+          pubkey: a.pubkey || "",
+          name: a.name,
+          label: `${a.name}${working ? " ⚡" : ""}`
+        };
+      });
+    }, [tab, tenantAgents, liveCrew, telemetry]);
     const defaultDmAgentKey = React.useMemo(() => {
       var _a2, _b2;
       const cooName = (((_a2 = status.tenantManifest) == null ? void 0 : _a2.coo) || "OrgFy Bento").toLowerCase();
@@ -49091,22 +49410,27 @@ function createFactoryAppComponent(ctx, opts = {}) {
       },
       [selectedDmAgent, resolveBuzzScope, notify2]
     );
-    const masterAgentName = ((_b = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _b.nome) || "OrgFy Iris";
-    const masterLive = liveCrew.find((a) => a.name.toLowerCase().includes("iris")) || liveCrew[0] || null;
+    const masterLive = mainAgentPubkey && liveCrew.find((a) => {
+      var _a2;
+      return ((_a2 = a.pubkey) == null ? void 0 : _a2.toLowerCase()) === mainAgentPubkey;
+    }) || liveCrew.find((a) => a.name.toLowerCase().includes("iris")) || liveCrew[0] || null;
+    const masterAgentName = (masterLive == null ? void 0 : masterLive.name) || ((_c = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _c.nome) || "OrgFy Iris";
+    const masterTurn = (masterLive == null ? void 0 : masterLive.pubkey) ? telemetry.byPubkey[masterLive.pubkey.toLowerCase()] || null : null;
     const workspaces = (holding == null ? void 0 : holding.empresas) && holding.empresas.length > 0 ? holding.empresas.map((e) => ({
       slug: e.slug,
       nome: e.workspaceBuzz || e.nome,
       estagio: e.estagio,
+      canal: e.canal || "",
       agentesInfo: `${e.agentesProntos}/${e.agentesTotal}`
     })) : DEFAULT_WORKSPACES.map((w) => ({ ...w, agentesInfo: "" }));
     const activeWorkspace = workspaces.find((w) => w.slug === tenant) || workspaces[0];
-    const empresaNome = ((_c = status.tenantManifest) == null ? void 0 : _c.nome) || (activeWorkspace == null ? void 0 : activeWorkspace.nome) || tenant;
-    const empresaRepo = ((_d = status.tenantManifest) == null ? void 0 : _d.repoId) || tenant;
+    const empresaNome = ((_d = status.tenantManifest) == null ? void 0 : _d.nome) || (activeWorkspace == null ? void 0 : activeWorkspace.nome) || tenant;
+    const empresaRepo = ((_e = status.tenantManifest) == null ? void 0 : _e.repoId) || tenant;
     const isGlobalView = GLOBAL_TABS.has(tab);
     const pendingApprovals = ((holding == null ? void 0 : holding.approvals) || []).filter((a) => a.status === "pendente").length;
     const abaixoMinimoCount = (status.modelos || []).filter((m) => m.abaixo_minimo).length;
     const inboxCount = status.held.length + [...status.inProgress, ...status.recent].filter((i) => i.stage === "escalated" || i.stage === "failed" || i.stage === "reverted").length;
-    const tenantActiveAgentsCount = tenantAgents.filter((a) => a.running).length;
+    const tenantWorkingNowCount = tenantAgents.filter((a) => Boolean(a.pubkey && telemetry.byPubkey[a.pubkey.toLowerCase()])).length;
     const tenantTotalAgentsCount = tenantAgents.length;
     const boardCount = status.backlog.length + status.inProgress.length;
     const renderNavBtn = (id, label, badge, tone) => h(
@@ -49124,12 +49448,17 @@ function createFactoryAppComponent(ctx, opts = {}) {
     const projectTabs = [
       { id: "overview", label: PT_BR.nav.overview },
       { id: "board", label: "Fábrica · Board", badge: String(boardCount) },
-      { id: "floor", label: "Andar 3D", badge: `${tenantActiveAgentsCount}/${tenantTotalAgentsCount}` },
+      {
+        id: "floor",
+        label: "Andar 3D",
+        badge: tenantWorkingNowCount > 0 ? `${tenantWorkingNowCount}/${tenantTotalAgentsCount}` : String(tenantTotalAgentsCount),
+        tone: tenantWorkingNowCount > 0 ? "warn" : void 0
+      },
       { id: "agents", label: "Agentes", badge: abaixoMinimoCount > 0 ? `⚠ ${abaixoMinimoCount}` : String(tenantTotalAgentsCount), tone: abaixoMinimoCount > 0 ? "danger" : void 0 },
       { id: "vision", label: "Canvas / Visão" },
       { id: "settings", label: PT_BR.nav.settings }
     ];
-    const NativeTabs = (_f = (_e = ctx == null ? void 0 : ctx.conversation) == null ? void 0 : _e.ui) == null ? void 0 : _f.Tabs;
+    const NativeTabs = (_g = (_f = ctx == null ? void 0 : ctx.conversation) == null ? void 0 : _f.ui) == null ? void 0 : _g.Tabs;
     const relaySnap = React.useMemo(() => {
       var _a2;
       try {
@@ -49155,7 +49484,6 @@ function createFactoryAppComponent(ctx, opts = {}) {
       h(
         "div",
         { className: "of-shell" },
-        // Sidebar limpa 1:1 CodeDen: CEO Master -> Holding Global (Conselho, Inbox, Uso & Custos, Automações) -> Empresas (Workspaces)
         h(
           "aside",
           { className: "of-sidebar" },
@@ -49175,7 +49503,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
             {
               type: "button",
               className: "of-surface",
-              title: `Abrir DM nativa com ${masterAgentName} no Buzz`,
+              title: `Abrir chat lateral nativo com ${masterAgentName}`,
               onClick: () => {
                 var _a2;
                 return handleOpenAgentDmInBuzz(
@@ -49201,10 +49529,14 @@ function createFactoryAppComponent(ctx, opts = {}) {
             h(
               "div",
               { style: { display: "flex", alignItems: "center", gap: "6px", fontSize: "12.5px", fontWeight: 700, color: "var(--foreground)" } },
-              h("span", { className: "of-dot", "data-tone": (masterLive == null ? void 0 : masterLive.running) ? "running" : "done" }),
+              h("span", { className: "of-dot", "data-tone": masterTurn ? "running" : "done" }),
               masterAgentName
             ),
-            h("div", { className: "of-mono of-muted", style: { fontSize: "10px" } }, masterLive ? masterLive.model : "Ativa no Buzz")
+            h(
+              "div",
+              { className: "of-mono of-muted", style: { fontSize: "10px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
+              masterTurn ? `⚡ ${masterTurn.stepLabel}` : masterLive ? masterLive.model : "Ativa no Buzz"
+            )
           ),
           h("div", { className: "of-nav-group-label" }, "Holding & Global"),
           h(
@@ -49221,6 +49553,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
             { className: "of-nav" },
             workspaces.map((w) => {
               const isSelectedEmpresa = !isGlobalView && tenant === w.slug;
+              const unread = w.canal ? telemetry.unreadByChannel[w.canal] || 0 : 0;
               return h(
                 "button",
                 {
@@ -49239,7 +49572,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
                   h("span", { className: "of-project-tile", style: { width: "18px", height: "18px", fontSize: "10px" } }, w.nome.charAt(0).toUpperCase()),
                   h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, w.nome)
                 ),
-                w.agentesInfo && h("span", { className: "of-nav-badge" }, w.agentesInfo)
+                unread > 0 ? h("span", { className: "of-nav-badge", "data-tone": "warn", title: `${unread} não lida(s) no canal` }, String(unread)) : w.agentesInfo && h("span", { className: "of-nav-badge" }, w.agentesInfo)
               );
             })
           ),
@@ -49254,7 +49587,6 @@ function createFactoryAppComponent(ctx, opts = {}) {
             "Control Room clássico"
           )
         ),
-        // Área principal em tela cheia: Header + Abas Horizontais da Empresa (1:1 CodeDen)
         h(
           "div",
           { className: "of-workspace" },
@@ -49276,6 +49608,11 @@ function createFactoryAppComponent(ctx, opts = {}) {
                 "span",
                 { className: "of-pill", "data-tone": status.killSwitch ? "failed" : "done" },
                 status.killSwitch ? "Kill Switch ativo" : PT_BR.modes[status.mode] || status.mode
+              ),
+              telemetry.activeTurns.length > 0 && h(
+                "span",
+                { className: "of-pill", "data-tone": "running", title: "Turnos ativos em tempo real via session.agentActivity" },
+                `⚡ ${telemetry.activeTurns.length} respondendo`
               )
             ),
             h(
@@ -49305,12 +49642,12 @@ function createFactoryAppComponent(ctx, opts = {}) {
                 "select",
                 {
                   className: "of-tenant-select",
-                  "aria-label": "Selecionar agente para DM no Buzz",
+                  "aria-label": "Selecionar agente para chat lateral no Buzz",
                   value: dmAgentKey,
                   onChange: (e) => setDmAgentKey(e.target.value),
                   style: { width: "auto", maxWidth: "210px", padding: "4px 8px", fontSize: "11.5px" }
                 },
-                dmPool.length > 0 ? dmPool.map((a) => h("option", { key: a.key, value: a.key }, a.label)) : h("option", { value: "" }, ((_g = status.tenantManifest) == null ? void 0 : _g.coo) || "OrgFy Bento (COO)")
+                dmPool.length > 0 ? dmPool.map((a) => h("option", { key: a.key, value: a.key }, a.label)) : h("option", { value: "" }, ((_h = status.tenantManifest) == null ? void 0 : _h.coo) || "OrgFy Bento (COO)")
               ),
               h(
                 "button",
@@ -49327,7 +49664,6 @@ function createFactoryAppComponent(ctx, opts = {}) {
             toast && h("span", { className: "of-pill", "data-tone": "done" }, toast),
             error2 && !toast && h("span", { className: "of-pill", "data-tone": "failed" }, `Aviso: ${error2}`)
           ),
-          // Barra de Abas Horizontais da Empresa (igual ao CodeDen ProjectPage!)
           !isGlobalView && h(
             "div",
             { className: "of-project-tabs", role: "tablist", "aria-label": `Navegação de ${empresaNome}` },
@@ -49360,6 +49696,10 @@ function createFactoryAppComponent(ctx, opts = {}) {
                 h,
                 tenant,
                 status,
+                telemetry,
+                workingNowCount: tenantWorkingNowCount,
+                onOpenTurnInSideChat: handleOpenTurnInSideChat,
+                onInterruptTurn: handleInterruptTurn,
                 loading,
                 confirmKill,
                 setConfirmKill,
@@ -49387,6 +49727,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
                 tenant,
                 status,
                 liveCrew,
+                telemetry,
                 viewMode: tab,
                 onChangeViewMode: (m) => setTab(m),
                 storeyFocus,
@@ -49403,6 +49744,8 @@ function createFactoryAppComponent(ctx, opts = {}) {
                 tab,
                 tenant,
                 holding,
+                telemetry,
+                channelCanvas,
                 onSelectTenant: (t) => {
                   setTenant(t);
                   setTab("overview");

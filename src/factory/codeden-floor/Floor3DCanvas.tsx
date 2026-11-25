@@ -3,6 +3,7 @@
 
 import type { Context } from "@buzz/author";
 import type { FactoryStatusPayload, FactoryWorkItem as OrgfyWorkItem } from "../factory-adapter";
+import type { BuzzLiveTelemetrySnapshot } from "../buzz-live-telemetry";
 import type { LiveCrewAgent } from "../FactoryBoardAndFloor";
 import {
   DISCOVERY_AREAS,
@@ -192,6 +193,7 @@ export interface Floor3DProps {
   tenant: string;
   status: FactoryStatusPayload;
   liveCrew: LiveCrewAgent[];
+  telemetry?: BuzzLiveTelemetrySnapshot;
   focus: StoreyFocus;
   onSelectItem: (item: OrgfyWorkItem) => void;
   onOpenAgentDm?: (agent: { key?: string; pubkey?: string; name?: string }) => void;
@@ -201,7 +203,7 @@ export function createFloor3DComponent(ctx: Context) {
   const React = ctx.react;
   const h = React.createElement;
 
-  return function CodeDenFloor3D({ tenant, status, liveCrew, focus, onSelectItem, onOpenAgentDm }: Floor3DProps) {
+  return function CodeDenFloor3D({ tenant, status, liveCrew, telemetry, focus, onSelectItem, onOpenAgentDm }: Floor3DProps) {
     const hostRef = React.useRef<HTMLDivElement | null>(null);
     const stageRef = React.useRef<FloorStage | null>(null);
     const seatingRef = React.useRef<Seating>(NO_SEATING);
@@ -287,7 +289,9 @@ export function createFloor3DComponent(ctx: Context) {
     const leadershipAndExec = tenantAgents.filter((a) => a.categoria === "lideranca" || a.categoria === "execucao");
     const reviewAndOps = tenantAgents.filter((a) => a.categoria === "revisao" || a.categoria === "operacao");
     const activeHoverAgent = scene.agents.find((a: SceneAgent) => a.key === (hoveredKey || selectedKey)) || null;
-    const runningCount = tenantAgents.filter((a) => a.running).length;
+    const turnOf = (ag: (typeof tenantAgents)[number]) =>
+      ag.pubkey && telemetry?.byPubkey ? telemetry.byPubkey[ag.pubkey.toLowerCase()] || null : null;
+    const workingNowCount = tenantAgents.filter((a) => Boolean(turnOf(a))).length;
     const inBuzzCount = tenantAgents.filter((a) => a.inBuzz).length;
 
     if (webglLost) {
@@ -299,8 +303,9 @@ export function createFloor3DComponent(ctx: Context) {
       );
     }
 
-    const renderCrewRow = (ag: (typeof tenantAgents)[number]) =>
-      h(
+    const renderCrewRow = (ag: (typeof tenantAgents)[number]) => {
+      const liveTurn = turnOf(ag);
+      return h(
         "div",
         {
           key: ag.agentKey || ag.name,
@@ -320,12 +325,14 @@ export function createFloor3DComponent(ctx: Context) {
             { style: { display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "11.5px", fontWeight: 600 } },
             h("span", {
               className: "of-dot",
-              "data-tone": ag.running ? "running" : ag.inBuzz ? "done" : "idle",
-              title: ag.running ? "Em execução no Buzz" : ag.inBuzz ? "Disponível no Buzz" : "A provisionar",
+              "data-tone": liveTurn ? (liveTurn.state === "error" ? "failed" : "running") : ag.inBuzz ? "done" : "idle",
+              title: liveTurn ? liveTurn.stepLabel : ag.inBuzz ? "Disponível no Buzz" : "A provisionar",
             }),
             h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, ag.name)
           ),
-          h("span", { className: "of-muted", style: { fontSize: "10px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, ag.funcao),
+          liveTurn
+            ? h("span", { className: "of-mono", style: { fontSize: "9.5px", color: liveTurn.state === "error" ? "var(--status-failed)" : "var(--status-running)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, liveTurn.stepLabel)
+            : h("span", { className: "of-muted", style: { fontSize: "10px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, ag.funcao),
           h("span", { className: "of-mono of-muted", style: { fontSize: "9.5px" } }, ag.model)
         ),
         onOpenAgentDm &&
@@ -346,6 +353,7 @@ export function createFloor3DComponent(ctx: Context) {
             "DM ↗"
           )
       );
+    };
 
     return h(
       "div",
@@ -477,7 +485,7 @@ export function createFloor3DComponent(ctx: Context) {
       h(
         "div",
         { className: "of-muted", style: { textAlign: "center", fontSize: "11px" } },
-        `Fábrica ${empresaNome} (${tenant}) · ${inBuzzCount}/${tenantAgents.length} agentes no Buzz · ${runningCount} ativo(s) agora · ${sceneSummary(scene)}`
+        `Fábrica ${empresaNome} (${tenant}) · ${inBuzzCount}/${tenantAgents.length} no Buzz · ${workingNowCount} respondendo agora · ${sceneSummary(scene)}`
       )
     );
   };

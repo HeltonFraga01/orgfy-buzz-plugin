@@ -2,6 +2,7 @@
 // Painel Visão Geral completo da Fábrica: Header, Alerta, Pipelines, 5 Meters, PRs, 3 Colunas (Checks | Recentes | Ignoradas), Scorecard, Lições, Digest e Rodapé.
 
 import type { FactoryStatusPayload, FactoryWorkItem } from "./factory-adapter";
+import type { BuzzLiveTelemetrySnapshot, LiveAgentTurn } from "./buzz-live-telemetry";
 import { PT_BR } from "../i18n/pt-BR";
 import { renderPipelineDiagram } from "./PipelineDiagram";
 
@@ -9,6 +10,10 @@ export interface FactoryOverviewProps {
   h: any;
   tenant: string;
   status: FactoryStatusPayload;
+  telemetry?: BuzzLiveTelemetrySnapshot;
+  workingNowCount?: number;
+  onOpenTurnInSideChat?: (turn: LiveAgentTurn) => void;
+  onInterruptTurn?: (turn: LiveAgentTurn) => void;
   loading: boolean;
   confirmKill: boolean;
   setConfirmKill: (v: boolean) => void;
@@ -229,6 +234,52 @@ export function renderFactoryOverviewPanel(props: FactoryOverviewProps) {
           )
         ),
 
+      // Telemetria ao vivo nativa do Buzz (session.agentActivity): turnos em execução agora
+      props.telemetry && props.telemetry.activeTurns.length > 0 &&
+        h(
+          "div",
+          { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "8px", borderColor: "rgba(56, 189, 248, 0.35)" } },
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" } },
+            h(
+              "span",
+              { style: { display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "11.5px", fontWeight: 700, color: "var(--status-running)" } },
+              h("span", { className: "of-dot", "data-tone": "running" }),
+              `Agora no Buzz · ${props.telemetry.activeTurns.length} agente(s) respondendo`
+            ),
+            h("span", { className: "of-mono of-muted", style: { fontSize: "10px" } }, `agentActivity: ${props.telemetry.activityStatus}`)
+          ),
+          h(
+            "div",
+            { style: { display: "flex", flexDirection: "column", gap: "6px" } },
+            props.telemetry.activeTurns.map((t) =>
+              h(
+                "div",
+                {
+                  key: `${t.agentPubkey}-${t.channelId}-${t.messageId || t.startedAt}`,
+                  style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", fontSize: "12px", padding: "6px 8px", borderRadius: "7px", background: "var(--card)", border: "1px solid var(--border)" },
+                },
+                h("span", { className: "of-dot", "data-tone": t.state === "error" ? "failed" : "running" }),
+                h("strong", null, t.agentName),
+                h("span", { className: "of-mono of-muted", style: { fontSize: "11px", flex: 1, minWidth: "140px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, t.stepLabel),
+                props.onOpenTurnInSideChat && t.channelId &&
+                  h(
+                    "button",
+                    { type: "button", className: "of-btn", "data-variant": "ghost", style: { padding: "2px 7px", fontSize: "11px", color: "var(--primary)" }, onClick: () => props.onOpenTurnInSideChat!(t) },
+                    "Abrir chat lateral"
+                  ),
+                props.onInterruptTurn && t.stoppable &&
+                  h(
+                    "button",
+                    { type: "button", className: "of-btn", "data-variant": "danger", style: { padding: "2px 7px", fontSize: "11px" }, onClick: () => props.onInterruptTurn!(t) },
+                    "Parar"
+                  )
+              )
+            )
+          )
+        ),
+
       // Seção Pipelines ao vivo
       h(
         "div",
@@ -267,10 +318,10 @@ export function renderFactoryOverviewPanel(props: FactoryOverviewProps) {
           warn: true,
         }),
         Meter(h, {
-          label: "Agentes trabalhando",
-          value: status.activeSessions,
+          label: "Trabalhando agora",
+          value: typeof props.workingNowCount === "number" ? props.workingNowCount : 0,
           max: status.limits.maxConcurrentSessions,
-          display: `${status.activeSessions} / ${status.limits.maxConcurrentSessions}`,
+          display: `${typeof props.workingNowCount === "number" ? props.workingNowCount : 0} / ${status.limits.maxConcurrentSessions}`,
           warn: false,
         }),
         Meter(h, {
