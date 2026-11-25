@@ -6400,6 +6400,21 @@ function buildUnifiedOrgfyTools(ctx) {
         });
         return { text: JSON.stringify(res, null, 2), isError: !res.ok };
       }
+    },
+    {
+      name: "orgfy_reconciliar_agentes",
+      description: "Reconcilia configs de agentes do Buzz Desktop via ctx.agents.save() (R5.2/R4.1), migrando agentes com :free, provider nulo ou modelos reprovados no eval R5.1 para gemini-2.5-flash / claude-sonnet-4-6.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          dry_run: { type: "boolean", description: "Se true (padrão), apenas audita sem salvar" }
+        }
+      },
+      execute: async (args) => {
+        const dryRun = (args == null ? void 0 : args.dry_run) !== false;
+        const res = await reconcileAgentsViaBuzzApi(ctx, { dryRun });
+        return { text: JSON.stringify({ ok: true, dryRun, ...res }, null, 2) };
+      }
     }
   ];
   return rawTools.map((tool) => ({
@@ -10742,31 +10757,12 @@ function renderOrgChartTab(props) {
     )
   );
 }
-const inject = [
-  "react",
-  "pages",
-  "settingsCards",
-  "host",
-  "navigation",
-  "agents",
-  "panels",
-  "artifactStorage",
-  "notifications",
-  "decisions",
-  "relay",
-  "conversation",
-  "sidebarSections",
-  "shortcuts"
-];
 const TENANTS = [
   { id: "all", name: "Holding OrgFy", badge: "Cross-Workspace", slug: "all" },
   { id: "orgfy", name: "OrgFy Core", badge: "Core Framework", slug: "orgfy" },
   { id: "lumen-iptv", name: "Lumen IPTV", badge: "Subsidiária IPTV", slug: "lumen-iptv" },
   { id: "saas-tributario", name: "SaaS Tributário", badge: "Subsidiária Fiscal", slug: "saas-tributario" }
 ];
-const INITIAL_PIPELINE_CARDS = [];
-const INITIAL_REGRAS_PROBATORIAS = [];
-const AVAILABLE_AGENTS = [];
 const SVG = {
   orgfy: ({ h, width = 20, height = 20 }) => h(
     "svg",
@@ -10963,6 +10959,25 @@ const THEME = {
   textSecondary: "#9ca3af",
   textMuted: "#6b7280"
 };
+const inject = [
+  "react",
+  "pages",
+  "settingsCards",
+  "host",
+  "navigation",
+  "agents",
+  "panels",
+  "artifactStorage",
+  "notifications",
+  "decisions",
+  "relay",
+  "conversation",
+  "sidebarSections",
+  "shortcuts"
+];
+const INITIAL_PIPELINE_CARDS = [];
+const INITIAL_REGRAS_PROBATORIAS = [];
+const AVAILABLE_AGENTS = [];
 function apply(ctx) {
   var _a, _b, _c;
   const React = ctx.react;

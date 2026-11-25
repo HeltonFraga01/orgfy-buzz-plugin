@@ -30,7 +30,7 @@ import {
   bindConversationContextForCard,
   stopAgentSession,
 } from "../services/governance-engine";
-import { executeSmartModelFailover } from "../services/model-failover";
+import { executeSmartModelFailover, reconcileAgentsViaBuzzApi } from "../services/model-failover";
 import { fetchResolvedArchive, searchResolvedArchive } from "../services/resolved-archive";
 import { createCanonicalCard } from "../services/card-creator";
 import { executeCardProgress } from "../services/card-progress";
@@ -765,6 +765,22 @@ export function buildUnifiedOrgfyTools(ctx: Context | any): UnifiedOrgfyTool[] {
           thread_root: args?.thread_root,
         });
         return { text: JSON.stringify(res, null, 2), isError: !res.ok };
+      },
+    },
+    {
+      name: "orgfy_reconciliar_agentes",
+      description:
+        "Reconcilia configs de agentes do Buzz Desktop via ctx.agents.save() (R5.2/R4.1), migrando agentes com :free, provider nulo ou modelos reprovados no eval R5.1 para gemini-2.5-flash / claude-sonnet-4-6.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          dry_run: { type: "boolean", description: "Se true (padrão), apenas audita sem salvar" },
+        },
+      },
+      execute: async (args: any) => {
+        const dryRun = args?.dry_run !== false;
+        const res = await reconcileAgentsViaBuzzApi(ctx, { dryRun });
+        return { text: JSON.stringify({ ok: true, dryRun, ...res }, null, 2) };
       },
     },
   ];
