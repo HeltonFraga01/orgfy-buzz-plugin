@@ -26,6 +26,7 @@ export interface BoardAndFloorProps {
   onSelectItem: (item: FactoryWorkItem) => void;
   onRefresh: () => void;
   loading: boolean;
+  Floor3D?: any;
 }
 
 const BOARD_STAGES: Array<{ id: string; label: string; hint: string }> = [
@@ -343,153 +344,19 @@ export function renderFactoryBoardAndFloor(props: BoardAndFloorProps) {
             })
           )
         )
-      : // Modo Andar (Floor): Roster lateral + Oficina (6 zonas + Baia de Reparo + Cabine PM) + Mirante (8 pods)
-        h(
-          "div",
-          { className: "of-floor-shell" },
-          // Roster lateral esquerdo (floor/roster.tsx)
-          h(
-            "aside",
-            { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "8px", overflowY: "auto" } },
-            h(
-              "div",
-              { style: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "12px", fontWeight: 700 } },
-              h("span", null, "Plantel ao vivo"),
-              h("span", { className: "of-mono of-muted" }, `${liveCrew.filter((c) => c.running).length}/${liveCrew.length}`)
-            ),
-            liveCrew.length === 0
-              ? h("div", { className: "of-muted" }, "Nenhum agente reportado por ctx.agents.snapshot().")
-              : liveCrew.map((agent) =>
-                  h(
-                    "button",
-                    {
-                      key: agent.key,
-                      type: "button",
-                      className: "of-nav-btn",
-                      "data-active": selectedAgentKey === agent.key ? "true" : "false",
-                      onClick: () => onSelectAgentKey(selectedAgentKey === agent.key ? null : agent.key),
-                    },
-                    h(
-                      "span",
-                      { style: { display: "inline-flex", alignItems: "center", gap: "6px", overflow: "hidden" } },
-                      h("span", { className: "of-dot", "data-tone": agent.running ? "running" : "idle" }),
-                      h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, agent.name)
-                    ),
-                    h("span", { className: "of-mono", style: { fontSize: "9.5px", opacity: 0.7 } }, agent.running ? "ativo" : "livre")
-                  )
-                )
-          ),
-
-          // Planta da Fábrica (Oficina + Mirante)
-          h(
+      : // Modo Andar (Floor): Motor 3D Three.js 1:1 oficial do CodeDen (Oficina + Mirante + Crew + Fit)
+        props.Floor3D
+        ? h(props.Floor3D, {
+            status,
+            liveCrew,
+            focus: storeyFocus,
+            onSelectItem,
+          })
+        : h(
             "div",
-            { style: { display: "flex", flexDirection: "column", gap: "12px", minWidth: 0 } },
-            selectedAgent &&
-              h(
-                "div",
-                { className: "of-card-pad", style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", borderColor: "rgba(245,158,11,0.45)" } },
-                h(
-                  "div",
-                  null,
-                  h("div", { style: { fontSize: "13px", fontWeight: 700 } }, selectedAgent.name),
-                  h("div", { className: "of-mono of-muted" }, `${selectedAgent.provider ? `${selectedAgent.provider}/` : ""}${selectedAgent.model} · ${selectedAgent.running ? "Trabalhando agora" : "Ocioso na bancada"}`)
-                ),
-                h("button", { type: "button", className: "of-btn", onClick: () => onSelectAgentKey(null) }, "Fechar")
-              ),
-
-            (storeyFocus === "workshop" || storeyFocus === "both") &&
-              h(
-                "section",
-                { className: "of-floor-hall" },
-                h(
-                  "div",
-                  { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
-                  h("strong", { style: { fontSize: "12.5px", letterSpacing: "0.04em", textTransform: "uppercase" } }, "Piso 1 · Oficina (Workshop)"),
-                  h("span", { className: "of-pill", "data-tone": status.coordenador === "ativo" ? "done" : "failed" }, `Coordenador: ${status.coordenador}`)
-                ),
-                h(
-                  "div",
-                  { className: "of-floor-zones" },
-                  BOARD_STAGES.map((z) => {
-                    const zoneItems = byStage[z.id] || [];
-                    return h(
-                      "div",
-                      { key: z.id, className: "of-zone-bay" },
-                      h(
-                        "div",
-                        { style: { display: "flex", justifyContent: "space-between", fontSize: "10px", fontFamily: "var(--font-mono)", color: "var(--muted-foreground)", textTransform: "uppercase" } },
-                        h("span", null, z.label),
-                        h("span", null, String(zoneItems.length))
-                      ),
-                      zoneItems.length === 0
-                        ? h("div", { className: "of-muted", style: { fontSize: "10.5px", marginTop: "auto" } }, "Bancadas livres")
-                        : zoneItems.slice(0, 4).map((w) =>
-                            h(
-                              "button",
-                              {
-                                key: w.id,
-                                type: "button",
-                                className: "of-chip",
-                                onClick: () => onSelectItem(w),
-                                style: { width: "100%", justifyContent: "flex-start" },
-                              },
-                              h("span", { className: "of-dot", "data-tone": cardStateOf(w) === "person" ? "waiting" : cardStateOf(w) }),
-                              h("span", { style: { overflow: "hidden", textOverflow: "ellipsis" } }, `#${w.id.slice(0, 6)}`)
-                            )
-                          )
-                    );
-                  })
-                ),
-                // Baia de Reparo (scene/repair-bay.ts) + Cabine do PM
-                h(
-                  "div",
-                  { className: "of-grid-2" },
-                  h(
-                    "div",
-                    { className: "of-repair-bay" },
-                    h("div", { style: { fontSize: "11px", fontWeight: 700, color: "var(--status-waiting)", textTransform: "uppercase", letterSpacing: "0.05em" } }, `Baia de Reparo · ${needsYou.length} caixas`),
-                    h(
-                      "div",
-                      { className: "of-muted", style: { marginTop: "4px" } },
-                      needsYou.length === 0
-                        ? "Nenhum item parado aguardando retry ou decisão humana."
-                        : needsYou.slice(0, 3).map((i) => `#${i.id.slice(0, 8)} (${i.stage})`).join(" · ")
-                    )
-                  ),
-                  h(
-                    "div",
-                    { className: "of-surface", style: { padding: "10px 12px" } },
-                    h("div", { style: { fontSize: "11px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" } }, "Cabine do PM / COO"),
-                    h("div", { className: "of-muted", style: { marginTop: "4px" } }, "Triagem de cards, despacho L-01 e supervisão de quarentena.")
-                  )
-                )
-              ),
-
-            (storeyFocus === "lookout" || storeyFocus === "both") &&
-              h(
-                "section",
-                { className: "of-floor-hall" },
-                h(
-                  "div",
-                  { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
-                  h("strong", { style: { fontSize: "12.5px", letterSpacing: "0.04em", textTransform: "uppercase" } }, "Piso 2 · Mirante (Lookout / Oráculo)"),
-                  h("span", { className: "of-pill", "data-tone": status.mode === "dark_factory" ? "running" : "idle" }, status.mode === "dark_factory" ? "Dark Factory ativo" : "Sob demanda")
-                ),
-                h(
-                  "div",
-                  { className: "of-lookout-pods" },
-                  LOOKOUT_AREAS.map((area) =>
-                    h(
-                      "div",
-                      { key: area.id, className: "of-surface", style: { padding: "8px 10px", display: "flex", alignItems: "center", justifyContent: "space-between" } },
-                      h("span", { style: { fontSize: "11.5px", fontWeight: 600 } }, area.label),
-                      h("span", { className: "of-dot", "data-tone": status.mode === "dark_factory" ? "waiting" : "idle" })
-                    )
-                  )
-                )
-              )
+            { className: "of-card-pad" },
+            "Carregando Andar 3D..."
           )
-        )
   );
 }
 
