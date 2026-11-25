@@ -108,7 +108,7 @@ function makeHarness(failReads = false) {
 
 // 1. Testes Originais (Kanban & Status Positivo/Negativo + MCP)
 const h1 = makeHarness(false);
-assert.equal(h1.tools.size, 17, "devem existir exatamente 17 agentTools registradas");
+assert.equal(h1.tools.size, 20, "devem existir exatamente 20 agentTools registradas");
 assert.ok(h1.panels.has("orgfy-channel-pulse"), "sidebar panel orgfy-channel-pulse deve ser registrado");
 assert.ok(h1.hooks.length >= 1, "hooks de governança devem ser registrados");
 
@@ -1257,4 +1257,184 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
   await lockTool.call({}, {}, { action: "release", issue_id: wsIssueA, agent_id: "OrgFy Otto" });
   await lockTool.call({}, {}, { action: "release", issue_id: wsIssueC, agent_id: "OrgFy Atlas" });
   console.log("[SOTA WRITE-SET CONFLICT GUARD OK]", JSON.stringify({ blockedCode: lockB.code, independentParallelOk: lockC.ok }));
+}
+
+// 21. v13.5: Presence & Lease Reconciler (mata estado 'trabalhando zumbi' após Stop/crash/restart)
+{
+  orgfyMod.resetPresenceStateForTests();
+  const baseNow = Date.now();
+  const zombieIssue = "aaaa111122223333444455556666777788889999aaaabbbbccccddddeeee0021";
+  const liveIssue = "aaaa111122223333444455556666777788889999aaaabbbbccccddddeeee0022";
+  const memFiles = new Map();
+  const mockPresenceCtx = {
+    agents: {
+      snapshot: () => ({
+        agents: [
+          { key: "local:orgfy-otto", name: "OrgFy Otto", config: { model: "gemini-3.8-flash-medium", provider: "nexusmind_antigravity" } },
+          { key: "local:orgfy-val", name: "OrgFy Val", config: { model: "gemini-3.8-flash-medium", provider: "nexusmind_antigravity" } },
+        ],
+        running: [
+          { key: "local:orgfy-otto", name: "OrgFy Otto", config: { model: "gemini-3.8-flash-medium", provider: "nexusmind_antigravity" } },
+        ],
+      }),
+      sessionState: (k) => (k === "local:orgfy-otto" ? "active" : "idle"),
+    },
+    host: {
+      readFile: async (p) => {
+        if (memFiles.has(p)) return new TextEncoder().encode(memFiles.get(p));
+        throw new Error("ENOENT");
+      },
+      writeFile: async (p, c) => memFiles.set(p, String(c)),
+    },
+  };
+
+  await lockTool.call({}, {}, { action: "acquire", issue_id: zombieIssue, agent_id: "OrgFy Val", exclusive_paths: ["src/zumbi.ts"] });
+  await lockTool.call({}, {}, { action: "acquire", issue_id: liveIssue, agent_id: "OrgFy Otto", exclusive_paths: ["src/ativo.ts"] });
+
+  const recon = await orgfyMod.reconcileAgentPresenceAndLocks(mockPresenceCtx, {
+    nowMs: baseNow + 5 * 60 * 1000,
+    orphanGraceMs: 3 * 60 * 1000,
+  });
+  assert.equal(recon.ok, true);
+  assert.ok(recon.orphanedReleased.some((o) => o.issueId === zombieIssue && o.agentKey === "OrgFy Val"), "lock zumbi de Val deve ser liberado automaticamente");
+  assert.ok(recon.activeLocks.some((l) => l.issueId === liveIssue && l.agentKey === "OrgFy Otto"), "lock real de Otto (running) deve ser preservado/renovado");
+  assert.ok(orgfyMod.getOrgfyPipelineEvents(10).some((e) => e.type === "lock.orphaned_released" && e.issueId === zombieIssue));
+  await lockTool.call({}, {}, { action: "release", issue_id: liveIssue, agent_id: "OrgFy Otto" });
+  console.log("[v13.5 PRESENCE & LEASE RECONCILER OK]", JSON.stringify({ orphanedReleased: recon.orphanedReleased.length, renewed: recon.renewedCount }));
+}
+
+// 22. v13.5: orgfy_roster_live (Raio-X unificado de presença real em 1 chamada)
+{
+  const rosterTool = h1.tools.get("orgfy_roster_live");
+  assert.ok(rosterTool, "agentTool orgfy_roster_live deve estar registrada");
+  const rosterRes = await orgfyMod.buildLiveAgentRoster(
+    {
+      agents: {
+        snapshot: () => ({
+          agents: [
+            { key: "local:orgfy-teo", name: "OrgFy Teo", config: { model: "claude-sonnet-5-5", provider: "nexusmind_anthropic" } },
+            { key: "local:orgfy-bento-arq", name: "OrgFy Bento Arquiteto", config: { model: "gemini-3.8-flash-medium", provider: "nexusmind_antigravity" } },
+          ],
+          running: [
+            { key: "local:orgfy-teo", name: "OrgFy Teo", config: { model: "claude-sonnet-5-5", provider: "nexusmind_anthropic" } },
+          ],
+        }),
+        sessionState: (k) => (k === "local:orgfy-teo" ? "active" : "idle"),
+      },
+      host: {
+        readFile: async () => { throw new Error("ENOENT"); },
+        writeFile: async () => {},
+      },
+    },
+    { empresa: "orgfy", reconcile: true }
+  );
+  assert.equal(rosterRes.ok, true);
+  assert.equal(rosterRes.resumo.total, 2);
+  assert.ok(rosterRes.agentes.some((a) => a.name === "OrgFy Teo" && a.status === "WORKING_REAL"), "OrgFy Teo (running) deve aparecer WORKING_REAL");
+  assert.ok(rosterRes.agentes.some((a) => a.name === "OrgFy Bento Arquiteto" && a.status === "FREE"), "OrgFy Bento Arquiteto (idle) deve aparecer FREE");
+  console.log("[v13.5 ROSTER LIVE OK]", JSON.stringify(rosterRes.resumo));
+}
+
+// 23. v13.5: orgfy_handoff_pack (Pacote de retomada P1..Pn + L-22 + Escrita exclusiva)
+{
+  const handoffTool = h1.tools.get("orgfy_handoff_pack");
+  assert.ok(handoffTool, "agentTool orgfy_handoff_pack deve estar registrada");
+  const sampleMd = [
+    "<!-- orgfy:card v4 -->",
+    "# SPEC-9999 T001 Teste Handoff",
+    "- **Escrita exclusiva:** `src/a.ts`, `src/b.ts`",
+    "- **Comando de aceite (L-22):** `pytest -q tests/test_a.py`",
+    "## O que fazer",
+    "- [x] **P1:** Criar teste RED",
+    "- [ ] **P2:** Implementar código GREEN",
+  ].join("\n");
+  const pack = JSON.parse(await handoffTool.call({}, {}, { slug: "SPEC-9999-T001", card_markdown: sampleMd }));
+  assert.equal(pack.ok, true);
+  assert.equal(pack.progress.done, 1);
+  assert.equal(pack.progress.nextPendingStepId, "P2");
+  assert.deepEqual(pack.exclusivePaths, ["src/a.ts", "src/b.ts"]);
+  assert.ok(pack.resumePrompt.includes("P2"));
+  assert.ok(pack.resumePrompt.includes("pytest -q tests/test_a.py"));
+  console.log("[v13.5 HANDOFF PACK OK]", JSON.stringify({ next: pack.progress.nextPendingStepId, paths: pack.exclusivePaths }));
+}
+
+// 24. v13.5: One-Shot Decision Dispatcher (orgfy_smart_dispatch com L-01 + ctx.decisions + auto-execute + Attention cleanup)
+{
+  const smartWakes = [];
+  const smartCtx = {
+    agents: {
+      snapshot: () => ({
+        agents: [
+          { key: "local:orgfy-otto", name: "OrgFy Otto", config: { model: "gemini-3.8-flash-medium", provider: "nexusmind_antigravity" } },
+          { key: "local:orgfy-atlas", name: "OrgFy Atlas", config: { model: "gemini-3.8-flash-medium", provider: "nexusmind_antigravity" } },
+          { key: "local:orgfy-teo", name: "OrgFy Teo", config: { model: "claude-sonnet-5-5", provider: "nexusmind_anthropic" } },
+        ],
+        running: [],
+      }),
+      sessionState: () => "idle",
+      wake: async (agentKey, payload) => smartWakes.push({ agentKey, payload }),
+    },
+    decisions: {
+      decide: async (req) => {
+        if (req?.questions?.best_executor) {
+          return {
+            outcome: "answered",
+            backend: "nexusmind-fast",
+            model: "gemini-3.8-flash-medium",
+            answers: {
+              best_executor: { type: "choice", choice: "OrgFy Atlas", confidence: 0.93 },
+            },
+          };
+        }
+        return {
+          outcome: "answered",
+          backend: "nexusmind-fast",
+          model: "gemini-3.8-flash-medium",
+          answers: {
+            escopo_atomico: { type: "yes_no", probability: 0.95 },
+            risco_tier: { type: "score", score: 1, confidence: 0.9, probabilities: {} },
+            modelo_tier: { type: "choice", choice: "tier1_fast", confidence: 0.9 },
+            politica_attention: { type: "choice", choice: "event_driven", confidence: 0.9 },
+          },
+        };
+      },
+    },
+    host: {
+      readFile: async () => { throw new Error("ENOENT"); },
+      writeFile: async () => {},
+    },
+  };
+
+  const smartIssue = "bbbb111122223333444455556666777788889999aaaabbbbccccddddeeee0024";
+  const dispRes = await orgfyMod.runOneShotDecisionDispatch(smartCtx, {
+    issue_id: smartIssue,
+    slug: "smart-demo",
+    titulo: "Ajuste pontual de fixture de teste",
+    revisor: "OrgFy Teo",
+    exclusive_paths: ["testes/fixture_demo.py"],
+    acceptance_command: "pytest -q testes/fixture_demo.py",
+    auto_execute: true,
+  });
+  assert.equal(dispRes.ok, true);
+  assert.equal(dispRes.action, "AUTO_DISPATCHED");
+  assert.equal(dispRes.decisionSource, "decisions_api");
+  assert.equal(dispRes.selectedAgent, "OrgFy Atlas");
+  assert.ok(!dispRes.candidatesEvaluated.includes("OrgFy Teo"), "L-01: revisor não pode entrar como candidato a executor");
+  assert.equal(dispRes.wokeAgent, true);
+  assert.equal(smartWakes.length, 1);
+
+  const cleanup = await orgfyMod.cleanupAttentionOnStageChange(smartCtx, {
+    issueId: smartIssue,
+    slug: "smart-demo",
+    newStage: "feito",
+  });
+  assert.equal(cleanup.ok, true);
+  assert.equal(cleanup.lockReleased, true);
+  assert.equal(cleanup.event.type, "attention.cleaned_up");
+  console.log("[v13.5 ONE-SHOT DECISION DISPATCHER + ATTENTION CLEANUP OK]", JSON.stringify({
+    selected: dispRes.selectedAgent,
+    confidence: dispRes.confidence,
+    woke: dispRes.wokeAgent,
+    cleaned: cleanup.lockReleased,
+  }));
 }

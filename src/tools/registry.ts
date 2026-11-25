@@ -39,6 +39,12 @@ import {
   triageDiffWithDecisions,
   buildBuzzAttentionContract,
 } from "../services/decision-router";
+import {
+  buildLiveAgentRoster,
+  buildHandoffPack,
+  runOneShotDecisionDispatch,
+  cleanupAttentionOnStageChange,
+} from "../services/presence-dispatcher";
 import { recordGenAISpan } from "../services/telemetry-otel";
 
 export interface UnifiedOrgfyTool {
@@ -228,8 +234,16 @@ export function buildUnifiedOrgfyTools(ctx: Context | any): UnifiedOrgfyTool[] {
           motivo: args?.motivo || "Decisão emitida via OrgFy Control Room",
           revisor: args?.revisor || "QA Sentinel",
         });
+        let attentionCleanup = null;
+        if (res.code === 0 && acao === "aceito") {
+          attentionCleanup = await cleanupAttentionOnStageChange(ctx, {
+            issueId: prId,
+            newStage: "feito",
+            empresa: args?.empresa || "orgfy",
+          });
+        }
         return {
-          text: JSON.stringify({ status: res.code === 0 ? "ok" : "error", exitCode: res.code, output: res.output }, null, 2),
+          text: JSON.stringify({ status: res.code === 0 ? "ok" : "error", exitCode: res.code, attentionCleanup, output: res.output }, null, 2),
           isError: res.code !== 0,
         };
       },
@@ -669,9 +683,93 @@ export function buildUnifiedOrgfyTools(ctx: Context | any): UnifiedOrgfyTool[] {
         return { text: JSON.stringify(res, null, 2), isError: !res.ok };
       },
     },
+    {
+      name: "orgfy_roster_live",
+      description:
+        "Raio-X real de presença em 1 chamada: reconcilia locks zumbis (lease 8m x snapshot/sessionState) e retorna quem está realmente FREE, WORKING_REAL, ALERT_RADAR ou MODEL_UNSUPPORTED.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          empresa: { type: "string", description: "Slug da empresa (default: 'orgfy')" },
+          reconcile: { type: "boolean", description: "Se true (padrão), limpa locks órfãos antes de listar" },
+        },
+      },
+      execute: async (args) => {
+        const res = await buildLiveAgentRoster(ctx, {
+          empresa: args?.empresa || "orgfy",
+          reconcile: args?.reconcile !== false,
+        });
+        return { text: JSON.stringify(res, null, 2), isError: !res.ok };
+      },
+    },
+    {
+      name: "orgfy_handoff_pack",
+      description:
+        "Gera pacote compacto de retomada ou revisão (checklist P1..Pn, Escrita exclusiva, comando L-22, git status/commits/diff e resumePrompt pronto) para zero desperdício de shells.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          slug: { type: "string", description: "Slug do card (ex.: 'SPEC-0006-T020')" },
+          issue_id: { type: "string" },
+          worktree_path: { type: "string" },
+          card_markdown: { type: "string" },
+        },
+      },
+      execute: async (args) => {
+        const res = await buildHandoffPack(ctx, {
+          slug: args?.slug,
+          issue_id: args?.issue_id,
+          worktree_path: args?.worktree_path,
+          card_markdown: args?.card_markdown,
+        });
+        return { text: JSON.stringify(res, null, 2), isError: !res.ok };
+      },
+    },
+    {
+      name: "orgfy_smart_dispatch",
+      description:
+        "Dispatcher Híbrido SOTA (Fase A Zero-Token: presença real + WRITE_SET_CONFLICT + L-01; Fase B One-Shot ctx.decisions.decide): recomenda ou despacha automaticamente para o melhor agente livre.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          issue_id: { type: "string" },
+          slug: { type: "string" },
+          titulo: { type: "string" },
+          objetivo: { type: "string" },
+          revisor: { type: "string" },
+          exclusive_paths: { type: "array", items: { type: "string" } },
+          acceptance_command: { type: "string" },
+          empresa: { type: "string" },
+          dry_run: { type: "boolean", description: "Padrão true (seguro): retorna recomendação sem despachar" },
+          auto_execute: { type: "boolean", description: "Se true, adquire lease curto 8m e acorda o agente escolhido quando confiança >= min_confidence e risco <= 3" },
+          min_confidence: { type: "number" },
+          channel_id: { type: "string" },
+          thread_root: { type: "string" },
+        },
+        required: ["issue_id", "titulo", "revisor", "exclusive_paths", "acceptance_command"],
+      },
+      execute: async (args) => {
+        const res = await runOneShotDecisionDispatch(ctx, {
+          issue_id: String(args?.issue_id || ""),
+          slug: args?.slug,
+          titulo: String(args?.titulo || ""),
+          objetivo: args?.objetivo,
+          revisor: String(args?.revisor || ""),
+          exclusive_paths: Array.isArray(args?.exclusive_paths) ? args.exclusive_paths : [],
+          acceptance_command: String(args?.acceptance_command || ""),
+          empresa: args?.empresa || "orgfy",
+          dry_run: args?.dry_run,
+          auto_execute: Boolean(args?.auto_execute),
+          min_confidence: typeof args?.min_confidence === "number" ? args.min_confidence : undefined,
+          channel_id: args?.channel_id,
+          thread_root: args?.thread_root,
+        });
+        return { text: JSON.stringify(res, null, 2), isError: !res.ok };
+      },
+    },
   ];
 
-  // Instrumentação OTel GenAI automática (execute_tool) em todas as 17 tools
+  // Instrumentação OTel GenAI automática (execute_tool) em todas as 20 tools
   return rawTools.map((tool) => ({
     ...tool,
     execute: async (args: any) => {

@@ -1,12 +1,14 @@
 import type { Context } from "@buzz/author";
 import { fetchKpisEsteira, fetchGooseLoopRadar, type KpisEsteiraPayload } from "./kpi-service";
 import { executeSmartModelFailover } from "./model-failover";
+import { reconcileAgentPresenceAndLocks } from "./presence-dispatcher";
 
 export interface CheckoutLockRecord {
   issueId: string;
   agentKey: string;
   acquiredAt: number;
   expiresAt: number;
+  lastHeartbeatAt?: number;
   title?: string;
   owner?: string;
   revisor?: string;
@@ -164,6 +166,7 @@ async function syncLocksFromDisk(ctx: Context, nowMs: number = Date.now()): Prom
               agentKey: v.agentKey,
               acquiredAt: Number(v.acquiredAt || nowMs),
               expiresAt: v.expiresAt,
+              lastHeartbeatAt: typeof v.lastHeartbeatAt === "number" ? v.lastHeartbeatAt : Number(v.acquiredAt || nowMs),
               title: typeof v.title === "string" ? v.title : undefined,
               owner: typeof v.owner === "string" ? v.owner : undefined,
               revisor: typeof v.revisor === "string" ? v.revisor : undefined,
@@ -336,6 +339,7 @@ export async function acquireCheckoutLock(
         agentKey: cleanAgent,
         acquiredAt: existing.acquiredAt,
         expiresAt: nowMs + normalizedTtlMs,
+        lastHeartbeatAt: nowMs,
         title: meta?.title?.trim() || existing.title,
         owner: meta?.owner?.trim() || existing.owner,
         revisor: meta?.revisor?.trim() || existing.revisor,
@@ -408,6 +412,7 @@ export async function acquireCheckoutLock(
     agentKey: cleanAgent,
     acquiredAt: nowMs,
     expiresAt: nowMs + normalizedTtlMs,
+    lastHeartbeatAt: nowMs,
     title: meta?.title?.trim() || undefined,
     owner: meta?.owner?.trim() || undefined,
     revisor: meta?.revisor?.trim() || undefined,
@@ -1552,10 +1557,12 @@ export function startGovernanceRadarWatchdog(
   const intervalMs = options.intervalMs ?? DEFAULT_WATCHDOG_INTERVAL_MS;
   const initialDelayMs = options.initialDelayMs ?? DEFAULT_WATCHDOG_INITIAL_DELAY_MS;
 
-  const tick = async () => {
+  const bootMs = Date.now();
+  const tick = async (isStartup: boolean = false) => {
     if (radarWatchdogRunning) return;
     radarWatchdogRunning = true;
     try {
+      await reconcileAgentPresenceAndLocks(ctx, { isStartup, bootMs });
       await evaluateGovernanceAndReact(ctx, { dryRun: false, autoWake: true, includeRadar: true });
     } catch {
       // Watchdog resiliente: nunca derruba o host
@@ -1566,7 +1573,7 @@ export function startGovernanceRadarWatchdog(
 
   radarWatchdogInitialTimer = setTimeout(() => {
     radarWatchdogInitialTimer = null;
-    void tick();
+    void tick(true);
   }, initialDelayMs);
   if (typeof radarWatchdogInitialTimer?.unref === "function") {
     radarWatchdogInitialTimer.unref();
