@@ -360,14 +360,15 @@ export function renderFactoryBoardAndFloor(props: BoardAndFloorProps) {
   );
 }
 
-/** Drawer lateral ItemSheet (item-sheet.tsx) com StepTrail, Fatos e Checks */
+/** Drawer lateral ItemSheet (item-sheet.tsx) com StepTrail, Fatos e Deep Link nativo do Buzz */
 export function renderItemSheetDrawer(props: {
   h: any;
   item: FactoryWorkItem | null;
   tenant: string;
   onClose: () => void;
+  onOpenInBuzz?: (item: FactoryWorkItem) => void;
 }) {
-  const { h, item, tenant, onClose } = props;
+  const { h, item, tenant, onClose, onOpenInBuzz } = props;
   if (!item) return null;
 
   const steps = ["Entrada", "Identificar tipo", "Execução (Worktree)", "Revisão L-01 + CI", "Merge na main"];
@@ -398,10 +399,22 @@ export function renderItemSheetDrawer(props: {
       ),
       h(
         "div",
-        { style: { display: "flex", gap: "6px", flexWrap: "wrap" } },
+        { style: { display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" } },
         h("span", { className: "of-pill", "data-tone": cardStateOf(item) === "person" ? "waiting" : cardStateOf(item) }, item.stage),
         item.type && h("span", { className: "of-pill" }, item.type),
-        item.attempts > 1 && h("span", { className: "of-pill", "data-tone": "waiting" }, `Refazer rodada ${item.attempts}`)
+        item.attempts > 1 && h("span", { className: "of-pill", "data-tone": "waiting" }, `Refazer rodada ${item.attempts}`),
+        onOpenInBuzz &&
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-variant": "primary",
+              style: { marginLeft: "auto" },
+              onClick: () => onOpenInBuzz(item),
+            },
+            "Abrir no Buzz ↗"
+          )
       ),
       h(
         "section",
