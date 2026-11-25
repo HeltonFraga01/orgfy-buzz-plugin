@@ -47732,271 +47732,6 @@ function createFloor3DComponent(ctx) {
     );
   };
 }
-function createAgentQuickChatComponent(ctx) {
-  const React = ctx.react;
-  const h = React.createElement;
-  return function AgentQuickChat({ tenant, liveCrew, onCollapse, onNotify }) {
-    const defaultAgentKey = React.useMemo(() => {
-      var _a;
-      const coo = liveCrew.find((a) => /bento/i.test(a.name) && !/arquiteto/i.test(a.name));
-      if (coo) return coo.key;
-      const anyCoo = liveCrew.find((a) => /coo|bento/i.test(a.name));
-      if (anyCoo) return anyCoo.key;
-      return ((_a = liveCrew[0]) == null ? void 0 : _a.key) || "local:orgfy-bento";
-    }, [liveCrew]);
-    const [selectedKey, setSelectedKey] = React.useState(defaultAgentKey);
-    const [draft, setDraft] = React.useState("");
-    const [sending, setSending] = React.useState(false);
-    const [messages, setMessages] = React.useState([]);
-    React.useEffect(() => {
-      if (liveCrew.length > 0 && !liveCrew.some((a) => a.key === selectedKey)) {
-        setSelectedKey(defaultAgentKey);
-      }
-    }, [liveCrew, selectedKey, defaultAgentKey]);
-    const activeAgent = liveCrew.find((a) => a.key === selectedKey) || {
-      key: selectedKey,
-      name: "OrgFy Bento (COO)",
-      model: "claude-sonnet-5-5",
-      provider: "nexusmind_anthropic",
-      running: false
-    };
-    const handleSend = React.useCallback(async () => {
-      var _a;
-      const text = draft.trim();
-      if (!text || sending) return;
-      setSending(true);
-      const nowStr = (/* @__PURE__ */ new Date()).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-      setMessages((prev) => [
-        ...prev,
-        { id: `u-${Date.now()}`, sender: "user", agentName: activeAgent.name, text, at: nowStr }
-      ]);
-      setDraft("");
-      try {
-        if ((_a = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _a.wake) {
-          await ctx.agents.wake(activeAgent.key, {
-            text: `[OrgFy Factory · ${tenant}] ${text}`
-          });
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: `s-${Date.now()}`,
-              sender: "system",
-              agentName: activeAgent.name,
-              text: `Mensagem enviada para ${activeAgent.name} via Buzz Agents. Clique em "Chat completo ↗" para acompanhar a resposta ao vivo.`,
-              at: (/* @__PURE__ */ new Date()).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
-            }
-          ]);
-          onNotify == null ? void 0 : onNotify(`Mensagem enviada para ${activeAgent.name}.`);
-        } else {
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: `s-${Date.now()}`,
-              sender: "system",
-              agentName: activeAgent.name,
-              text: "ctx.agents.wake não está disponível nesta sessão.",
-              at: nowStr
-            }
-          ]);
-        }
-      } catch (err) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `e-${Date.now()}`,
-            sender: "system",
-            agentName: activeAgent.name,
-            text: `Erro ao acionar ${activeAgent.name}: ${(err == null ? void 0 : err.message) || err}`,
-            at: nowStr
-          }
-        ]);
-      } finally {
-        setSending(false);
-      }
-    }, [draft, sending, activeAgent, tenant, onNotify]);
-    const handleOpenFullChat = React.useCallback(async () => {
-      var _a;
-      try {
-        if ((_a = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a.open) {
-          await ctx.navigation.open({ kind: "agent", agentKey: activeAgent.key });
-          return;
-        }
-      } catch {
-      }
-      onNotify == null ? void 0 : onNotify(`Abrindo conversa completa de ${activeAgent.name} no Buzz.`);
-    }, [activeAgent, onNotify]);
-    return h(
-      "aside",
-      {
-        style: {
-          width: "320px",
-          flexShrink: 0,
-          display: "flex",
-          flexDirection: "column",
-          borderLeft: "1px solid var(--border)",
-          background: "var(--panel)",
-          minHeight: 0,
-          overflow: "hidden"
-        }
-      },
-      // Cabeçalho do Chat Lateral (COO / Seletor de Agente + Chat completo ↗ + Recolher)
-      h(
-        "div",
-        {
-          style: {
-            display: "flex",
-            flexDirection: "column",
-            gap: "6px",
-            padding: "10px 12px",
-            borderBottom: "1px solid var(--border)"
-          }
-        },
-        h(
-          "div",
-          { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px" } },
-          h(
-            "span",
-            { style: { display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: 700 } },
-            h("span", { className: "of-dot", "data-tone": activeAgent.running ? "running" : "done" }),
-            "Chat · COO & Agentes"
-          ),
-          h(
-            "div",
-            { style: { display: "inline-flex", alignItems: "center", gap: "4px" } },
-            h(
-              "button",
-              {
-                type: "button",
-                className: "of-btn",
-                "data-variant": "ghost",
-                style: { padding: "2px 6px", fontSize: "11px", color: "var(--primary)" },
-                onClick: handleOpenFullChat
-              },
-              "Chat completo ↗"
-            ),
-            h(
-              "button",
-              {
-                type: "button",
-                className: "of-btn",
-                "data-variant": "ghost",
-                style: { padding: "2px 6px" },
-                title: "Recolher chat lateral",
-                onClick: onCollapse
-              },
-              "›"
-            )
-          )
-        ),
-        // Seletor de qualquer agente do Buzz
-        h(
-          "select",
-          {
-            className: "of-tenant-select",
-            value: selectedKey,
-            onChange: (e) => setSelectedKey(e.target.value)
-          },
-          liveCrew.length > 0 ? liveCrew.map(
-            (a) => h(
-              "option",
-              { key: a.key, value: a.key },
-              `${a.name}${a.running ? " (ativo)" : ""} · ${a.model}`
-            )
-          ) : h("option", { value: "local:orgfy-bento" }, "OrgFy Bento (COO)")
-        )
-      ),
-      // Histórico / Estado do agente selecionado
-      h(
-        "div",
-        {
-          style: {
-            flex: 1,
-            minHeight: 0,
-            overflowY: "auto",
-            padding: "12px",
-            display: "flex",
-            flexDirection: "column",
-            gap: "8px"
-          }
-        },
-        messages.length === 0 ? h(
-          "div",
-          { className: "of-surface", style: { padding: "10px 12px", fontSize: "11.5px", lineHeight: 1.45 } },
-          h("div", { style: { fontWeight: 600, marginBottom: "4px" } }, activeAgent.name),
-          h(
-            "div",
-            { className: "of-muted" },
-            `Pronto para receber ordens no workspace ${tenant}. Envie uma mensagem abaixo para acionar diretamente pelo Buzz (ctx.agents.wake) ou abra o Chat completo.`
-          )
-        ) : messages.map(
-          (m) => h(
-            "div",
-            {
-              key: m.id,
-              className: "of-surface",
-              style: {
-                padding: "8px 10px",
-                fontSize: "11.5px",
-                borderColor: m.sender === "user" ? "var(--primary)" : "var(--border)",
-                alignSelf: m.sender === "user" ? "flex-end" : "stretch",
-                maxWidth: m.sender === "user" ? "90%" : "100%"
-              }
-            },
-            h(
-              "div",
-              { style: { display: "flex", justifyContent: "space-between", fontSize: "10px", color: "var(--muted-foreground)", marginBottom: "3px" } },
-              h("span", null, m.sender === "user" ? "Você" : m.agentName),
-              h("span", null, m.at)
-            ),
-            h("div", { style: { whiteSpace: "pre-wrap", lineHeight: 1.4 } }, m.text)
-          )
-        )
-      ),
-      // Composer inferior (igual ao CodeDen PM chat)
-      h(
-        "div",
-        {
-          style: {
-            padding: "10px 12px",
-            borderTop: "1px solid var(--border)",
-            display: "flex",
-            flexDirection: "column",
-            gap: "6px"
-          }
-        },
-        h("textarea", {
-          className: "of-textarea",
-          style: { minHeight: "56px", fontFamily: "inherit", fontSize: "12px" },
-          placeholder: `Mensagem para ${activeAgent.name}... (Cmd/Ctrl+Enter para enviar)`,
-          value: draft,
-          onChange: (e) => setDraft(e.target.value),
-          onKeyDown: (e) => {
-            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-              e.preventDefault();
-              handleSend();
-            }
-          }
-        }),
-        h(
-          "div",
-          { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px" } },
-          h("span", { className: "of-mono of-muted", style: { fontSize: "10px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, activeAgent.model),
-          h(
-            "button",
-            {
-              type: "button",
-              className: "of-btn",
-              "data-variant": "primary",
-              disabled: sending || !draft.trim(),
-              onClick: handleSend
-            },
-            sending ? "Enviando..." : "Enviar ↑"
-          )
-        )
-      )
-    );
-  };
-}
 const TENANTS = [
   { id: "orgfy", name: "OrgFy Core (Engenharia & Método)", desc: "Esteira determinística principal, CI 7/7 e governança L-01/L-22." },
   { id: "lumen-iptv", name: "Lumen IPTV", desc: "Operação multi-tenant ativa na Holding Cortexx." },
@@ -48685,12 +48420,12 @@ function createFactoryAppComponent(ctx, opts = {}) {
   const React = ctx.react;
   const h = React.createElement;
   const Floor3D = createFloor3DComponent(ctx);
-  const AgentQuickChat = createAgentQuickChatComponent(ctx);
   return function OrgFyFactoryApp() {
     var _a;
     const [tenant, setTenant] = React.useState("orgfy");
     const [tab, setTab] = React.useState("overview");
-    const [chatOpen, setChatOpen] = React.useState(true);
+    const [dmAgentKey, setDmAgentKey] = React.useState("");
+    const [openingDm, setOpeningDm] = React.useState(false);
     const [status, setStatus] = React.useState(() => buildEmptyFactoryStatus("orgfy"));
     const [holding, setHolding] = React.useState(null);
     const [loading, setLoading] = React.useState(true);
@@ -48792,20 +48527,52 @@ function createFactoryAppComponent(ctx, opts = {}) {
       },
       [tenant, notify2]
     );
+    const resolveBuzzScope = React.useCallback(() => {
+      var _a2, _b, _c, _d;
+      try {
+        const navSnap = typeof ((_a2 = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a2.snapshot) === "function" ? ctx.navigation.snapshot() : null;
+        const navScope = (_c = (_b = navSnap == null ? void 0 : navSnap.entry) == null ? void 0 : _b.target) == null ? void 0 : _c.scope;
+        if ((navScope == null ? void 0 : navScope.viewer) && (navScope == null ? void 0 : navScope.communityOrigin)) {
+          return { viewer: String(navScope.viewer), communityOrigin: String(navScope.communityOrigin) };
+        }
+      } catch {
+      }
+      try {
+        const relaySnap = typeof ((_d = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _d.snapshot) === "function" ? ctx.relay.snapshot() : null;
+        if ((relaySnap == null ? void 0 : relaySnap.viewer) && (relaySnap == null ? void 0 : relaySnap.origin)) {
+          return { viewer: String(relaySnap.viewer), communityOrigin: String(relaySnap.origin) };
+        }
+      } catch {
+      }
+      return null;
+    }, []);
     const handleOpenChannelInBuzz = React.useCallback(async () => {
       var _a2;
       const emp = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant);
       const canal = emp == null ? void 0 : emp.canal;
+      const scope = resolveBuzzScope();
       try {
-        if (canal && ((_a2 = ctx.navigation) == null ? void 0 : _a2.open)) {
-          await ctx.navigation.open({ kind: "channel", channelId: canal });
+        if (canal && scope && ((_a2 = ctx.navigation) == null ? void 0 : _a2.open)) {
+          const res = await ctx.navigation.open({
+            version: 1,
+            kind: "conversation",
+            scope,
+            channelId: canal
+          });
+          if (!res || res.status === "opened") {
+            notify2(`Canal do workspace ${tenant} aberto no Buzz.`);
+            return;
+          }
+        }
+        if (canal) {
+          await openSystemUri(ctx, `buzz://channel?id=${canal}`);
           notify2(`Canal do workspace ${tenant} aberto no Buzz.`);
           return;
         }
       } catch {
       }
       notify2(`Workspace ativo: ${tenant}${canal ? ` (canal ${canal.slice(0, 8)}…)` : ""}.`);
-    }, [holding, tenant, notify2]);
+    }, [holding, tenant, resolveBuzzScope, notify2]);
     const liveCrew = React.useMemo(() => {
       var _a2, _b;
       try {
@@ -48815,6 +48582,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
           var _a3, _b2;
           return {
             key: String((a == null ? void 0 : a.key) || (a == null ? void 0 : a.name) || ""),
+            pubkey: typeof (a == null ? void 0 : a.pubkey) === "string" ? a.pubkey : "",
             name: String((a == null ? void 0 : a.name) || (a == null ? void 0 : a.key) || "Agente"),
             model: ((_a3 = a == null ? void 0 : a.config) == null ? void 0 : _a3.model) || PT_BR.labels.unavailable,
             provider: ((_b2 = a == null ? void 0 : a.config) == null ? void 0 : _b2.provider) || "",
@@ -48825,6 +48593,86 @@ function createFactoryAppComponent(ctx, opts = {}) {
         return [];
       }
     }, [status.lastTickAt]);
+    const defaultDmAgentKey = React.useMemo(() => {
+      var _a2;
+      const coo = liveCrew.find((a) => /bento/i.test(a.name) && !/arquiteto/i.test(a.name));
+      if (coo) return coo.key;
+      const iris = liveCrew.find((a) => /iris/i.test(a.name));
+      if (iris) return iris.key;
+      return ((_a2 = liveCrew[0]) == null ? void 0 : _a2.key) || "";
+    }, [liveCrew]);
+    React.useEffect(() => {
+      if (liveCrew.length > 0 && (!dmAgentKey || !liveCrew.some((a) => a.key === dmAgentKey))) {
+        setDmAgentKey(defaultDmAgentKey);
+      }
+    }, [liveCrew, dmAgentKey, defaultDmAgentKey]);
+    const selectedDmAgent = React.useMemo(
+      () => liveCrew.find((a) => a.key === dmAgentKey) || liveCrew[0] || null,
+      [liveCrew, dmAgentKey]
+    );
+    const handleOpenAgentDmInBuzz = React.useCallback(
+      async (targetAgent) => {
+        var _a2, _b, _c, _d, _e;
+        const agent = targetAgent || selectedDmAgent;
+        const agentName = (agent == null ? void 0 : agent.name) || "Agente";
+        const pubkey = ((agent == null ? void 0 : agent.pubkey) || "").trim();
+        setOpeningDm(true);
+        try {
+          const scope = resolveBuzzScope();
+          const relaySnap = typeof ((_a2 = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a2.snapshot) === "function" ? ctx.relay.snapshot() : null;
+          const session = relaySnap == null ? void 0 : relaySnap.session;
+          let channelId = null;
+          if ((_b = session == null ? void 0 : session.channels) == null ? void 0 : _b.list) {
+            try {
+              const list = ((_c = session.channels.list()) == null ? void 0 : _c.channels) || [];
+              const lowerName = agentName.toLowerCase();
+              const existing = list.find((ch) => {
+                if ((ch == null ? void 0 : ch.channelType) !== "dm" && (ch == null ? void 0 : ch.channelType) !== "solo") return false;
+                if (pubkey) {
+                  const members = [...ch.participants || [], ...ch.members || []];
+                  if (members.some((m) => String(m).toLowerCase() === pubkey.toLowerCase())) return true;
+                }
+                return typeof (ch == null ? void 0 : ch.name) === "string" && ch.name.toLowerCase().includes(lowerName);
+              });
+              if (existing == null ? void 0 : existing.id) channelId = String(existing.id);
+            } catch {
+            }
+          }
+          if (!channelId && pubkey && ((_d = session == null ? void 0 : session.directMessages) == null ? void 0 : _d.available) && typeof session.directMessages.open === "function") {
+            const ac = new AbortController();
+            const timeout = setTimeout(() => ac.abort(), 8e3);
+            try {
+              channelId = await session.directMessages.open([pubkey], ac.signal);
+            } finally {
+              clearTimeout(timeout);
+            }
+          }
+          if (channelId && scope && ((_e = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _e.open)) {
+            const res = await ctx.navigation.open({
+              version: 1,
+              kind: "conversation",
+              scope,
+              channelId
+            });
+            if (!res || res.status === "opened") {
+              notify2(`DM nativa com ${agentName} aberta no Buzz.`);
+              return;
+            }
+          }
+          if (channelId) {
+            await openSystemUri(ctx, `buzz://channel?id=${channelId}`);
+            notify2(`DM com ${agentName} aberta no Buzz.`);
+            return;
+          }
+          notify2(`Não foi possível localizar a DM de ${agentName} (verifique a conexão do relay no Buzz).`);
+        } catch (err) {
+          notify2(`Erro ao abrir DM de ${agentName}: ${(err == null ? void 0 : err.message) || err}`);
+        } finally {
+          setOpeningDm(false);
+        }
+      },
+      [selectedDmAgent, resolveBuzzScope, notify2]
+    );
     const masterAgentName = ((_a = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _a.nome) || "OrgFy Iris";
     const masterLive = liveCrew.find((a) => a.name.toLowerCase().includes("iris")) || liveCrew[0] || null;
     const workspaces = (holding == null ? void 0 : holding.empresas) && holding.empresas.length > 0 ? holding.empresas.map((e) => ({
@@ -48875,15 +48723,39 @@ function createFactoryAppComponent(ctx, opts = {}) {
             h("span", { className: "of-dot", "data-tone": status.coordenador === "ativo" ? "done" : "failed", title: `Coordenador: ${status.coordenador}` })
           ),
           h(
-            "div",
-            { className: "of-surface", style: { padding: "8px 10px", display: "flex", flexDirection: "column", gap: "3px" } },
+            "button",
+            {
+              type: "button",
+              className: "of-surface",
+              title: `Abrir DM nativa com ${masterAgentName} no Buzz`,
+              onClick: () => {
+                var _a2;
+                return handleOpenAgentDmInBuzz(
+                  masterLive || { name: masterAgentName, pubkey: ((_a2 = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _a2.pubkey) || "" }
+                );
+              },
+              style: {
+                padding: "8px 10px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "3px",
+                textAlign: "left",
+                cursor: "pointer",
+                width: "100%"
+              }
+            },
             h(
               "div",
               { style: { display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "10px", color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.06em" } },
               h("span", null, "CEO Master · Orquestrador"),
-              h("span", { className: "of-dot", "data-tone": (masterLive == null ? void 0 : masterLive.running) ? "running" : "done" })
+              h("span", { style: { color: "var(--primary)", fontWeight: 600, textTransform: "none", letterSpacing: 0 } }, "DM ↗")
             ),
-            h("div", { style: { fontSize: "12.5px", fontWeight: 700, color: "var(--foreground)" } }, masterAgentName),
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", gap: "6px", fontSize: "12.5px", fontWeight: 700, color: "var(--foreground)" } },
+              h("span", { className: "of-dot", "data-tone": (masterLive == null ? void 0 : masterLive.running) ? "running" : "done" }),
+              masterAgentName
+            ),
             h("div", { className: "of-mono of-muted", style: { fontSize: "10px" } }, masterLive ? masterLive.model : "Ativa no Buzz")
           ),
           h("div", { className: "of-nav-group-label" }, "Holding & Conselho"),
@@ -48949,7 +48821,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
             "Control Room clássico"
           )
         ),
-        // Área principal + Painel Lateral de Chat com COO & Agentes
+        // Área principal em tela cheia (sem painel lateral redundante — usa DM nativa do Buzz)
         h(
           "div",
           { className: "of-workspace" },
@@ -48972,14 +48844,28 @@ function createFactoryAppComponent(ctx, opts = {}) {
                 "Canal no Buzz ↗"
               ),
               h(
+                "select",
+                {
+                  className: "of-tenant-select",
+                  "aria-label": "Selecionar agente para DM no Buzz",
+                  value: dmAgentKey,
+                  onChange: (e) => setDmAgentKey(e.target.value),
+                  style: { width: "auto", maxWidth: "200px", padding: "4px 8px", fontSize: "11.5px" }
+                },
+                liveCrew.length > 0 ? liveCrew.map(
+                  (a) => h("option", { key: a.key, value: a.key }, `${a.name}${a.running ? " ●" : ""}`)
+                ) : h("option", { value: "" }, "OrgFy Bento (COO)")
+              ),
+              h(
                 "button",
                 {
                   type: "button",
                   className: "of-btn",
-                  "data-variant": chatOpen ? "primary" : void 0,
-                  onClick: () => setChatOpen(!chatOpen)
+                  "data-variant": "primary",
+                  disabled: openingDm,
+                  onClick: () => handleOpenAgentDmInBuzz(selectedDmAgent)
                 },
-                chatOpen ? "Ocultar Chat COO" : "Chat COO & Agentes"
+                openingDm ? "Abrindo..." : "Abrir DM ↗"
               )
             ),
             toast && h("span", { className: "of-pill", "data-tone": "done" }, toast),
@@ -49072,13 +48958,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
                 onSelectModeQuick: (mode) => handleControlUpdate({ mode }, `Modo alterado para ${PT_BR.modes[mode]}.`),
                 onOpenChannelInBuzz: handleOpenChannelInBuzz
               })
-            ),
-            chatOpen && h(AgentQuickChat, {
-              tenant,
-              liveCrew,
-              onCollapse: () => setChatOpen(false),
-              onNotify: notify2
-            })
+            )
           )
         )
       ),

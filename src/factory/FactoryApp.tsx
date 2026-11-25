@@ -1,5 +1,5 @@
 // Adaptado de CodeDen (MIT) commit b0b2a5a: apps/web/src/components/shell/app-shell.tsx e routes/project.tsx
-// Shell nativo do Buzz para a OrgFy Factory: cores dinâmicas do Buzz, CEO Master, Conselho (Board), Workspaces, Andar 3D em tela cheia e Chat lateral do COO/Agentes.
+// Shell nativo do Buzz para a OrgFy Factory: cores dinâmicas do Buzz, CEO Master, Conselho (Board), Workspaces, Andar 3D em tela cheia e DM nativa de agentes no Buzz.
 
 import type { Context } from "@buzz/author";
 import { PT_BR } from "../i18n/pt-BR";
@@ -15,10 +15,9 @@ import { attachFactoryShadowStyles, FACTORY_SHADOW_CSS } from "./shadow-shell";
 import { renderFactoryOverviewPanel } from "./FactoryOverviewPanel";
 import { renderFactoryBoardAndFloor, renderItemSheetDrawer, type LiveCrewAgent } from "./FactoryBoardAndFloor";
 import { createFloor3DComponent } from "./codeden-floor/Floor3DCanvas";
-import { createAgentQuickChatComponent } from "./AgentQuickChat";
 import { renderFactorySecondaryPage } from "./FactoryPages";
 import { subscribeRelayUpdates } from "../services/buzz-native";
-import { openIssueInBuzz } from "../services/orgfy-bridge";
+import { openIssueInBuzz, openSystemUri } from "../services/orgfy-bridge";
 import { fetchHoldingControlPlane, type HoldingControlPlaneSnapshot } from "../services/holding-service";
 
 type FactoryTab =
@@ -47,12 +46,12 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
   const React = ctx.react;
   const h = React.createElement;
   const Floor3D = createFloor3DComponent(ctx);
-  const AgentQuickChat = createAgentQuickChatComponent(ctx);
 
   return function OrgFyFactoryApp() {
     const [tenant, setTenant] = React.useState<string>("orgfy");
     const [tab, setTab] = React.useState<FactoryTab>("overview");
-    const [chatOpen, setChatOpen] = React.useState<boolean>(true);
+    const [dmAgentKey, setDmAgentKey] = React.useState<string>("");
+    const [openingDm, setOpeningDm] = React.useState<boolean>(false);
     const [status, setStatus] = React.useState<FactoryStatusPayload>(() => buildEmptyFactoryStatus("orgfy"));
     const [holding, setHolding] = React.useState<HoldingControlPlaneSnapshot | null>(null);
     const [loading, setLoading] = React.useState<boolean>(true);
@@ -175,18 +174,48 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       [tenant, notify]
     );
 
+    const resolveBuzzScope = React.useCallback((): { viewer: string; communityOrigin: string } | null => {
+      try {
+        const navSnap = typeof (ctx as any)?.navigation?.snapshot === "function" ? (ctx as any).navigation.snapshot() : null;
+        const navScope = navSnap?.entry?.target?.scope;
+        if (navScope?.viewer && navScope?.communityOrigin) {
+          return { viewer: String(navScope.viewer), communityOrigin: String(navScope.communityOrigin) };
+        }
+      } catch {}
+      try {
+        const relaySnap = typeof (ctx as any)?.relay?.snapshot === "function" ? (ctx as any).relay.snapshot() : null;
+        if (relaySnap?.viewer && relaySnap?.origin) {
+          return { viewer: String(relaySnap.viewer), communityOrigin: String(relaySnap.origin) };
+        }
+      } catch {}
+      return null;
+    }, []);
+
     const handleOpenChannelInBuzz = React.useCallback(async () => {
       const emp = holding?.empresas.find((e) => e.slug === tenant);
       const canal = emp?.canal;
+      const scope = resolveBuzzScope();
       try {
-        if (canal && (ctx as any).navigation?.open) {
-          await (ctx as any).navigation.open({ kind: "channel", channelId: canal });
+        if (canal && scope && (ctx as any).navigation?.open) {
+          const res = await (ctx as any).navigation.open({
+            version: 1,
+            kind: "conversation",
+            scope,
+            channelId: canal,
+          });
+          if (!res || res.status === "opened") {
+            notify(`Canal do workspace ${tenant} aberto no Buzz.`);
+            return;
+          }
+        }
+        if (canal) {
+          await openSystemUri(ctx, `buzz://channel?id=${canal}`);
           notify(`Canal do workspace ${tenant} aberto no Buzz.`);
           return;
         }
       } catch {}
       notify(`Workspace ativo: ${tenant}${canal ? ` (canal ${canal.slice(0, 8)}…)` : ""}.`);
-    }, [holding, tenant, notify]);
+    }, [holding, tenant, resolveBuzzScope, notify]);
 
     const liveCrew: LiveCrewAgent[] = React.useMemo(() => {
       try {
@@ -194,6 +223,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         const runningSet = new Set((snap.running || []).map((a: any) => String(a?.key || a?.name)));
         return (snap.agents || []).map((a: any) => ({
           key: String(a?.key || a?.name || ""),
+          pubkey: typeof a?.pubkey === "string" ? a.pubkey : "",
           name: String(a?.name || a?.key || "Agente"),
           model: a?.config?.model || PT_BR.labels.unavailable,
           provider: a?.config?.provider || "",
@@ -203,6 +233,96 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         return [];
       }
     }, [status.lastTickAt]);
+
+    const defaultDmAgentKey = React.useMemo(() => {
+      const coo = liveCrew.find((a) => /bento/i.test(a.name) && !/arquiteto/i.test(a.name));
+      if (coo) return coo.key;
+      const iris = liveCrew.find((a) => /iris/i.test(a.name));
+      if (iris) return iris.key;
+      return liveCrew[0]?.key || "";
+    }, [liveCrew]);
+
+    React.useEffect(() => {
+      if (liveCrew.length > 0 && (!dmAgentKey || !liveCrew.some((a) => a.key === dmAgentKey))) {
+        setDmAgentKey(defaultDmAgentKey);
+      }
+    }, [liveCrew, dmAgentKey, defaultDmAgentKey]);
+
+    const selectedDmAgent = React.useMemo(
+      () => liveCrew.find((a) => a.key === dmAgentKey) || liveCrew[0] || null,
+      [liveCrew, dmAgentKey]
+    );
+
+    const handleOpenAgentDmInBuzz = React.useCallback(
+      async (targetAgent?: { key?: string; pubkey?: string; name?: string } | null) => {
+        const agent = targetAgent || selectedDmAgent;
+        const agentName = agent?.name || "Agente";
+        const pubkey = (agent?.pubkey || "").trim();
+        setOpeningDm(true);
+        try {
+          const scope = resolveBuzzScope();
+          const relaySnap = typeof (ctx as any)?.relay?.snapshot === "function" ? (ctx as any).relay.snapshot() : null;
+          const session = relaySnap?.session;
+
+          let channelId: string | null = null;
+
+          // 1. Procura DM ou Solo chat já aberto com o agente na lista de canais do Buzz
+          if (session?.channels?.list) {
+            try {
+              const list = session.channels.list()?.channels || [];
+              const lowerName = agentName.toLowerCase();
+              const existing = list.find((ch: any) => {
+                if (ch?.channelType !== "dm" && ch?.channelType !== "solo") return false;
+                if (pubkey) {
+                  const members = [...(ch.participants || []), ...(ch.members || [])];
+                  if (members.some((m: string) => String(m).toLowerCase() === pubkey.toLowerCase())) return true;
+                }
+                return typeof ch?.name === "string" && ch.name.toLowerCase().includes(lowerName);
+              });
+              if (existing?.id) channelId = String(existing.id);
+            } catch {}
+          }
+
+          // 2. Abre/cria a DM nativa pelo Buzz (session.directMessages.open)
+          if (!channelId && pubkey && session?.directMessages?.available && typeof session.directMessages.open === "function") {
+            const ac = new AbortController();
+            const timeout = setTimeout(() => ac.abort(), 8000);
+            try {
+              channelId = await session.directMessages.open([pubkey], ac.signal);
+            } finally {
+              clearTimeout(timeout);
+            }
+          }
+
+          // 3. Navega diretamente para a tela nativa de conversa DM do Buzz
+          if (channelId && scope && (ctx as any)?.navigation?.open) {
+            const res = await (ctx as any).navigation.open({
+              version: 1,
+              kind: "conversation",
+              scope,
+              channelId,
+            });
+            if (!res || res.status === "opened") {
+              notify(`DM nativa com ${agentName} aberta no Buzz.`);
+              return;
+            }
+          }
+
+          if (channelId) {
+            await openSystemUri(ctx, `buzz://channel?id=${channelId}`);
+            notify(`DM com ${agentName} aberta no Buzz.`);
+            return;
+          }
+
+          notify(`Não foi possível localizar a DM de ${agentName} (verifique a conexão do relay no Buzz).`);
+        } catch (err: any) {
+          notify(`Erro ao abrir DM de ${agentName}: ${err?.message || err}`);
+        } finally {
+          setOpeningDm(false);
+        }
+      },
+      [selectedDmAgent, resolveBuzzScope, notify]
+    );
 
     const masterAgentName = holding?.ceoHolding?.nome || "OrgFy Iris";
     const masterLive = liveCrew.find((a) => a.name.toLowerCase().includes("iris")) || liveCrew[0] || null;
@@ -264,15 +384,37 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
           ),
 
           h(
-            "div",
-            { className: "of-surface", style: { padding: "8px 10px", display: "flex", flexDirection: "column", gap: "3px" } },
+            "button",
+            {
+              type: "button",
+              className: "of-surface",
+              title: `Abrir DM nativa com ${masterAgentName} no Buzz`,
+              onClick: () =>
+                handleOpenAgentDmInBuzz(
+                  masterLive || { name: masterAgentName, pubkey: holding?.ceoHolding?.pubkey || "" }
+                ),
+              style: {
+                padding: "8px 10px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "3px",
+                textAlign: "left",
+                cursor: "pointer",
+                width: "100%",
+              },
+            },
             h(
               "div",
               { style: { display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "10px", color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.06em" } },
               h("span", null, "CEO Master · Orquestrador"),
-              h("span", { className: "of-dot", "data-tone": masterLive?.running ? "running" : "done" })
+              h("span", { style: { color: "var(--primary)", fontWeight: 600, textTransform: "none", letterSpacing: 0 } }, "DM ↗")
             ),
-            h("div", { style: { fontSize: "12.5px", fontWeight: 700, color: "var(--foreground)" } }, masterAgentName),
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", gap: "6px", fontSize: "12.5px", fontWeight: 700, color: "var(--foreground)" } },
+              h("span", { className: "of-dot", "data-tone": masterLive?.running ? "running" : "done" }),
+              masterAgentName
+            ),
             h("div", { className: "of-mono of-muted", style: { fontSize: "10px" } }, masterLive ? masterLive.model : "Ativa no Buzz")
           ),
 
@@ -345,7 +487,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
             )
         ),
 
-        // Área principal + Painel Lateral de Chat com COO & Agentes
+        // Área principal em tela cheia (sem painel lateral redundante — usa DM nativa do Buzz)
         h(
           "div",
           { className: "of-workspace" },
@@ -368,14 +510,30 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                 "Canal no Buzz ↗"
               ),
               h(
+                "select",
+                {
+                  className: "of-tenant-select",
+                  "aria-label": "Selecionar agente para DM no Buzz",
+                  value: dmAgentKey,
+                  onChange: (e: any) => setDmAgentKey(e.target.value),
+                  style: { width: "auto", maxWidth: "200px", padding: "4px 8px", fontSize: "11.5px" },
+                },
+                liveCrew.length > 0
+                  ? liveCrew.map((a) =>
+                      h("option", { key: a.key, value: a.key }, `${a.name}${a.running ? " ●" : ""}`)
+                    )
+                  : h("option", { value: "" }, "OrgFy Bento (COO)")
+              ),
+              h(
                 "button",
                 {
                   type: "button",
                   className: "of-btn",
-                  "data-variant": chatOpen ? "primary" : undefined,
-                  onClick: () => setChatOpen(!chatOpen),
+                  "data-variant": "primary",
+                  disabled: openingDm,
+                  onClick: () => handleOpenAgentDmInBuzz(selectedDmAgent),
                 },
-                chatOpen ? "Ocultar Chat COO" : "Chat COO & Agentes"
+                openingDm ? "Abrindo..." : "Abrir DM ↗"
               )
             ),
             toast && h("span", { className: "of-pill", "data-tone": "done" }, toast),
@@ -476,14 +634,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                       handleControlUpdate({ mode }, `Modo alterado para ${PT_BR.modes[mode]}.`),
                     onOpenChannelInBuzz: handleOpenChannelInBuzz,
                   })
-            ),
-            chatOpen &&
-              h(AgentQuickChat, {
-                tenant,
-                liveCrew,
-                onCollapse: () => setChatOpen(false),
-                onNotify: notify,
-              })
+            )
           )
         )
       ),
