@@ -18,8 +18,7 @@
   "host": {
     "agentHooks": [
       "buzz.pi/pi",
-      "buzz.claude-code/claude-code",
-      "buzz.goose/goose"
+      "buzz.claude-code/claude-code"
     ],
     "networkOrigins": [
       "https://api.cortexx.digital",
@@ -30,11 +29,6 @@
     "mcp": true,
     "processes": [
       {
-        "id": "bash",
-        "program": "bash",
-        "args": ["-c"]
-      },
-      {
         "id": "python",
         "program": "python3",
         "args": []
@@ -42,6 +36,16 @@
       {
         "id": "git",
         "program": "git",
+        "args": []
+      },
+      {
+        "id": "buzz",
+        "program": "buzz",
+        "args": []
+      },
+      {
+        "id": "osascript",
+        "program": "osascript",
         "args": []
       },
       {

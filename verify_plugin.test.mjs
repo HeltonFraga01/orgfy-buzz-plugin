@@ -1208,8 +1208,8 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     },
   });
 
-  const turnFailedHook = hooks.find((hk) => hk.id === "orgfy-turn-failed-model-failover");
-  assert.ok(turnFailedHook, "hook orgfy-turn-failed-model-failover deve estar registrado");
+  const turnFailedHook = hooks.find((hk) => hk.id === "orgfy-claude-tool-failure-failover");
+  assert.ok(turnFailedHook, "hook orgfy-claude-tool-failure-failover deve estar registrado");
   await turnFailedHook.run({
     agentName: "OrgFy Bento Arquiteto",
     agentPubkey: "6d2ab612cc8e091e5c4381694728ce3f8873661156adeeda1522737af334b271",
@@ -1218,6 +1218,20 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     channelId: "e445491d-2fb3-4ebd-8e2e-f6813c33fb03",
     threadRoot: "39a75068da62278de10a7b638f65ed91ca0e35eb508aed4477c0511e4354b3ba",
   });
+
+  // B2: Verifica filtro fiel de buzz-app/src/features/agents/hooks.ts:50 para TODOS os hooks registrados
+  const VALID_BUZZ_EVENTS = {
+    "buzz.pi/pi": new Set(["beforeTool", "afterTool"]),
+    "buzz.claude-code/claude-code": new Set(["PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop"]),
+  };
+  const handlers = (harness, event) => hooks.filter((hk) => hk.harness === harness && hk.event === event);
+  for (const hk of hooks) {
+    assert.ok(VALID_BUZZ_EVENTS[hk.harness], `harness inválido registrado: ${hk.harness}`);
+    assert.ok(VALID_BUZZ_EVENTS[hk.harness].has(hk.event), `evento inválido para ${hk.harness}: ${hk.event}`);
+    assert.ok(handlers(hk.harness, hk.event).some((x) => x.id === hk.id), `handlers(${hk.harness}, ${hk.event}) deve encontrar ${hk.id}`);
+  }
+  assert.equal(handlers("all", "turn.failed").length, 0, "não deve existir hook harness=all/turn.failed");
+  assert.equal(handlers("buzz.claude-code/claude-code", "beforeTool").length, 0, "claude-code não usa beforeTool");
 
   assert.equal(saves.length, 1, "hook turn.failed deve salvar novo modelo saudável via ctx.agents.save");
   assert.equal(saves[0].change.config.model, "gemini-3.8-flash-medium", "deve ignorar tab_jump_flash_lite_preview e auto/claude-sonnet");

@@ -1019,8 +1019,8 @@ export async function executeDespachar(
       appendChunk(chunk);
     };
     try {
-      const proc = await ctx.host.spawn("bash", {
-        args: [buildEnvPythonBashCmd(pyArgs)],
+      const proc = await ctx.host.spawn("python", {
+        args: pyArgs,
         cwd: ORGFY_ABS_PATH,
         onStdout: appendAttempt,
         onStderr: appendAttempt,
@@ -1093,8 +1093,8 @@ export async function executeGate(
   }
 
   try {
-    const proc = await ctx.host.spawn("bash", {
-      args: [buildEnvPythonBashCmd(pyArgs)],
+    const proc = await ctx.host.spawn("python", {
+      args: pyArgs,
       cwd: ORGFY_ABS_PATH,
       onStdout: appendChunk,
       onStderr: appendChunk,
@@ -1140,8 +1140,8 @@ export async function executePorteiroSync(
   }
 
   try {
-    const proc = await ctx.host.spawn("bash", {
-      args: [buildEnvPythonBashCmd(pyArgs)],
+    const proc = await ctx.host.spawn("python", {
+      args: pyArgs,
       cwd: ORGFY_ABS_PATH,
       onStdout: appendChunk,
       onStderr: appendChunk,
@@ -1360,9 +1360,8 @@ export async function ensureWorktreeInfrastructure(ctx: any): Promise<{
   const append = (c: string) => (output += c);
 
   try {
-    const cmd = `cd "${ORGFY_ABS_PATH}" && mkdir -p .worktrees && git worktree prune && git worktree list`;
-    const proc = await ctx.host.spawn("bash", {
-      args: [cmd],
+    const proc = await ctx.host.spawn("git", {
+      args: ["-C", ORGFY_ABS_PATH, "worktree", "list"],
       onStdout: append,
       onStderr: append,
     });

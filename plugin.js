@@ -713,14 +713,6 @@ async function buildOrgfyStatus(ctx, empresa) {
     modo_execucao: "efemero_headless"
   };
 }
-const SENTINELA_ENV_PATH = "/Users/heltonfraga/.buzz/vault-forense/sentinela-esteira.env";
-function shQuote(arg) {
-  return `'${String(arg).replace(/'/g, `'"'"'`)}'`;
-}
-function buildEnvPythonBashCmd(pyArgs) {
-  const quotedArgs = pyArgs.map(shQuote).join(" ");
-  return `set -a; [ -f ${shQuote(SENTINELA_ENV_PATH)} ] && . ${shQuote(SENTINELA_ENV_PATH)}; set +a; cd ${shQuote(ORGFY_ABS_PATH)} && exec python3 ${quotedArgs}`;
-}
 async function executeDespachar(ctx, options) {
   var _a;
   let combinedOutput = "";
@@ -752,8 +744,8 @@ async function executeDespachar(ctx, options) {
       appendChunk(chunk);
     };
     try {
-      const proc = await ctx.host.spawn("bash", {
-        args: [buildEnvPythonBashCmd(pyArgs)],
+      const proc = await ctx.host.spawn("python", {
+        args: pyArgs,
         cwd: ORGFY_ABS_PATH,
         onStdout: appendAttempt,
         onStderr: appendAttempt
@@ -814,8 +806,8 @@ async function executeGate(ctx, options) {
     return { code: 1, output: combinedOutput };
   }
   try {
-    const proc = await ctx.host.spawn("bash", {
-      args: [buildEnvPythonBashCmd(pyArgs)],
+    const proc = await ctx.host.spawn("python", {
+      args: pyArgs,
       cwd: ORGFY_ABS_PATH,
       onStdout: appendChunk,
       onStderr: appendChunk
@@ -852,8 +844,8 @@ async function executePorteiroSync(ctx, options) {
     return { code: 1, output: combinedOutput };
   }
   try {
-    const proc = await ctx.host.spawn("bash", {
-      args: [buildEnvPythonBashCmd(pyArgs)],
+    const proc = await ctx.host.spawn("python", {
+      args: pyArgs,
       cwd: ORGFY_ABS_PATH,
       onStdout: appendChunk,
       onStderr: appendChunk
@@ -1040,32 +1032,26 @@ async function openIssueInBuzz(ctx, issue) {
   return openSystemUri(ctx, uri);
 }
 const INITIAL_BOOTSTRAP_STEPS = [
-  { step: "prerequisites", label: "Auditoria de Pré-requisitos (Python 3.10+, Git, Docker)", status: "pending" },
+  { step: "prerequisites", label: "Auditoria de Pré-requisitos (Python 3.10+, Git)", status: "pending" },
   { step: "repo", label: "Verificação da Esteira Determinística (REPOS/orgfy)", status: "pending" },
-  { step: "nostr_channel", label: "Provisionamento do Canal Nostr (#esteira-orgfy)", status: "pending" },
-  { step: "canonical_agents", label: "Reconciliação dos Agentes OrgFy da Holding", status: "pending" },
-  { step: "porteiro_daemon", label: "Ativação Rápida do Porteiro Nostr", status: "pending" }
+  { step: "nostr_channel", label: "Verificação do Canal Nostr (#esteira-orgfy)", status: "pending" },
+  { step: "canonical_agents", label: "Reconciliação dos Agentes OrgFy via ctx.agents", status: "pending" },
+  { step: "porteiro_daemon", label: "Coordenador Ativo (esteira_minima.py)", status: "pending" }
 ];
 async function checkExistingConfiguration(ctx) {
-  var _a;
+  var _a, _b;
   try {
-    if ((_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.spawn) {
-      let output = "";
-      const proc = await ctx.host.spawn("bash", {
-        args: [`[ -f "$HOME/Library/Application Support/xyz.block.buzz.desktop/agents/identities.json" ] && [ -d "${ORGFY_ABS_PATH}" ] && echo "FOUND" || echo "NOT_FOUND"`],
-        onStdout: (c) => output += c
-      });
-      await proc.exited;
-      if (output.includes("FOUND")) {
-        return { exists: true, agentCount: 16 };
-      }
+    const snap = ((_b = (_a = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) || {};
+    const count = (snap.agents || []).length || (snap.running || []).length;
+    if (count > 0) {
+      return { exists: true, agentCount: count };
     }
   } catch (_e) {
   }
   return { exists: false, agentCount: 0 };
 }
 async function executeBootstrapFlow(ctx, onStepUpdate) {
-  var _a, _b, _c, _d, _e, _f;
+  var _a, _b, _c;
   let steps = INITIAL_BOOTSTRAP_STEPS.map((s) => ({ ...s, status: "pending" }));
   let logBuffer = "";
   const update = (stepKey, status, details) => {
@@ -1074,19 +1060,19 @@ async function executeBootstrapFlow(ctx, onStepUpdate) {
     if (details) logBuffer += `[${stepKey.toUpperCase()}] ${details}
 `;
   };
-  update("prerequisites", "running", "Checando binários locais (python3, git, docker)...");
+  update("prerequisites", "running", "Checando binários locais (python3, git)...");
   try {
     if ((_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.spawn) {
-      const proc = await ctx.host.spawn("bash", {
-        args: ["python3 --version && git --version && (docker --version || echo 'docker: opcional local')"]
-      });
-      await proc.exited;
+      const p1 = await ctx.host.spawn("python", { args: ["--version"] });
+      await p1.exited;
+      const p2 = await ctx.host.spawn("git", { args: ["--version"] });
+      await p2.exited;
     }
-    update("prerequisites", "success", "Python 3.10+, Git e Docker verificados.");
+    update("prerequisites", "success", "Python 3 e Git verificados.");
   } catch (err) {
-    update("prerequisites", "success", "Binários essenciais (python3, git) presentes.");
+    update("prerequisites", "error", `Falha ao verificar binários: ${(err == null ? void 0 : err.message) || err}`);
   }
-  update("repo", "running", "Auditando estrutura de REPOS/orgfy, manifestos e provisionando .worktrees/...");
+  update("repo", "running", "Executando git worktree prune em REPOS/orgfy...");
   try {
     if ((_b = ctx == null ? void 0 : ctx.host) == null ? void 0 : _b.spawn) {
       const proc = await ctx.host.spawn("git", {
@@ -1094,136 +1080,35 @@ async function executeBootstrapFlow(ctx, onStepUpdate) {
       });
       await proc.exited;
     }
-    update("repo", "success", "Estrutura REPOS/orgfy e diretório .worktrees/ (_runner_esteira, git worktree prune) íntegros.");
+    update("repo", "success", "Estrutura REPOS/orgfy e worktrees verificadas.");
   } catch (err) {
-    update("repo", "success", "Estrutura REPOS/orgfy e diretório .worktrees/ verificados.");
+    update("repo", "error", `Falha no git worktree prune: ${(err == null ? void 0 : err.message) || err}`);
   }
-  update("nostr_channel", "running", "Provisionando canal #esteira-orgfy no Relay...");
+  update("nostr_channel", "running", "Verificando canal #esteira-orgfy no Relay...");
   try {
     if ((_c = ctx == null ? void 0 : ctx.host) == null ? void 0 : _c.spawn) {
-      const proc = await ctx.host.spawn("bash", {
-        args: [
-          `cd "${ORGFY_ABS_PATH}" && buzz channels list | grep -q "esteira-orgfy" || buzz channels create --name "esteira-orgfy" --description "Canal oficial da esteira determinística OrgFy v10" || echo "[NOSTR] Canal #esteira-orgfy pronto"`
-        ]
+      const proc = await ctx.host.spawn("buzz", {
+        args: ["channels", "list"],
+        cwd: ORGFY_ABS_PATH
       });
       await proc.exited;
     }
-    update("nostr_channel", "success", "Canal #esteira-orgfy ativo e subscrito no Relay.");
+    update("nostr_channel", "success", "Canal #esteira-orgfy verificado no Relay.");
   } catch (err) {
-    update("nostr_channel", "success", "Canal #esteira-orgfy configurado.");
+    update("nostr_channel", "error", `Falha ao listar canais: ${(err == null ? void 0 : err.message) || err}`);
   }
-  update("canonical_agents", "running", "Detectando configuração de agentes existentes...");
+  update("canonical_agents", "running", "Verificando agentes registrados via ctx.agents...");
   try {
     const existing = await checkExistingConfiguration(ctx);
-    if (existing.exists) {
-      update("canonical_agents", "running", "Configuração existente detectada (16 agentes). Executando migração atômica para v10...");
-      if ((_d = ctx == null ? void 0 : ctx.host) == null ? void 0 : _d.spawn) {
-        let migOutput = "";
-        const proc = await ctx.host.spawn("bash", {
-          args: [`python3 "${ORGFY_ABS_PATH}/ferramentas/esteira/migrar_agentes_buzz.py"`],
-          onStdout: (c) => migOutput += c,
-          onStderr: (c) => migOutput += c
-        });
-        await proc.exited;
-      }
-      update("canonical_agents", "success", "16 agentes OrgFy reconciliados com prompts v10 e workspace soberano.");
-    } else {
-      update("canonical_agents", "running", "Registrando agentes canônicos da Holding...");
-      const canonicals = [
-        {
-          name: "OrgFy Iris",
-          role: "CEO Holding",
-          prompt: `Você é OrgFy Iris, CEO da Holding OrgFy e árbitra máxima executiva.
-Sua missão:
-1. Definir prioridades estratégicas da holding e de suas subsidiárias (OrgFy Core, Lumen IPTV, SaaS Tributário).
-2. Interagir com o Fundador Helton Fraga para aprovação de riscos jurídicos, orçamentos e missão.
-3. Decidir matérias reservadas e mediar impasses de engenharia escalados pelo COO Bento.
-
-Invariantes Absolutos (L-01, L-22, L-90):
-- NUNCA escreva código de produto, testes unitários ou scripts de deploy.
-- NUNCA execute tarefas de especialista diretamente; delegue para o COO Bento.
-- Ao criar ou direcionar cards, exija sempre especificação de comando de aceite executável.
-- Opere no mais alto nível de capacidade cognitiva, auditando entregas por amostragem.`
-        },
-        {
-          name: "OrgFy Bento",
-          role: "COO Operacional",
-          prompt: `Você é OrgFy Bento, COO e a única despachante autorizada da esteira determinística OrgFy.
-Sua missão:
-1. Orquestrar a vazão contínua do Kanban e rotinas da esteira sem deixar especialistas ociosos.
-2. Despachar cards associando o executor ideal via Roteador de Capacidade CoEvo-RSI (Tier 1 Barato, Tier 2 Revisor, Tier 3 Arquiteto).
-3. Congelar o hash do comando de aceite em todo despacho, garantindo que o executor não altere a prova.
-4. Quando alertado por [DSAP BACKTRACKING] na 2ª recusa consecutiva com similaridade >= 0.70, intervir imediatamente para re-escopar ou quebrar o card antes da 3ª rodada.
-
-Invariantes Absolutos:
-- Você NÃO escreve código de implementação ou testes.
-- Respeite estritamente a Regra L-01: o executor de um card NUNCA pode ser seu revisor.
-- Opere deterministamente usando ferramentas MCP da esteira (orgfy_despachar, orgfy_status).`
-        },
-        {
-          name: "OrgFy Bento Arquiteto",
-          role: "Arquiteto de Software",
-          prompt: `Você é OrgFy Bento Arquiteto, Guardião do Método, dos Contratos de Card e da Matriz de Lições.
-Sua missão:
-1. Manter a arquitetura do método: papéis (papeis/*.md), contratos de card, formatos de laudo e matriz de lições normativas (L-01 a L-111).
-2. Garantir o princípio de single source of truth: uma regra tem apenas uma fonte; redundância é defeito.
-3. Avaliar regras probatórias do RSI (retro.py) durante a janela de 10 cards, assegurando que o FPY não sofra regressão (catraca L-90).
-4. Decidir a forma e consistência arquitetural, sem escrever ferramentas efêmeras.`
-        },
-        {
-          name: "QA Sentinel",
-          role: "Auditor de Qualidade",
-          prompt: `Você é QA Sentinel, Auditor Soberano de Qualidade e Revisor Independente do Quality Gate da OrgFy.
-Sua missão:
-1. Certificar PRs sob estrita observância da Regra L-01 (revisor independente obrigatório).
-2. Auditar os 3 Probes Caixa-Preta em produção:
-   - http_rota: HTTP 200 no Caddy/Traefik.
-   - supabase_rls: Migrações aplicadas e tabelas críticas protegidas por RLS.
-   - playwright_console: 0 erros de console e screenshot auditável de tela anexado.
-3. Reexecutar os testes em worktree limpa ou validar integridade do aceite_cache.
-4. Ao recusar um card, emitir parecer objetivo e factual. Se a recusa repetir a assinatura do erro anterior com similaridade >= 0.70, acionar compulsoriamente [DSAP BACKTRACKING].
-
-Invariantes Absolutos:
-- Proibido aprovar sem prova factual reproduzível (L-24).
-- Nunca aprove seu próprio PR ou código produzido por você.`
-        }
-      ];
-      if ((_e = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _e.create) {
-        for (const agent of canonicals) {
-          try {
-            await ctx.agents.create({
-              type: "claude-code",
-              name: agent.name,
-              config: { systemPrompt: agent.prompt }
-            });
-          } catch (_err) {
-          }
-        }
-      }
-      update("canonical_agents", "success", "4 agentes canônicos (OrgFy Iris, Bento, Bento Arquiteto, QA Sentinel) registrados.");
-    }
+    update(
+      "canonical_agents",
+      "success",
+      existing.exists ? `${existing.agentCount} agentes detectados via ctx.agents.snapshot() (sem escrita direta em agents/state).` : "Nenhum agente detectado no snapshot; crie agentes pela API nativa do Buzz."
+    );
   } catch (err) {
-    update("canonical_agents", "success", "Agentes reconciliados com sucesso.");
+    update("canonical_agents", "error", `Erro ao consultar agentes: ${(err == null ? void 0 : err.message) || err}`);
   }
-  update("porteiro_daemon", "running", "Ativando porteiro.py em modo leve (timeout 5s)...");
-  try {
-    if ((_f = ctx == null ? void 0 : ctx.host) == null ? void 0 : _f.spawn) {
-      const runPorteiro = async () => {
-        try {
-          const proc = await ctx.host.spawn("bash", {
-            args: [`cd "${ORGFY_ABS_PATH}" && python3 ferramentas/esteira/porteiro.py --empresa orgfy --uma-vez --skip-pytest --skip-entregas --skip-estado-cards --dry-run`]
-          });
-          await proc.exited;
-        } catch (_e2) {
-        }
-      };
-      const timeout = new Promise((resolve) => setTimeout(resolve, 4500));
-      await Promise.race([runPorteiro(), timeout]);
-    }
-    update("porteiro_daemon", "success", "Porteiro sincronizado em modo rápido.");
-  } catch (err) {
-    update("porteiro_daemon", "success", "Porteiro pronto para sub-second wake.");
-  }
+  update("porteiro_daemon", "success", "Coordenador ativo: esteira_minima.py via LaunchAgent (porteiro.py removido).");
   return { success: true, log: logBuffer };
 }
 const KPI_SNAPSHOT_PATH = "/Users/heltonfraga/.buzz/.scratch/kpis-esteira.json";
@@ -1345,13 +1230,7 @@ async function recalculateKpisNow(ctx) {
   let output = "";
   try {
     if (host == null ? void 0 : host.exec) {
-      let res = await host.exec("python", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
-      if ((res == null ? void 0 : res.exitCode) && res.exitCode !== 0) {
-        res = await host.exec("bash", [
-          "-c",
-          `python3 "${KPI_SCRIPT_PATH}" --output "${KPI_SNAPSHOT_PATH}"`
-        ]);
-      }
+      const res = await host.exec("python", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
       output = [res == null ? void 0 : res.stdout, res == null ? void 0 : res.stderr].filter(Boolean).join("\n").trim();
     } else if (host == null ? void 0 : host.spawn) {
       const proc = await host.spawn("python", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
@@ -4670,18 +4549,26 @@ function registerGovernanceAgentHooks(ctx) {
         }
       };
       agentsApi.registerHook({
-        id: "orgfy-post-turn-governance",
-        harness: "all",
-        event: "turn.completed",
+        id: "orgfy-pi-after-tool-governance",
+        harness: "buzz.pi/pi",
+        event: "afterTool",
+        run: async (payload) => {
+          await handleProviderHookFailover(payload);
+        }
+      });
+      agentsApi.registerHook({
+        id: "orgfy-claude-stop-governance",
+        harness: "buzz.claude-code/claude-code",
+        event: "Stop",
         run: async (payload) => {
           await handleProviderHookFailover(payload);
           await evaluateGovernanceAndReact(ctx, { dryRun: false, autoWake: true, includeRadar: true });
         }
       });
       agentsApi.registerHook({
-        id: "orgfy-turn-failed-model-failover",
-        harness: "all",
-        event: "turn.failed",
+        id: "orgfy-claude-tool-failure-failover",
+        harness: "buzz.claude-code/claude-code",
+        event: "PostToolUseFailure",
         run: async (payload) => {
           await handleProviderHookFailover(payload);
         }
@@ -5104,10 +4991,9 @@ async function sendDesktopNotification(ctx, title, body) {
   }
   if ((_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.spawn) {
     try {
-      const safeTitle = title.replace(/"/g, '\\"');
-      const safeBody = body.replace(/"/g, '\\"');
-      await ctx.host.spawn("bash", {
-        args: [`osascript -e 'display notification "${safeBody}" with title "${safeTitle}" sound name "Glass"'`]
+      const script = `display notification ${JSON.stringify(String(body || ""))} with title ${JSON.stringify(String(title || ""))} sound name "Glass"`;
+      await ctx.host.spawn("osascript", {
+        args: ["-e", script]
       });
     } catch (_err) {
     }
@@ -5566,112 +5452,72 @@ async function startOrgfyMcpServer(ctx, onStatusChange) {
   }
 }
 async function fetchMigrationStatus(ctx) {
-  var _a;
-  const fallbackSummary = {
-    total: 16,
-    migratedCount: 16,
-    pendingCount: 0,
-    agents: [
-      { name: "OrgFy Iris", pubkey: "1fae49a2", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_3_arquiteto", role: "CEO Holding" },
-      { name: "OrgFy Bento", pubkey: "d24eb749", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_3_arquiteto", role: "COO Operacional" },
-      { name: "OrgFy Bento Arquiteto", pubkey: "6d2ab612", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_3_arquiteto", role: "Arquiteto de Método" },
-      { name: "QA Sentinel", pubkey: "qa_sentinel", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_2_revisor", role: "Auditor Soberano Quality Gate" },
-      { name: "OrgFy Atlas", pubkey: "bbc9cc93", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_1_exec_barato", role: "Engenheiro Executor" },
-      { name: "OrgFy Otto", pubkey: "72f0cf21", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_1_exec_barato", role: "Engenheiro Testes & Probes" },
-      { name: "OrgFy Val", pubkey: "9c8e5fb9", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_1_exec_barato", role: "Engenheiro Multi-Tenant" },
-      { name: "OrgFy Lia", pubkey: "ddd338e3", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_1_exec_barato", role: "Engenheira APIs & Runtime" },
-      { name: "OrgFy Sol", pubkey: "2e76bf96", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_1_exec_barato", role: "Engenheiro Features" },
-      { name: "OrgFy Ravi", pubkey: "e322c59f", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_1_exec_barato", role: "Engenheiro Performance" },
-      { name: "OrgFy Teo", pubkey: "23fa72f9", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_2_revisor", role: "Revisor Sênior Código" },
-      { name: "OrgFy Vera", pubkey: "f3a93a54", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_2_revisor", role: "Revisora de Método" },
-      { name: "OrgFy Hugo", pubkey: "853b0927", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_2_revisor", role: "Revisor de Segurança" },
-      { name: "OrgFy Livia", pubkey: "06d3de86", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_2_revisor", role: "Revisora de UI/UX" },
-      { name: "OrgFy Sol PO", pubkey: "0f7166c7", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_3_arquiteto", role: "Product Owner" },
-      { name: "OrgFy Cron", pubkey: "ae5d969b", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_1_exec_barato", role: "Sentinela de Estagnação" },
-      { name: "OrgFy Oráculo", pubkey: "11b539d8", workspace: `${ORGFY_ABS_PATH}`, isMigrated: true, hasV10Prompt: true, tier: "tier_3_arquiteto", role: "Inteligência Estratégica" }
-    ]
-  };
-  if (!((_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.spawn)) {
-    return fallbackSummary;
-  }
+  var _a, _b, _c, _d;
   try {
-    let output = "";
-    const proc = await ctx.host.spawn("bash", {
-      args: [`python3 "${ORGFY_ABS_PATH}/ferramentas/esteira/migrar_agentes_buzz.py" --status`],
-      onStdout: (c) => output += c,
-      onStderr: (c) => output += c
-    });
-    await proc.exited;
-    const lines = output.split("\n");
+    const snap = ((_b = (_a = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) || {};
+    const pool = [...snap.running || [], ...snap.agents || []];
+    const seen = /* @__PURE__ */ new Set();
     const agents = [];
     let migratedCount = 0;
-    for (const line of lines) {
-      if (line.includes("✅ MIGRADO") || line.includes("⚠️ PENDENTE")) {
-        const isMigrated = line.includes("✅ MIGRADO");
-        if (isMigrated) migratedCount++;
-        const parts = line.split("|").map((p) => p.trim());
-        const name = parts[1] || "";
-        const wsPart = parts[2] || "";
-        const v10Part = parts[3] || "";
-        let tier = "tier_1_exec_barato";
-        let role = "Engenheiro Executor";
-        if (["OrgFy Iris", "OrgFy Bento", "OrgFy Bento Arquiteto", "OrgFy Sol PO", "OrgFy Oráculo"].includes(name)) {
-          tier = "tier_3_arquiteto";
-          role = name.includes("Iris") ? "CEO Holding" : name.includes("Bento Arquiteto") ? "Arquiteto de Método" : name.includes("Bento") ? "COO Operacional" : name.includes("PO") ? "Product Owner" : "Inteligência";
-        } else if (["OrgFy Teo", "OrgFy Vera", "OrgFy Hugo", "OrgFy Livia", "QA Sentinel"].includes(name)) {
-          tier = "tier_2_revisor";
-          role = name.includes("Teo") ? "Revisor Código" : name.includes("Vera") ? "Revisora Método" : name.includes("Hugo") ? "Revisor Segurança" : name.includes("Livia") ? "Revisora UI/UX" : "Quality Auditor";
-        }
-        agents.push({
-          name,
-          pubkey: name.toLowerCase().replace(/\s+/g, "_"),
-          workspace: wsPart.replace("ws=", ""),
-          isMigrated,
-          hasV10Prompt: v10Part.includes("True"),
-          tier,
-          role
-        });
-      }
+    for (const a of pool) {
+      const name = String((a == null ? void 0 : a.name) || (a == null ? void 0 : a.key) || "").trim();
+      if (!name || seen.has(name)) continue;
+      seen.add(name);
+      const ws = String(((_c = a == null ? void 0 : a.config) == null ? void 0 : _c.workspace) || ((_d = a == null ? void 0 : a.config) == null ? void 0 : _d.cwd) || ORGFY_ABS_PATH);
+      const isMigrated = ws.includes("REPOS/orgfy");
+      if (isMigrated) migratedCount++;
+      agents.push({
+        name,
+        pubkey: String((a == null ? void 0 : a.pubkey) || "").slice(0, 8),
+        workspace: ws,
+        isMigrated,
+        hasV10Prompt: true,
+        tier: "tier_1_exec_barato",
+        role: "Agente Buzz"
+      });
     }
-    if (agents.length > 0) {
-      return {
-        total: agents.length,
-        migratedCount,
-        pendingCount: agents.length - migratedCount,
-        agents
-      };
-    }
-    return fallbackSummary;
-  } catch (_e) {
-    return fallbackSummary;
+    return {
+      total: agents.length,
+      migratedCount,
+      pendingCount: agents.length - migratedCount,
+      agents
+    };
+  } catch (_err) {
+    return { total: 0, migratedCount: 0, pendingCount: 0, agents: [] };
   }
 }
 async function executeAgentMigration(ctx, onOutput) {
-  var _a;
+  var _a, _b, _c;
   let combinedOutput = "";
-  const appendChunk = (chunk) => {
-    combinedOutput += chunk;
-    if (onOutput) onOutput(chunk);
+  const appendChunk = (c) => {
+    combinedOutput += c;
+    if (onOutput) onOutput(c);
   };
-  appendChunk("[MIGRATION] Iniciando sincronização atômica de agentes OrgFy para v10...\n");
-  if (!((_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.spawn)) {
-    appendChunk("[ERRO] ctx.host.spawn indisponível para executar migração.\n");
+  appendChunk("[MIGRATION] Sincronizando agentes OrgFy via ctx.agents.save() (B4)...\n");
+  if (typeof ((_a = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _a.save) !== "function") {
+    appendChunk("[ERRO] ctx.agents.save indisponível; escrita direta em agents/state desativada.\n");
     return { success: false, output: combinedOutput };
   }
   try {
-    const proc = await ctx.host.spawn("bash", {
-      args: [`python3 "${ORGFY_ABS_PATH}/ferramentas/esteira/migrar_agentes_buzz.py"`],
-      onStdout: appendChunk,
-      onStderr: appendChunk
-    });
-    const code = await proc.exited;
+    const snap = ((_c = (_b = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _b.snapshot) == null ? void 0 : _c.call(_b)) || {};
+    const pool = [...snap.running || [], ...snap.agents || []];
+    let updated = 0;
+    for (const a of pool) {
+      if (!(a == null ? void 0 : a.key)) continue;
+      const cfg = {
+        ...a.config && typeof a.config === "object" ? a.config : {},
+        workspace: ORGFY_ABS_PATH
+      };
+      await ctx.agents.save(a.key, { config: cfg });
+      updated++;
+    }
     appendChunk(`
-[MIGRATION CONCLUÍDA] Código de saída: ${code}
+[MIGRATION CONCLUÍDA] ${updated} agente(s) sincronizado(s) via ctx.agents.save.
 `);
-    return { success: code === 0, output: combinedOutput };
+    return { success: true, output: combinedOutput };
   } catch (err) {
     appendChunk(`
-[ERRO CRÍTICO] Falha ao executar migrador: ${(err == null ? void 0 : err.message) || err}
+[ERRO CRÍTICO] Falha ao sincronizar agentes: ${(err == null ? void 0 : err.message) || err}
 `);
     return { success: false, output: combinedOutput };
   }
@@ -5690,9 +5536,17 @@ async function compileProbationaryRule(ctx, options) {
     return { success: false, output: combinedOutput };
   }
   try {
-    const cmd = `cd "${ORGFY_ABS_PATH}" && python3 ferramentas/esteira/retro.py --compilar-regra "${options.erroId}" --descricao "${options.descricao}" --comando-check "${options.comandoCheck}"`;
-    const proc = await ctx.host.spawn("bash", {
-      args: [cmd],
+    const proc = await ctx.host.spawn("python", {
+      args: [
+        `${ORGFY_ABS_PATH}/ferramentas/esteira/retro.py`,
+        "--compilar-regra",
+        String(options.erroId || ""),
+        "--descricao",
+        String(options.descricao || ""),
+        "--comando-check",
+        String(options.comandoCheck || "")
+      ],
+      cwd: ORGFY_ABS_PATH,
       onStdout: appendChunk,
       onStderr: appendChunk
     });
@@ -7361,8 +7215,9 @@ function registerBuzzNativeIntegrations(ctx) {
       };
       registerOtel("buzz.pi/pi", "beforeTool");
       registerOtel("buzz.pi/pi", "afterTool");
-      registerOtel("buzz.claude-code/claude-code", "beforeTool");
-      registerOtel("buzz.claude-code/claude-code", "afterTool");
+      registerOtel("buzz.claude-code/claude-code", "PreToolUse");
+      registerOtel("buzz.claude-code/claude-code", "PostToolUse");
+      registerOtel("buzz.claude-code/claude-code", "PostToolUseFailure");
       state.otelHookRegistered = true;
     }
   } catch (err) {

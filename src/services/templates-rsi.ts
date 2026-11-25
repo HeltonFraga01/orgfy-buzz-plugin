@@ -68,9 +68,17 @@ export async function compileProbationaryRule(
   }
 
   try {
-    const cmd = `cd "${ORGFY_ABS_PATH}" && python3 ferramentas/esteira/retro.py --compilar-regra "${options.erroId}" --descricao "${options.descricao}" --comando-check "${options.comandoCheck}"`;
-    const proc = await ctx.host.spawn("bash", {
-      args: [cmd],
+    const proc = await ctx.host.spawn("python", {
+      args: [
+        `${ORGFY_ABS_PATH}/ferramentas/esteira/retro.py`,
+        "--compilar-regra",
+        String(options.erroId || ""),
+        "--descricao",
+        String(options.descricao || ""),
+        "--comando-check",
+        String(options.comandoCheck || ""),
+      ],
+      cwd: ORGFY_ABS_PATH,
       onStdout: appendChunk,
       onStderr: appendChunk,
     });
