@@ -241,10 +241,16 @@ export const FACTORY_SHADOW_CSS = `
   align-items: center;
   gap: 6px;
   height: 100%;
-  padding: 0 2px;
+  padding: 0 4px;
+  margin-bottom: -1px;
   border: none;
   border-bottom: 2px solid transparent;
-  background: transparent;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
   color: var(--muted-foreground);
   font-size: 12.5px;
   font-weight: 500;
@@ -255,12 +261,15 @@ export const FACTORY_SHADOW_CSS = `
 
 .of-project-tab:hover {
   color: var(--foreground);
+  background: transparent !important;
 }
 
 .of-project-tab[data-active="true"] {
   color: var(--foreground);
   font-weight: 600;
   border-bottom-color: var(--primary);
+  border-radius: 0 !important;
+  background: transparent !important;
 }
 
 .of-main {

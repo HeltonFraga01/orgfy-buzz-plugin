@@ -2,6 +2,7 @@
 // Páginas secundárias 100% adaptadas ao motor OrgFy: Conselho (Board), Inbox, Uso & Custos, Automações, Agentes por Empresa (com papel, modelo vivo e DM ↗), Canvas / Visão e Configurações.
 
 import type { AutonomyMode, FactoryStatusPayload, FactoryWorkItem } from "./factory-adapter";
+import type { BuzzLiveTelemetrySnapshot } from "./buzz-live-telemetry";
 import type { LiveCrewAgent } from "./FactoryBoardAndFloor";
 import type { HoldingControlPlaneSnapshot } from "../services/holding-service";
 import { PT_BR } from "../i18n/pt-BR";
@@ -11,6 +12,8 @@ export interface FactorySecondaryPagesProps {
   tab: "holding" | "inbox" | "costs" | "automations" | "agents" | "vision" | "settings";
   tenant: string;
   holding: HoldingControlPlaneSnapshot | null;
+  telemetry?: BuzzLiveTelemetrySnapshot;
+  channelCanvas?: string | null;
   onSelectTenant: (t: string) => void;
   onOpenAgentDm?: (agent: { key?: string; pubkey?: string; name?: string }) => void;
   status: FactoryStatusPayload;
@@ -648,8 +651,11 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                   h(
                     "tbody",
                     null,
-                    tenantAgents.map((a) =>
-                      h(
+                    tenantAgents.map((a) => {
+                      const pkLower = (a.pubkey || "").toLowerCase();
+                      const liveTurn = pkLower && props.telemetry?.byPubkey ? props.telemetry.byPubkey[pkLower] : null;
+                      const presence = pkLower && props.telemetry?.presenceByPubkey ? props.telemetry.presenceByPubkey[pkLower] : undefined;
+                      return h(
                         "tr",
                         { key: a.name },
                         h(
@@ -658,7 +664,7 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                           h(
                             "span",
                             { style: { display: "inline-flex", alignItems: "center", gap: "6px" } },
-                            h("span", { className: "of-dot", "data-tone": a.running ? "running" : a.inBuzz ? "done" : "idle" }),
+                            h("span", { className: "of-dot", "data-tone": liveTurn ? (liveTurn.state === "error" ? "failed" : "running") : a.inBuzz ? "done" : "idle" }),
                             a.name
                           )
                         ),
@@ -666,7 +672,9 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                           "td",
                           null,
                           h("div", { style: { fontSize: "12px" } }, a.funcao),
-                          h("div", { className: "of-mono of-muted", style: { fontSize: "10px" } }, `papel: ${a.papel} · paralelismo: ${a.parallelism}x`)
+                          liveTurn
+                            ? h("div", { className: "of-mono", style: { fontSize: "10px", color: liveTurn.state === "error" ? "var(--status-failed)" : "var(--status-running)" } }, `⚡ ${liveTurn.stepLabel}`)
+                            : h("div", { className: "of-mono of-muted", style: { fontSize: "10px" } }, `papel: ${a.papel} · paralelismo: ${a.parallelism}x`)
                         ),
                         h("td", { className: "of-mono" }, a.model),
                         h(
@@ -674,8 +682,8 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                           null,
                           h(
                             "span",
-                            { className: "of-pill", "data-tone": a.running ? "running" : a.inBuzz ? "done" : "waiting" },
-                            a.running ? "Em execução" : a.inBuzz ? "No Buzz" : "A provisionar"
+                            { className: "of-pill", "data-tone": liveTurn ? (liveTurn.state === "error" ? "failed" : "running") : a.inBuzz ? "done" : "waiting" },
+                            liveTurn ? "Respondendo agora" : presence === "online" ? "Online" : a.inBuzz ? "Disponível" : "A provisionar"
                           )
                         ),
                         h(
@@ -695,8 +703,8 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                               )
                             : h("span", { className: "of-muted" }, "—")
                         )
-                      )
-                    )
+                      );
+                    })
                   )
                 )
           )
@@ -840,6 +848,17 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
               "div",
               { style: { display: "flex", flexWrap: "wrap", gap: "6px" } },
               papeis.map(([papel, agente]) => h("span", { key: papel, className: "of-pill" }, `${papel}: ${agente}`))
+            ),
+          props.channelCanvas &&
+            h(
+              "div",
+              { className: "of-surface", style: { padding: "10px 12px", borderColor: "var(--primary)" } },
+              h("div", { className: "of-mono", style: { fontSize: "10.5px", color: "var(--primary)", marginBottom: "6px" } }, `Canvas ao vivo do canal no Buzz (session.canvas.read · ${tenant})`),
+              h(
+                "pre",
+                { className: "of-muted", style: { margin: 0, whiteSpace: "pre-wrap", fontSize: "11px", maxHeight: "180px", overflowY: "auto", fontFamily: "inherit", lineHeight: 1.45 } },
+                props.channelCanvas
+              )
             ),
           h(
             "div",

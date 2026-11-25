@@ -1,5 +1,5 @@
 // Adaptado de CodeDen (MIT) commit b0b2a5a: apps/web/src/components/shell/app-shell.tsx e routes/project.tsx
-// Shell nativo do Buzz para a OrgFy Factory: Sidebar global (CEO Master, Conselho, Inbox, Custos, Automações, Empresas) + Menu Superior com abas por Empresa e DM nativa do Buzz.
+// Shell nativo do Buzz para a OrgFy Factory: Sidebar global (CEO Master via mainAgent, Conselho, Inbox, Uso & Custos, Automações, Empresas com unread real) + Menu Superior com abas por Empresa + Telemetria ao vivo (session.agentActivity) + Painel lateral nativo (ctx.conversation.ui.Tabs).
 
 import type { Context } from "@buzz/author";
 import { PT_BR } from "../i18n/pt-BR";
@@ -16,6 +16,13 @@ import { renderFactoryOverviewPanel } from "./FactoryOverviewPanel";
 import { renderFactoryBoardAndFloor, renderItemSheetDrawer, type LiveCrewAgent } from "./FactoryBoardAndFloor";
 import { createFloor3DComponent } from "./codeden-floor/Floor3DCanvas";
 import { renderFactorySecondaryPage } from "./FactoryPages";
+import {
+  interruptLiveTurn,
+  readBuzzChannelCanvas,
+  readBuzzLiveTelemetry,
+  readBuzzMainAgentPubkey,
+  type LiveAgentTurn,
+} from "./buzz-live-telemetry";
 import { subscribeRelayUpdates } from "../services/buzz-native";
 import { openIssueInBuzz, openSystemUri } from "../services/orgfy-bridge";
 import { fetchHoldingControlPlane, type HoldingControlPlaneSnapshot } from "../services/holding-service";
@@ -35,9 +42,9 @@ type FactoryTab =
 const GLOBAL_TABS = new Set<FactoryTab>(["holding", "inbox", "costs", "automations"]);
 
 const DEFAULT_WORKSPACES = [
-  { slug: "orgfy", nome: "OrgFy Core", estagio: "operacional" },
-  { slug: "lumen-iptv", nome: "Lumen IPTV", estagio: "operacional" },
-  { slug: "saas-tributario", nome: "SaaS Tributário", estagio: "planejado" },
+  { slug: "orgfy", nome: "OrgFy Core", estagio: "operacional", canal: "" },
+  { slug: "lumen-iptv", nome: "Lumen IPTV", estagio: "operacional", canal: "" },
+  { slug: "saas-tributario", nome: "SaaS Tributário", estagio: "planejado", canal: "" },
 ];
 
 export interface CreateFactoryAppOptions {
@@ -55,6 +62,9 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     const [dmAgentKey, setDmAgentKey] = React.useState<string>("");
     const [openingDm, setOpeningDm] = React.useState<boolean>(false);
     const [relayTick, setRelayTick] = React.useState<number>(0);
+    const [activityTick, setActivityTick] = React.useState<number>(0);
+    const [mainAgentPubkey, setMainAgentPubkey] = React.useState<string | null>(null);
+    const [channelCanvas, setChannelCanvas] = React.useState<string | null>(null);
     const [status, setStatus] = React.useState<FactoryStatusPayload>(() => buildEmptyFactoryStatus("orgfy"));
     const [holding, setHolding] = React.useState<HoldingControlPlaneSnapshot | null>(null);
     const [loading, setLoading] = React.useState<boolean>(true);
@@ -74,6 +84,42 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       if (typeof relay?.subscribe !== "function") return;
       return relay.subscribe(() => setRelayTick((n) => n + 1));
     }, []);
+
+    // Ativa e assina telemetria ao vivo nativa do Buzz (session.agentActivity + unread + mainAgent)
+    React.useEffect(() => {
+      const session = (ctx as any)?.relay?.snapshot?.()?.session;
+      if (!session) return;
+      const disposers: Array<() => void> = [];
+      const bump = () => setActivityTick((n) => n + 1);
+      try {
+        if (typeof session.agentActivity?.activate === "function") disposers.push(session.agentActivity.activate());
+        if (typeof session.agentActivity?.subscribe === "function") disposers.push(session.agentActivity.subscribe(bump));
+        if (typeof session.agentActivity?.subscribeWorking === "function") disposers.push(session.agentActivity.subscribeWorking(bump));
+        if (typeof session.unread?.subscribe === "function") disposers.push(session.unread.subscribe(bump));
+      } catch {}
+      readBuzzMainAgentPubkey(ctx).then((pk) => {
+        if (pk) setMainAgentPubkey(pk);
+      }).catch(() => {});
+      return () => {
+        for (const d of disposers) {
+          try { d(); } catch {}
+        }
+      };
+    }, [relayTick]);
+
+    // Lê Canvas ao vivo do canal da empresa no Buzz (session.canvas.read)
+    React.useEffect(() => {
+      let cancelled = false;
+      const canal = status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === tenant)?.canal || null;
+      readBuzzChannelCanvas(ctx, canal)
+        .then((txt) => {
+          if (!cancelled) setChannelCanvas(txt);
+        })
+        .catch(() => {});
+      return () => {
+        cancelled = true;
+      };
+    }, [tenant, status.tenantManifest?.canal, holding, relayTick]);
 
     // Estados das páginas
     const [scorecardView, setScorecardView] = React.useState<"builders" | "reviewers" | "pairs">("builders");
@@ -209,7 +255,6 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       const canal = status.tenantManifest?.canal || emp?.canal;
       const scope = resolveBuzzScope();
       try {
-        // 1. Prioridade máxima: abre o canal na barra lateral nativa do Buzz (ctx.conversation.ui.Tabs) sem sair do plugin
         if (canal && openSideTabRef.current) {
           const openedSide = openSideTabRef.current({ channelId: canal }, { keep: true });
           if (openedSide) {
@@ -217,7 +262,6 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
             return;
           }
         }
-        // 2. Fallback caso ui.Tabs ainda não esteja montado
         if (canal && scope && (ctx as any).navigation?.open) {
           const res = await (ctx as any).navigation.open({
             version: 1,
@@ -254,26 +298,75 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       } catch {
         return [];
       }
-    }, [status.lastTickAt]);
+    }, [status.lastTickAt, relayTick]);
 
-    // Agentes filtrados para a empresa ativa (empresas/<tenant>.json × Buzz)
     const tenantAgents = status.tenantManifest?.agentes || [];
+
+    // Mapa pubkey -> nome amigável para enriquecer a telemetria ao vivo do Buzz
+    const nameByPubkey = React.useMemo(() => {
+      const map = new Map<string, string>();
+      for (const a of liveCrew) {
+        if (a.pubkey) map.set(a.pubkey.toLowerCase(), a.name);
+      }
+      for (const a of tenantAgents) {
+        if (a.pubkey) map.set(a.pubkey.toLowerCase(), a.name);
+      }
+      return map;
+    }, [liveCrew, tenantAgents]);
+
+    // Snapshot ao vivo de session.agentActivity + session.presence + session.unread
+    const telemetry = React.useMemo(
+      () => readBuzzLiveTelemetry(ctx, nameByPubkey),
+      [nameByPubkey, activityTick, relayTick, status.lastTickAt]
+    );
+
+    const handleOpenTurnInSideChat = React.useCallback(
+      (turn: LiveAgentTurn) => {
+        if (turn.channelId && openSideTabRef.current) {
+          const ok = openSideTabRef.current(
+            { channelId: turn.channelId, threadId: turn.threadRootId, messageId: turn.messageId },
+            { keep: true }
+          );
+          if (ok) {
+            notify(`Conversa de ${turn.agentName} aberta na barra lateral.`);
+            return;
+          }
+        }
+        notify(`Não foi possível abrir o chat lateral de ${turn.agentName}.`);
+      },
+      [notify]
+    );
+
+    const handleInterruptTurn = React.useCallback(
+      async (turn: LiveAgentTurn) => {
+        const ok = await interruptLiveTurn(ctx, turn);
+        notify(ok ? `Turno de ${turn.agentName} interrompido.` : `Não foi possível interromper o turno de ${turn.agentName}.`);
+      },
+      [notify]
+    );
+
     const dmPool = React.useMemo(() => {
       if (!GLOBAL_TABS.has(tab) && tenantAgents.length > 0) {
-        return tenantAgents.map((a) => ({
-          key: a.agentKey,
-          pubkey: a.pubkey,
-          name: a.name,
-          label: `${a.name} · ${a.papel}${a.running ? " ●" : ""}`,
-        }));
+        return tenantAgents.map((a) => {
+          const working = Boolean(a.pubkey && telemetry.byPubkey[a.pubkey.toLowerCase()]);
+          return {
+            key: a.agentKey,
+            pubkey: a.pubkey,
+            name: a.name,
+            label: `${a.name} · ${a.papel}${working ? " ⚡" : ""}`,
+          };
+        });
       }
-      return liveCrew.map((a) => ({
-        key: a.key,
-        pubkey: a.pubkey || "",
-        name: a.name,
-        label: `${a.name}${a.running ? " ●" : ""}`,
-      }));
-    }, [tab, tenantAgents, liveCrew]);
+      return liveCrew.map((a) => {
+        const working = Boolean(a.pubkey && telemetry.byPubkey[a.pubkey.toLowerCase()]);
+        return {
+          key: a.key,
+          pubkey: a.pubkey || "",
+          name: a.name,
+          label: `${a.name}${working ? " ⚡" : ""}`,
+        };
+      });
+    }, [tab, tenantAgents, liveCrew, telemetry]);
 
     const defaultDmAgentKey = React.useMemo(() => {
       const cooName = (status.tenantManifest?.coo || "OrgFy Bento").toLowerCase();
@@ -334,7 +427,6 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
             }
           }
 
-          // 1. Prioridade máxima: abre o chat nativo do Buzz NA BARRA LATERAL (sem sair do plugin!)
           if (channelId && openSideTabRef.current) {
             const openedSide = openSideTabRef.current({ channelId }, { keep: true });
             if (openedSide) {
@@ -343,7 +435,6 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
             }
           }
 
-          // 2. Fallback caso ui.Tabs ainda não esteja disponível nesta sessão
           if (channelId && scope && (ctx as any)?.navigation?.open) {
             const res = await (ctx as any).navigation.open({
               version: 1,
@@ -373,14 +464,22 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       [selectedDmAgent, resolveBuzzScope, notify]
     );
 
-    const masterAgentName = holding?.ceoHolding?.nome || "OrgFy Iris";
-    const masterLive = liveCrew.find((a) => a.name.toLowerCase().includes("iris")) || liveCrew[0] || null;
+    // CEO Master dinâmico: respeita session.mainAgent do Buzz se configurado, senão board.json (OrgFy Iris)
+    const masterLive =
+      (mainAgentPubkey && liveCrew.find((a) => a.pubkey?.toLowerCase() === mainAgentPubkey)) ||
+      liveCrew.find((a) => a.name.toLowerCase().includes("iris")) ||
+      liveCrew[0] ||
+      null;
+    const masterAgentName = masterLive?.name || holding?.ceoHolding?.nome || "OrgFy Iris";
+    const masterTurn = masterLive?.pubkey ? telemetry.byPubkey[masterLive.pubkey.toLowerCase()] || null : null;
+
     const workspaces =
       holding?.empresas && holding.empresas.length > 0
         ? holding.empresas.map((e) => ({
             slug: e.slug,
             nome: e.workspaceBuzz || e.nome,
             estagio: e.estagio,
+            canal: e.canal || "",
             agentesInfo: `${e.agentesProntos}/${e.agentesTotal}`,
           }))
         : DEFAULT_WORKSPACES.map((w) => ({ ...w, agentesInfo: "" }));
@@ -395,7 +494,9 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     const inboxCount =
       status.held.length +
       [...status.inProgress, ...status.recent].filter((i) => i.stage === "escalated" || i.stage === "failed" || i.stage === "reverted").length;
-    const tenantActiveAgentsCount = tenantAgents.filter((a) => a.running).length;
+
+    // Contagem REAL de agentes respondendo agora nesta empresa (via session.agentActivity!)
+    const tenantWorkingNowCount = tenantAgents.filter((a) => Boolean(a.pubkey && telemetry.byPubkey[a.pubkey.toLowerCase()])).length;
     const tenantTotalAgentsCount = tenantAgents.length;
     const boardCount = status.backlog.length + status.inProgress.length;
 
@@ -416,7 +517,12 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     const projectTabs: Array<{ id: FactoryTab; label: string; badge?: string; tone?: "warn" | "danger" }> = [
       { id: "overview", label: PT_BR.nav.overview },
       { id: "board", label: "Fábrica · Board", badge: String(boardCount) },
-      { id: "floor", label: "Andar 3D", badge: `${tenantActiveAgentsCount}/${tenantTotalAgentsCount}` },
+      {
+        id: "floor",
+        label: "Andar 3D",
+        badge: tenantWorkingNowCount > 0 ? `${tenantWorkingNowCount}/${tenantTotalAgentsCount}` : String(tenantTotalAgentsCount),
+        tone: tenantWorkingNowCount > 0 ? "warn" : undefined,
+      },
       { id: "agents", label: "Agentes", badge: abaixoMinimoCount > 0 ? `⚠ ${abaixoMinimoCount}` : String(tenantTotalAgentsCount), tone: abaixoMinimoCount > 0 ? "danger" : undefined },
       { id: "vision", label: "Canvas / Visão" },
       { id: "settings", label: PT_BR.nav.settings },
@@ -448,7 +554,6 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       h(
         "div",
         { className: "of-shell" },
-        // Sidebar limpa 1:1 CodeDen: CEO Master -> Holding Global (Conselho, Inbox, Uso & Custos, Automações) -> Empresas (Workspaces)
         h(
           "aside",
           { className: "of-sidebar" },
@@ -469,7 +574,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
             {
               type: "button",
               className: "of-surface",
-              title: `Abrir DM nativa com ${masterAgentName} no Buzz`,
+              title: `Abrir chat lateral nativo com ${masterAgentName}`,
               onClick: () =>
                 handleOpenAgentDmInBuzz(
                   masterLive || { name: masterAgentName, pubkey: holding?.ceoHolding?.pubkey || "" }
@@ -493,10 +598,14 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
             h(
               "div",
               { style: { display: "flex", alignItems: "center", gap: "6px", fontSize: "12.5px", fontWeight: 700, color: "var(--foreground)" } },
-              h("span", { className: "of-dot", "data-tone": masterLive?.running ? "running" : "done" }),
+              h("span", { className: "of-dot", "data-tone": masterTurn ? "running" : "done" }),
               masterAgentName
             ),
-            h("div", { className: "of-mono of-muted", style: { fontSize: "10px" } }, masterLive ? masterLive.model : "Ativa no Buzz")
+            h(
+              "div",
+              { className: "of-mono of-muted", style: { fontSize: "10px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
+              masterTurn ? `⚡ ${masterTurn.stepLabel}` : masterLive ? masterLive.model : "Ativa no Buzz"
+            )
           ),
 
           h("div", { className: "of-nav-group-label" }, "Holding & Global"),
@@ -515,6 +624,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
             { className: "of-nav" },
             workspaces.map((w) => {
               const isSelectedEmpresa = !isGlobalView && tenant === w.slug;
+              const unread = w.canal ? telemetry.unreadByChannel[w.canal] || 0 : 0;
               return h(
                 "button",
                 {
@@ -533,7 +643,9 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                   h("span", { className: "of-project-tile", style: { width: "18px", height: "18px", fontSize: "10px" } }, w.nome.charAt(0).toUpperCase()),
                   h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, w.nome)
                 ),
-                w.agentesInfo && h("span", { className: "of-nav-badge" }, w.agentesInfo)
+                unread > 0
+                  ? h("span", { className: "of-nav-badge", "data-tone": "warn", title: `${unread} não lida(s) no canal` }, String(unread))
+                  : w.agentesInfo && h("span", { className: "of-nav-badge" }, w.agentesInfo)
               );
             })
           ),
@@ -551,7 +663,6 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
             )
         ),
 
-        // Área principal em tela cheia: Header + Abas Horizontais da Empresa (1:1 CodeDen)
         h(
           "div",
           { className: "of-workspace" },
@@ -575,7 +686,13 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                     "span",
                     { className: "of-pill", "data-tone": status.killSwitch ? "failed" : "done" },
                     status.killSwitch ? "Kill Switch ativo" : PT_BR.modes[status.mode] || status.mode
-                  )
+                  ),
+                  telemetry.activeTurns.length > 0 &&
+                    h(
+                      "span",
+                      { className: "of-pill", "data-tone": "running", title: "Turnos ativos em tempo real via session.agentActivity" },
+                      `⚡ ${telemetry.activeTurns.length} respondendo`
+                    )
                 ),
             h(
               "div",
@@ -606,7 +723,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                 "select",
                 {
                   className: "of-tenant-select",
-                  "aria-label": "Selecionar agente para DM no Buzz",
+                  "aria-label": "Selecionar agente para chat lateral no Buzz",
                   value: dmAgentKey,
                   onChange: (e: any) => setDmAgentKey(e.target.value),
                   style: { width: "auto", maxWidth: "210px", padding: "4px 8px", fontSize: "11.5px" },
@@ -631,7 +748,6 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
             error && !toast && h("span", { className: "of-pill", "data-tone": "failed" }, `Aviso: ${error}`)
           ),
 
-          // Barra de Abas Horizontais da Empresa (igual ao CodeDen ProjectPage!)
           !isGlobalView &&
             h(
               "div",
@@ -667,6 +783,10 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                     h,
                     tenant,
                     status,
+                    telemetry,
+                    workingNowCount: tenantWorkingNowCount,
+                    onOpenTurnInSideChat: handleOpenTurnInSideChat,
+                    onInterruptTurn: handleInterruptTurn,
                     loading,
                     confirmKill,
                     setConfirmKill,
@@ -698,6 +818,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                     tenant,
                     status,
                     liveCrew,
+                    telemetry,
                     viewMode: tab,
                     onChangeViewMode: (m) => setTab(m),
                     storeyFocus,
@@ -715,6 +836,8 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                     tab,
                     tenant,
                     holding,
+                    telemetry,
+                    channelCanvas,
                     onSelectTenant: (t) => {
                       setTenant(t);
                       setTab("overview");

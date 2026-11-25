@@ -2,6 +2,7 @@
 // Visão completa da Fábrica: ViewHeader, StatsStrip (6 tiles), Board 6 colunas + Faixa "Precisa de você", Andar 2 pisos (Oficina + Mirante) com Roster lateral e drawer ItemSheet.
 
 import type { FactoryStatusPayload, FactoryWorkItem } from "./factory-adapter";
+import type { BuzzLiveTelemetrySnapshot } from "./buzz-live-telemetry";
 import { PT_BR } from "../i18n/pt-BR";
 
 export interface LiveCrewAgent {
@@ -18,6 +19,7 @@ export interface BoardAndFloorProps {
   tenant: string;
   status: FactoryStatusPayload;
   liveCrew: LiveCrewAgent[];
+  telemetry?: BuzzLiveTelemetrySnapshot;
   viewMode: "board" | "floor";
   onChangeViewMode: (m: "board" | "floor") => void;
   storeyFocus: "workshop" | "lookout" | "both";
@@ -354,6 +356,7 @@ export function renderFactoryBoardAndFloor(props: BoardAndFloorProps) {
             tenant,
             status,
             liveCrew,
+            telemetry: props.telemetry,
             focus: storeyFocus,
             onSelectItem,
             onOpenAgentDm: props.onOpenAgentDm,
