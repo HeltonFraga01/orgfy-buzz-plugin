@@ -1544,13 +1544,16 @@ export function isRateLimitOrProviderError(text: string): boolean {
     "too many requests",
     "429",
     "no available accounts",
+    "model requires available accounts",
     "service temporarily unavailable",
     "503 service unavailable",
     "502 bad gateway",
     "504 gateway timeout",
     "resource not found (404)",
     "[404]:",
-    "bad request (400): upstream",
+    "bad request (400)",
+    "no target in combo",
+    "supports tool calling",
     "upstream request failed",
     "upstream_malformed_function_call",
     "overloaded_error",
@@ -1802,22 +1805,29 @@ export function registerGovernanceAgentHooks(ctx: Context): boolean {
   let registered = false;
   if (agentsApi?.registerHook) {
     try {
+      const handleProviderHookFailover = async (payload?: any) => {
+        const errText = String(payload?.error || payload?.reason || payload?.output || payload?.message || "");
+        const agentPubkey = String(payload?.agentPubkey || payload?.pubkey || "").trim();
+        const agentName = String(payload?.agentName || payload?.agent || "").trim();
+        if ((agentPubkey || agentName) && isRateLimitOrProviderError(errText)) {
+          await executeSmartModelFailover(ctx, {
+            agente: agentName || undefined,
+            agent_pubkey: agentPubkey || null,
+            failed_model: payload?.model ? String(payload.model) : null,
+            prefer_free: false,
+            apply: true,
+            retrigger: true,
+            channel_id: String(payload?.channelId || payload?.channel || DEFAULT_ORGFY_CHANNEL),
+            thread_root: payload?.threadRoot || payload?.root || null,
+          });
+        }
+      };
       agentsApi.registerHook({
         id: "orgfy-post-turn-governance",
         harness: "all",
         event: "turn.completed",
         run: async (payload?: any) => {
-          const errText = String(payload?.error || payload?.output || payload?.message || "");
-          const agentPubkey = String(payload?.agentPubkey || payload?.pubkey || "");
-          if (agentPubkey && isRateLimitOrProviderError(errText)) {
-            await executeAgentModelFailover(ctx, {
-              agentPubkey,
-              agentName: payload?.agentName,
-              errorText: errText,
-              channel: payload?.channel,
-              autoWake: true,
-            });
-          }
+          await handleProviderHookFailover(payload);
           await evaluateGovernanceAndReact(ctx, { dryRun: false, autoWake: true, includeRadar: true });
         },
       });
@@ -1826,17 +1836,7 @@ export function registerGovernanceAgentHooks(ctx: Context): boolean {
         harness: "all",
         event: "turn.failed",
         run: async (payload?: any) => {
-          const errText = String(payload?.error || payload?.reason || payload?.message || "");
-          const agentPubkey = String(payload?.agentPubkey || payload?.pubkey || "");
-          if (agentPubkey && isRateLimitOrProviderError(errText)) {
-            await executeAgentModelFailover(ctx, {
-              agentPubkey,
-              agentName: payload?.agentName,
-              errorText: errText,
-              channel: payload?.channel,
-              autoWake: true,
-            });
-          }
+          await handleProviderHookFailover(payload);
         },
       });
       registered = true;

@@ -203,6 +203,27 @@ export function isFreeModelId(modelId: string): boolean {
 }
 
 /**
+ * Bloqueia modelos incompatíveis com agentes (autocomplete IDE, combos sem tool-calling, embeddings, áudio/imagem).
+ */
+export function isUnsupportedAgentModel(modelId: string): boolean {
+  const m = String(modelId || "").trim().toLowerCase();
+  if (!m) return true;
+  return (
+    m.startsWith("auto/") ||
+    m.includes("tab_jump") ||
+    m.includes("autocomplete") ||
+    m.includes("fim-") ||
+    m.includes("embedding") ||
+    m.includes("rerank") ||
+    m.includes("whisper") ||
+    m.includes("tts") ||
+    m.includes("imagen") ||
+    m.includes("dall-e") ||
+    m.includes("moderation")
+  );
+}
+
+/**
  * Pontuação heurística determinística de inteligência (0..100) para priorizar
  * modelos mais capazes entre os candidatos online (ex.: reasoning/pro/coder/large > mini/nano).
  */
@@ -312,7 +333,7 @@ async function loadSharedNexusMindRanking(
     const candidates: ModelCandidateScore[] = [];
     for (const m of parsed.models) {
       const mid = String(m?.model || "").trim();
-      if (!mid || m.isDisabled || m.autoAssignBlocked || disabled.has(mid) || excludeSet.has(mid.toLowerCase())) continue;
+      if (!mid || isUnsupportedAgentModel(mid) || m.isDisabled || m.autoAssignBlocked || disabled.has(mid) || excludeSet.has(mid.toLowerCase())) continue;
       if (blockedAuto.has(mid.toLowerCase())) continue;
       if (m.online === false) continue; // Pula modelos que falharam no ping real do NexusMind
       if (maxCost !== null && typeof m.avgCostUsd === "number" && m.avgCostUsd > 0 && m.avgCostUsd > maxCost) continue;
@@ -320,6 +341,8 @@ async function loadSharedNexusMindRanking(
       if (effectivePreferFree && !free) continue;
       if (!effectivePreferFree && free) continue;
       const isPinned = Boolean(pinnedModel && mid === pinnedModel);
+      const isVerifiedOnline = m.online === true;
+      const baseScore = Number(m.score ?? estimateModelIntelligence(mid));
       candidates.push({
         model: mid,
         provider: String(m.group || inferProviderId(mid)),
@@ -333,7 +356,7 @@ async function loadSharedNexusMindRanking(
             : typeof m.avgDurationMs === "number"
             ? m.avgDurationMs
             : null,
-        combinedScore: isPinned ? 1000 : Number(m.score ?? estimateModelIntelligence(mid)),
+        combinedScore: isPinned ? 1000 : isVerifiedOnline ? baseScore : Number((baseScore - 25).toFixed(2)),
         online: true,
         calls: Number(m.calls || 0),
         source: "nexusmind_ranking",
@@ -493,15 +516,39 @@ async function probeModelLive(
 
   const t0 = Date.now();
   try {
+    const probePayload: Record<string, any> = prov.isAnthropic
+      ? {
+          model: modelId,
+          messages: [{ role: "user", content: "ok" }],
+          max_tokens: 16,
+          tools: [
+            {
+              name: "ping",
+              description: "healthcheck",
+              input_schema: { type: "object", properties: {} },
+            },
+          ],
+        }
+      : {
+          model: modelId,
+          messages: [{ role: "user", content: "ok" }],
+          max_tokens: 5,
+          tools: [
+            {
+              type: "function",
+              function: {
+                name: "ping",
+                description: "healthcheck",
+                parameters: { type: "object", properties: {} },
+              },
+            },
+          ],
+        };
     const res = await host.request({
       url,
       method: "POST",
       headers,
-      body: JSON.stringify({
-        model: modelId,
-        messages: [{ role: "user", content: "ok" }],
-        max_tokens: prov.isAnthropic ? 16 : 5,
-      }),
+      body: JSON.stringify(probePayload),
       timeoutMs: 9000,
     });
     const latencyMs = Date.now() - t0;
@@ -639,7 +686,7 @@ export async function executeSmartModelFailover(
   const hasVerifiedOnline = verifiedShared.some((v) => v.online);
   if (sharedRanking.length === 0 || (verifiedShared.length > 0 && !hasVerifiedOnline)) {
     const catalog = await discoverNexusMindCatalog(ctx);
-    let pool = catalog.filter((c) => !excludeSet.has(c.id.toLowerCase()));
+    let pool = catalog.filter((c) => !isUnsupportedAgentModel(c.id) && !excludeSet.has(c.id.toLowerCase()));
     if (preferFree) {
       const freeOnly = pool.filter((c) => isFreeModelId(c.id));
       if (freeOnly.length > 0) pool = freeOnly;
@@ -799,6 +846,15 @@ export async function executeSmartModelFailover(
       try {
         const channel = String(input.channel_id || DEFAULT_ORGFY_CHANNEL).trim() || DEFAULT_ORGFY_CHANNEL;
         const root = input.thread_root ? String(input.thread_root).trim() : undefined;
+        // Renova a sessão Goose na thread para que o próximo turno suba com o novo modelo (sem herdar o modelo antigo preso na sessão)
+        if (typeof agentsApi?.session === "function") {
+          try {
+            const place = root ? { channelId: channel, root } : { channelId: channel };
+            await agentsApi.session(matchedAgent.key, place, "new");
+          } catch {
+            // Sessão pode ainda não existir
+          }
+        }
         await agentsApi.wake(matchedAgent.key, {
           channel,
           ...(root ? { root } : {}),
@@ -807,7 +863,7 @@ export async function executeSmartModelFailover(
             `[ORGFY FAILOVER AUTOMÁTICO] Seu modelo foi migrado para '${winner.model}' (${winner.provider} · ${sourceTag}) após erro de API no modelo anterior. Retome imediatamente o último passo da tarefa com escopo fechado.`,
         });
         retriggered = true;
-        applyNote += " Agente re-disparado automaticamente.";
+        applyNote += " Sessão renovada e agente re-disparado automaticamente.";
       } catch (wErr: any) {
         applyNote += ` (Aviso: falha no re-disparo wake: ${wErr?.message || wErr})`;
       }

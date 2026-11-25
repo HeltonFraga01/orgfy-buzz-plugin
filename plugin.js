@@ -1559,6 +1559,11 @@ function isFreeModelId(modelId) {
   const lower = String(modelId || "").toLowerCase();
   return lower.includes(":free") || lower.includes("-free") || lower.includes("/free") || lower.endsWith("free");
 }
+function isUnsupportedAgentModel(modelId) {
+  const m = String(modelId || "").trim().toLowerCase();
+  if (!m) return true;
+  return m.startsWith("auto/") || m.includes("tab_jump") || m.includes("autocomplete") || m.includes("fim-") || m.includes("embedding") || m.includes("rerank") || m.includes("whisper") || m.includes("tts") || m.includes("imagen") || m.includes("dall-e") || m.includes("moderation");
+}
 function estimateModelIntelligence(modelId) {
   const m = String(modelId || "").toLowerCase();
   let score = 50;
@@ -1638,7 +1643,7 @@ async function loadSharedNexusMindRanking(ctx, excludeSet, preferFree) {
     const candidates = [];
     for (const m of parsed.models) {
       const mid = String((m == null ? void 0 : m.model) || "").trim();
-      if (!mid || m.isDisabled || m.autoAssignBlocked || disabled.has(mid) || excludeSet.has(mid.toLowerCase())) continue;
+      if (!mid || isUnsupportedAgentModel(mid) || m.isDisabled || m.autoAssignBlocked || disabled.has(mid) || excludeSet.has(mid.toLowerCase())) continue;
       if (blockedAuto.has(mid.toLowerCase())) continue;
       if (m.online === false) continue;
       if (maxCost !== null && typeof m.avgCostUsd === "number" && m.avgCostUsd > 0 && m.avgCostUsd > maxCost) continue;
@@ -1646,13 +1651,15 @@ async function loadSharedNexusMindRanking(ctx, excludeSet, preferFree) {
       if (effectivePreferFree && !free) continue;
       if (!effectivePreferFree && free) continue;
       const isPinned = Boolean(pinnedModel && mid === pinnedModel);
+      const isVerifiedOnline = m.online === true;
+      const baseScore = Number(m.score ?? estimateModelIntelligence(mid));
       candidates.push({
         model: mid,
         provider: String(m.group || inferProviderId(mid)),
         isFree: free,
         intelligenceScore: Number(m.capabilityScore || estimateModelIntelligence(mid)),
         latencyMs: typeof m.pingLatencyMs === "number" ? m.pingLatencyMs : typeof m.avgFirstTokenMs === "number" ? m.avgFirstTokenMs : typeof m.avgDurationMs === "number" ? m.avgDurationMs : null,
-        combinedScore: isPinned ? 1e3 : Number(m.score ?? estimateModelIntelligence(mid)),
+        combinedScore: isPinned ? 1e3 : isVerifiedOnline ? baseScore : Number((baseScore - 25).toFixed(2)),
         online: true,
         calls: Number(m.calls || 0),
         source: "nexusmind_ranking"
@@ -1790,15 +1797,37 @@ async function probeModelLive(ctx, modelId, prov) {
   };
   const t0 = Date.now();
   try {
+    const probePayload = prov.isAnthropic ? {
+      model: modelId,
+      messages: [{ role: "user", content: "ok" }],
+      max_tokens: 16,
+      tools: [
+        {
+          name: "ping",
+          description: "healthcheck",
+          input_schema: { type: "object", properties: {} }
+        }
+      ]
+    } : {
+      model: modelId,
+      messages: [{ role: "user", content: "ok" }],
+      max_tokens: 5,
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "ping",
+            description: "healthcheck",
+            parameters: { type: "object", properties: {} }
+          }
+        }
+      ]
+    };
     const res = await host.request({
       url,
       method: "POST",
       headers,
-      body: JSON.stringify({
-        model: modelId,
-        messages: [{ role: "user", content: "ok" }],
-        max_tokens: prov.isAnthropic ? 16 : 5
-      }),
+      body: JSON.stringify(probePayload),
       timeoutMs: 9e3
     });
     const latencyMs = Date.now() - t0;
@@ -1894,7 +1923,7 @@ async function executeSmartModelFailover(ctx, input = {}) {
   const hasVerifiedOnline = verifiedShared.some((v) => v.online);
   if (sharedRanking.length === 0 || verifiedShared.length > 0 && !hasVerifiedOnline) {
     const catalog = await discoverNexusMindCatalog(ctx);
-    let pool = catalog.filter((c) => !excludeSet.has(c.id.toLowerCase()));
+    let pool = catalog.filter((c) => !isUnsupportedAgentModel(c.id) && !excludeSet.has(c.id.toLowerCase()));
     if (preferFree) {
       const freeOnly = pool.filter((c) => isFreeModelId(c.id));
       if (freeOnly.length > 0) pool = freeOnly;
@@ -2019,13 +2048,20 @@ async function executeSmartModelFailover(ctx, input = {}) {
       try {
         const channel = String(input.channel_id || DEFAULT_ORGFY_CHANNEL$2).trim() || DEFAULT_ORGFY_CHANNEL$2;
         const root = input.thread_root ? String(input.thread_root).trim() : void 0;
+        if (typeof (agentsApi == null ? void 0 : agentsApi.session) === "function") {
+          try {
+            const place = root ? { channelId: channel, root } : { channelId: channel };
+            await agentsApi.session(matchedAgent.key, place, "new");
+          } catch {
+          }
+        }
         await agentsApi.wake(matchedAgent.key, {
           channel,
           ...root ? { root } : {},
           text: input.retrigger_text || `[ORGFY FAILOVER AUTOMÁTICO] Seu modelo foi migrado para '${winner.model}' (${winner.provider} · ${sourceTag}) após erro de API no modelo anterior. Retome imediatamente o último passo da tarefa com escopo fechado.`
         });
         retriggered = true;
-        applyNote += " Agente re-disparado automaticamente.";
+        applyNote += " Sessão renovada e agente re-disparado automaticamente.";
       } catch (wErr) {
         applyNote += ` (Aviso: falha no re-disparo wake: ${(wErr == null ? void 0 : wErr.message) || wErr})`;
       }
@@ -3102,14 +3138,6 @@ function startGovernanceRadarWatchdog(ctx, options = {}) {
   }
   return true;
 }
-const MODEL_FAILOVER_CHAIN = [
-  { provider: "nexusmind_openai", model: "antigravity/gemini-3.8-flash-medium" },
-  { provider: "nexusmind_openai", model: "gpt-6.1-terra" },
-  { provider: "nexusmind_anthropic", model: "claude-sonnet-5-5" },
-  { provider: "nexusmind_grok", model: "grok-4.1-fast" }
-];
-const AGENT_STATE_DIR_DEFAULT = "/Users/heltonfraga/Library/Application Support/xyz.block.buzz.desktop/agents/state";
-const FAILOVER_COOLDOWN_MS = 5 * 60 * 1e3;
 function isRateLimitOrProviderError(text) {
   const low = String(text || "").toLowerCase();
   return [
@@ -3118,122 +3146,21 @@ function isRateLimitOrProviderError(text) {
     "too many requests",
     "429",
     "no available accounts",
+    "model requires available accounts",
     "service temporarily unavailable",
     "503 service unavailable",
     "502 bad gateway",
     "504 gateway timeout",
     "resource not found (404)",
     "[404]:",
-    "bad request (400): upstream",
+    "bad request (400)",
+    "no target in combo",
+    "supports tool calling",
     "upstream request failed",
     "upstream_malformed_function_call",
     "overloaded_error",
     "model is overloaded"
   ].some((marker) => low.includes(marker));
-}
-function pickNextHealthyModel(currentProvider, currentModel) {
-  const p = String(currentProvider || "").trim();
-  const m = String(currentModel || "").trim();
-  const idx = MODEL_FAILOVER_CHAIN.findIndex(
-    (entry) => entry.provider === p && entry.model === m
-  );
-  if (idx >= 0) {
-    return MODEL_FAILOVER_CHAIN[(idx + 1) % MODEL_FAILOVER_CHAIN.length];
-  }
-  return MODEL_FAILOVER_CHAIN[0];
-}
-async function executeAgentModelFailover(ctx, options) {
-  const agentKey = options.agentName || options.agentPubkey;
-  const nowMs = options.nowMs ?? Date.now();
-  if (!isRateLimitOrProviderError(options.errorText)) {
-    return {
-      ok: false,
-      switched: false,
-      code: "NOT_RATE_LIMIT",
-      agentKey,
-      previous: null,
-      current: null,
-      wokeAgent: false,
-      message: "Erro informado não é rate limit/indisponibilidade transitória de provedor."
-    };
-  }
-  const cooldownKey = `model_failover:${options.agentPubkey}`;
-  if (!canTriggerWithCooldown(cooldownKey, nowMs, true, FAILOVER_COOLDOWN_MS)) {
-    return {
-      ok: true,
-      switched: false,
-      code: "COOLDOWN_ACTIVE",
-      agentKey,
-      previous: null,
-      current: null,
-      wokeAgent: false,
-      message: `Failover de modelo em cooldown (5 min) para ${agentKey}.`
-    };
-  }
-  const host = ctx.host;
-  const dir = options.stateDir || AGENT_STATE_DIR_DEFAULT;
-  const statePath = `${dir}/buzz.agent.v1%3A${options.agentPubkey}`;
-  try {
-    const raw = await host.readFile(statePath);
-    const text = typeof raw === "string" ? raw : raw instanceof Uint8Array ? new TextDecoder("utf-8").decode(raw) : raw instanceof ArrayBuffer ? new TextDecoder("utf-8").decode(new Uint8Array(raw)) : String(raw ?? "");
-    const parsed = JSON.parse(text);
-    const cfg = parsed.config = parsed.config || {};
-    const previous = {
-      provider: String(cfg.provider || ""),
-      model: String(cfg.model || "")
-    };
-    const next = pickNextHealthyModel(previous.provider, previous.model);
-    cfg.provider = next.provider;
-    cfg.model = next.model;
-    if (host == null ? void 0 : host.writeFile) {
-      await host.writeFile(statePath, JSON.stringify(parsed, null, 2));
-    }
-    try {
-      const notifApi = ctx.notifications;
-      if (notifApi == null ? void 0 : notifApi.notify) {
-        await notifApi.notify({
-          title: `OrgFy Failover [${agentKey}]`,
-          body: `Rate limit detectado. Modelo trocado de ${previous.model || "vazio"} para ${next.provider}/${next.model}.`
-        });
-      }
-    } catch {
-    }
-    let wokeAgent = false;
-    if (options.autoWake !== false) {
-      try {
-        const agentsApi = ctx.agents;
-        if (agentsApi == null ? void 0 : agentsApi.wake) {
-          await agentsApi.wake(options.agentName || options.agentPubkey, {
-            channel: options.channel || "#esteira-orgfy",
-            text: `[ORGFY FAILOVER 429] Modelo rotacionado para ${next.provider}/${next.model} após rate limit upstream. Retome o turno anterior.`
-          });
-          wokeAgent = true;
-        }
-      } catch {
-      }
-    }
-    return {
-      ok: true,
-      switched: true,
-      code: "SWITCHED",
-      agentKey,
-      previous,
-      current: next,
-      wokeAgent,
-      message: `Modelo de ${agentKey} rotacionado: ${previous.model || "vazio"} -> ${next.provider}/${next.model}.`
-    };
-  } catch (err) {
-    return {
-      ok: false,
-      switched: false,
-      code: "STATE_NOT_FOUND",
-      agentKey,
-      previous: null,
-      current: null,
-      wokeAgent: false,
-      message: `Falha ao ler/atualizar state do agente: ${(err == null ? void 0 : err.message) || err}`
-    };
-  }
 }
 function normalizeAgentAlias(raw) {
   return String(raw || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/^@/, "").replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
@@ -3308,22 +3235,29 @@ function registerGovernanceAgentHooks(ctx) {
   let registered = false;
   if (agentsApi == null ? void 0 : agentsApi.registerHook) {
     try {
+      const handleProviderHookFailover = async (payload) => {
+        const errText = String((payload == null ? void 0 : payload.error) || (payload == null ? void 0 : payload.reason) || (payload == null ? void 0 : payload.output) || (payload == null ? void 0 : payload.message) || "");
+        const agentPubkey = String((payload == null ? void 0 : payload.agentPubkey) || (payload == null ? void 0 : payload.pubkey) || "").trim();
+        const agentName = String((payload == null ? void 0 : payload.agentName) || (payload == null ? void 0 : payload.agent) || "").trim();
+        if ((agentPubkey || agentName) && isRateLimitOrProviderError(errText)) {
+          await executeSmartModelFailover(ctx, {
+            agente: agentName || void 0,
+            agent_pubkey: agentPubkey || null,
+            failed_model: (payload == null ? void 0 : payload.model) ? String(payload.model) : null,
+            prefer_free: false,
+            apply: true,
+            retrigger: true,
+            channel_id: String((payload == null ? void 0 : payload.channelId) || (payload == null ? void 0 : payload.channel) || DEFAULT_ORGFY_CHANNEL$1),
+            thread_root: (payload == null ? void 0 : payload.threadRoot) || (payload == null ? void 0 : payload.root) || null
+          });
+        }
+      };
       agentsApi.registerHook({
         id: "orgfy-post-turn-governance",
         harness: "all",
         event: "turn.completed",
         run: async (payload) => {
-          const errText = String((payload == null ? void 0 : payload.error) || (payload == null ? void 0 : payload.output) || (payload == null ? void 0 : payload.message) || "");
-          const agentPubkey = String((payload == null ? void 0 : payload.agentPubkey) || (payload == null ? void 0 : payload.pubkey) || "");
-          if (agentPubkey && isRateLimitOrProviderError(errText)) {
-            await executeAgentModelFailover(ctx, {
-              agentPubkey,
-              agentName: payload == null ? void 0 : payload.agentName,
-              errorText: errText,
-              channel: payload == null ? void 0 : payload.channel,
-              autoWake: true
-            });
-          }
+          await handleProviderHookFailover(payload);
           await evaluateGovernanceAndReact(ctx, { dryRun: false, autoWake: true, includeRadar: true });
         }
       });
@@ -3332,17 +3266,7 @@ function registerGovernanceAgentHooks(ctx) {
         harness: "all",
         event: "turn.failed",
         run: async (payload) => {
-          const errText = String((payload == null ? void 0 : payload.error) || (payload == null ? void 0 : payload.reason) || (payload == null ? void 0 : payload.message) || "");
-          const agentPubkey = String((payload == null ? void 0 : payload.agentPubkey) || (payload == null ? void 0 : payload.pubkey) || "");
-          if (agentPubkey && isRateLimitOrProviderError(errText)) {
-            await executeAgentModelFailover(ctx, {
-              agentPubkey,
-              agentName: payload == null ? void 0 : payload.agentName,
-              errorText: errText,
-              channel: payload == null ? void 0 : payload.channel,
-              autoWake: true
-            });
-          }
+          await handleProviderHookFailover(payload);
         }
       });
       registered = true;

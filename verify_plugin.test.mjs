@@ -961,7 +961,8 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
   const govAuto = autoTools.get("orgfy_governanca_avaliar");
   const autoRes = JSON.parse(await govAuto.call({}, {}, { dry_run: false, auto_wake: true, bypass_cooldown: true }));
   assert.equal(autoRes.ok, true);
-  assert.equal(autoStops.length, 1, "deve interromper sessão travada em 503 antes de trocar");
+  assert.ok(autoStops.some((s) => s.action === "interrupt"), "deve interromper sessão travada em 503 antes de trocar");
+  assert.ok(autoStops.some((s) => s.action === "new"), "deve renovar a sessão ('new') após trocar o modelo antes do wake");
   assert.equal(autoSaves.length, 1, "deve salvar novo modelo automaticamente via ctx.agents.save");
   assert.equal(autoSaves[0].change.config.model, "gemini-2.5-flash-thinking", "deve pular claude-opus (blocked), mistral-large (503 no probe) e gemini-3.1-flash-lite (atual)");
   assert.ok(probedModels.includes("mistralai/mistral-large-4-1t-a52b"), "deve testar ao vivo mistral-large antes de trocar");
@@ -1133,4 +1134,88 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
   assert.ok(validZ3.markdown.includes("RED"), "passos padrão devem exigir ciclo TDD RED->GREEN");
   assert.ok(validZ3.publishCommand.includes("--gate gate:implementacao"), "execucao não pode mais emitir --gate gate:qa");
   console.log("[SPECSFY CARD-CREATOR ENFORCEMENT OK]", JSON.stringify({ effort: validZ3.effort, ato: validZ3.ato, gate: "gate:implementacao" }));
+}
+
+// 19. Auto-Failover v2: bloqueio de tab_jump/auto/*, probe com tools, reset de sessão ("new") e hook turn.failed para 400 tool calling
+{
+  const hooks = [];
+  const saves = [];
+  const sessions = [];
+  const wakes = [];
+  const probePayloads = [];
+  let arqModel = "tab_jump_flash_lite_preview";
+
+  const fakeRankingBad = JSON.stringify({
+    version: 2,
+    policy: { strategy: "balanced", forceFree: false, autoAssignBlocked: [] },
+    models: [
+      { rank: 1, model: "tab_jump_flash_lite_preview", group: "nexusmind_antigravity", score: 99, online: null, autoAssignBlocked: false },
+      { rank: 2, model: "auto/claude-sonnet", group: "nexusmind_openai", score: 98, online: null, autoAssignBlocked: false },
+      { rank: 3, model: "gemini-3.8-flash-medium", group: "nexusmind_antigravity", score: 89.6, online: true, autoAssignBlocked: false },
+    ],
+  });
+
+  orgfyMod.apply({
+    react: { createElement: () => null },
+    pages: { register: () => {} },
+    settingsCards: { register: () => {} },
+    panels: { register: () => {} },
+    navigation: { open: async () => ({ status: "opened" }) },
+    notifications: { notify: async () => {} },
+    agents: {
+      addInstructions: () => {},
+      addTool: () => {},
+      registerHook: (hk) => hooks.push(hk),
+      snapshot: () => ({
+        agents: [
+          {
+            key: "local:orgfy-bento-arq",
+            pubkey: "6d2ab612cc8e091e5c4381694728ce3f8873661156adeeda1522737af334b271",
+            name: "OrgFy Bento Arquiteto",
+            place: "here",
+            config: { model: arqModel, provider: "nexusmind_antigravity" },
+          },
+        ],
+        running: [],
+      }),
+      session: async (agentKey, place, action) => sessions.push({ agentKey, place, action }),
+      save: async (agentKey, change) => {
+        saves.push({ agentKey, change });
+        arqModel = change.config.model;
+      },
+      wake: async (agentKey, payload) => wakes.push({ agentKey, payload }),
+    },
+    host: {
+      request: async (req) => {
+        const body = JSON.parse(req.body || "{}");
+        probePayloads.push(body);
+        return { status: 200, body: JSON.stringify({ choices: [{ message: { content: "ok" } }] }) };
+      },
+      readFile: async (p) => {
+        if (p.endsWith("nexusmind-model-ranking.json")) return new TextEncoder().encode(fakeRankingBad);
+        if (p.endsWith("orgfy-model-quarantine.json")) return new TextEncoder().encode("{}");
+        return new Uint8Array(fs.readFileSync(p));
+      },
+      writeFile: async () => {},
+      serveMcp: async () => ({ url: "mcp://test-failover-v2", close: () => {} }),
+    },
+  });
+
+  const turnFailedHook = hooks.find((hk) => hk.id === "orgfy-turn-failed-model-failover");
+  assert.ok(turnFailedHook, "hook orgfy-turn-failed-model-failover deve estar registrado");
+  await turnFailedHook.run({
+    agentName: "OrgFy Bento Arquiteto",
+    agentPubkey: "6d2ab612cc8e091e5c4381694728ce3f8873661156adeeda1522737af334b271",
+    model: "auto/claude-sonnet",
+    error: "Request failed: Bad request (400): No target in combo auto/claude-sonnet supports tool calling; request carried 50 tools",
+    channelId: "e445491d-2fb3-4ebd-8e2e-f6813c33fb03",
+    threadRoot: "39a75068da62278de10a7b638f65ed91ca0e35eb508aed4477c0511e4354b3ba",
+  });
+
+  assert.equal(saves.length, 1, "hook turn.failed deve salvar novo modelo saudável via ctx.agents.save");
+  assert.equal(saves[0].change.config.model, "gemini-3.8-flash-medium", "deve ignorar tab_jump_flash_lite_preview e auto/claude-sonnet");
+  assert.ok(probePayloads.length >= 1 && Array.isArray(probePayloads[0].tools) && probePayloads[0].tools.length === 1, "probe ao vivo deve enviar tools para validar tool-calling");
+  assert.ok(sessions.some((s) => s.action === "new" && s.place.root === "39a75068da62278de10a7b638f65ed91ca0e35eb508aed4477c0511e4354b3ba"), "deve renovar a sessão ('new') antes do wake");
+  assert.equal(wakes.length, 1, "deve re-disparar o agente na thread original");
+  console.log("[AUTO-FAILOVER V2 TOOL-CALLING + SESSION RESET OK]", JSON.stringify({ selected: saves[0].change.config.model, sessionResets: sessions.length }));
 }
