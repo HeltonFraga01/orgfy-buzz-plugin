@@ -1,4 +1,41 @@
-const ORGFY_ABS_PATH = "/Users/heltonfraga/.buzz/REPOS/orgfy";
+function resolveHomeDir() {
+  var _a;
+  try {
+    const env = (_a = globalThis == null ? void 0 : globalThis.process) == null ? void 0 : _a.env;
+    if ((env == null ? void 0 : env.ORGFY_HOME) && String(env.ORGFY_HOME).trim()) {
+      return String(env.ORGFY_HOME).trim().replace(/\/+$/, "");
+    }
+    if ((env == null ? void 0 : env.HOME) && String(env.HOME).trim()) {
+      return String(env.HOME).trim().replace(/\/+$/, "");
+    }
+  } catch {
+  }
+  try {
+    const stored = typeof localStorage !== "undefined" ? localStorage.getItem("orgfy_home_dir") : null;
+    if (stored && stored.trim()) return stored.trim().replace(/\/+$/, "");
+  } catch {
+  }
+  return "~";
+}
+function joinHome(...parts) {
+  const base = resolveHomeDir();
+  const clean = parts.map((p) => p.replace(/^\/+|\/+$/g, "")).filter(Boolean);
+  return [base, ...clean].join("/");
+}
+const BUZZ_ROOT = joinHome(".buzz");
+const SCRATCH_ROOT = joinHome(".buzz", ".scratch");
+const ORGFY_REPO_ROOT = joinHome(".buzz", "REPOS", "orgfy");
+joinHome(".buzz", "REPOS", "orgfy-buzz-plugin");
+const ORGFY_ESTADO_DIR = joinHome(".buzz", "REPOS", "orgfy", ".esteira", "estado");
+const ORGFY_EMPRESAS_DIR = joinHome(".buzz", "REPOS", "orgfy", "empresas");
+const ORGFY_CARDS_DIR = joinHome(".buzz", "REPOS", "orgfy", "cards");
+joinHome(".buzz", "vault-forense", "sentinela-esteira.env");
+const KPI_SNAPSHOT_PATH = joinHome(".buzz", ".scratch", "kpis-esteira.json");
+const KPI_SCRIPT_PATH = joinHome(".buzz", "REPOS", "orgfy", "ferramentas", "esteira", "gerar_kpis_esteira.py");
+const GOOSE_LOOP_RADAR_SCRIPT_PATH = joinHome(".buzz", "REPOS", "orgfy-buzz-plugin", "scripts", "goose_loop_radar.py");
+const GOOSE_LOOP_RADAR_SNAPSHOT_PATH = joinHome(".buzz", ".scratch", "goose-loop-radar.json");
+joinHome(".buzz", "REPOS", "orgfy", "ferramentas", "esteira", "fabrica_status.py");
+const ORGFY_ABS_PATH = ORGFY_REPO_ROOT;
 async function readOrgfyJson(ctx, relativePath, fallback) {
   var _a;
   if (!((_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.readFile)) {
@@ -21,7 +58,7 @@ async function readOrgfyJson(ctx, relativePath, fallback) {
     }
     try {
       if (relativePath.includes(".scratch/")) {
-        const userScratch = `/Users/heltonfraga/.buzz/${relativePath}`;
+        const userScratch = `${BUZZ_ROOT}/${relativePath}`;
         const raw = await ctx.host.readFile(userScratch);
         const text = typeof raw === "string" ? raw : new TextDecoder().decode(raw);
         return JSON.parse(text);
@@ -51,7 +88,7 @@ async function readOrgfyText(ctx, relativePath) {
     }
     try {
       if (relativePath.includes(".scratch/")) {
-        const userScratch = `/Users/heltonfraga/.buzz/${relativePath}`;
+        const userScratch = `${BUZZ_ROOT}/${relativePath}`;
         const raw = await ctx.host.readFile(userScratch);
         return typeof raw === "string" ? raw : new TextDecoder().decode(raw);
       }
@@ -182,7 +219,7 @@ async function fetchLiveKanbanSnapshot(ctx, filter) {
   }
   try {
     if ((_e = ctx == null ? void 0 : ctx.host) == null ? void 0 : _e.readFile) {
-      const rawTrans = await ctx.host.readFile("/Users/heltonfraga/.buzz/.scratch/esteira-transicoes.jsonl");
+      const rawTrans = await ctx.host.readFile(`${SCRATCH_ROOT}/esteira-transicoes.jsonl`);
       const transTxt = typeof rawTrans === "string" ? rawTrans : rawTrans instanceof Uint8Array ? new TextDecoder("utf-8").decode(rawTrans) : String(rawTrans ?? "");
       for (const line of transTxt.split("\n")) {
         if (!line.trim()) continue;
@@ -367,7 +404,7 @@ async function fetchLiveKanbanSnapshot(ctx, filter) {
   };
   try {
     if ((_g = ctx == null ? void 0 : ctx.host) == null ? void 0 : _g.readFile) {
-      const rawLocks = await ctx.host.readFile("/Users/heltonfraga/.buzz/.scratch/orgfy-locks.json");
+      const rawLocks = await ctx.host.readFile(`${SCRATCH_ROOT}/orgfy-locks.json`);
       const lockTxt = typeof rawLocks === "string" ? rawLocks : rawLocks instanceof Uint8Array ? new TextDecoder("utf-8").decode(rawLocks) : String(rawLocks ?? "");
       const parsedLocks = JSON.parse(lockTxt);
       const nowMs = Date.now();
@@ -558,7 +595,7 @@ async function fetchLiveKanbanSnapshot(ctx, filter) {
       };
     };
     if ((_j = ctx == null ? void 0 : ctx.host) == null ? void 0 : _j.readFile) {
-      const rawIdx = await ctx.host.readFile("/Users/heltonfraga/.buzz/.scratch/orgfy-cards-index.json");
+      const rawIdx = await ctx.host.readFile(`${SCRATCH_ROOT}/orgfy-cards-index.json`);
       const idxTxt = typeof rawIdx === "string" ? rawIdx : rawIdx instanceof Uint8Array ? new TextDecoder("utf-8").decode(rawIdx) : String(rawIdx ?? "");
       const parsedIdx = JSON.parse(idxTxt);
       if (parsedIdx && typeof parsedIdx === "object" && !Array.isArray(parsedIdx)) {
@@ -1103,7 +1140,7 @@ async function executeBootstrapFlow(ctx, onStepUpdate) {
     update(
       "canonical_agents",
       "success",
-      existing.exists ? `${existing.agentCount} agentes detectados via ctx.agents.snapshot() (sem escrita direta em agents/state).` : "Nenhum agente detectado no snapshot; crie agentes pela API nativa do Buzz."
+      existing.exists ? `${existing.agentCount} agentes detectados via ctx.agents.snapshot() (sem escrita direta em disco).` : "Nenhum agente detectado no snapshot; crie agentes pela API nativa do Buzz."
     );
   } catch (err) {
     update("canonical_agents", "error", `Erro ao consultar agentes: ${(err == null ? void 0 : err.message) || err}`);
@@ -1111,8 +1148,6 @@ async function executeBootstrapFlow(ctx, onStepUpdate) {
   update("porteiro_daemon", "success", "Coordenador ativo: esteira_minima.py via LaunchAgent (porteiro.py removido).");
   return { success: true, log: logBuffer };
 }
-const KPI_SNAPSHOT_PATH = "/Users/heltonfraga/.buzz/.scratch/kpis-esteira.json";
-const KPI_SCRIPT_PATH = "/Users/heltonfraga/.buzz/REPOS/orgfy/ferramentas/esteira/gerar_kpis_esteira.py";
 const ARTIFACT_COLLECTION = "orgfy_kpi_history_v1";
 const LOCAL_STORAGE_KEY = "orgfy_kpi_history_v1";
 const MAX_HISTORY_POINTS = 60;
@@ -1233,7 +1268,7 @@ async function recalculateKpisNow(ctx) {
       const res = await host.exec("python", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
       output = [res == null ? void 0 : res.stdout, res == null ? void 0 : res.stderr].filter(Boolean).join("\n").trim();
     } else if (host == null ? void 0 : host.spawn) {
-      const proc = await host.spawn("python", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
+      const proc = await host.spawn("python", { args: [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH] });
       if (proc == null ? void 0 : proc.exited) {
         await proc.exited;
       }
@@ -1249,8 +1284,6 @@ async function recalculateKpisNow(ctx) {
     result
   };
 }
-const GOOSE_LOOP_RADAR_SCRIPT_PATH = "/Users/heltonfraga/.buzz/REPOS/orgfy-buzz-plugin/scripts/goose_loop_radar.py";
-const GOOSE_LOOP_RADAR_SNAPSHOT_PATH = "/Users/heltonfraga/.buzz/.scratch/goose-loop-radar.json";
 async function fetchGooseLoopRadar(ctx) {
   const host = ctx.host;
   const empty = {
@@ -1349,115 +1382,15 @@ const VERIFIED_TOOLCALL_FAILOVER_CHAIN = [
   { model: "gemini-2.5-flash", provider: "nexusmind_antigravity", measuredLatencyMs: 1945, toolCallRate: "10/10", cost10CardsUsd: 22e-4, role: "fast_cost_effective" },
   { model: "claude-sonnet-4-6", provider: "nexusmind_anthropic", measuredLatencyMs: 4314, toolCallRate: "10/10", cost10CardsUsd: 0.0815, role: "primary_quality" }
 ];
-const NEXUSMIND_PROVIDERS = [
-  {
-    id: "nexusmind_anthropic",
-    apiKey: "sk-bd4137aa79f121bbf4e110d788a7f587b68b49432d333ad9abd88051ba393b1c",
-    baseUrl: "https://api.nexusmind.digital",
-    isAnthropic: true
-  },
-  {
-    id: "nexusmind_antigravity",
-    apiKey: "sk-cf8ffed3d96eff9ca80093aee98c589dcf67cf6932c76cd45e223429204051a0",
-    baseUrl: "https://api.nexusmind.digital/v1",
-    isAnthropic: false
-  },
-  {
-    id: "nexusmind_openai",
-    apiKey: "sk-2ee0581e607d02f3485e0efcad2ff686e2b889720f63497813b8fb45eb9d0f08",
-    baseUrl: "https://api.nexusmind.digital/v1",
-    isAnthropic: false
-  }
-];
-const DEFAULT_ORGFY_CHANNEL$2 = "e445491d-2fb3-4ebd-8e2e-f6813c33fb03";
-const SHARED_RANKING_PATHS = [
-  "/Users/heltonfraga/.buzz/.scratch/nexusmind-model-ranking.json",
+[
+  joinHome(".buzz", ".scratch", "nexusmind-model-ranking.json"),
   "~/.buzz/.scratch/nexusmind-model-ranking.json"
 ];
-const SHARED_USAGE_PATHS = [
-  "/Users/heltonfraga/.buzz/.scratch/nm_usage.json",
+[
+  joinHome(".buzz", ".scratch", "nm_usage.json"),
   "~/.buzz/.scratch/nm_usage.json"
 ];
-const MODEL_QUARANTINE_PATH = "/Users/heltonfraga/.buzz/.scratch/orgfy-model-quarantine.json";
-const BACKOFF_TTL_STEPS_MS = [5 * 60 * 1e3, 15 * 60 * 1e3, 45 * 60 * 1e3];
-const modelQuarantineMemory = /* @__PURE__ */ new Map();
-async function quarantineFailedModel(ctx, modelId, reason = "provider_5xx_or_429", ttlMs, nowMs = Date.now()) {
-  const norm = String(modelId || "").trim().toLowerCase();
-  if (!norm) return;
-  const prev = modelQuarantineMemory.get(norm);
-  const failureCount = ((prev == null ? void 0 : prev.failureCount) || 0) + 1;
-  const effectiveTtl = BACKOFF_TTL_STEPS_MS[Math.min(failureCount - 1, BACKOFF_TTL_STEPS_MS.length - 1)];
-  modelQuarantineMemory.set(norm, {
-    model: String(modelId).trim(),
-    failedAt: nowMs,
-    expiresAt: nowMs + effectiveTtl,
-    failureCount,
-    circuitState: "open",
-    reason
-  });
-  const host = ctx == null ? void 0 : ctx.host;
-  if (typeof (host == null ? void 0 : host.writeFile) === "function") {
-    try {
-      const obj = {};
-      for (const [k, v] of modelQuarantineMemory.entries()) {
-        if (v.expiresAt > nowMs) obj[k] = v;
-      }
-      await host.writeFile(MODEL_QUARANTINE_PATH, JSON.stringify(obj, null, 2));
-    } catch {
-    }
-  }
-}
-async function getQuarantinedModels(ctx, nowMs = Date.now()) {
-  const host = ctx == null ? void 0 : ctx.host;
-  if (typeof (host == null ? void 0 : host.readFile) === "function") {
-    try {
-      const raw = await host.readFile(MODEL_QUARANTINE_PATH);
-      if (raw) {
-        const parsed = JSON.parse(decodeHostBytes$2(raw));
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-          for (const [k, v] of Object.entries(parsed)) {
-            if (v && typeof v.expiresAt === "number" && v.expiresAt > nowMs && !modelQuarantineMemory.has(k.toLowerCase())) {
-              modelQuarantineMemory.set(k.toLowerCase(), {
-                model: String(v.model || k),
-                failedAt: Number(v.failedAt || nowMs),
-                expiresAt: v.expiresAt,
-                reason: typeof v.reason === "string" ? v.reason : void 0
-              });
-            }
-          }
-        }
-      }
-    } catch {
-    }
-  }
-  const active = /* @__PURE__ */ new Set();
-  for (const [k, v] of modelQuarantineMemory.entries()) {
-    if (v.expiresAt <= nowMs) {
-      modelQuarantineMemory.delete(k);
-    } else {
-      active.add(k);
-    }
-  }
-  return active;
-}
-function decodeHostBytes$2(raw) {
-  if (typeof raw === "string") return raw;
-  if (raw instanceof Uint8Array) return new TextDecoder("utf-8").decode(raw);
-  if (raw instanceof ArrayBuffer) return new TextDecoder("utf-8").decode(new Uint8Array(raw));
-  if (ArrayBuffer.isView(raw)) {
-    return new TextDecoder("utf-8").decode(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength));
-  }
-  return String(raw ?? "");
-}
-function inferProviderId(modelId) {
-  const m = String(modelId || "").toLowerCase();
-  if (m.includes("grok")) return "nexusmind_grok";
-  if (m.includes("gemini") || m.includes("antigravity") || m.includes("thinking")) {
-    return "nexusmind_antigravity";
-  }
-  if (m.includes("claude")) return "nexusmind_anthropic";
-  return "nexusmind_openai";
-}
+joinHome(".buzz", ".scratch", "orgfy-model-quarantine.json");
 function isFreeModelId(modelId) {
   const lower = String(modelId || "").toLowerCase();
   return lower.includes(":free") || lower.includes("-free") || lower.includes("/free") || lower.endsWith("free");
@@ -1467,573 +1400,40 @@ function isUnsupportedAgentModel(modelId) {
   if (!m) return true;
   return m === "haiku" || m === "grok-4.5" || m.includes("mistral-large-4-1t-a52b") || m.includes("claude-opus-5-5") || m.includes("minimax-m3.1-flash") || m.startsWith("auto/") || m.includes("tab_jump") || m.includes("autocomplete") || m.includes("fim-") || m.includes("embedding") || m.includes("rerank") || m.includes("whisper") || m.includes("tts") || m.includes("imagen") || m.includes("dall-e") || m.includes("moderation");
 }
-function estimateModelIntelligence(modelId) {
-  const m = String(modelId || "").toLowerCase();
-  let score = 50;
-  if (/(opus|o3|gpt-5|gpt-6|claude-sonnet-4-6|claude-sonnet-5|gemini-3\.?5?-pro|gemini-2\.5-pro|deepseek-r1|deepseek-v3|qwen3-coder|mistral-large|grok-4)/.test(m)) {
-    score += 32;
-  } else if (/(sonnet|pro|large|coder|r1|reasoning|thinking|v3|nemotron-ultra|llama-4|glm-4\.5|kimi-k2)/.test(m)) {
-    score += 22;
-  } else if (/(flash|haiku|medium|70b|72b|32b|devstral|codestral)/.test(m)) {
-    score += 12;
-  }
-  if (/(nano|tiny|1b|3b|7b|8b|fast-free|lite)/.test(m)) {
-    score -= 12;
-  }
-  if (/(thinking|reasoning|high)/.test(m)) {
-    score += 6;
-  }
-  return Math.max(10, Math.min(100, score));
-}
-function computeCombinedModelScore(intelligenceScore, latencyMs) {
-  if (latencyMs === null || !Number.isFinite(latencyMs)) return -1;
-  const latencyPenalty = Math.min(35, latencyMs / 1e3 * 4);
-  return Number((intelligenceScore - latencyPenalty).toFixed(2));
-}
-function getDisabledModelsFromLocalStorage() {
+async function requestModelFailover(ctx, input) {
   var _a, _b;
-  try {
-    const raw = (_b = (_a = globalThis == null ? void 0 : globalThis.localStorage) == null ? void 0 : _a.getItem) == null ? void 0 : _b.call(_a, "nexusmind_disabled_models");
-    if (!raw) return /* @__PURE__ */ new Set();
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? new Set(parsed.map((x) => String(x))) : /* @__PURE__ */ new Set();
-  } catch {
-    return /* @__PURE__ */ new Set();
-  }
-}
-async function loadSharedNexusMindRanking(ctx, excludeSet, preferFree) {
-  var _a, _b, _c;
-  const disabled = getDisabledModelsFromLocalStorage();
-  let parsed = null;
-  const host = ctx == null ? void 0 : ctx.host;
-  if (typeof (host == null ? void 0 : host.readFile) === "function") {
-    for (const p of SHARED_RANKING_PATHS) {
-      try {
-        const raw = await host.readFile(p);
-        if (!raw) continue;
-        const txt = decodeHostBytes$2(raw);
-        const obj = JSON.parse(txt);
-        if (obj && Array.isArray(obj.models) && obj.models.length > 0) {
-          parsed = obj;
-          break;
-        }
-      } catch {
-      }
-    }
-  }
-  if (!parsed) {
-    try {
-      const raw = (_b = (_a = globalThis == null ? void 0 : globalThis.localStorage) == null ? void 0 : _a.getItem) == null ? void 0 : _b.call(_a, "nexusmind_model_ranking");
-      if (raw) {
-        const obj = JSON.parse(raw);
-        if (obj && Array.isArray(obj.models) && obj.models.length > 0) {
-          parsed = obj;
-        }
-      }
-    } catch {
-    }
-  }
-  if (parsed && Array.isArray(parsed.models)) {
-    const policy = parsed.policy && typeof parsed.policy === "object" ? parsed.policy : {};
-    const effectivePreferFree = preferFree || Boolean(policy.forceFree);
-    const blockedAuto = new Set(
-      (Array.isArray(policy.autoAssignBlocked) ? policy.autoAssignBlocked : []).map(
-        (x) => String(x || "").trim().toLowerCase()
-      )
-    );
-    const maxCost = typeof policy.maxCostPerReqUsd === "number" && policy.maxCostPerReqUsd > 0 ? policy.maxCostPerReqUsd : null;
-    const pinnedModel = policy.tierPins && typeof policy.tierPins === "object" ? String(policy.tierPins.geral || policy.tierPins.tier2_balanced || "").trim() : "";
-    const candidates = [];
-    for (const m of parsed.models) {
-      const mid = String((m == null ? void 0 : m.model) || "").trim();
-      if (!mid || isUnsupportedAgentModel(mid) || m.isDisabled || m.autoAssignBlocked || disabled.has(mid) || excludeSet.has(mid.toLowerCase())) continue;
-      if (blockedAuto.has(mid.toLowerCase())) continue;
-      if (m.online === false) continue;
-      if (maxCost !== null && typeof m.avgCostUsd === "number" && m.avgCostUsd > 0 && m.avgCostUsd > maxCost) continue;
-      const free = isFreeModelId(mid);
-      if (effectivePreferFree && !free) continue;
-      if (!effectivePreferFree && free) continue;
-      const isPinned = Boolean(pinnedModel && mid === pinnedModel);
-      const isVerifiedOnline = m.online === true;
-      const baseScore = Number(m.score ?? estimateModelIntelligence(mid));
-      candidates.push({
-        model: mid,
-        provider: String(m.group || inferProviderId(mid)),
-        isFree: free,
-        intelligenceScore: Number(m.capabilityScore || estimateModelIntelligence(mid)),
-        latencyMs: typeof m.pingLatencyMs === "number" ? m.pingLatencyMs : typeof m.avgFirstTokenMs === "number" ? m.avgFirstTokenMs : typeof m.avgDurationMs === "number" ? m.avgDurationMs : null,
-        combinedScore: isPinned ? 1e3 : isVerifiedOnline ? baseScore : Number((baseScore - 25).toFixed(2)),
-        online: true,
-        calls: Number(m.calls || 0),
-        source: "nexusmind_ranking"
-      });
-    }
-    if (candidates.length > 0) {
-      candidates.sort((a, b) => b.combinedScore - a.combinedScore);
-      return candidates;
-    }
-  }
-  if (typeof (host == null ? void 0 : host.readFile) === "function") {
-    for (const p of SHARED_USAGE_PATHS) {
-      try {
-        const raw = await host.readFile(p);
-        if (!raw) continue;
-        const txt = decodeHostBytes$2(raw);
-        const obj = JSON.parse(txt);
-        const items = Array.isArray((_c = obj == null ? void 0 : obj.data) == null ? void 0 : _c.items) ? obj.data.items : Array.isArray(obj == null ? void 0 : obj.items) ? obj.items : [];
-        if (items.length === 0) continue;
-        const acc = /* @__PURE__ */ new Map();
-        for (const it of items) {
-          const mid = String((it == null ? void 0 : it.model) || "").trim();
-          if (!mid || disabled.has(mid) || excludeSet.has(mid.toLowerCase())) continue;
-          const free = isFreeModelId(mid);
-          if (preferFree && !free) continue;
-          if (!preferFree && free) continue;
-          let st = acc.get(mid);
-          if (!st) {
-            st = { calls: 0, durSum: 0, durN: 0 };
-            acc.set(mid, st);
-          }
-          st.calls += 1;
-          const dur = Number((it == null ? void 0 : it.first_token_ms) ?? (it == null ? void 0 : it.duration_ms));
-          if (Number.isFinite(dur) && dur > 0 && dur < 18e4) {
-            st.durSum += dur;
-            st.durN += 1;
-          }
-        }
-        const fromUsage = [];
-        for (const [mid, st] of acc.entries()) {
-          if (st.calls < 5) continue;
-          const intel = estimateModelIntelligence(mid);
-          const avgMs = st.durN > 0 ? Math.round(st.durSum / st.durN) : null;
-          const adoption = Math.min(25, Math.log10(st.calls + 1) * 6.5);
-          const speedBonus = avgMs !== null ? Math.max(0, 15 - avgMs / 1e3 * 0.5) : 5;
-          fromUsage.push({
-            model: mid,
-            provider: inferProviderId(mid),
-            isFree: isFreeModelId(mid),
-            intelligenceScore: intel,
-            latencyMs: avgMs,
-            combinedScore: Number((intel * 0.65 + adoption + speedBonus).toFixed(2)),
-            online: true,
-            calls: st.calls,
-            source: "gateway_usage"
-          });
-        }
-        if (fromUsage.length > 0) {
-          fromUsage.sort((a, b) => b.combinedScore - a.combinedScore);
-          return fromUsage.slice(0, 10);
-        }
-      } catch {
-      }
-    }
-  }
-  return [];
-}
-async function discoverNexusMindCatalog(ctx) {
-  var _a, _b;
-  const host = ctx == null ? void 0 : ctx.host;
-  const disabled = getDisabledModelsFromLocalStorage();
-  const seen = /* @__PURE__ */ new Map();
-  if (typeof (host == null ? void 0 : host.request) === "function") {
-    await Promise.all(
-      NEXUSMIND_PROVIDERS.map(async (prov) => {
-        try {
-          const res = await host.request({
-            url: "https://api.nexusmind.digital/v1/models",
-            method: "GET",
-            headers: {
-              Authorization: `Bearer ${prov.apiKey}`,
-              "User-Agent": "BuzzDesktop/OrgFyFailover"
-            },
-            timeoutMs: 8e3
-          });
-          if ((res == null ? void 0 : res.status) >= 200 && (res == null ? void 0 : res.status) < 300 && (res == null ? void 0 : res.body)) {
-            const parsed = JSON.parse(res.body);
-            const list = Array.isArray(parsed == null ? void 0 : parsed.data) ? parsed.data : [];
-            for (const m of list) {
-              const mid = String((m == null ? void 0 : m.id) || "").trim();
-              if (!mid || disabled.has(mid) || seen.has(mid)) continue;
-              seen.set(mid, { id: mid, provider: prov });
-            }
-          }
-        } catch {
-        }
-      })
-    );
-  }
-  if (seen.size === 0) {
-    try {
-      const raw = (_b = (_a = globalThis == null ? void 0 : globalThis.localStorage) == null ? void 0 : _a.getItem) == null ? void 0 : _b.call(_a, "nexusmind_cached_models");
-      if (raw) {
-        const cached = JSON.parse(raw);
-        if (Array.isArray(cached)) {
-          for (const m of cached) {
-            const mid = String((m == null ? void 0 : m.id) || "").trim();
-            if (!mid || disabled.has(mid) || seen.has(mid)) continue;
-            const prov = NEXUSMIND_PROVIDERS.find((p) => p.id === (m == null ? void 0 : m.primaryGroup)) || NEXUSMIND_PROVIDERS[0];
-            seen.set(mid, { id: mid, provider: prov });
-          }
-        }
-      }
-    } catch {
-    }
-  }
-  return Array.from(seen.values());
-}
-async function probeModelLive(ctx, modelId, prov) {
-  const host = ctx == null ? void 0 : ctx.host;
-  if (typeof (host == null ? void 0 : host.request) !== "function") {
-    return { online: false, latencyMs: null, error: "ctx.host.request indisponível" };
-  }
-  const url = prov.isAnthropic ? "https://api.nexusmind.digital/v1/messages" : "https://api.nexusmind.digital/v1/chat/completions";
-  const headers = prov.isAnthropic ? {
-    "x-api-key": prov.apiKey,
-    Authorization: `Bearer ${prov.apiKey}`,
-    "anthropic-version": "2023-06-01",
-    "Content-Type": "application/json",
-    "User-Agent": "BuzzDesktop/OrgFyFailover"
-  } : {
-    Authorization: `Bearer ${prov.apiKey}`,
-    "Content-Type": "application/json",
-    "User-Agent": "BuzzDesktop/OrgFyFailover"
+  const detail = {
+    source: "digital.cortexx.orgfy",
+    agente: input.agente,
+    agent_pubkey: input.agent_pubkey || null,
+    failed_model: input.failed_model || null,
+    reason: input.reason || "provider_error",
+    channel_id: input.channel_id || null,
+    thread_root: input.thread_root || null,
+    ts: Date.now()
   };
-  const t0 = Date.now();
+  let dispatched = false;
   try {
-    const probePayload = prov.isAnthropic ? {
-      model: modelId,
-      messages: [{ role: "user", content: "ok" }],
-      max_tokens: 16,
-      tools: [
-        {
-          name: "ping",
-          description: "healthcheck",
-          input_schema: { type: "object", properties: {} }
-        }
-      ]
-    } : {
-      model: modelId,
-      messages: [{ role: "user", content: "ok" }],
-      max_tokens: 5,
-      tools: [
-        {
-          type: "function",
-          function: {
-            name: "ping",
-            description: "healthcheck",
-            parameters: { type: "object", properties: {} }
-          }
-        }
-      ]
-    };
-    const res = await host.request({
-      url,
-      method: "POST",
-      headers,
-      body: JSON.stringify(probePayload),
-      timeoutMs: 9e3
-    });
-    const latencyMs = Date.now() - t0;
-    if ((res == null ? void 0 : res.status) >= 200 && (res == null ? void 0 : res.status) < 300) {
-      return { online: true, latencyMs };
+    const emitter = ((_a = ctx == null ? void 0 : ctx.events) == null ? void 0 : _a.emit) || ((_b = ctx == null ? void 0 : ctx.bus) == null ? void 0 : _b.emit);
+    if (typeof emitter === "function") {
+      await emitter(ORGFY_FAILOVER_REQUEST_EVENT, detail);
+      dispatched = true;
+    } else if (typeof globalThis !== "undefined" && typeof globalThis.dispatchEvent === "function" && typeof CustomEvent === "function") {
+      globalThis.dispatchEvent(new CustomEvent(ORGFY_FAILOVER_REQUEST_EVENT, { detail }));
+      dispatched = true;
     }
-    return { online: false, latencyMs, error: `HTTP ${(res == null ? void 0 : res.status) ?? "erro"}` };
-  } catch (err) {
-    return { online: false, latencyMs: Date.now() - t0, error: String((err == null ? void 0 : err.message) || err).slice(0, 100) };
-  }
-}
-function findAgentInSnapshot(agentsApi, query, pubkey) {
-  if (!(agentsApi == null ? void 0 : agentsApi.snapshot)) return void 0;
-  const snap = agentsApi.snapshot() || {};
-  const pool = [];
-  const seen = /* @__PURE__ */ new Set();
-  for (const list of [snap.running, snap.agents]) {
-    if (!Array.isArray(list)) continue;
-    for (const a of list) {
-      if (!a || !a.key || seen.has(a.key)) continue;
-      seen.add(a.key);
-      pool.push(a);
-    }
-  }
-  const qLower = String(query || "").trim().toLowerCase();
-  const pkLower = String(pubkey || "").trim().toLowerCase();
-  return pkLower && pool.find((a) => String(a.pubkey || "").toLowerCase() === pkLower) || qLower && pool.find((a) => String(a.key || "").toLowerCase() === qLower) || qLower && pool.find((a) => String(a.name || "").toLowerCase() === qLower) || (qLower ? pool.find((a) => String(a.name || "").toLowerCase().includes(qLower)) : void 0);
-}
-async function executeSmartModelFailover(ctx, input = {}) {
-  var _a, _b, _c;
-  const preferFree = Boolean(input.prefer_free);
-  const applyChange = Boolean(input.apply);
-  const retrigger = input.retrigger !== false;
-  const maxProbes = Math.max(1, Math.min(10, Number(input.max_probes || 6)));
-  const failedNorm = String(input.failed_model || "").trim().toLowerCase();
-  const agentsApi = ctx.agents;
-  const matchedAgent = input.agente || input.agent_pubkey ? findAgentInSnapshot(agentsApi, input.agente, input.agent_pubkey) : void 0;
-  const previousModel = ((matchedAgent == null ? void 0 : matchedAgent.config) && typeof matchedAgent.config === "object" ? String(matchedAgent.config.model || "") : "") || (input.failed_model || null);
-  if (failedNorm) {
-    await quarantineFailedModel(ctx, input.failed_model || failedNorm, "reported_failed");
-  }
-  if (applyChange && previousModel) {
-    await quarantineFailedModel(ctx, previousModel, "agent_failover_source");
-  }
-  const quarantined = await getQuarantinedModels(ctx);
-  const excludeSet = new Set(quarantined);
-  if (failedNorm) excludeSet.add(failedNorm);
-  if (previousModel) excludeSet.add(previousModel.toLowerCase());
-  let sharedRanking = await loadSharedNexusMindRanking(ctx, excludeSet, preferFree);
-  if (sharedRanking.length === 0 && quarantined.size > 0) {
-    const minimalExclude = /* @__PURE__ */ new Set();
-    if (failedNorm) minimalExclude.add(failedNorm);
-    if (previousModel) minimalExclude.add(previousModel.toLowerCase());
-    sharedRanking = await loadSharedNexusMindRanking(ctx, minimalExclude, preferFree);
-  }
-  const failedProvider = previousModel ? inferProviderId(previousModel) : failedNorm ? inferProviderId(failedNorm) : null;
-  if (failedProvider && sharedRanking.length > 1) {
-    sharedRanking = sharedRanking.map((c) => ({
-      ...c,
-      combinedScore: c.provider !== failedProvider ? Number((c.combinedScore + 12).toFixed(2)) : c.combinedScore
-    })).sort((a, b) => b.combinedScore - a.combinedScore);
-  }
-  const host = ctx == null ? void 0 : ctx.host;
-  let verifiedShared = [];
-  if (sharedRanking.length > 0 && typeof (host == null ? void 0 : host.request) === "function") {
-    const toVerify = sharedRanking.slice(0, maxProbes);
-    let gotAnyHttpResponse = false;
-    for (const cand of toVerify) {
-      const prov = NEXUSMIND_PROVIDERS.find((p) => p.id === cand.provider) || NEXUSMIND_PROVIDERS.find((p) => p.id === inferProviderId(cand.model)) || NEXUSMIND_PROVIDERS[0];
-      const res = await probeModelLive(ctx, cand.model, prov);
-      if (res.online || res.error && /^HTTP\s+\d{3}/.test(res.error)) {
-        gotAnyHttpResponse = true;
-      }
-      if (res.online) {
-        verifiedShared.push({
-          ...cand,
-          provider: prov.id,
-          latencyMs: res.latencyMs,
-          online: true,
-          source: "live_probe"
-        });
-        break;
-      } else {
-        if (res.error && /^HTTP\s+(400|404|429|502|503|504)/.test(res.error)) {
-          await quarantineFailedModel(ctx, cand.model, res.error);
-        }
-        verifiedShared.push({
-          ...cand,
-          latencyMs: res.latencyMs,
-          online: false,
-          source: "live_probe",
-          error: res.error
-        });
-      }
-    }
-    if (!gotAnyHttpResponse) {
-      verifiedShared = [];
-    }
-  }
-  let probed = [];
-  const hasVerifiedOnline = verifiedShared.some((v) => v.online);
-  if (sharedRanking.length === 0 || verifiedShared.length > 0 && !hasVerifiedOnline) {
-    const catalog = await discoverNexusMindCatalog(ctx);
-    let pool = catalog.filter((c) => !isUnsupportedAgentModel(c.id) && !excludeSet.has(c.id.toLowerCase()));
-    if (preferFree) {
-      const freeOnly = pool.filter((c) => isFreeModelId(c.id));
-      if (freeOnly.length > 0) pool = freeOnly;
-    } else {
-      const paidOnly = pool.filter((c) => !isFreeModelId(c.id));
-      if (paidOnly.length > 0) pool = paidOnly;
-    }
-    const preRanked = pool.map((c) => ({ ...c, intelligenceScore: estimateModelIntelligence(c.id) })).sort((a, b) => b.intelligenceScore - a.intelligenceScore).slice(0, maxProbes);
-    if (preRanked.length > 0) {
-      probed = await Promise.all(
-        preRanked.map(async (cand) => {
-          const res = await probeModelLive(ctx, cand.id, cand.provider);
-          if (!res.online && res.error && /^HTTP\s+(400|404|429|502|503|504)/.test(res.error)) {
-            await quarantineFailedModel(ctx, cand.id, res.error);
-          }
-          const combinedScore = res.online ? computeCombinedModelScore(cand.intelligenceScore, res.latencyMs) : -1;
-          return {
-            model: cand.id,
-            provider: cand.provider.id,
-            isFree: isFreeModelId(cand.id),
-            intelligenceScore: cand.intelligenceScore,
-            latencyMs: res.latencyMs,
-            combinedScore,
-            online: res.online,
-            source: "live_probe",
-            error: res.error
-          };
-        })
-      );
-      probed.sort((a, b) => {
-        if (a.online !== b.online) return a.online ? -1 : 1;
-        if (b.combinedScore !== a.combinedScore) return b.combinedScore - a.combinedScore;
-        return (a.latencyMs ?? 999999) - (b.latencyMs ?? 999999);
-      });
-    }
-  }
-  const finalRanking = verifiedShared.some((v) => v.online) ? verifiedShared : probed.some((p) => p.online) ? probed : verifiedShared.length > 0 ? verifiedShared : sharedRanking.length > 0 ? sharedRanking : probed;
-  const winner = finalRanking.find((p) => p.online) || null;
-  if (!winner) {
-    return {
-      ok: false,
-      mode: applyChange ? "applied" : "dry_run",
-      agentName: (matchedAgent == null ? void 0 : matchedAgent.name) || input.agente || null,
-      agentKey: (matchedAgent == null ? void 0 : matchedAgent.key) || null,
-      previousModel,
-      selectedModel: null,
-      selectedProvider: null,
-      selectedLatencyMs: null,
-      selectedIntelligenceScore: null,
-      retriggered: false,
-      candidatesTested: finalRanking.length,
-      ranking: finalRanking,
-      message: finalRanking.length > 0 ? `Nenhum dos ${finalRanking.length} modelos testados respondeu HTTP 200 no ping real do NexusMind. Abra a aba "Ranking de Modelos" no plugin NexusMind Gateway para atualizar o ranking.` : "Ranking do NexusMind indisponível. Abra o plugin NexusMind Gateway > Ranking de Modelos para gerar o ranking em tempo real."
-    };
-  }
-  let appliedOk = false;
-  let retriggered = false;
-  let applyNote = "";
-  const sourceTag = winner.source === "nexusmind_ranking" ? `Ranking NexusMind · score ${winner.combinedScore}${winner.calls ? ` · ${winner.calls} chamadas reais` : ""}` : winner.source === "gateway_usage" ? `Telemetria Gateway · score ${winner.combinedScore}${winner.calls ? ` · ${winner.calls} chamadas reais` : ""}` : `${winner.latencyMs}ms · score ${winner.combinedScore}`;
-  if (applyChange) {
-    if (!matchedAgent) {
-      return {
-        ok: false,
-        mode: "applied",
-        agentName: input.agente || null,
-        agentKey: null,
-        previousModel,
-        selectedModel: winner.model,
-        selectedProvider: winner.provider,
-        selectedLatencyMs: winner.latencyMs,
-        selectedIntelligenceScore: winner.intelligenceScore,
-        retriggered: false,
-        candidatesTested: finalRanking.length,
-        ranking: finalRanking,
-        message: `Melhor modelo eleito (${winner.model}, ${sourceTag}), mas agente '${input.agente || input.agent_pubkey || ""}' não encontrado no Buzz Desktop.`
-      };
-    }
-    const failoverPayload = {
-      event: ORGFY_FAILOVER_REQUEST_EVENT,
-      agentKey: matchedAgent.key,
-      agentName: matchedAgent.name || matchedAgent.key,
-      previousModel,
-      selectedModel: winner.model,
-      selectedProvider: winner.provider,
-      ts: Date.now()
-    };
-    try {
-      (_b = (_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.emit) == null ? void 0 : _b.call(_a, ORGFY_FAILOVER_REQUEST_EVENT, failoverPayload);
-      if (typeof (globalThis == null ? void 0 : globalThis.dispatchEvent) === "function" && typeof (globalThis == null ? void 0 : globalThis.CustomEvent) === "function") {
-        globalThis.dispatchEvent(new globalThis.CustomEvent(ORGFY_FAILOVER_REQUEST_EVENT, { detail: failoverPayload }));
-      }
-    } catch {
-    }
-    const nexusDelegator = (_c = ctx == null ? void 0 : ctx.nexusmind) == null ? void 0 : _c.applyBestModel;
-    if (input.delegate_only || typeof nexusDelegator === "function") {
-      if (typeof nexusDelegator === "function") {
-        await nexusDelegator({
-          agente: matchedAgent.name || matchedAgent.key,
-          model: winner.model,
-          provider: winner.provider
-        });
-      }
-      return {
-        ok: true,
-        mode: "delegated",
-        delegatedToNexusMind: true,
-        agentName: matchedAgent.name || matchedAgent.key,
-        agentKey: matchedAgent.key,
-        previousModel,
-        selectedModel: winner.model,
-        selectedProvider: winner.provider,
-        selectedLatencyMs: winner.latencyMs,
-        selectedIntelligenceScore: winner.intelligenceScore,
-        retriggered: false,
-        candidatesTested: finalRanking.length,
-        ranking: finalRanking,
-        message: `Failover de ${matchedAgent.name || matchedAgent.key} delegado ao NexusMind (${winner.provider}/${winner.model} · ${sourceTag}).`
-      };
-    }
-    if (typeof (agentsApi == null ? void 0 : agentsApi.save) !== "function") {
-      return {
-        ok: false,
-        mode: "applied",
-        agentName: matchedAgent.name || matchedAgent.key,
-        agentKey: matchedAgent.key,
-        previousModel,
-        selectedModel: winner.model,
-        selectedProvider: winner.provider,
-        selectedLatencyMs: winner.latencyMs,
-        selectedIntelligenceScore: winner.intelligenceScore,
-        retriggered: false,
-        candidatesTested: finalRanking.length,
-        ranking: finalRanking,
-        message: `Melhor modelo eleito (${winner.model}, ${sourceTag}), mas ctx.agents.save indisponível neste host.`
-      };
-    }
-    const currentCfg = matchedAgent.config && typeof matchedAgent.config === "object" ? { ...matchedAgent.config } : {};
-    currentCfg.model = winner.model;
-    if ("provider" in currentCfg || winner.provider) {
-      currentCfg.provider = winner.provider;
-    }
-    try {
-      await agentsApi.save(matchedAgent.key, { config: currentCfg });
-      appliedOk = true;
-      applyNote = `Modelo de ${matchedAgent.name || matchedAgent.key} atualizado de '${previousModel || "padrão"}' para '${winner.model}' (${winner.provider} · ${sourceTag}).`;
-    } catch (err) {
-      return {
-        ok: false,
-        mode: "applied",
-        agentName: matchedAgent.name || matchedAgent.key,
-        agentKey: matchedAgent.key,
-        previousModel,
-        selectedModel: winner.model,
-        selectedProvider: winner.provider,
-        selectedLatencyMs: winner.latencyMs,
-        selectedIntelligenceScore: winner.intelligenceScore,
-        retriggered: false,
-        candidatesTested: finalRanking.length,
-        ranking: finalRanking,
-        message: `Falha ao salvar novo modelo '${winner.model}' em ${matchedAgent.name || matchedAgent.key}: ${(err == null ? void 0 : err.message) || err}`
-      };
-    }
-    if (appliedOk && retrigger && typeof (agentsApi == null ? void 0 : agentsApi.wake) === "function") {
-      try {
-        const channel = String(input.channel_id || DEFAULT_ORGFY_CHANNEL$2).trim() || DEFAULT_ORGFY_CHANNEL$2;
-        const root = input.thread_root ? String(input.thread_root).trim() : void 0;
-        if (typeof (agentsApi == null ? void 0 : agentsApi.session) === "function") {
-          try {
-            const place = root ? { channelId: channel, root } : { channelId: channel };
-            await agentsApi.session(matchedAgent.key, place, "new");
-          } catch {
-          }
-        }
-        await agentsApi.wake(matchedAgent.key, {
-          channel,
-          ...root ? { root } : {},
-          text: input.retrigger_text || `[ORGFY FAILOVER AUTOMÁTICO] Seu modelo foi migrado para '${winner.model}' (${winner.provider} · ${sourceTag}) após erro de API no modelo anterior. Retome imediatamente o último passo da tarefa com escopo fechado.`
-        });
-        retriggered = true;
-        applyNote += " Sessão renovada e agente re-disparado automaticamente.";
-      } catch (wErr) {
-        applyNote += ` (Aviso: falha no re-disparo wake: ${(wErr == null ? void 0 : wErr.message) || wErr})`;
-      }
-    }
+  } catch {
   }
   return {
     ok: true,
-    mode: applyChange ? "applied" : "dry_run",
-    agentName: (matchedAgent == null ? void 0 : matchedAgent.name) || input.agente || null,
-    agentKey: (matchedAgent == null ? void 0 : matchedAgent.key) || null,
-    previousModel,
-    selectedModel: winner.model,
-    selectedProvider: winner.provider,
-    selectedLatencyMs: winner.latencyMs,
-    selectedIntelligenceScore: winner.intelligenceScore,
-    retriggered,
-    candidatesTested: finalRanking.length,
-    ranking: finalRanking,
-    message: applyNote || `Melhor modelo disponível (${preferFree ? "FREE" : "PRODUÇÃO"}): ${winner.model} (${winner.provider} · ${sourceTag}).`
+    delegated: true,
+    event: ORGFY_FAILOVER_REQUEST_EVENT,
+    agente: input.agente || "unknown",
+    previousModel: input.failed_model || null,
+    selectedModel: null,
+    candidatesTested: 0,
+    retriggered: false,
+    message: `Failover delegado ao NexusMind via evento ${ORGFY_FAILOVER_REQUEST_EVENT} (${input.agente}${dispatched ? "" : " — aguardando listener NexusMind"}).`
   };
 }
 const MARK_TO_STATUS = {
@@ -2813,8 +2213,6 @@ function buildBuzzAttentionContract(params) {
 }
 const DEFAULT_LEASE_MS = 8 * 60 * 1e3;
 const DEFAULT_ORPHAN_GRACE_MS = 3 * 60 * 1e3;
-const CARDS_DIR = "/Users/heltonfraga/.buzz/REPOS/orgfy/cards";
-const EMPRESAS_DIR$1 = "/Users/heltonfraga/.buzz/REPOS/orgfy/empresas";
 const pipelineEventsBuffer = [];
 const pipelineEventListeners = /* @__PURE__ */ new Set();
 const MAX_PIPELINE_EVENTS = 80;
@@ -2971,7 +2369,7 @@ async function loadEmpresaRoles(ctx, empresa) {
   const host = ctx == null ? void 0 : ctx.host;
   if (!(host == null ? void 0 : host.readFile)) return map;
   try {
-    const raw = await host.readFile(`${EMPRESAS_DIR$1}/${empresa}.json`);
+    const raw = await host.readFile(`${ORGFY_EMPRESAS_DIR}/${empresa}.json`);
     const parsed = JSON.parse(decodeText(raw));
     if (Array.isArray(parsed == null ? void 0 : parsed.agentes)) {
       for (const a of parsed.agentes) {
@@ -3114,7 +2512,7 @@ async function buildHandoffPack(ctx, input) {
   let md = input.card_markdown ? String(input.card_markdown) : "";
   let cardFile = null;
   if (!md && slug && (host == null ? void 0 : host.readFile)) {
-    const candidate = `${CARDS_DIR}/${slug}.md`;
+    const candidate = `${ORGFY_CARDS_DIR}/${slug}.md`;
     try {
       md = decodeText(await host.readFile(candidate));
       cardFile = `cards/${slug}.md`;
@@ -3388,7 +2786,7 @@ async function resolveFullNostrIssueId(ctx, rawId) {
   if (!(host == null ? void 0 : host.readFile)) return clean;
   const decode = (raw) => typeof raw === "string" ? raw : raw instanceof Uint8Array ? new TextDecoder("utf-8").decode(raw) : String(raw ?? "");
   try {
-    const rawT = await host.readFile("/Users/heltonfraga/.buzz/.scratch/esteira-transicoes.jsonl");
+    const rawT = await host.readFile(`${SCRATCH_ROOT}/esteira-transicoes.jsonl`);
     const lines = decode(rawT).split("\n");
     for (let i = lines.length - 1; i >= 0; i--) {
       if (!lines[i].includes(clean)) continue;
@@ -3398,7 +2796,7 @@ async function resolveFullNostrIssueId(ctx, rawId) {
   } catch {
   }
   try {
-    const rawE = await host.readFile("/Users/heltonfraga/.buzz/REPOS/orgfy/.esteira/estado/esteira-minima-state.json");
+    const rawE = await host.readFile(`${ORGFY_ESTADO_DIR}/esteira-minima-state.json`);
     const parsed = JSON.parse(decode(rawE));
     for (const k of Object.keys((parsed == null ? void 0 : parsed.aceites) || {})) {
       if (k.toLowerCase().startsWith(clean) && /^[0-9a-f]{64}$/i.test(k)) {
@@ -3409,7 +2807,7 @@ async function resolveFullNostrIssueId(ctx, rawId) {
   }
   return clean;
 }
-const LOCKS_FILE_PATH = "/Users/heltonfraga/.buzz/.scratch/orgfy-locks.json";
+const LOCKS_FILE_PATH = `${SCRATCH_ROOT}/orgfy-locks.json`;
 const DEFAULT_LOCK_TTL_MS = 30 * 60 * 1e3;
 const DEFAULT_COOLDOWN_MS = 15 * 60 * 1e3;
 const memoryLocks = /* @__PURE__ */ new Map();
@@ -3747,7 +3145,7 @@ function canTriggerWithCooldown(key, nowMs, commit = true, cooldownMs = DEFAULT_
   return true;
 }
 const DEFAULT_ORGFY_CHANNEL = "e445491d-2fb3-4ebd-8e2e-f6813c33fb03";
-const EMPRESAS_DIR = "/Users/heltonfraga/.buzz/REPOS/orgfy/empresas";
+const EMPRESAS_DIR = ORGFY_EMPRESAS_DIR;
 const KNOWN_COMPANY_SLUGS = ["orgfy", "lumen-iptv", "saas-tributario"];
 const radarEscalationCounts = /* @__PURE__ */ new Map();
 function decodeHostBytes$1(raw) {
@@ -3925,7 +3323,7 @@ async function evaluateGovernanceAndReact(ctx, options = {}) {
                   }
                 }
               }
-              const failoverRes = await executeSmartModelFailover(ctx, {
+              const failoverRes = await requestModelFailover(ctx, {
                 agente: s.agente,
                 agent_pubkey: s.agent_pubkey || null,
                 prefer_free: false,
@@ -4255,7 +3653,7 @@ async function bindConversationContextForCard(ctx, input) {
   let degradedFallback = false;
   if (!folderAssigned && !sectionsInjected && remoteOrMissingAgent) {
     const safeId = String(input.issueId || "card").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 16) || "card";
-    const ctxPath = `/Users/heltonfraga/.buzz/.scratch/orgfy-context-${safeId}.json`;
+    const ctxPath = `${SCRATCH_ROOT}/orgfy-context-${safeId}.json`;
     const payload = JSON.stringify(
       {
         issueId: input.issueId,
@@ -4600,7 +3998,7 @@ function registerGovernanceAgentHooks(ctx) {
         const agentPubkey = String((payload == null ? void 0 : payload.agentPubkey) || (payload == null ? void 0 : payload.pubkey) || "").trim();
         const agentName = String((payload == null ? void 0 : payload.agentName) || (payload == null ? void 0 : payload.agent) || "").trim();
         if ((agentPubkey || agentName) && isRateLimitOrProviderError(errText)) {
-          await executeSmartModelFailover(ctx, {
+          await requestModelFailover(ctx, {
             agente: agentName || void 0,
             agent_pubkey: agentPubkey || null,
             failed_model: (payload == null ? void 0 : payload.model) ? String(payload.model) : null,
@@ -5559,7 +4957,7 @@ async function executeAgentMigration(ctx, onOutput) {
   };
   appendChunk("[MIGRATION] Sincronizando agentes OrgFy via ctx.agents.save() (B4)...\n");
   if (typeof ((_a = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _a.save) !== "function") {
-    appendChunk("[ERRO] ctx.agents.save indisponível; escrita direta em agents/state desativada.\n");
+    appendChunk("[ERRO] ctx.agents.save indisponível; escrita direta em disco desativada (R4.1).\n");
     return { success: false, output: combinedOutput };
   }
   try {
@@ -5586,7 +4984,7 @@ async function executeAgentMigration(ctx, onOutput) {
     return { success: false, output: combinedOutput };
   }
 }
-const RESOLVED_ARCHIVE_PATH = "/Users/heltonfraga/.buzz/.scratch/resolved-issues-archive.json";
+const RESOLVED_ARCHIVE_PATH = joinHome(".buzz", ".scratch", "resolved-issues-archive.json");
 function decodeHostBytes(raw) {
   if (typeof raw === "string") return raw;
   if (raw instanceof Uint8Array) return new TextDecoder("utf-8").decode(raw);
@@ -6141,7 +5539,7 @@ function buildUnifiedOrgfyTools(ctx) {
         }
       },
       execute: async (args) => {
-        const res = await executeSmartModelFailover(ctx, {
+        const res = await requestModelFailover(ctx, {
           agente: args == null ? void 0 : args.agente,
           agent_pubkey: args == null ? void 0 : args.agent_pubkey,
           failed_model: args == null ? void 0 : args.failed_model,
@@ -6476,7 +5874,7 @@ function createAgentOrgfyTabComponent(ctx) {
       setFailoverBusy(true);
       setStatusBanner(null);
       try {
-        const res = await executeSmartModelFailover(ctx, {
+        const res = await requestModelFailover(ctx, {
           agente: agentName,
           agent_pubkey: agentPubkey || void 0,
           failed_model: currentModel !== "padrão" ? currentModel : void 0,
@@ -9130,9 +8528,7 @@ function createCardStudioTabComponent(ctx) {
     );
   };
 }
-const ORGFY_REPO_ROOT = "/Users/heltonfraga/.buzz/REPOS/orgfy";
-const SCRATCH_ROOT = "/Users/heltonfraga/.buzz/.scratch";
-const BUZZ_AGENTS_DIR = "/Users/heltonfraga/Library/Application Support/xyz.block.buzz.desktop/agents";
+const BUZZ_AGENTS_DIR = "";
 function decodeBytes(raw) {
   if (typeof raw === "string") return raw;
   if (raw instanceof Uint8Array) return new TextDecoder("utf-8").decode(raw);
@@ -9660,8 +9056,8 @@ function renderResolvedArchiveTab(props) {
     )
   );
 }
-const BOARD_APPROVALS_PATH = "/Users/heltonfraga/.buzz/.scratch/board-approvals.json";
-const BUZZ_AGENT_STATE_DIR = "/Users/heltonfraga/Library/Application Support/xyz.block.buzz.desktop/agents/state";
+const BOARD_APPROVALS_PATH = joinHome(".buzz", ".scratch", "board-approvals.json");
+const BUZZ_AGENT_STATE_DIR = "";
 function isPlaceholderHex(val) {
   const clean = String(val || "").trim().toLowerCase();
   if (!/^[0-9a-f]{64}$/.test(clean)) return true;
@@ -12434,7 +11830,7 @@ function renderIssueDetailModal(p) {
               )
             )
           ),
-          // Box C: Modelo Real do Executor (agents/state/ — Zero Hardcode)
+          // Box C: Modelo Real do Executor (via ctx.agents.snapshot — Zero Hardcode)
           h(
             "div",
             {
@@ -12452,7 +11848,7 @@ function renderIssueDetailModal(p) {
             h(
               "div",
               { style: { fontSize: "11px", color: "#ffffff", fontWeight: "600", fontFamily: "monospace" } },
-              (hydratedIssueDetail == null ? void 0 : hydratedIssueDetail.executorModel) ? `${hydratedIssueDetail.executorProvider ? hydratedIssueDetail.executorProvider + "/" : ""}${hydratedIssueDetail.executorModel}` : isHydratingIssueDetail ? "Lendo agents/state/..." : "Modelo não identificado no state local"
+              (hydratedIssueDetail == null ? void 0 : hydratedIssueDetail.executorModel) ? `${hydratedIssueDetail.executorProvider ? hydratedIssueDetail.executorProvider + "/" : ""}${hydratedIssueDetail.executorModel}` : isHydratingIssueDetail ? "Lendo ctx.agents.snapshot()..." : "Modelo não identificado no state local"
             ),
             h(
               "div",
@@ -13195,7 +12591,7 @@ function renderInfraModals(p) {
           "div",
           { style: { fontSize: "12px", color: "#9ca3af", lineHeight: "1.5" } },
           "Sincronização atômica de todos os agentes OrgFy criados no Buzz Desktop. Vincula o diretório de execução ao repositório ",
-          h("code", { style: { backgroundColor: "rgba(255, 255, 255, 0.08)", padding: "2px 6px", borderRadius: "4px", color: "#38bdf8" } }, "/Users/heltonfraga/.buzz/REPOS/orgfy"),
+          h("code", { style: { backgroundColor: "rgba(255, 255, 255, 0.08)", padding: "2px 6px", borderRadius: "4px", color: "#38bdf8" } }, "~/.buzz/REPOS/orgfy"),
           ", injeta contratos CoEvo-RSI (Tiers 1, 2 e 3), regras probatórias e ferramentas MCP loopback com backup automático (.bak)."
         ),
         // Metric Cards
@@ -13283,7 +12679,7 @@ function renderInfraModals(p) {
                   },
                   ag.tier === "tier_3_arquiteto" ? "Tier 3 Arquiteto" : ag.tier === "tier_2_revisor" ? "Tier 2 Revisor" : "Tier 1 Executor"
                 ),
-                h("span", { style: { fontFamily: "monospace", fontSize: "10px", color: "#6b7280" } }, ag.workspace.replace("/Users/heltonfraga/", "~/") || "~/.buzz")
+                h("span", { style: { fontFamily: "monospace", fontSize: "10px", color: "#6b7280" } }, ag.workspace.replace(/^\/Users\/[^/]+\//, "~/") || "~/.buzz")
               )
             )
           )
@@ -14203,7 +13599,7 @@ function apply(ctx) {
     const handleFailoverModelSession = React.useCallback(async (session) => {
       setFailingOverSessionId(session.session_id);
       try {
-        const res = await executeSmartModelFailover(ctx, {
+        const res = await requestModelFailover(ctx, {
           agente: session.agente,
           agent_pubkey: session.agent_pubkey,
           prefer_free: true,
@@ -15829,7 +15225,6 @@ export {
   cleanupAttentionOnStageChange,
   createCanonicalCard,
   executeCardProgress,
-  executeSmartModelFailover,
   getBuzzNativeState,
   getOrgfyPipelineEvents,
   getTelemetrySnapshot,
@@ -15840,6 +15235,7 @@ export {
   reconcileAgentPresenceAndLocks,
   reconcileAgentsViaBuzzApi,
   registerBuzzNativeIntegrations,
+  requestModelFailover,
   resetPresenceStateForTests,
   resetTelemetryForTests,
   resetThreadWakeGuardForTests,

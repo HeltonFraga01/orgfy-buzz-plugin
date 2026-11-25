@@ -8,8 +8,9 @@ import type { Context } from "@buzz/author";
 import { ORGFY_ABS_PATH, readOrgfyJson, readOrgfyText } from "./orgfy-bridge";
 import { listActiveLocks, type CheckoutLockRecord } from "./governance-engine";
 
-export const BOARD_APPROVALS_PATH = "/Users/heltonfraga/.buzz/.scratch/board-approvals.json";
-export const BUZZ_AGENT_STATE_DIR = "/Users/heltonfraga/Library/Application Support/xyz.block.buzz.desktop/agents/state";
+import { joinHome } from "../config";
+export const BOARD_APPROVALS_PATH = joinHome(".buzz", ".scratch", "board-approvals.json");
+export const BUZZ_AGENT_STATE_DIR = ""; // Removido (R4.1): usar ctx.agents.snapshot()
 
 export interface BoardCouncilMember {
   id: string;

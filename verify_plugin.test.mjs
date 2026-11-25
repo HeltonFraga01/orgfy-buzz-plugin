@@ -457,13 +457,10 @@ const failoverRes = JSON.parse(await failoverTool.call({}, {}, {
   channel_id: "e445491d-2fb3-4ebd-8e2e-f6813c33fb03",
   thread_root: "25c49b323d299d3a81ca260197cecd5b6208668d84bb8788971ba347fb15b193",
 }));
-assert.equal(failoverRes.ok, true, "failover deve eleger o melhor modelo free online");
-assert.equal(failoverRes.selectedModel, "qwen/qwen3-coder:free", "deve pular o 503 e escolher o mais inteligente online");
-assert.equal(failoverRes.retriggered, true);
-assert.equal(savedChanges.length, 1);
-assert.equal(savedChanges[0].change.config.model, "qwen/qwen3-coder:free");
-assert.equal(failoverWakes.length, 1);
-assert.equal(failoverWakes[0].payload.root, "25c49b323d299d3a81ca260197cecd5b6208668d84bb8788971ba347fb15b193");
+assert.equal(failoverRes.ok, true, "R4.6: failover deve delegar ao NexusMind via evento");
+assert.equal(failoverRes.delegated, true, "R4.6: OrgFy deve apenas delegar failover ao NexusMind");
+assert.equal(failoverRes.event, orgfyMod.ORGFY_FAILOVER_REQUEST_EVENT);
+assert.equal(savedChanges.length, 0, "R4.6: OrgFy nao deve chamar ctx.agents.save() no failover");
 console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failoverRes.selectedModel, tested: failoverRes.candidatesTested, retriggered: failoverRes.retriggered }));
 
 // 12. Escalação Hierárquica Multi-Empresa no Radar (COO -> CEO da Empresa -> Iris só em último caso)
@@ -657,7 +654,7 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
   assert.ok(hydrated.contexto && hydrated.contexto.includes("SPEC-0006"));
   assert.equal(hydrated.acceptanceFrozenValid, false, "sem arquivo em aceites/, não pode marcar congelamento válido");
   assert.equal(hydrated.acceptanceHash, null);
-  assert.ok(hydrated.executorModel && hydrated.executorModel.length > 0, "deve ler modelo real de OrgFy Lia em agents/state/");
+  // R4.1: leitura direta de agents/state/ removida; modelo vem de ctx.agents.snapshot() no runtime
   assert.ok(hydrated.probes.some((p) => p.status === "NA"), "orgfy CLI não deve exibir Caddy/Supabase/Playwright como PASS");
   console.log("[ZERO-MOCK ISSUE MODAL OK]", JSON.stringify({
     cardFileFound: hydrated.cardFileFound,
@@ -975,28 +972,14 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
   const autoRes = JSON.parse(await govAuto.call({}, {}, { dry_run: false, auto_wake: true, bypass_cooldown: true }));
   assert.equal(autoRes.ok, true);
   assert.ok(autoStops.some((s) => s.action === "interrupt"), "deve interromper sessão travada em 503 antes de trocar");
-  assert.ok(autoStops.some((s) => s.action === "new"), "deve renovar a sessão ('new') após trocar o modelo antes do wake");
-  assert.equal(autoSaves.length, 1, "deve salvar novo modelo automaticamente via ctx.agents.save");
-  assert.equal(autoSaves[0].change.config.model, "gemini-2.5-flash-thinking", "deve pular claude-opus (blocked), mistral-large (bloqueado em B3 por timeout >20s) e gemini-3.1-flash-lite (atual)");
-  assert.ok(!probedModels.includes("mistralai/mistral-large-4-1t-a52b"), "B3: mistral-large-4-1t-a52b deve ser excluído do failover sem desperdiçar probe");
-  assert.ok(probedModels.includes("gemini-2.5-flash-thinking"), "deve validar gemini-2.5-flash-thinking ao vivo");
-  assert.equal(autoWakes.length, 1, "deve re-disparar o agente automaticamente na thread original");
-  assert.equal(autoWakes[0].payload.root, "4406f509983396ed055d9739185f30bface744d032df4d1452035e6e4c00c7cd");
-
-  // Segundo failover consecutivo: NÃO pode fazer ping-pong voltando para mistral-large ou gemini-3.1-flash-lite (ambos em quarentena)
+  // R4.6: renovação de sessão após troca de modelo fica sob responsabilidade do NexusMind
+  assert.equal(autoSaves.length, 0, "R4.6: watchdog do OrgFy delega failover ao NexusMind sem mutar ctx.agents.save()");
   const failoverAuto = autoTools.get("orgfy_model_failover");
-  const secondRes = JSON.parse(await failoverAuto.call({}, {}, {
-    agente: "OrgFy Bento",
-    apply: true,
-    retrigger: false,
-  }));
+  const secondRes = JSON.parse(await failoverAuto.call({}, {}, { agente: "OrgFy Bento", apply: true, retrigger: false }));
   assert.equal(secondRes.ok, true);
-  assert.equal(secondRes.selectedModel, "gemini-3-flash", "quarentena deve impedir ping-pong para modelos que falharam recentemente");
-  console.log("[AUTO-FAILOVER WATCHDOG + LIVE PROBE + ANTI-PINGPONG OK]", JSON.stringify({
-    first: autoSaves[0].change.config.model,
-    second: secondRes.selectedModel,
-    probed: probedModels,
-  }));
+  assert.equal(secondRes.delegated, true);
+  assert.equal(secondRes.event, orgfyMod.ORGFY_FAILOVER_REQUEST_EVENT);
+  console.log("[R4.6 FAILOVER DELEGATED TO NEXUSMIND OK]", JSON.stringify({ event: secondRes.event, directSaves: autoSaves.length }));
 }
 
 // 17. Auto-Failover Imediato no 1º Erro Fatal de LLM (last_msg_is_provider_error=true, ex.: 404 Resource not found no OrgFy Cron)
@@ -1098,14 +1081,10 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
   const govCron = cronTools.get("orgfy_governanca_avaliar");
   const r1 = JSON.parse(await govCron.call({}, {}, { dry_run: false, auto_wake: true }));
   assert.equal(r1.ok, true);
-  assert.equal(cronSaves.length, 1, "deve trocar modelo imediatamente no 1º erro fatal (last_msg_is_provider_error=true)");
-  assert.equal(cronSaves[0].change.config.model, "claude-sonnet-5-5");
-  assert.equal(cronWakes.length, 1, "deve re-disparar OrgFy Cron automaticamente");
-
+  assert.equal(cronSaves.length, 0, "R4.6: OrgFy delega 404 ao NexusMind sem mutar ctx.agents.save()");
   const r2 = JSON.parse(await govCron.call({}, {}, { dry_run: false, auto_wake: true }));
-  assert.equal(cronSaves.length, 1, "mesmo timestamp de erro não deve disparar failover duplicado");
   assert.ok(r2.skippedByCooldown.some((s) => s.includes("auto_failover_already_healed:OrgFy Cron")));
-  console.log("[AUTO-FAILOVER 1ST CRASH 404 + DEDUP OK]", JSON.stringify({ switchedTo: cronSaves[0].change.config.model }));
+  console.log("[R4.6 1ST CRASH 404 DELEGATED + DEDUP OK]");
 }
 
 // 18. Specsfy Enforcement em orgfy_card_create (Effort 1-10, spec_path obrigatório em Effort>=3, skills Specsfy, TDD, gate:implementacao)
@@ -1239,12 +1218,8 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
   assert.equal(handlers("all", "turn.failed").length, 0, "não deve existir hook harness=all/turn.failed");
   assert.equal(handlers("buzz.claude-code/claude-code", "beforeTool").length, 0, "claude-code não usa beforeTool");
 
-  assert.equal(saves.length, 1, "hook turn.failed deve salvar novo modelo saudável via ctx.agents.save");
-  assert.equal(saves[0].change.config.model, "gemini-3.8-flash-medium", "deve ignorar tab_jump_flash_lite_preview e auto/claude-sonnet");
-  assert.ok(probePayloads.length >= 1 && Array.isArray(probePayloads[0].tools) && probePayloads[0].tools.length === 1, "probe ao vivo deve enviar tools para validar tool-calling");
-  assert.ok(sessions.some((s) => s.action === "new" && s.place.root === "39a75068da62278de10a7b638f65ed91ca0e35eb508aed4477c0511e4354b3ba"), "deve renovar a sessão ('new') antes do wake");
-  assert.equal(wakes.length, 1, "deve re-disparar o agente na thread original");
-  console.log("[AUTO-FAILOVER V2 TOOL-CALLING + SESSION RESET OK]", JSON.stringify({ selected: saves[0].change.config.model, sessionResets: sessions.length }));
+  assert.equal(saves.length, 0, "R4.6: hook delega failover ao NexusMind sem chamar ctx.agents.save()");
+  console.log("[R4.6 HOOK DELEGATED OK]", JSON.stringify({ directSaves: saves.length }));
 }
 
 // 20. SOTA AAA: Write-Set Conflict Guard (WRITE_SET_CONFLICT) em orgfy_checkout_lock

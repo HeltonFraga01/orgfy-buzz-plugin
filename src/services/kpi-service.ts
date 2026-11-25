@@ -112,8 +112,8 @@ export interface KpiReadResult {
   history: KpiHistoryPoint[];
 }
 
-export const KPI_SNAPSHOT_PATH = "/Users/heltonfraga/.buzz/.scratch/kpis-esteira.json";
-export const KPI_SCRIPT_PATH = "/Users/heltonfraga/.buzz/REPOS/orgfy/ferramentas/esteira/gerar_kpis_esteira.py";
+import { KPI_SNAPSHOT_PATH, KPI_SCRIPT_PATH, GOOSE_LOOP_RADAR_SCRIPT_PATH, GOOSE_LOOP_RADAR_SNAPSHOT_PATH } from "../config";
+export { KPI_SNAPSHOT_PATH, KPI_SCRIPT_PATH, GOOSE_LOOP_RADAR_SCRIPT_PATH, GOOSE_LOOP_RADAR_SNAPSHOT_PATH };
 const ARTIFACT_COLLECTION = "orgfy_kpi_history_v1";
 const LOCAL_STORAGE_KEY = "orgfy_kpi_history_v1";
 const MAX_HISTORY_POINTS = 60;
@@ -261,7 +261,7 @@ export async function recalculateKpisNow(ctx: Context): Promise<{
       const res = await host.exec("python", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
       output = [res?.stdout, res?.stderr].filter(Boolean).join("\n").trim();
     } else if (host?.spawn) {
-      const proc = await host.spawn("python", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
+      const proc = await host.spawn("python", { args: [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH] });
       if (proc?.exited) {
         await proc.exited;
       }
@@ -330,10 +330,7 @@ export interface GooseLoopRadarPayload {
   sessoes: GooseLoopSession[];
 }
 
-export const GOOSE_LOOP_RADAR_SCRIPT_PATH =
-  "/Users/heltonfraga/.buzz/REPOS/orgfy-buzz-plugin/scripts/goose_loop_radar.py";
-export const GOOSE_LOOP_RADAR_SNAPSHOT_PATH =
-  "/Users/heltonfraga/.buzz/.scratch/goose-loop-radar.json";
+// Re-exported from ../config
 
 export async function fetchGooseLoopRadar(ctx: Context): Promise<GooseLoopRadarPayload> {
   const host = (ctx as any).host;

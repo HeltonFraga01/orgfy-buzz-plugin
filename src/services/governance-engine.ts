@@ -1,6 +1,7 @@
+import { SCRATCH_ROOT, ORGFY_ESTADO_DIR, ORGFY_EMPRESAS_DIR } from "../config";
 import type { Context } from "@buzz/author";
 import { fetchKpisEsteira, fetchGooseLoopRadar, type KpisEsteiraPayload } from "./kpi-service";
-import { executeSmartModelFailover } from "./model-failover";
+import { requestModelFailover } from "./model-failover";
 import { reconcileAgentPresenceAndLocks } from "./presence-dispatcher";
 
 export interface CheckoutLockRecord {
@@ -39,7 +40,7 @@ async function resolveFullNostrIssueId(ctx: Context, rawId: string): Promise<str
       ? new TextDecoder("utf-8").decode(raw)
       : String(raw ?? "");
   try {
-    const rawT = await host.readFile("/Users/heltonfraga/.buzz/.scratch/esteira-transicoes.jsonl");
+    const rawT = await host.readFile(`${SCRATCH_ROOT}/esteira-transicoes.jsonl`);
     const lines = decode(rawT).split("\n");
     for (let i = lines.length - 1; i >= 0; i--) {
       if (!lines[i].includes(clean)) continue;
@@ -50,7 +51,7 @@ async function resolveFullNostrIssueId(ctx: Context, rawId: string): Promise<str
     // Opcional
   }
   try {
-    const rawE = await host.readFile("/Users/heltonfraga/.buzz/REPOS/orgfy/.esteira/estado/esteira-minima-state.json");
+    const rawE = await host.readFile(`${ORGFY_ESTADO_DIR}/esteira-minima-state.json`);
     const parsed = JSON.parse(decode(rawE));
     for (const k of Object.keys(parsed?.aceites || {})) {
       if (k.toLowerCase().startsWith(clean) && /^[0-9a-f]{64}$/i.test(k)) {
@@ -114,7 +115,7 @@ export interface DsapHybridResult {
   action: string;
 }
 
-export const LOCKS_FILE_PATH = "/Users/heltonfraga/.buzz/.scratch/orgfy-locks.json";
+export const LOCKS_FILE_PATH = `${SCRATCH_ROOT}/orgfy-locks.json`;
 const DEFAULT_LOCK_TTL_MS = 30 * 60 * 1000; // 30 min
 const DEFAULT_COOLDOWN_MS = 15 * 60 * 1000; // 15 min
 
@@ -542,7 +543,7 @@ function canTriggerWithCooldown(
 }
 
 export const DEFAULT_ORGFY_CHANNEL = "e445491d-2fb3-4ebd-8e2e-f6813c33fb03";
-const EMPRESAS_DIR = "/Users/heltonfraga/.buzz/REPOS/orgfy/empresas";
+const EMPRESAS_DIR = ORGFY_EMPRESAS_DIR;
 const KNOWN_COMPANY_SLUGS = ["orgfy", "lumen-iptv", "saas-tributario"];
 const radarEscalationCounts = new Map<string, number>();
 
@@ -800,7 +801,7 @@ export async function evaluateGovernanceAndReact(
                 }
               }
 
-              const failoverRes = await executeSmartModelFailover(ctx, {
+              const failoverRes = await requestModelFailover(ctx, {
                 agente: s.agente,
                 agent_pubkey: s.agent_pubkey || null,
                 prefer_free: false,
@@ -1271,7 +1272,7 @@ export async function bindConversationContextForCard(
   let degradedFallback = false;
   if (!folderAssigned && !sectionsInjected && remoteOrMissingAgent) {
     const safeId = String(input.issueId || "card").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 16) || "card";
-    const ctxPath = `/Users/heltonfraga/.buzz/.scratch/orgfy-context-${safeId}.json`;
+    const ctxPath = `${SCRATCH_ROOT}/orgfy-context-${safeId}.json`;
     const payload = JSON.stringify(
       {
         issueId: input.issueId,
@@ -1618,7 +1619,7 @@ export const MODEL_FAILOVER_CHAIN: ModelFailoverEntry[] = [
 ];
 
 const AGENT_STATE_DIR_DEFAULT =
-  "/Users/heltonfraga/Library/Application Support/xyz.block.buzz.desktop/agents/state";
+  ""; // Removido (R4.1): usar ctx.agents.snapshot()
 const FAILOVER_COOLDOWN_MS = 5 * 60 * 1000;
 
 export function isRateLimitOrProviderError(text: string): boolean {
@@ -1721,7 +1722,7 @@ export async function executeAgentModelFailover(
         previous: null,
         current: null,
         wokeAgent: false,
-        message: `Failover bloqueado (B4): ctx.agents.save indisponível ou agente ${agentKey} não encontrado (escrita direta em agents/state removida).`,
+        message: `Failover bloqueado (B4): ctx.agents.save indisponível ou agente ${agentKey} não encontrado (escrita direta em disco removida (R4.1)).`,
       };
     }
     const cfg = { ...(target.config && typeof target.config === "object" ? target.config : {}) };
@@ -1898,7 +1899,7 @@ export function registerGovernanceAgentHooks(ctx: Context): boolean {
         const agentPubkey = String(payload?.agentPubkey || payload?.pubkey || "").trim();
         const agentName = String(payload?.agentName || payload?.agent || "").trim();
         if ((agentPubkey || agentName) && isRateLimitOrProviderError(errText)) {
-          await executeSmartModelFailover(ctx, {
+          await requestModelFailover(ctx, {
             agente: agentName || undefined,
             agent_pubkey: agentPubkey || null,
             failed_model: payload?.model ? String(payload.model) : null,

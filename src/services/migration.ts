@@ -71,7 +71,7 @@ export async function executeAgentMigration(
   appendChunk("[MIGRATION] Sincronizando agentes OrgFy via ctx.agents.save() (B4)...\n");
 
   if (typeof ctx?.agents?.save !== "function") {
-    appendChunk("[ERRO] ctx.agents.save indisponível; escrita direta em agents/state desativada.\n");
+    appendChunk("[ERRO] ctx.agents.save indisponível; escrita direta em disco desativada (R4.1).\n");
     return { success: false, output: combinedOutput };
   }
 

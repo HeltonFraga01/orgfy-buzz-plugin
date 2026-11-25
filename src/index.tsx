@@ -143,13 +143,13 @@ export {
   resetTelemetryForTests,
 };
 import {
-  executeSmartModelFailover,
+  requestModelFailover,
   VERIFIED_TOOLCALL_FAILOVER_CHAIN,
   isUnsupportedAgentModel,
   ORGFY_FAILOVER_REQUEST_EVENT,
   reconcileAgentsViaBuzzApi,
 } from "./services/model-failover";
-export { VERIFIED_TOOLCALL_FAILOVER_CHAIN, isUnsupportedAgentModel, ORGFY_FAILOVER_REQUEST_EVENT, reconcileAgentsViaBuzzApi, executeSmartModelFailover };
+export { VERIFIED_TOOLCALL_FAILOVER_CHAIN, isUnsupportedAgentModel, ORGFY_FAILOVER_REQUEST_EVENT, reconcileAgentsViaBuzzApi, requestModelFailover };
 import {
   fetchResolvedArchive,
   searchResolvedArchive,
@@ -478,7 +478,7 @@ export function apply(ctx: Context) {
     const handleFailoverModelSession = React.useCallback(async (session: GooseLoopSession) => {
       setFailingOverSessionId(session.session_id);
       try {
-        const res = await executeSmartModelFailover(ctx, {
+        const res = await requestModelFailover(ctx, {
           agente: session.agente,
           agent_pubkey: session.agent_pubkey,
           prefer_free: true,

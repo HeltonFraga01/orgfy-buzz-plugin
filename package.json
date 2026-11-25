@@ -6,7 +6,8 @@
   "description": "Painel de controle, governan\u00e7a determin\u00edstica e orquestra\u00e7\u00e3o aut\u00f4noma da esteira OrgFy v10 para a Holding Cortexx.",
   "scripts": {
     "build": "tsc && vite build",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "test": "node --test verify_plugin.test.mjs"
   },
   "devDependencies": {
     "@buzz/author": "file:vendor/buzz-author-0.0.0-preview.1-89e2d15.tgz",

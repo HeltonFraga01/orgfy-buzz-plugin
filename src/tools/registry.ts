@@ -30,7 +30,7 @@ import {
   bindConversationContextForCard,
   stopAgentSession,
 } from "../services/governance-engine";
-import { executeSmartModelFailover, reconcileAgentsViaBuzzApi } from "../services/model-failover";
+import { requestModelFailover, reconcileAgentsViaBuzzApi } from "../services/model-failover";
 import { fetchResolvedArchive, searchResolvedArchive } from "../services/resolved-archive";
 import { createCanonicalCard } from "../services/card-creator";
 import { executeCardProgress } from "../services/card-progress";
@@ -538,7 +538,7 @@ export function buildUnifiedOrgfyTools(ctx: Context | any): UnifiedOrgfyTool[] {
         },
       },
       execute: async (args) => {
-        const res = await executeSmartModelFailover(ctx, {
+        const res = await requestModelFailover(ctx, {
           agente: args?.agente,
           agent_pubkey: args?.agent_pubkey,
           failed_model: args?.failed_model,
