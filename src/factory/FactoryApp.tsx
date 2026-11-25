@@ -474,6 +474,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                       ),
                     onSelectModeQuick: (mode) =>
                       handleControlUpdate({ mode }, `Modo alterado para ${PT_BR.modes[mode]}.`),
+                    onOpenChannelInBuzz: handleOpenChannelInBuzz,
                   })
             ),
             chatOpen &&

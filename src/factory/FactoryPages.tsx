@@ -36,6 +36,7 @@ export interface FactorySecondaryPagesProps {
   setSettingsForm: (patch: Partial<FactorySecondaryPagesProps["settingsForm"]>) => void;
   onSaveSettings: () => void;
   onSelectModeQuick: (mode: AutonomyMode) => void;
+  onOpenChannelInBuzz?: () => void;
 }
 
 const TENANTS = [
@@ -503,39 +504,137 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
     );
   }
 
-  // ── 6. VISÃO (routes/vision.tsx) ──
+  // ── 6. CANVAS / VISÃO & REGRAS INJETADAS (100% OrgFy: Board + Workspace/Canvas + Regras & Lições) ──
   if (tab === "vision") {
-    const sections = ["Objetivos (Goals)", "Usuários-alvo", "Princípios", "Fora de escopo", "Barra de qualidade"];
+    const ov = status.orgfyVision;
+    const invariantes = ov?.invariantes || [];
+    const cadeia = ov?.cadeiaComando || [];
+    const escalada = Object.entries(ov?.fluxoEscalada || {});
+    const regras = ov?.regrasProbatorias || [];
+    const papeis = Object.entries(ov?.papeis || {});
     return h(
       "div",
-      { className: "of-grid-2" },
+      { style: { display: "flex", flexDirection: "column", gap: "14px" } },
       h(
         "div",
-        { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "8px" } },
-        h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Visão do produto · ${tenant}`),
-        h("div", { className: "of-mono of-muted" }, "docs/VISION.md"),
+        { className: "of-card-pad", style: { display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "10px" } },
         h(
           "div",
-          { className: status.visionExists ? "of-surface" : "of-alert-banner", style: { padding: "12px" } },
-          status.visionExists
-            ? "Arquivo docs/VISION.md presente no repositório do tenant e lido pelos revisores e pelo Oráculo."
-            : "Arquivo docs/VISION.md ainda não existe neste tenant. Crie-o na raiz docs/VISION.md para habilitar o modo Dark Factory."
-        )
+          null,
+          h("div", { style: { fontSize: "14.5px", fontWeight: 700 } }, `Canvas, Visão & Regras Injetadas · ${tenant}`),
+          h("div", { className: "of-muted", style: { marginTop: "2px" } }, "Fontes reais do OrgFy: empresas/board.json (Conselho), PROJECT.md + AGENTS.md + Canvas do canal no Buzz (Workspace) e regras-probatorias.json + ctx.agents.addInstructions (Agentes).")
+        ),
+        props.onOpenChannelInBuzz &&
+          h(
+            "button",
+            { type: "button", className: "of-btn", "data-variant": "primary", onClick: props.onOpenChannelInBuzz },
+            "Abrir Canvas / Canal no Buzz ↗"
+          )
       ),
       h(
         "div",
-        { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "8px" } },
-        h("div", { className: "of-meter-label" }, "Seções esperadas (VisionPreview)"),
-        sections.map((s) =>
+        { className: "of-grid-2" },
+        h(
+          "section",
+          { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+          h("div", { className: "of-meter-label" }, "1. Visão da Holding / Conselho (empresas/board.json)"),
           h(
             "div",
-            { key: s, style: { display: "flex", alignItems: "center", gap: "8px", fontSize: "12.5px" } },
-            h("span", { className: "of-dot", "data-tone": status.visionExists ? "done" : "waiting" }),
-            h("span", null, s)
-          )
+            { style: { display: "flex", flexDirection: "column", gap: "6px" } },
+            h("strong", { style: { fontSize: "12.5px" } }, "Invariantes da Holding"),
+            invariantes.length === 0
+              ? h("div", { className: "of-muted" }, PT_BR.labels.unavailable)
+              : invariantes.map((inv, idx) =>
+                  h(
+                    "div",
+                    { key: idx, style: { display: "flex", alignItems: "flex-start", gap: "7px", fontSize: "12px" } },
+                    h("span", { className: "of-dot", "data-tone": "done", style: { marginTop: "5px" } }),
+                    h("span", null, inv)
+                  )
+                )
+          ),
+          cadeia.length > 0 &&
+            h(
+              "div",
+              { style: { display: "flex", flexDirection: "column", gap: "4px", paddingTop: "8px", borderTop: "1px solid var(--border)" } },
+              h("strong", { style: { fontSize: "12px" } }, "Cadeia de comando"),
+              cadeia.map((c, idx) => h("div", { key: idx, className: "of-muted", style: { fontSize: "11.5px" } }, `${idx + 1}. ${c}`))
+            ),
+          escalada.length > 0 &&
+            h(
+              "div",
+              { style: { display: "flex", flexDirection: "column", gap: "4px", paddingTop: "8px", borderTop: "1px solid var(--border)" } },
+              h("strong", { style: { fontSize: "12px" } }, "Fluxo de escalada"),
+              escalada.map(([k, v]) => h("div", { key: k, className: "of-muted", style: { fontSize: "11px" } }, h("span", { className: "of-mono", style: { color: "var(--foreground)" } }, `${k}: `), String(v)))
+            )
         ),
-        h("div", { className: "of-meter-label", style: { marginTop: "8px" } }, "Áreas protegidas"),
-        h("div", { className: "of-muted" }, "Mudanças em áreas protegidas nunca recebem auto-merge e sempre vão para sua decisão na Inbox.")
+        h(
+          "section",
+          { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+          h("div", { className: "of-meter-label" }, `2. Workspace & Canvas (${tenant})`),
+          papeis.length > 0 &&
+            h(
+              "div",
+              { style: { display: "flex", flexWrap: "wrap", gap: "6px" } },
+              papeis.map(([papel, agente]) =>
+                h("span", { key: papel, className: "of-pill" }, `${papel}: ${agente}`)
+              )
+            ),
+          h(
+            "div",
+            { className: "of-surface", style: { padding: "10px 12px" } },
+            h("div", { className: "of-mono", style: { fontSize: "10.5px", color: "var(--primary)", marginBottom: "6px" } }, "PROJECT.md"),
+            h(
+              "pre",
+              { className: "of-muted", style: { margin: 0, whiteSpace: "pre-wrap", fontSize: "11px", maxHeight: "180px", overflowY: "auto", fontFamily: "inherit", lineHeight: 1.45 } },
+              ov?.projectMd || "PROJECT.md não encontrado no diretório raiz."
+            )
+          ),
+          h(
+            "div",
+            { className: "of-surface", style: { padding: "10px 12px" } },
+            h("div", { className: "of-mono", style: { fontSize: "10.5px", color: "var(--primary)", marginBottom: "6px" } }, "AGENTS.md"),
+            h(
+              "pre",
+              { className: "of-muted", style: { margin: 0, whiteSpace: "pre-wrap", fontSize: "11px", maxHeight: "160px", overflowY: "auto", fontFamily: "inherit", lineHeight: 1.45 } },
+              ov?.agentsMd || "AGENTS.md não encontrado no diretório raiz."
+            )
+          )
+        )
+      ),
+      h(
+        "section",
+        { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+        h("div", { className: "of-meter-label" }, "3. Regras Probatórias (regras-probatorias.json) & Injeção nos Prompts (ctx.agents.addInstructions)"),
+        regras.length === 0
+          ? h("div", { className: "of-muted" }, "Nenhuma regra probatória pendente em .esteira/estado/regras-probatorias.json (invariantes permanentes ativos em licoes/ e <plugin-instructions>).")
+          : h(
+              "table",
+              { className: "of-table" },
+              h("thead", null, h("tr", null, h("th", null, "Regra"), h("th", null, "Descrição"), h("th", null, "Janela"), h("th", null, "Status"))),
+              h(
+                "tbody",
+                null,
+                regras.map((r) =>
+                  h(
+                    "tr",
+                    { key: r.id },
+                    h("td", { className: "of-mono" }, r.id),
+                    h("td", null, r.descricao),
+                    h("td", { className: "of-mono" }, `${r.cardsAvaliados}/${r.janelaAlvo}`),
+                    h("td", null, h("span", { className: "of-pill", "data-tone": "done" }, r.status))
+                  )
+                )
+              )
+            ),
+        h(
+          "div",
+          { className: "of-surface", style: { padding: "10px 12px", fontSize: "11.5px", lineHeight: 1.5 } },
+          h("div", { className: "of-mono", style: { fontSize: "10.5px", color: "var(--primary)", marginBottom: "4px" } }, "Injetado automaticamente em todos os agentes via ctx.agents.addInstructions (orgfy-governance-v13-lean):"),
+          h("div", { className: "of-muted" }, "• Invariantes L-01 (Executor ≠ Revisor), L-22 (Aceite congelado por SHA-256), L-90 (Catraca de não-regressão) e Specsfy + TDD (Z2/Z3/Z4)."),
+          h("div", { className: "of-muted" }, "• Guarda de Identidade (@menção) + Freio Anti-Loop (máx. 12 shells sem commit / 2 falhas consecutivas -> BLOQUEADO)."),
+          h("div", { className: "of-muted" }, "• Regras específicas por papel: Executor (worktree isolado), Revisor (GATE objetivo), COO (roster_live + smart_dispatch + auto-cura) e CEO/Board (alvo fechado).")
+        )
       )
     );
   }

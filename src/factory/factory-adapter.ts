@@ -98,6 +98,16 @@ export interface FactoryStatusPayload {
     higiene?: Record<string, any> | null;
   };
   modelos?: AgentModelEvalRow[];
+  orgfyVision?: {
+    projectMd: string | null;
+    agentsMd: string | null;
+    invariantes: string[];
+    cadeiaComando: string[];
+    fluxoEscalada: Record<string, string>;
+    regrasProbatorias: Array<{ id: string; descricao: string; status: string; cardsAvaliados: number; janelaAlvo: number }>;
+    canalBuzz: string | null;
+    papeis: Record<string, string>;
+  };
   indisponivel: string[];
 }
 
@@ -204,12 +214,15 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
   const base = buildEmptyFactoryStatus(slug);
   const host = (ctx as any)?.host;
 
-  const [kpiRes, cards, empresaJson, evalMd, visionMd] = await Promise.all([
+  const [kpiRes, cards, empresaJson, boardJson, evalMd, projectMd, agentsMd, regrasJson] = await Promise.all([
     fetchKpisEsteira(ctx).catch(() => ({ kpis: null, history: [], error: null })),
     fetchLiveKanbanCards(ctx, { empresa: slug }).catch(() => []),
     readOrgfyJson<any>(ctx, `empresas/${slug}.json`, null).catch(() => null),
+    readOrgfyJson<any>(ctx, "empresas/board.json", null).catch(() => null),
     readOrgfyText(ctx, "docs/eval-modelos-onda5.md").catch(() => null),
-    readOrgfyText(ctx, "docs/VISION.md").catch(() => null),
+    readOrgfyText(ctx, "PROJECT.md").catch(() => null),
+    readOrgfyText(ctx, "AGENTS.md").catch(() => null),
+    readOrgfyJson<any>(ctx, ".esteira/estado/regras-probatorias.json", null).catch(() => null),
   ]);
 
   let controle: Record<string, any> | null = null;
@@ -326,7 +339,23 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
     inProgress,
     recent,
     viewRecent: recent,
-    visionExists: Boolean(visionMd && visionMd.trim().length > 0),
+    visionExists: Boolean(projectMd || boardJson || empresaJson),
+    orgfyVision: {
+      projectMd: projectMd ? projectMd.slice(0, 2400) : null,
+      agentsMd: agentsMd ? agentsMd.slice(0, 2400) : null,
+      invariantes: Array.isArray(boardJson?.protocolo_governanca?.invariantes) ? boardJson.protocolo_governanca.invariantes : [],
+      cadeiaComando: Array.isArray(boardJson?.protocolo_governanca?.cadeia_comando) ? boardJson.protocolo_governanca.cadeia_comando : [],
+      fluxoEscalada: boardJson?.fluxo_escalada && typeof boardJson.fluxo_escalada === "object" ? boardJson.fluxo_escalada : {},
+      regrasProbatorias: Object.entries((regrasJson?.regras || {}) as Record<string, any>).map(([id, r]) => ({
+        id,
+        descricao: String(r?.descricao || id),
+        status: String(r?.status || "ATIVA"),
+        cardsAvaliados: Number(r?.cards_avaliados || 0),
+        janelaAlvo: Number(r?.janela_alvo || 10),
+      })),
+      canalBuzz: typeof empresaJson?.canal === "string" ? empresaJson.canal : null,
+      papeis: empresaJson?.papeis && typeof empresaJson.papeis === "object" ? empresaJson.papeis : {},
+    },
     lastTickAt: Date.now(),
     coordenador: killSwitch ? "parado" : "ativo",
     kpis: kpis
