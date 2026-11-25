@@ -66,8 +66,9 @@ export async function reconcileAgentsViaBuzzApi(
       isUnsupportedAgentModel(mlow) ||
       (prov === "nexusmind_openai" && mlow.startsWith("antigravity/"));
     if (!needsFix) continue;
-    const nextModel = mlow.includes("flash") || mlow.includes("haiku") ? "claude-haiku-5-5" : "claude-sonnet-4-6";
-    const nextProv = "nexusmind_anthropic";
+    const isFastTarget = mlow.includes("flash") || mlow.includes("haiku");
+    const nextModel = isFastTarget ? "gemini-2.5-flash" : "claude-sonnet-4-6";
+    const nextProv = isFastTarget ? "nexusmind_antigravity" : "nexusmind_anthropic";
     if (!opts.dryRun && typeof agentsApi?.save === "function") {
       await agentsApi.save(ag.key, { config: { ...cfg, provider: nextProv, model: nextModel } });
     }
@@ -83,13 +84,11 @@ interface ProviderGroupConfig {
   isAnthropic: boolean;
 }
 
-// B3: Cadeia de failover verificada com tool_call real (probe 2026-11-25).
-// Exclui grok-4.5 (HTTP 503) e mistralai/mistral-large-4-1t-a52b (timeout >20s com tool_choice).
+// R5.1 (docs/eval-modelos-onda5.md): apenas os 2 modelos com 10/10 tool_call em 10 cards reais.
+// Exclui gemini-3.8-flash-medium (0/10 tool_call), claude-haiku-5-5 (2/10), grok-4.5 (503) e mistral-large-4-1t-a52b (timeout >20s).
 export const VERIFIED_TOOLCALL_FAILOVER_CHAIN = [
-  { model: "claude-sonnet-4-6", provider: "nexusmind_anthropic", measuredLatencyMs: 2947, role: "primary_execution" },
-  { model: "claude-haiku-5-5", provider: "nexusmind_anthropic", measuredLatencyMs: 1800, role: "fast_execution" },
-  { model: "gemini-2.5-flash", provider: "nexusmind_antigravity", measuredLatencyMs: 1977, role: "secondary_fast" },
-  { model: "gemini-3.8-flash-medium", provider: "nexusmind_antigravity", measuredLatencyMs: 2986, role: "last_resort" },
+  { model: "gemini-2.5-flash", provider: "nexusmind_antigravity", measuredLatencyMs: 1945, toolCallRate: "10/10", cost10CardsUsd: 0.0022, role: "fast_cost_effective" },
+  { model: "claude-sonnet-4-6", provider: "nexusmind_anthropic", measuredLatencyMs: 4314, toolCallRate: "10/10", cost10CardsUsd: 0.0815, role: "primary_quality" },
 ] as const;
 
 const NEXUSMIND_PROVIDERS: ProviderGroupConfig[] = [

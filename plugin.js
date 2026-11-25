@@ -1335,8 +1335,9 @@ async function reconcileAgentsViaBuzzApi(ctx, opts = {}) {
     const mlow = String(model || "").trim().toLowerCase();
     const needsFix = !prov || !model || isFreeModelId(mlow) || isUnsupportedAgentModel(mlow) || prov === "nexusmind_openai" && mlow.startsWith("antigravity/");
     if (!needsFix) continue;
-    const nextModel = mlow.includes("flash") || mlow.includes("haiku") ? "claude-haiku-5-5" : "claude-sonnet-4-6";
-    const nextProv = "nexusmind_anthropic";
+    const isFastTarget = mlow.includes("flash") || mlow.includes("haiku");
+    const nextModel = isFastTarget ? "gemini-2.5-flash" : "claude-sonnet-4-6";
+    const nextProv = isFastTarget ? "nexusmind_antigravity" : "nexusmind_anthropic";
     if (!opts.dryRun && typeof (agentsApi == null ? void 0 : agentsApi.save) === "function") {
       await agentsApi.save(ag.key, { config: { ...cfg, provider: nextProv, model: nextModel } });
     }
@@ -1345,10 +1346,8 @@ async function reconcileAgentsViaBuzzApi(ctx, opts = {}) {
   return { total: list.length, updated };
 }
 const VERIFIED_TOOLCALL_FAILOVER_CHAIN = [
-  { model: "claude-sonnet-4-6", provider: "nexusmind_anthropic", measuredLatencyMs: 2947, role: "primary_execution" },
-  { model: "claude-haiku-5-5", provider: "nexusmind_anthropic", measuredLatencyMs: 1800, role: "fast_execution" },
-  { model: "gemini-2.5-flash", provider: "nexusmind_antigravity", measuredLatencyMs: 1977, role: "secondary_fast" },
-  { model: "gemini-3.8-flash-medium", provider: "nexusmind_antigravity", measuredLatencyMs: 2986, role: "last_resort" }
+  { model: "gemini-2.5-flash", provider: "nexusmind_antigravity", measuredLatencyMs: 1945, toolCallRate: "10/10", cost10CardsUsd: 22e-4, role: "fast_cost_effective" },
+  { model: "claude-sonnet-4-6", provider: "nexusmind_anthropic", measuredLatencyMs: 4314, toolCallRate: "10/10", cost10CardsUsd: 0.0815, role: "primary_quality" }
 ];
 const NEXUSMIND_PROVIDERS = [
   {

@@ -1459,14 +1459,12 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     cleaned: cleanup.lockReleased,
   }));
 
-  // B3: Cadeia de failover verificada com tool_call real (probe 2026-11-25)
-  assert.ok(Array.isArray(orgfyMod.VERIFIED_TOOLCALL_FAILOVER_CHAIN), "B3: VERIFIED_TOOLCALL_FAILOVER_CHAIN deve ser exportada");
+  // R5.1: Cadeia de failover baseada no eval real de 10 cards (docs/eval-modelos-onda5.md)
+  assert.ok(Array.isArray(orgfyMod.VERIFIED_TOOLCALL_FAILOVER_CHAIN), "R5.1: VERIFIED_TOOLCALL_FAILOVER_CHAIN deve ser exportada");
   const chainModels = orgfyMod.VERIFIED_TOOLCALL_FAILOVER_CHAIN.map((c) => c.model);
   assert.deepEqual(chainModels, [
-    "claude-sonnet-4-6",
-    "claude-haiku-5-5",
     "gemini-2.5-flash",
-    "gemini-3.8-flash-medium",
+    "claude-sonnet-4-6",
   ]);
   assert.equal(orgfyMod.isUnsupportedAgentModel("grok-4.5"), true, "B3: grok-4.5 (503) deve ser bloqueado no failover");
   assert.equal(
