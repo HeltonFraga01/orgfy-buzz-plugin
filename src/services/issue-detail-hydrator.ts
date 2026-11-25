@@ -46,10 +46,9 @@ export interface HydratedIssueDetail {
   progress: CardProgressSummary | null;
 }
 
-const ORGFY_REPO_ROOT = "/Users/heltonfraga/.buzz/REPOS/orgfy";
-const SCRATCH_ROOT = "/Users/heltonfraga/.buzz/.scratch";
+import { ORGFY_REPO_ROOT, SCRATCH_ROOT } from "../config";
 const BUZZ_AGENTS_DIR =
-  "/Users/heltonfraga/Library/Application Support/xyz.block.buzz.desktop/agents";
+  "" /* R4.1: usar ctx.agents.snapshot() */;
 
 function decodeBytes(raw: unknown): string {
   if (typeof raw === "string") return raw;
@@ -190,7 +189,7 @@ export async function hydrateIssueDetail(
   const lockActive = Boolean(lockRec && typeof lockRec.expiresAt === "number" && lockRec.expiresAt > nowMs);
   const lockExpiresInMin = lockActive ? Math.max(1, Math.round((lockRec.expiresAt - nowMs) / 60000)) : null;
 
-  // Modelo real do executor no Buzz Desktop (agents/state/buzz.agent.v1%3A<pubkey>)
+  // Modelo real do executor no Buzz Desktop (via ctx.agents.snapshot())
   let executorProvider: string | null = null;
   let executorModel: string | null = null;
   const execName = String(card.executor || lockRec?.agentKey || "").trim();

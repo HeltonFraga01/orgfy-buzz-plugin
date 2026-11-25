@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// ORGFY BOOTSTRAP SERVICE (B1/B4 — ZERO BASH, ZERO agents/state, ZERO porteiro.py)
+// ORGFY BOOTSTRAP SERVICE (B1/B4 — ZERO BASH, ZERO escrita direta em estado de agentes, ZERO porteiro.py)
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { ORGFY_ABS_PATH } from "./orgfy-bridge";
@@ -92,7 +92,7 @@ export async function executeBootstrapFlow(
     update("nostr_channel", "error", `Falha ao listar canais: ${err?.message || err}`);
   }
 
-  // 4. Reconciliação via ctx.agents API (B4: sem migrar_agentes_buzz.py nem escrita em agents/state)
+  // 4. Reconciliação via ctx.agents API (B4: sem migrar_agentes_buzz.py nem escrita direta em disco)
   update("canonical_agents", "running", "Verificando agentes registrados via ctx.agents...");
   try {
     const existing = await checkExistingConfiguration(ctx);
@@ -100,7 +100,7 @@ export async function executeBootstrapFlow(
       "canonical_agents",
       "success",
       existing.exists
-        ? `${existing.agentCount} agentes detectados via ctx.agents.snapshot() (sem escrita direta em agents/state).`
+        ? `${existing.agentCount} agentes detectados via ctx.agents.snapshot() (sem escrita direta em disco).`
         : "Nenhum agente detectado no snapshot; crie agentes pela API nativa do Buzz."
     );
   } catch (err: any) {

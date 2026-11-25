@@ -12,7 +12,8 @@ import type {
   PipelineCard,
 } from "../types/orgfy";
 
-export const ORGFY_ABS_PATH = "/Users/heltonfraga/.buzz/REPOS/orgfy";
+import { ORGFY_REPO_ROOT, BUZZ_ROOT, SCRATCH_ROOT, ORGFY_VAULT_ENV_PATH } from "../config";
+export const ORGFY_ABS_PATH = ORGFY_REPO_ROOT;
 
 /**
  * Lê e decodifica arquivo JSON de forma segura com fallback resiliente.
@@ -38,7 +39,7 @@ export async function readOrgfyJson<T>(ctx: any, relativePath: string, fallback:
     } catch (_err) {}
     try {
       if (relativePath.includes(".scratch/")) {
-        const userScratch = `/Users/heltonfraga/.buzz/${relativePath}`;
+        const userScratch = `${BUZZ_ROOT}/${relativePath}`;
         const raw = await ctx.host.readFile(userScratch);
         const text = typeof raw === "string" ? raw : new TextDecoder().decode(raw);
         return JSON.parse(text) as T;
@@ -66,7 +67,7 @@ export async function readOrgfyText(ctx: any, relativePath: string): Promise<str
     } catch (_err) {}
     try {
       if (relativePath.includes(".scratch/")) {
-        const userScratch = `/Users/heltonfraga/.buzz/${relativePath}`;
+        const userScratch = `${BUZZ_ROOT}/${relativePath}`;
         const raw = await ctx.host.readFile(userScratch);
         return typeof raw === "string" ? raw : new TextDecoder().decode(raw);
       }
@@ -271,7 +272,7 @@ export async function fetchLiveKanbanSnapshot(
   }
   try {
     if (ctx?.host?.readFile) {
-      const rawTrans = await ctx.host.readFile("/Users/heltonfraga/.buzz/.scratch/esteira-transicoes.jsonl");
+      const rawTrans = await ctx.host.readFile(`${SCRATCH_ROOT}/esteira-transicoes.jsonl`);
       const transTxt =
         typeof rawTrans === "string"
           ? rawTrans
@@ -515,7 +516,7 @@ export async function fetchLiveKanbanSnapshot(
 
   try {
     if (ctx?.host?.readFile) {
-      const rawLocks = await ctx.host.readFile("/Users/heltonfraga/.buzz/.scratch/orgfy-locks.json");
+      const rawLocks = await ctx.host.readFile(`${SCRATCH_ROOT}/orgfy-locks.json`);
       const lockTxt =
         typeof rawLocks === "string"
           ? rawLocks
@@ -754,7 +755,7 @@ export async function fetchLiveKanbanSnapshot(
     };
 
     if (ctx?.host?.readFile) {
-      const rawIdx = await ctx.host.readFile("/Users/heltonfraga/.buzz/.scratch/orgfy-cards-index.json");
+      const rawIdx = await ctx.host.readFile(`${SCRATCH_ROOT}/orgfy-cards-index.json`);
       const idxTxt =
         typeof rawIdx === "string"
           ? rawIdx
@@ -962,9 +963,9 @@ export async function buildOrgfyStatus(ctx: any, empresa?: string) {
 
 /**
  * Executa o comando determinístico de Despacho via `ctx.host.spawn` com bash.
- * cd /Users/heltonfraga/.buzz/REPOS/orgfy && python3 ferramentas/esteira/despachar --empresa <slug> <ISSUE_ID> "<EXECUTOR>" "<REVISOR>"
+ * cd ~/.buzz/REPOS/orgfy && python3 ferramentas/esteira/despachar --empresa <slug> <ISSUE_ID> "<EXECUTOR>" "<REVISOR>"
  */
-const SENTINELA_ENV_PATH = "/Users/heltonfraga/.buzz/vault-forense/sentinela-esteira.env";
+const SENTINELA_ENV_PATH = ORGFY_VAULT_ENV_PATH;
 
 function shQuote(arg: string): string {
   return `'${String(arg).replace(/'/g, `'"'"'`)}'`;
@@ -1054,7 +1055,7 @@ export async function executeDespachar(
 
 /**
  * Executa o comando determinístico de Gate (Aceite ou Recusa) via `ctx.host.spawn` com bash.
- * cd /Users/heltonfraga/.buzz/REPOS/orgfy && python3 ferramentas/esteira/gate --empresa <slug> <PR_ID> aceito|recusado "<motivo>" --revisor "<NOME>"
+ * cd ~/.buzz/REPOS/orgfy && python3 ferramentas/esteira/gate --empresa <slug> <PR_ID> aceito|recusado "<motivo>" --revisor "<NOME>"
  */
 export async function executeGate(
   ctx: any,
@@ -1111,7 +1112,7 @@ export async function executeGate(
 
 /**
  * Executa uma rodada única do Porteiro via `ctx.host.spawn` com bash.
- * cd /Users/heltonfraga/.buzz/REPOS/orgfy && python3 ferramentas/esteira/porteiro.py --empresa <slug> --uma-vez
+ * cd ~/.buzz/REPOS/orgfy && python3 ferramentas/esteira/porteiro.py --empresa <slug> --uma-vez
  */
 export async function executePorteiroSync(
   ctx: any,

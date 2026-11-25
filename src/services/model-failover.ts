@@ -1,3 +1,4 @@
+import { joinHome } from "../config";
 import type { Context } from "@buzz/author";
 
 export interface ModelCandidateScore {
@@ -114,14 +115,14 @@ const NEXUSMIND_PROVIDERS: ProviderGroupConfig[] = [
 
 const DEFAULT_ORGFY_CHANNEL = "e445491d-2fb3-4ebd-8e2e-f6813c33fb03";
 const SHARED_RANKING_PATHS = [
-  "/Users/heltonfraga/.buzz/.scratch/nexusmind-model-ranking.json",
+  joinHome(".buzz", ".scratch", "nexusmind-model-ranking.json"),
   "~/.buzz/.scratch/nexusmind-model-ranking.json",
 ];
 const SHARED_USAGE_PATHS = [
-  "/Users/heltonfraga/.buzz/.scratch/nm_usage.json",
+  joinHome(".buzz", ".scratch", "nm_usage.json"),
   "~/.buzz/.scratch/nm_usage.json",
 ];
-export const MODEL_QUARANTINE_PATH = "/Users/heltonfraga/.buzz/.scratch/orgfy-model-quarantine.json";
+export const MODEL_QUARANTINE_PATH = joinHome(".buzz", ".scratch", "orgfy-model-quarantine.json");
 const BACKOFF_TTL_STEPS_MS = [5 * 60 * 1000, 15 * 60 * 1000, 45 * 60 * 1000];
 
 export interface QuarantinedModelRecord {
@@ -988,5 +989,73 @@ export async function executeSmartModelFailover(
     message:
       applyNote ||
       `Melhor modelo disponível (${preferFree ? "FREE" : "PRODUÇÃO"}): ${winner.model} (${winner.provider} · ${sourceTag}).`,
+  };
+}
+
+
+/**
+ * R4.6 (Failover Único no NexusMind): OrgFy apenas emite o evento `orgfy.failover.requested`
+ * sem decidir nem mutar modelos diretamente.
+ */
+export async function requestModelFailover(
+  ctx: Context,
+  input: {
+    agente?: string;
+    agent_pubkey?: string | null;
+    failed_model?: string | null;
+    reason?: string;
+    prefer_free?: boolean;
+    apply?: boolean;
+    retrigger?: boolean;
+    retrigger_text?: string;
+    channel_id?: string | null;
+    thread_root?: string | null;
+    max_probes?: number;
+    [key: string]: unknown;
+  }
+): Promise<{
+  ok: boolean;
+  delegated: boolean;
+  event: string;
+  agente: string;
+  previousModel: string | null;
+  selectedModel: string | null;
+  candidatesTested: number;
+  retriggered: boolean;
+  message: string;
+}> {
+  const detail = {
+    source: "digital.cortexx.orgfy",
+    agente: input.agente,
+    agent_pubkey: input.agent_pubkey || null,
+    failed_model: input.failed_model || null,
+    reason: input.reason || "provider_error",
+    channel_id: input.channel_id || null,
+    thread_root: input.thread_root || null,
+    ts: Date.now(),
+  };
+  let dispatched = false;
+  try {
+    const emitter = (ctx as any)?.events?.emit || (ctx as any)?.bus?.emit;
+    if (typeof emitter === "function") {
+      await emitter(ORGFY_FAILOVER_REQUEST_EVENT, detail);
+      dispatched = true;
+    } else if (typeof globalThis !== "undefined" && typeof (globalThis as any).dispatchEvent === "function" && typeof CustomEvent === "function") {
+      (globalThis as any).dispatchEvent(new CustomEvent(ORGFY_FAILOVER_REQUEST_EVENT, { detail }));
+      dispatched = true;
+    }
+  } catch {
+    // Evento best-effort
+  }
+  return {
+    ok: true,
+    delegated: true,
+    event: ORGFY_FAILOVER_REQUEST_EVENT,
+    agente: input.agente || "unknown",
+    previousModel: input.failed_model || null,
+    selectedModel: null,
+    candidatesTested: 0,
+    retriggered: false,
+    message: `Failover delegado ao NexusMind via evento ${ORGFY_FAILOVER_REQUEST_EVENT} (${input.agente}${dispatched ? "" : " — aguardando listener NexusMind"}).`,
   };
 }

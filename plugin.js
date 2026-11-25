@@ -1,4 +1,45 @@
-const ORGFY_ABS_PATH = "/Users/heltonfraga/.buzz/REPOS/orgfy";
+function resolveHomeDir() {
+  var _a;
+  try {
+    const env = (_a = globalThis == null ? void 0 : globalThis.process) == null ? void 0 : _a.env;
+    if ((env == null ? void 0 : env.ORGFY_HOME) && String(env.ORGFY_HOME).trim()) {
+      return String(env.ORGFY_HOME).trim().replace(/\/+$/, "");
+    }
+    if ((env == null ? void 0 : env.HOME) && String(env.HOME).trim()) {
+      return String(env.HOME).trim().replace(/\/+$/, "");
+    }
+  } catch {
+  }
+  try {
+    const stored = typeof localStorage !== "undefined" ? localStorage.getItem("orgfy_home_dir") : null;
+    if (stored && stored.trim()) return stored.trim().replace(/\/+$/, "");
+  } catch {
+  }
+  return "~";
+}
+function joinHome(...parts) {
+  const base = resolveHomeDir();
+  const clean = parts.map((p) => p.replace(/^\/+|\/+$/g, "")).filter(Boolean);
+  return [base, ...clean].join("/");
+}
+const BUZZ_ROOT = joinHome(".buzz");
+const SCRATCH_ROOT = joinHome(".buzz", ".scratch");
+const ORGFY_REPO_ROOT = joinHome(".buzz", "REPOS", "orgfy");
+joinHome(".buzz", "REPOS", "orgfy-buzz-plugin");
+const ORGFY_ESTADO_DIR = joinHome(".buzz", "REPOS", "orgfy", ".esteira", "estado");
+const ORGFY_EMPRESAS_DIR = joinHome(".buzz", "REPOS", "orgfy", "empresas");
+const ORGFY_CARDS_DIR = joinHome(".buzz", "REPOS", "orgfy", "cards");
+joinHome(".buzz", "vault-forense", "sentinela-esteira.env");
+const KPI_SNAPSHOT_PATH = joinHome(".buzz", ".scratch", "kpis-esteira.json");
+const KPI_SCRIPT_PATH = joinHome(".buzz", "REPOS", "orgfy", "ferramentas", "esteira", "gerar_kpis_esteira.py");
+const GOOSE_LOOP_RADAR_SCRIPT_PATH = joinHome(".buzz", "REPOS", "orgfy-buzz-plugin", "scripts", "goose_loop_radar.py");
+const GOOSE_LOOP_RADAR_SNAPSHOT_PATH = joinHome(".buzz", ".scratch", "goose-loop-radar.json");
+const FABRICA_STATUS_SCRIPT_PATH = joinHome(".buzz", "REPOS", "orgfy", "ferramentas", "esteira", "fabrica_status.py");
+function getControlePath(tenant) {
+  const slug = tenant.trim().toLowerCase() || "orgfy";
+  return joinHome(".buzz", "REPOS", "orgfy", ".esteira", "estado", `controle-${slug}.json`);
+}
+const ORGFY_ABS_PATH = ORGFY_REPO_ROOT;
 async function readOrgfyJson(ctx, relativePath, fallback) {
   var _a;
   if (!((_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.readFile)) {
@@ -21,7 +62,7 @@ async function readOrgfyJson(ctx, relativePath, fallback) {
     }
     try {
       if (relativePath.includes(".scratch/")) {
-        const userScratch = `/Users/heltonfraga/.buzz/${relativePath}`;
+        const userScratch = `${BUZZ_ROOT}/${relativePath}`;
         const raw = await ctx.host.readFile(userScratch);
         const text = typeof raw === "string" ? raw : new TextDecoder().decode(raw);
         return JSON.parse(text);
@@ -51,7 +92,7 @@ async function readOrgfyText(ctx, relativePath) {
     }
     try {
       if (relativePath.includes(".scratch/")) {
-        const userScratch = `/Users/heltonfraga/.buzz/${relativePath}`;
+        const userScratch = `${BUZZ_ROOT}/${relativePath}`;
         const raw = await ctx.host.readFile(userScratch);
         return typeof raw === "string" ? raw : new TextDecoder().decode(raw);
       }
@@ -182,7 +223,7 @@ async function fetchLiveKanbanSnapshot(ctx, filter) {
   }
   try {
     if ((_e = ctx == null ? void 0 : ctx.host) == null ? void 0 : _e.readFile) {
-      const rawTrans = await ctx.host.readFile("/Users/heltonfraga/.buzz/.scratch/esteira-transicoes.jsonl");
+      const rawTrans = await ctx.host.readFile(`${SCRATCH_ROOT}/esteira-transicoes.jsonl`);
       const transTxt = typeof rawTrans === "string" ? rawTrans : rawTrans instanceof Uint8Array ? new TextDecoder("utf-8").decode(rawTrans) : String(rawTrans ?? "");
       for (const line of transTxt.split("\n")) {
         if (!line.trim()) continue;
@@ -367,7 +408,7 @@ async function fetchLiveKanbanSnapshot(ctx, filter) {
   };
   try {
     if ((_g = ctx == null ? void 0 : ctx.host) == null ? void 0 : _g.readFile) {
-      const rawLocks = await ctx.host.readFile("/Users/heltonfraga/.buzz/.scratch/orgfy-locks.json");
+      const rawLocks = await ctx.host.readFile(`${SCRATCH_ROOT}/orgfy-locks.json`);
       const lockTxt = typeof rawLocks === "string" ? rawLocks : rawLocks instanceof Uint8Array ? new TextDecoder("utf-8").decode(rawLocks) : String(rawLocks ?? "");
       const parsedLocks = JSON.parse(lockTxt);
       const nowMs = Date.now();
@@ -558,7 +599,7 @@ async function fetchLiveKanbanSnapshot(ctx, filter) {
       };
     };
     if ((_j = ctx == null ? void 0 : ctx.host) == null ? void 0 : _j.readFile) {
-      const rawIdx = await ctx.host.readFile("/Users/heltonfraga/.buzz/.scratch/orgfy-cards-index.json");
+      const rawIdx = await ctx.host.readFile(`${SCRATCH_ROOT}/orgfy-cards-index.json`);
       const idxTxt = typeof rawIdx === "string" ? rawIdx : rawIdx instanceof Uint8Array ? new TextDecoder("utf-8").decode(rawIdx) : String(rawIdx ?? "");
       const parsedIdx = JSON.parse(idxTxt);
       if (parsedIdx && typeof parsedIdx === "object" && !Array.isArray(parsedIdx)) {
@@ -1103,7 +1144,7 @@ async function executeBootstrapFlow(ctx, onStepUpdate) {
     update(
       "canonical_agents",
       "success",
-      existing.exists ? `${existing.agentCount} agentes detectados via ctx.agents.snapshot() (sem escrita direta em agents/state).` : "Nenhum agente detectado no snapshot; crie agentes pela API nativa do Buzz."
+      existing.exists ? `${existing.agentCount} agentes detectados via ctx.agents.snapshot() (sem escrita direta em disco).` : "Nenhum agente detectado no snapshot; crie agentes pela API nativa do Buzz."
     );
   } catch (err) {
     update("canonical_agents", "error", `Erro ao consultar agentes: ${(err == null ? void 0 : err.message) || err}`);
@@ -1111,8 +1152,6 @@ async function executeBootstrapFlow(ctx, onStepUpdate) {
   update("porteiro_daemon", "success", "Coordenador ativo: esteira_minima.py via LaunchAgent (porteiro.py removido).");
   return { success: true, log: logBuffer };
 }
-const KPI_SNAPSHOT_PATH = "/Users/heltonfraga/.buzz/.scratch/kpis-esteira.json";
-const KPI_SCRIPT_PATH = "/Users/heltonfraga/.buzz/REPOS/orgfy/ferramentas/esteira/gerar_kpis_esteira.py";
 const ARTIFACT_COLLECTION = "orgfy_kpi_history_v1";
 const LOCAL_STORAGE_KEY = "orgfy_kpi_history_v1";
 const MAX_HISTORY_POINTS = 60;
@@ -1233,7 +1272,7 @@ async function recalculateKpisNow(ctx) {
       const res = await host.exec("python", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
       output = [res == null ? void 0 : res.stdout, res == null ? void 0 : res.stderr].filter(Boolean).join("\n").trim();
     } else if (host == null ? void 0 : host.spawn) {
-      const proc = await host.spawn("python", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
+      const proc = await host.spawn("python", { args: [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH] });
       if (proc == null ? void 0 : proc.exited) {
         await proc.exited;
       }
@@ -1249,8 +1288,6 @@ async function recalculateKpisNow(ctx) {
     result
   };
 }
-const GOOSE_LOOP_RADAR_SCRIPT_PATH = "/Users/heltonfraga/.buzz/REPOS/orgfy-buzz-plugin/scripts/goose_loop_radar.py";
-const GOOSE_LOOP_RADAR_SNAPSHOT_PATH = "/Users/heltonfraga/.buzz/.scratch/goose-loop-radar.json";
 async function fetchGooseLoopRadar(ctx) {
   const host = ctx.host;
   const empty = {
@@ -1349,115 +1386,15 @@ const VERIFIED_TOOLCALL_FAILOVER_CHAIN = [
   { model: "gemini-2.5-flash", provider: "nexusmind_antigravity", measuredLatencyMs: 1945, toolCallRate: "10/10", cost10CardsUsd: 22e-4, role: "fast_cost_effective" },
   { model: "claude-sonnet-4-6", provider: "nexusmind_anthropic", measuredLatencyMs: 4314, toolCallRate: "10/10", cost10CardsUsd: 0.0815, role: "primary_quality" }
 ];
-const NEXUSMIND_PROVIDERS = [
-  {
-    id: "nexusmind_anthropic",
-    apiKey: "sk-bd4137aa79f121bbf4e110d788a7f587b68b49432d333ad9abd88051ba393b1c",
-    baseUrl: "https://api.nexusmind.digital",
-    isAnthropic: true
-  },
-  {
-    id: "nexusmind_antigravity",
-    apiKey: "sk-cf8ffed3d96eff9ca80093aee98c589dcf67cf6932c76cd45e223429204051a0",
-    baseUrl: "https://api.nexusmind.digital/v1",
-    isAnthropic: false
-  },
-  {
-    id: "nexusmind_openai",
-    apiKey: "sk-2ee0581e607d02f3485e0efcad2ff686e2b889720f63497813b8fb45eb9d0f08",
-    baseUrl: "https://api.nexusmind.digital/v1",
-    isAnthropic: false
-  }
-];
-const DEFAULT_ORGFY_CHANNEL$2 = "e445491d-2fb3-4ebd-8e2e-f6813c33fb03";
-const SHARED_RANKING_PATHS = [
-  "/Users/heltonfraga/.buzz/.scratch/nexusmind-model-ranking.json",
+[
+  joinHome(".buzz", ".scratch", "nexusmind-model-ranking.json"),
   "~/.buzz/.scratch/nexusmind-model-ranking.json"
 ];
-const SHARED_USAGE_PATHS = [
-  "/Users/heltonfraga/.buzz/.scratch/nm_usage.json",
+[
+  joinHome(".buzz", ".scratch", "nm_usage.json"),
   "~/.buzz/.scratch/nm_usage.json"
 ];
-const MODEL_QUARANTINE_PATH = "/Users/heltonfraga/.buzz/.scratch/orgfy-model-quarantine.json";
-const BACKOFF_TTL_STEPS_MS = [5 * 60 * 1e3, 15 * 60 * 1e3, 45 * 60 * 1e3];
-const modelQuarantineMemory = /* @__PURE__ */ new Map();
-async function quarantineFailedModel(ctx, modelId, reason = "provider_5xx_or_429", ttlMs, nowMs = Date.now()) {
-  const norm = String(modelId || "").trim().toLowerCase();
-  if (!norm) return;
-  const prev = modelQuarantineMemory.get(norm);
-  const failureCount = ((prev == null ? void 0 : prev.failureCount) || 0) + 1;
-  const effectiveTtl = BACKOFF_TTL_STEPS_MS[Math.min(failureCount - 1, BACKOFF_TTL_STEPS_MS.length - 1)];
-  modelQuarantineMemory.set(norm, {
-    model: String(modelId).trim(),
-    failedAt: nowMs,
-    expiresAt: nowMs + effectiveTtl,
-    failureCount,
-    circuitState: "open",
-    reason
-  });
-  const host = ctx == null ? void 0 : ctx.host;
-  if (typeof (host == null ? void 0 : host.writeFile) === "function") {
-    try {
-      const obj = {};
-      for (const [k, v] of modelQuarantineMemory.entries()) {
-        if (v.expiresAt > nowMs) obj[k] = v;
-      }
-      await host.writeFile(MODEL_QUARANTINE_PATH, JSON.stringify(obj, null, 2));
-    } catch {
-    }
-  }
-}
-async function getQuarantinedModels(ctx, nowMs = Date.now()) {
-  const host = ctx == null ? void 0 : ctx.host;
-  if (typeof (host == null ? void 0 : host.readFile) === "function") {
-    try {
-      const raw = await host.readFile(MODEL_QUARANTINE_PATH);
-      if (raw) {
-        const parsed = JSON.parse(decodeHostBytes$2(raw));
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-          for (const [k, v] of Object.entries(parsed)) {
-            if (v && typeof v.expiresAt === "number" && v.expiresAt > nowMs && !modelQuarantineMemory.has(k.toLowerCase())) {
-              modelQuarantineMemory.set(k.toLowerCase(), {
-                model: String(v.model || k),
-                failedAt: Number(v.failedAt || nowMs),
-                expiresAt: v.expiresAt,
-                reason: typeof v.reason === "string" ? v.reason : void 0
-              });
-            }
-          }
-        }
-      }
-    } catch {
-    }
-  }
-  const active = /* @__PURE__ */ new Set();
-  for (const [k, v] of modelQuarantineMemory.entries()) {
-    if (v.expiresAt <= nowMs) {
-      modelQuarantineMemory.delete(k);
-    } else {
-      active.add(k);
-    }
-  }
-  return active;
-}
-function decodeHostBytes$2(raw) {
-  if (typeof raw === "string") return raw;
-  if (raw instanceof Uint8Array) return new TextDecoder("utf-8").decode(raw);
-  if (raw instanceof ArrayBuffer) return new TextDecoder("utf-8").decode(new Uint8Array(raw));
-  if (ArrayBuffer.isView(raw)) {
-    return new TextDecoder("utf-8").decode(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength));
-  }
-  return String(raw ?? "");
-}
-function inferProviderId(modelId) {
-  const m = String(modelId || "").toLowerCase();
-  if (m.includes("grok")) return "nexusmind_grok";
-  if (m.includes("gemini") || m.includes("antigravity") || m.includes("thinking")) {
-    return "nexusmind_antigravity";
-  }
-  if (m.includes("claude")) return "nexusmind_anthropic";
-  return "nexusmind_openai";
-}
+joinHome(".buzz", ".scratch", "orgfy-model-quarantine.json");
 function isFreeModelId(modelId) {
   const lower = String(modelId || "").toLowerCase();
   return lower.includes(":free") || lower.includes("-free") || lower.includes("/free") || lower.endsWith("free");
@@ -1467,573 +1404,40 @@ function isUnsupportedAgentModel(modelId) {
   if (!m) return true;
   return m === "haiku" || m === "grok-4.5" || m.includes("mistral-large-4-1t-a52b") || m.includes("claude-opus-5-5") || m.includes("minimax-m3.1-flash") || m.startsWith("auto/") || m.includes("tab_jump") || m.includes("autocomplete") || m.includes("fim-") || m.includes("embedding") || m.includes("rerank") || m.includes("whisper") || m.includes("tts") || m.includes("imagen") || m.includes("dall-e") || m.includes("moderation");
 }
-function estimateModelIntelligence(modelId) {
-  const m = String(modelId || "").toLowerCase();
-  let score = 50;
-  if (/(opus|o3|gpt-5|gpt-6|claude-sonnet-4-6|claude-sonnet-5|gemini-3\.?5?-pro|gemini-2\.5-pro|deepseek-r1|deepseek-v3|qwen3-coder|mistral-large|grok-4)/.test(m)) {
-    score += 32;
-  } else if (/(sonnet|pro|large|coder|r1|reasoning|thinking|v3|nemotron-ultra|llama-4|glm-4\.5|kimi-k2)/.test(m)) {
-    score += 22;
-  } else if (/(flash|haiku|medium|70b|72b|32b|devstral|codestral)/.test(m)) {
-    score += 12;
-  }
-  if (/(nano|tiny|1b|3b|7b|8b|fast-free|lite)/.test(m)) {
-    score -= 12;
-  }
-  if (/(thinking|reasoning|high)/.test(m)) {
-    score += 6;
-  }
-  return Math.max(10, Math.min(100, score));
-}
-function computeCombinedModelScore(intelligenceScore, latencyMs) {
-  if (latencyMs === null || !Number.isFinite(latencyMs)) return -1;
-  const latencyPenalty = Math.min(35, latencyMs / 1e3 * 4);
-  return Number((intelligenceScore - latencyPenalty).toFixed(2));
-}
-function getDisabledModelsFromLocalStorage() {
+async function requestModelFailover(ctx, input) {
   var _a, _b;
-  try {
-    const raw = (_b = (_a = globalThis == null ? void 0 : globalThis.localStorage) == null ? void 0 : _a.getItem) == null ? void 0 : _b.call(_a, "nexusmind_disabled_models");
-    if (!raw) return /* @__PURE__ */ new Set();
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? new Set(parsed.map((x) => String(x))) : /* @__PURE__ */ new Set();
-  } catch {
-    return /* @__PURE__ */ new Set();
-  }
-}
-async function loadSharedNexusMindRanking(ctx, excludeSet, preferFree) {
-  var _a, _b, _c;
-  const disabled = getDisabledModelsFromLocalStorage();
-  let parsed = null;
-  const host = ctx == null ? void 0 : ctx.host;
-  if (typeof (host == null ? void 0 : host.readFile) === "function") {
-    for (const p of SHARED_RANKING_PATHS) {
-      try {
-        const raw = await host.readFile(p);
-        if (!raw) continue;
-        const txt = decodeHostBytes$2(raw);
-        const obj = JSON.parse(txt);
-        if (obj && Array.isArray(obj.models) && obj.models.length > 0) {
-          parsed = obj;
-          break;
-        }
-      } catch {
-      }
-    }
-  }
-  if (!parsed) {
-    try {
-      const raw = (_b = (_a = globalThis == null ? void 0 : globalThis.localStorage) == null ? void 0 : _a.getItem) == null ? void 0 : _b.call(_a, "nexusmind_model_ranking");
-      if (raw) {
-        const obj = JSON.parse(raw);
-        if (obj && Array.isArray(obj.models) && obj.models.length > 0) {
-          parsed = obj;
-        }
-      }
-    } catch {
-    }
-  }
-  if (parsed && Array.isArray(parsed.models)) {
-    const policy = parsed.policy && typeof parsed.policy === "object" ? parsed.policy : {};
-    const effectivePreferFree = preferFree || Boolean(policy.forceFree);
-    const blockedAuto = new Set(
-      (Array.isArray(policy.autoAssignBlocked) ? policy.autoAssignBlocked : []).map(
-        (x) => String(x || "").trim().toLowerCase()
-      )
-    );
-    const maxCost = typeof policy.maxCostPerReqUsd === "number" && policy.maxCostPerReqUsd > 0 ? policy.maxCostPerReqUsd : null;
-    const pinnedModel = policy.tierPins && typeof policy.tierPins === "object" ? String(policy.tierPins.geral || policy.tierPins.tier2_balanced || "").trim() : "";
-    const candidates = [];
-    for (const m of parsed.models) {
-      const mid = String((m == null ? void 0 : m.model) || "").trim();
-      if (!mid || isUnsupportedAgentModel(mid) || m.isDisabled || m.autoAssignBlocked || disabled.has(mid) || excludeSet.has(mid.toLowerCase())) continue;
-      if (blockedAuto.has(mid.toLowerCase())) continue;
-      if (m.online === false) continue;
-      if (maxCost !== null && typeof m.avgCostUsd === "number" && m.avgCostUsd > 0 && m.avgCostUsd > maxCost) continue;
-      const free = isFreeModelId(mid);
-      if (effectivePreferFree && !free) continue;
-      if (!effectivePreferFree && free) continue;
-      const isPinned = Boolean(pinnedModel && mid === pinnedModel);
-      const isVerifiedOnline = m.online === true;
-      const baseScore = Number(m.score ?? estimateModelIntelligence(mid));
-      candidates.push({
-        model: mid,
-        provider: String(m.group || inferProviderId(mid)),
-        isFree: free,
-        intelligenceScore: Number(m.capabilityScore || estimateModelIntelligence(mid)),
-        latencyMs: typeof m.pingLatencyMs === "number" ? m.pingLatencyMs : typeof m.avgFirstTokenMs === "number" ? m.avgFirstTokenMs : typeof m.avgDurationMs === "number" ? m.avgDurationMs : null,
-        combinedScore: isPinned ? 1e3 : isVerifiedOnline ? baseScore : Number((baseScore - 25).toFixed(2)),
-        online: true,
-        calls: Number(m.calls || 0),
-        source: "nexusmind_ranking"
-      });
-    }
-    if (candidates.length > 0) {
-      candidates.sort((a, b) => b.combinedScore - a.combinedScore);
-      return candidates;
-    }
-  }
-  if (typeof (host == null ? void 0 : host.readFile) === "function") {
-    for (const p of SHARED_USAGE_PATHS) {
-      try {
-        const raw = await host.readFile(p);
-        if (!raw) continue;
-        const txt = decodeHostBytes$2(raw);
-        const obj = JSON.parse(txt);
-        const items = Array.isArray((_c = obj == null ? void 0 : obj.data) == null ? void 0 : _c.items) ? obj.data.items : Array.isArray(obj == null ? void 0 : obj.items) ? obj.items : [];
-        if (items.length === 0) continue;
-        const acc = /* @__PURE__ */ new Map();
-        for (const it of items) {
-          const mid = String((it == null ? void 0 : it.model) || "").trim();
-          if (!mid || disabled.has(mid) || excludeSet.has(mid.toLowerCase())) continue;
-          const free = isFreeModelId(mid);
-          if (preferFree && !free) continue;
-          if (!preferFree && free) continue;
-          let st = acc.get(mid);
-          if (!st) {
-            st = { calls: 0, durSum: 0, durN: 0 };
-            acc.set(mid, st);
-          }
-          st.calls += 1;
-          const dur = Number((it == null ? void 0 : it.first_token_ms) ?? (it == null ? void 0 : it.duration_ms));
-          if (Number.isFinite(dur) && dur > 0 && dur < 18e4) {
-            st.durSum += dur;
-            st.durN += 1;
-          }
-        }
-        const fromUsage = [];
-        for (const [mid, st] of acc.entries()) {
-          if (st.calls < 5) continue;
-          const intel = estimateModelIntelligence(mid);
-          const avgMs = st.durN > 0 ? Math.round(st.durSum / st.durN) : null;
-          const adoption = Math.min(25, Math.log10(st.calls + 1) * 6.5);
-          const speedBonus = avgMs !== null ? Math.max(0, 15 - avgMs / 1e3 * 0.5) : 5;
-          fromUsage.push({
-            model: mid,
-            provider: inferProviderId(mid),
-            isFree: isFreeModelId(mid),
-            intelligenceScore: intel,
-            latencyMs: avgMs,
-            combinedScore: Number((intel * 0.65 + adoption + speedBonus).toFixed(2)),
-            online: true,
-            calls: st.calls,
-            source: "gateway_usage"
-          });
-        }
-        if (fromUsage.length > 0) {
-          fromUsage.sort((a, b) => b.combinedScore - a.combinedScore);
-          return fromUsage.slice(0, 10);
-        }
-      } catch {
-      }
-    }
-  }
-  return [];
-}
-async function discoverNexusMindCatalog(ctx) {
-  var _a, _b;
-  const host = ctx == null ? void 0 : ctx.host;
-  const disabled = getDisabledModelsFromLocalStorage();
-  const seen = /* @__PURE__ */ new Map();
-  if (typeof (host == null ? void 0 : host.request) === "function") {
-    await Promise.all(
-      NEXUSMIND_PROVIDERS.map(async (prov) => {
-        try {
-          const res = await host.request({
-            url: "https://api.nexusmind.digital/v1/models",
-            method: "GET",
-            headers: {
-              Authorization: `Bearer ${prov.apiKey}`,
-              "User-Agent": "BuzzDesktop/OrgFyFailover"
-            },
-            timeoutMs: 8e3
-          });
-          if ((res == null ? void 0 : res.status) >= 200 && (res == null ? void 0 : res.status) < 300 && (res == null ? void 0 : res.body)) {
-            const parsed = JSON.parse(res.body);
-            const list = Array.isArray(parsed == null ? void 0 : parsed.data) ? parsed.data : [];
-            for (const m of list) {
-              const mid = String((m == null ? void 0 : m.id) || "").trim();
-              if (!mid || disabled.has(mid) || seen.has(mid)) continue;
-              seen.set(mid, { id: mid, provider: prov });
-            }
-          }
-        } catch {
-        }
-      })
-    );
-  }
-  if (seen.size === 0) {
-    try {
-      const raw = (_b = (_a = globalThis == null ? void 0 : globalThis.localStorage) == null ? void 0 : _a.getItem) == null ? void 0 : _b.call(_a, "nexusmind_cached_models");
-      if (raw) {
-        const cached = JSON.parse(raw);
-        if (Array.isArray(cached)) {
-          for (const m of cached) {
-            const mid = String((m == null ? void 0 : m.id) || "").trim();
-            if (!mid || disabled.has(mid) || seen.has(mid)) continue;
-            const prov = NEXUSMIND_PROVIDERS.find((p) => p.id === (m == null ? void 0 : m.primaryGroup)) || NEXUSMIND_PROVIDERS[0];
-            seen.set(mid, { id: mid, provider: prov });
-          }
-        }
-      }
-    } catch {
-    }
-  }
-  return Array.from(seen.values());
-}
-async function probeModelLive(ctx, modelId, prov) {
-  const host = ctx == null ? void 0 : ctx.host;
-  if (typeof (host == null ? void 0 : host.request) !== "function") {
-    return { online: false, latencyMs: null, error: "ctx.host.request indisponível" };
-  }
-  const url = prov.isAnthropic ? "https://api.nexusmind.digital/v1/messages" : "https://api.nexusmind.digital/v1/chat/completions";
-  const headers = prov.isAnthropic ? {
-    "x-api-key": prov.apiKey,
-    Authorization: `Bearer ${prov.apiKey}`,
-    "anthropic-version": "2023-06-01",
-    "Content-Type": "application/json",
-    "User-Agent": "BuzzDesktop/OrgFyFailover"
-  } : {
-    Authorization: `Bearer ${prov.apiKey}`,
-    "Content-Type": "application/json",
-    "User-Agent": "BuzzDesktop/OrgFyFailover"
+  const detail = {
+    source: "digital.cortexx.orgfy",
+    agente: input.agente,
+    agent_pubkey: input.agent_pubkey || null,
+    failed_model: input.failed_model || null,
+    reason: input.reason || "provider_error",
+    channel_id: input.channel_id || null,
+    thread_root: input.thread_root || null,
+    ts: Date.now()
   };
-  const t0 = Date.now();
+  let dispatched = false;
   try {
-    const probePayload = prov.isAnthropic ? {
-      model: modelId,
-      messages: [{ role: "user", content: "ok" }],
-      max_tokens: 16,
-      tools: [
-        {
-          name: "ping",
-          description: "healthcheck",
-          input_schema: { type: "object", properties: {} }
-        }
-      ]
-    } : {
-      model: modelId,
-      messages: [{ role: "user", content: "ok" }],
-      max_tokens: 5,
-      tools: [
-        {
-          type: "function",
-          function: {
-            name: "ping",
-            description: "healthcheck",
-            parameters: { type: "object", properties: {} }
-          }
-        }
-      ]
-    };
-    const res = await host.request({
-      url,
-      method: "POST",
-      headers,
-      body: JSON.stringify(probePayload),
-      timeoutMs: 9e3
-    });
-    const latencyMs = Date.now() - t0;
-    if ((res == null ? void 0 : res.status) >= 200 && (res == null ? void 0 : res.status) < 300) {
-      return { online: true, latencyMs };
+    const emitter = ((_a = ctx == null ? void 0 : ctx.events) == null ? void 0 : _a.emit) || ((_b = ctx == null ? void 0 : ctx.bus) == null ? void 0 : _b.emit);
+    if (typeof emitter === "function") {
+      await emitter(ORGFY_FAILOVER_REQUEST_EVENT, detail);
+      dispatched = true;
+    } else if (typeof globalThis !== "undefined" && typeof globalThis.dispatchEvent === "function" && typeof CustomEvent === "function") {
+      globalThis.dispatchEvent(new CustomEvent(ORGFY_FAILOVER_REQUEST_EVENT, { detail }));
+      dispatched = true;
     }
-    return { online: false, latencyMs, error: `HTTP ${(res == null ? void 0 : res.status) ?? "erro"}` };
-  } catch (err) {
-    return { online: false, latencyMs: Date.now() - t0, error: String((err == null ? void 0 : err.message) || err).slice(0, 100) };
-  }
-}
-function findAgentInSnapshot(agentsApi, query, pubkey) {
-  if (!(agentsApi == null ? void 0 : agentsApi.snapshot)) return void 0;
-  const snap = agentsApi.snapshot() || {};
-  const pool = [];
-  const seen = /* @__PURE__ */ new Set();
-  for (const list of [snap.running, snap.agents]) {
-    if (!Array.isArray(list)) continue;
-    for (const a of list) {
-      if (!a || !a.key || seen.has(a.key)) continue;
-      seen.add(a.key);
-      pool.push(a);
-    }
-  }
-  const qLower = String(query || "").trim().toLowerCase();
-  const pkLower = String(pubkey || "").trim().toLowerCase();
-  return pkLower && pool.find((a) => String(a.pubkey || "").toLowerCase() === pkLower) || qLower && pool.find((a) => String(a.key || "").toLowerCase() === qLower) || qLower && pool.find((a) => String(a.name || "").toLowerCase() === qLower) || (qLower ? pool.find((a) => String(a.name || "").toLowerCase().includes(qLower)) : void 0);
-}
-async function executeSmartModelFailover(ctx, input = {}) {
-  var _a, _b, _c;
-  const preferFree = Boolean(input.prefer_free);
-  const applyChange = Boolean(input.apply);
-  const retrigger = input.retrigger !== false;
-  const maxProbes = Math.max(1, Math.min(10, Number(input.max_probes || 6)));
-  const failedNorm = String(input.failed_model || "").trim().toLowerCase();
-  const agentsApi = ctx.agents;
-  const matchedAgent = input.agente || input.agent_pubkey ? findAgentInSnapshot(agentsApi, input.agente, input.agent_pubkey) : void 0;
-  const previousModel = ((matchedAgent == null ? void 0 : matchedAgent.config) && typeof matchedAgent.config === "object" ? String(matchedAgent.config.model || "") : "") || (input.failed_model || null);
-  if (failedNorm) {
-    await quarantineFailedModel(ctx, input.failed_model || failedNorm, "reported_failed");
-  }
-  if (applyChange && previousModel) {
-    await quarantineFailedModel(ctx, previousModel, "agent_failover_source");
-  }
-  const quarantined = await getQuarantinedModels(ctx);
-  const excludeSet = new Set(quarantined);
-  if (failedNorm) excludeSet.add(failedNorm);
-  if (previousModel) excludeSet.add(previousModel.toLowerCase());
-  let sharedRanking = await loadSharedNexusMindRanking(ctx, excludeSet, preferFree);
-  if (sharedRanking.length === 0 && quarantined.size > 0) {
-    const minimalExclude = /* @__PURE__ */ new Set();
-    if (failedNorm) minimalExclude.add(failedNorm);
-    if (previousModel) minimalExclude.add(previousModel.toLowerCase());
-    sharedRanking = await loadSharedNexusMindRanking(ctx, minimalExclude, preferFree);
-  }
-  const failedProvider = previousModel ? inferProviderId(previousModel) : failedNorm ? inferProviderId(failedNorm) : null;
-  if (failedProvider && sharedRanking.length > 1) {
-    sharedRanking = sharedRanking.map((c) => ({
-      ...c,
-      combinedScore: c.provider !== failedProvider ? Number((c.combinedScore + 12).toFixed(2)) : c.combinedScore
-    })).sort((a, b) => b.combinedScore - a.combinedScore);
-  }
-  const host = ctx == null ? void 0 : ctx.host;
-  let verifiedShared = [];
-  if (sharedRanking.length > 0 && typeof (host == null ? void 0 : host.request) === "function") {
-    const toVerify = sharedRanking.slice(0, maxProbes);
-    let gotAnyHttpResponse = false;
-    for (const cand of toVerify) {
-      const prov = NEXUSMIND_PROVIDERS.find((p) => p.id === cand.provider) || NEXUSMIND_PROVIDERS.find((p) => p.id === inferProviderId(cand.model)) || NEXUSMIND_PROVIDERS[0];
-      const res = await probeModelLive(ctx, cand.model, prov);
-      if (res.online || res.error && /^HTTP\s+\d{3}/.test(res.error)) {
-        gotAnyHttpResponse = true;
-      }
-      if (res.online) {
-        verifiedShared.push({
-          ...cand,
-          provider: prov.id,
-          latencyMs: res.latencyMs,
-          online: true,
-          source: "live_probe"
-        });
-        break;
-      } else {
-        if (res.error && /^HTTP\s+(400|404|429|502|503|504)/.test(res.error)) {
-          await quarantineFailedModel(ctx, cand.model, res.error);
-        }
-        verifiedShared.push({
-          ...cand,
-          latencyMs: res.latencyMs,
-          online: false,
-          source: "live_probe",
-          error: res.error
-        });
-      }
-    }
-    if (!gotAnyHttpResponse) {
-      verifiedShared = [];
-    }
-  }
-  let probed = [];
-  const hasVerifiedOnline = verifiedShared.some((v) => v.online);
-  if (sharedRanking.length === 0 || verifiedShared.length > 0 && !hasVerifiedOnline) {
-    const catalog = await discoverNexusMindCatalog(ctx);
-    let pool = catalog.filter((c) => !isUnsupportedAgentModel(c.id) && !excludeSet.has(c.id.toLowerCase()));
-    if (preferFree) {
-      const freeOnly = pool.filter((c) => isFreeModelId(c.id));
-      if (freeOnly.length > 0) pool = freeOnly;
-    } else {
-      const paidOnly = pool.filter((c) => !isFreeModelId(c.id));
-      if (paidOnly.length > 0) pool = paidOnly;
-    }
-    const preRanked = pool.map((c) => ({ ...c, intelligenceScore: estimateModelIntelligence(c.id) })).sort((a, b) => b.intelligenceScore - a.intelligenceScore).slice(0, maxProbes);
-    if (preRanked.length > 0) {
-      probed = await Promise.all(
-        preRanked.map(async (cand) => {
-          const res = await probeModelLive(ctx, cand.id, cand.provider);
-          if (!res.online && res.error && /^HTTP\s+(400|404|429|502|503|504)/.test(res.error)) {
-            await quarantineFailedModel(ctx, cand.id, res.error);
-          }
-          const combinedScore = res.online ? computeCombinedModelScore(cand.intelligenceScore, res.latencyMs) : -1;
-          return {
-            model: cand.id,
-            provider: cand.provider.id,
-            isFree: isFreeModelId(cand.id),
-            intelligenceScore: cand.intelligenceScore,
-            latencyMs: res.latencyMs,
-            combinedScore,
-            online: res.online,
-            source: "live_probe",
-            error: res.error
-          };
-        })
-      );
-      probed.sort((a, b) => {
-        if (a.online !== b.online) return a.online ? -1 : 1;
-        if (b.combinedScore !== a.combinedScore) return b.combinedScore - a.combinedScore;
-        return (a.latencyMs ?? 999999) - (b.latencyMs ?? 999999);
-      });
-    }
-  }
-  const finalRanking = verifiedShared.some((v) => v.online) ? verifiedShared : probed.some((p) => p.online) ? probed : verifiedShared.length > 0 ? verifiedShared : sharedRanking.length > 0 ? sharedRanking : probed;
-  const winner = finalRanking.find((p) => p.online) || null;
-  if (!winner) {
-    return {
-      ok: false,
-      mode: applyChange ? "applied" : "dry_run",
-      agentName: (matchedAgent == null ? void 0 : matchedAgent.name) || input.agente || null,
-      agentKey: (matchedAgent == null ? void 0 : matchedAgent.key) || null,
-      previousModel,
-      selectedModel: null,
-      selectedProvider: null,
-      selectedLatencyMs: null,
-      selectedIntelligenceScore: null,
-      retriggered: false,
-      candidatesTested: finalRanking.length,
-      ranking: finalRanking,
-      message: finalRanking.length > 0 ? `Nenhum dos ${finalRanking.length} modelos testados respondeu HTTP 200 no ping real do NexusMind. Abra a aba "Ranking de Modelos" no plugin NexusMind Gateway para atualizar o ranking.` : "Ranking do NexusMind indisponível. Abra o plugin NexusMind Gateway > Ranking de Modelos para gerar o ranking em tempo real."
-    };
-  }
-  let appliedOk = false;
-  let retriggered = false;
-  let applyNote = "";
-  const sourceTag = winner.source === "nexusmind_ranking" ? `Ranking NexusMind · score ${winner.combinedScore}${winner.calls ? ` · ${winner.calls} chamadas reais` : ""}` : winner.source === "gateway_usage" ? `Telemetria Gateway · score ${winner.combinedScore}${winner.calls ? ` · ${winner.calls} chamadas reais` : ""}` : `${winner.latencyMs}ms · score ${winner.combinedScore}`;
-  if (applyChange) {
-    if (!matchedAgent) {
-      return {
-        ok: false,
-        mode: "applied",
-        agentName: input.agente || null,
-        agentKey: null,
-        previousModel,
-        selectedModel: winner.model,
-        selectedProvider: winner.provider,
-        selectedLatencyMs: winner.latencyMs,
-        selectedIntelligenceScore: winner.intelligenceScore,
-        retriggered: false,
-        candidatesTested: finalRanking.length,
-        ranking: finalRanking,
-        message: `Melhor modelo eleito (${winner.model}, ${sourceTag}), mas agente '${input.agente || input.agent_pubkey || ""}' não encontrado no Buzz Desktop.`
-      };
-    }
-    const failoverPayload = {
-      event: ORGFY_FAILOVER_REQUEST_EVENT,
-      agentKey: matchedAgent.key,
-      agentName: matchedAgent.name || matchedAgent.key,
-      previousModel,
-      selectedModel: winner.model,
-      selectedProvider: winner.provider,
-      ts: Date.now()
-    };
-    try {
-      (_b = (_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.emit) == null ? void 0 : _b.call(_a, ORGFY_FAILOVER_REQUEST_EVENT, failoverPayload);
-      if (typeof (globalThis == null ? void 0 : globalThis.dispatchEvent) === "function" && typeof (globalThis == null ? void 0 : globalThis.CustomEvent) === "function") {
-        globalThis.dispatchEvent(new globalThis.CustomEvent(ORGFY_FAILOVER_REQUEST_EVENT, { detail: failoverPayload }));
-      }
-    } catch {
-    }
-    const nexusDelegator = (_c = ctx == null ? void 0 : ctx.nexusmind) == null ? void 0 : _c.applyBestModel;
-    if (input.delegate_only || typeof nexusDelegator === "function") {
-      if (typeof nexusDelegator === "function") {
-        await nexusDelegator({
-          agente: matchedAgent.name || matchedAgent.key,
-          model: winner.model,
-          provider: winner.provider
-        });
-      }
-      return {
-        ok: true,
-        mode: "delegated",
-        delegatedToNexusMind: true,
-        agentName: matchedAgent.name || matchedAgent.key,
-        agentKey: matchedAgent.key,
-        previousModel,
-        selectedModel: winner.model,
-        selectedProvider: winner.provider,
-        selectedLatencyMs: winner.latencyMs,
-        selectedIntelligenceScore: winner.intelligenceScore,
-        retriggered: false,
-        candidatesTested: finalRanking.length,
-        ranking: finalRanking,
-        message: `Failover de ${matchedAgent.name || matchedAgent.key} delegado ao NexusMind (${winner.provider}/${winner.model} · ${sourceTag}).`
-      };
-    }
-    if (typeof (agentsApi == null ? void 0 : agentsApi.save) !== "function") {
-      return {
-        ok: false,
-        mode: "applied",
-        agentName: matchedAgent.name || matchedAgent.key,
-        agentKey: matchedAgent.key,
-        previousModel,
-        selectedModel: winner.model,
-        selectedProvider: winner.provider,
-        selectedLatencyMs: winner.latencyMs,
-        selectedIntelligenceScore: winner.intelligenceScore,
-        retriggered: false,
-        candidatesTested: finalRanking.length,
-        ranking: finalRanking,
-        message: `Melhor modelo eleito (${winner.model}, ${sourceTag}), mas ctx.agents.save indisponível neste host.`
-      };
-    }
-    const currentCfg = matchedAgent.config && typeof matchedAgent.config === "object" ? { ...matchedAgent.config } : {};
-    currentCfg.model = winner.model;
-    if ("provider" in currentCfg || winner.provider) {
-      currentCfg.provider = winner.provider;
-    }
-    try {
-      await agentsApi.save(matchedAgent.key, { config: currentCfg });
-      appliedOk = true;
-      applyNote = `Modelo de ${matchedAgent.name || matchedAgent.key} atualizado de '${previousModel || "padrão"}' para '${winner.model}' (${winner.provider} · ${sourceTag}).`;
-    } catch (err) {
-      return {
-        ok: false,
-        mode: "applied",
-        agentName: matchedAgent.name || matchedAgent.key,
-        agentKey: matchedAgent.key,
-        previousModel,
-        selectedModel: winner.model,
-        selectedProvider: winner.provider,
-        selectedLatencyMs: winner.latencyMs,
-        selectedIntelligenceScore: winner.intelligenceScore,
-        retriggered: false,
-        candidatesTested: finalRanking.length,
-        ranking: finalRanking,
-        message: `Falha ao salvar novo modelo '${winner.model}' em ${matchedAgent.name || matchedAgent.key}: ${(err == null ? void 0 : err.message) || err}`
-      };
-    }
-    if (appliedOk && retrigger && typeof (agentsApi == null ? void 0 : agentsApi.wake) === "function") {
-      try {
-        const channel = String(input.channel_id || DEFAULT_ORGFY_CHANNEL$2).trim() || DEFAULT_ORGFY_CHANNEL$2;
-        const root = input.thread_root ? String(input.thread_root).trim() : void 0;
-        if (typeof (agentsApi == null ? void 0 : agentsApi.session) === "function") {
-          try {
-            const place = root ? { channelId: channel, root } : { channelId: channel };
-            await agentsApi.session(matchedAgent.key, place, "new");
-          } catch {
-          }
-        }
-        await agentsApi.wake(matchedAgent.key, {
-          channel,
-          ...root ? { root } : {},
-          text: input.retrigger_text || `[ORGFY FAILOVER AUTOMÁTICO] Seu modelo foi migrado para '${winner.model}' (${winner.provider} · ${sourceTag}) após erro de API no modelo anterior. Retome imediatamente o último passo da tarefa com escopo fechado.`
-        });
-        retriggered = true;
-        applyNote += " Sessão renovada e agente re-disparado automaticamente.";
-      } catch (wErr) {
-        applyNote += ` (Aviso: falha no re-disparo wake: ${(wErr == null ? void 0 : wErr.message) || wErr})`;
-      }
-    }
+  } catch {
   }
   return {
     ok: true,
-    mode: applyChange ? "applied" : "dry_run",
-    agentName: (matchedAgent == null ? void 0 : matchedAgent.name) || input.agente || null,
-    agentKey: (matchedAgent == null ? void 0 : matchedAgent.key) || null,
-    previousModel,
-    selectedModel: winner.model,
-    selectedProvider: winner.provider,
-    selectedLatencyMs: winner.latencyMs,
-    selectedIntelligenceScore: winner.intelligenceScore,
-    retriggered,
-    candidatesTested: finalRanking.length,
-    ranking: finalRanking,
-    message: applyNote || `Melhor modelo disponível (${preferFree ? "FREE" : "PRODUÇÃO"}): ${winner.model} (${winner.provider} · ${sourceTag}).`
+    delegated: true,
+    event: ORGFY_FAILOVER_REQUEST_EVENT,
+    agente: input.agente || "unknown",
+    previousModel: input.failed_model || null,
+    selectedModel: null,
+    candidatesTested: 0,
+    retriggered: false,
+    message: `Failover delegado ao NexusMind via evento ${ORGFY_FAILOVER_REQUEST_EVENT} (${input.agente}${dispatched ? "" : " — aguardando listener NexusMind"}).`
   };
 }
 const MARK_TO_STATUS = {
@@ -2813,8 +2217,6 @@ function buildBuzzAttentionContract(params) {
 }
 const DEFAULT_LEASE_MS = 8 * 60 * 1e3;
 const DEFAULT_ORPHAN_GRACE_MS = 3 * 60 * 1e3;
-const CARDS_DIR = "/Users/heltonfraga/.buzz/REPOS/orgfy/cards";
-const EMPRESAS_DIR$1 = "/Users/heltonfraga/.buzz/REPOS/orgfy/empresas";
 const pipelineEventsBuffer = [];
 const pipelineEventListeners = /* @__PURE__ */ new Set();
 const MAX_PIPELINE_EVENTS = 80;
@@ -2971,7 +2373,7 @@ async function loadEmpresaRoles(ctx, empresa) {
   const host = ctx == null ? void 0 : ctx.host;
   if (!(host == null ? void 0 : host.readFile)) return map;
   try {
-    const raw = await host.readFile(`${EMPRESAS_DIR$1}/${empresa}.json`);
+    const raw = await host.readFile(`${ORGFY_EMPRESAS_DIR}/${empresa}.json`);
     const parsed = JSON.parse(decodeText(raw));
     if (Array.isArray(parsed == null ? void 0 : parsed.agentes)) {
       for (const a of parsed.agentes) {
@@ -3114,7 +2516,7 @@ async function buildHandoffPack(ctx, input) {
   let md = input.card_markdown ? String(input.card_markdown) : "";
   let cardFile = null;
   if (!md && slug && (host == null ? void 0 : host.readFile)) {
-    const candidate = `${CARDS_DIR}/${slug}.md`;
+    const candidate = `${ORGFY_CARDS_DIR}/${slug}.md`;
     try {
       md = decodeText(await host.readFile(candidate));
       cardFile = `cards/${slug}.md`;
@@ -3388,7 +2790,7 @@ async function resolveFullNostrIssueId(ctx, rawId) {
   if (!(host == null ? void 0 : host.readFile)) return clean;
   const decode = (raw) => typeof raw === "string" ? raw : raw instanceof Uint8Array ? new TextDecoder("utf-8").decode(raw) : String(raw ?? "");
   try {
-    const rawT = await host.readFile("/Users/heltonfraga/.buzz/.scratch/esteira-transicoes.jsonl");
+    const rawT = await host.readFile(`${SCRATCH_ROOT}/esteira-transicoes.jsonl`);
     const lines = decode(rawT).split("\n");
     for (let i = lines.length - 1; i >= 0; i--) {
       if (!lines[i].includes(clean)) continue;
@@ -3398,7 +2800,7 @@ async function resolveFullNostrIssueId(ctx, rawId) {
   } catch {
   }
   try {
-    const rawE = await host.readFile("/Users/heltonfraga/.buzz/REPOS/orgfy/.esteira/estado/esteira-minima-state.json");
+    const rawE = await host.readFile(`${ORGFY_ESTADO_DIR}/esteira-minima-state.json`);
     const parsed = JSON.parse(decode(rawE));
     for (const k of Object.keys((parsed == null ? void 0 : parsed.aceites) || {})) {
       if (k.toLowerCase().startsWith(clean) && /^[0-9a-f]{64}$/i.test(k)) {
@@ -3409,7 +2811,7 @@ async function resolveFullNostrIssueId(ctx, rawId) {
   }
   return clean;
 }
-const LOCKS_FILE_PATH = "/Users/heltonfraga/.buzz/.scratch/orgfy-locks.json";
+const LOCKS_FILE_PATH = `${SCRATCH_ROOT}/orgfy-locks.json`;
 const DEFAULT_LOCK_TTL_MS = 30 * 60 * 1e3;
 const DEFAULT_COOLDOWN_MS = 15 * 60 * 1e3;
 const memoryLocks = /* @__PURE__ */ new Map();
@@ -3747,7 +3149,7 @@ function canTriggerWithCooldown(key, nowMs, commit = true, cooldownMs = DEFAULT_
   return true;
 }
 const DEFAULT_ORGFY_CHANNEL = "e445491d-2fb3-4ebd-8e2e-f6813c33fb03";
-const EMPRESAS_DIR = "/Users/heltonfraga/.buzz/REPOS/orgfy/empresas";
+const EMPRESAS_DIR = ORGFY_EMPRESAS_DIR;
 const KNOWN_COMPANY_SLUGS = ["orgfy", "lumen-iptv", "saas-tributario"];
 const radarEscalationCounts = /* @__PURE__ */ new Map();
 function decodeHostBytes$1(raw) {
@@ -3925,7 +3327,7 @@ async function evaluateGovernanceAndReact(ctx, options = {}) {
                   }
                 }
               }
-              const failoverRes = await executeSmartModelFailover(ctx, {
+              const failoverRes = await requestModelFailover(ctx, {
                 agente: s.agente,
                 agent_pubkey: s.agent_pubkey || null,
                 prefer_free: false,
@@ -4255,7 +3657,7 @@ async function bindConversationContextForCard(ctx, input) {
   let degradedFallback = false;
   if (!folderAssigned && !sectionsInjected && remoteOrMissingAgent) {
     const safeId = String(input.issueId || "card").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 16) || "card";
-    const ctxPath = `/Users/heltonfraga/.buzz/.scratch/orgfy-context-${safeId}.json`;
+    const ctxPath = `${SCRATCH_ROOT}/orgfy-context-${safeId}.json`;
     const payload = JSON.stringify(
       {
         issueId: input.issueId,
@@ -4600,7 +4002,7 @@ function registerGovernanceAgentHooks(ctx) {
         const agentPubkey = String((payload == null ? void 0 : payload.agentPubkey) || (payload == null ? void 0 : payload.pubkey) || "").trim();
         const agentName = String((payload == null ? void 0 : payload.agentName) || (payload == null ? void 0 : payload.agent) || "").trim();
         if ((agentPubkey || agentName) && isRateLimitOrProviderError(errText)) {
-          await executeSmartModelFailover(ctx, {
+          await requestModelFailover(ctx, {
             agente: agentName || void 0,
             agent_pubkey: agentPubkey || null,
             failed_model: (payload == null ? void 0 : payload.model) ? String(payload.model) : null,
@@ -5559,7 +4961,7 @@ async function executeAgentMigration(ctx, onOutput) {
   };
   appendChunk("[MIGRATION] Sincronizando agentes OrgFy via ctx.agents.save() (B4)...\n");
   if (typeof ((_a = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _a.save) !== "function") {
-    appendChunk("[ERRO] ctx.agents.save indisponível; escrita direta em agents/state desativada.\n");
+    appendChunk("[ERRO] ctx.agents.save indisponível; escrita direta em disco desativada (R4.1).\n");
     return { success: false, output: combinedOutput };
   }
   try {
@@ -5586,7 +4988,7 @@ async function executeAgentMigration(ctx, onOutput) {
     return { success: false, output: combinedOutput };
   }
 }
-const RESOLVED_ARCHIVE_PATH = "/Users/heltonfraga/.buzz/.scratch/resolved-issues-archive.json";
+const RESOLVED_ARCHIVE_PATH = joinHome(".buzz", ".scratch", "resolved-issues-archive.json");
 function decodeHostBytes(raw) {
   if (typeof raw === "string") return raw;
   if (raw instanceof Uint8Array) return new TextDecoder("utf-8").decode(raw);
@@ -6141,7 +5543,7 @@ function buildUnifiedOrgfyTools(ctx) {
         }
       },
       execute: async (args) => {
-        const res = await executeSmartModelFailover(ctx, {
+        const res = await requestModelFailover(ctx, {
           agente: args == null ? void 0 : args.agente,
           agent_pubkey: args == null ? void 0 : args.agent_pubkey,
           failed_model: args == null ? void 0 : args.failed_model,
@@ -6476,7 +5878,7 @@ function createAgentOrgfyTabComponent(ctx) {
       setFailoverBusy(true);
       setStatusBanner(null);
       try {
-        const res = await executeSmartModelFailover(ctx, {
+        const res = await requestModelFailover(ctx, {
           agente: agentName,
           agent_pubkey: agentPubkey || void 0,
           failed_model: currentModel !== "padrão" ? currentModel : void 0,
@@ -9130,9 +8532,7 @@ function createCardStudioTabComponent(ctx) {
     );
   };
 }
-const ORGFY_REPO_ROOT = "/Users/heltonfraga/.buzz/REPOS/orgfy";
-const SCRATCH_ROOT = "/Users/heltonfraga/.buzz/.scratch";
-const BUZZ_AGENTS_DIR = "/Users/heltonfraga/Library/Application Support/xyz.block.buzz.desktop/agents";
+const BUZZ_AGENTS_DIR = "";
 function decodeBytes(raw) {
   if (typeof raw === "string") return raw;
   if (raw instanceof Uint8Array) return new TextDecoder("utf-8").decode(raw);
@@ -9660,8 +9060,8 @@ function renderResolvedArchiveTab(props) {
     )
   );
 }
-const BOARD_APPROVALS_PATH = "/Users/heltonfraga/.buzz/.scratch/board-approvals.json";
-const BUZZ_AGENT_STATE_DIR = "/Users/heltonfraga/Library/Application Support/xyz.block.buzz.desktop/agents/state";
+const BOARD_APPROVALS_PATH = joinHome(".buzz", ".scratch", "board-approvals.json");
+const BUZZ_AGENT_STATE_DIR = "";
 function isPlaceholderHex(val) {
   const clean = String(val || "").trim().toLowerCase();
   if (!/^[0-9a-f]{64}$/.test(clean)) return true;
@@ -12434,7 +11834,7 @@ function renderIssueDetailModal(p) {
               )
             )
           ),
-          // Box C: Modelo Real do Executor (agents/state/ — Zero Hardcode)
+          // Box C: Modelo Real do Executor (via ctx.agents.snapshot — Zero Hardcode)
           h(
             "div",
             {
@@ -12452,7 +11852,7 @@ function renderIssueDetailModal(p) {
             h(
               "div",
               { style: { fontSize: "11px", color: "#ffffff", fontWeight: "600", fontFamily: "monospace" } },
-              (hydratedIssueDetail == null ? void 0 : hydratedIssueDetail.executorModel) ? `${hydratedIssueDetail.executorProvider ? hydratedIssueDetail.executorProvider + "/" : ""}${hydratedIssueDetail.executorModel}` : isHydratingIssueDetail ? "Lendo agents/state/..." : "Modelo não identificado no state local"
+              (hydratedIssueDetail == null ? void 0 : hydratedIssueDetail.executorModel) ? `${hydratedIssueDetail.executorProvider ? hydratedIssueDetail.executorProvider + "/" : ""}${hydratedIssueDetail.executorModel}` : isHydratingIssueDetail ? "Lendo ctx.agents.snapshot()..." : "Modelo não identificado no state local"
             ),
             h(
               "div",
@@ -13195,7 +12595,7 @@ function renderInfraModals(p) {
           "div",
           { style: { fontSize: "12px", color: "#9ca3af", lineHeight: "1.5" } },
           "Sincronização atômica de todos os agentes OrgFy criados no Buzz Desktop. Vincula o diretório de execução ao repositório ",
-          h("code", { style: { backgroundColor: "rgba(255, 255, 255, 0.08)", padding: "2px 6px", borderRadius: "4px", color: "#38bdf8" } }, "/Users/heltonfraga/.buzz/REPOS/orgfy"),
+          h("code", { style: { backgroundColor: "rgba(255, 255, 255, 0.08)", padding: "2px 6px", borderRadius: "4px", color: "#38bdf8" } }, "~/.buzz/REPOS/orgfy"),
           ", injeta contratos CoEvo-RSI (Tiers 1, 2 e 3), regras probatórias e ferramentas MCP loopback com backup automático (.bak)."
         ),
         // Metric Cards
@@ -13283,7 +12683,7 @@ function renderInfraModals(p) {
                   },
                   ag.tier === "tier_3_arquiteto" ? "Tier 3 Arquiteto" : ag.tier === "tier_2_revisor" ? "Tier 2 Revisor" : "Tier 1 Executor"
                 ),
-                h("span", { style: { fontFamily: "monospace", fontSize: "10px", color: "#6b7280" } }, ag.workspace.replace("/Users/heltonfraga/", "~/") || "~/.buzz")
+                h("span", { style: { fontFamily: "monospace", fontSize: "10px", color: "#6b7280" } }, ag.workspace.replace(/^\/Users\/[^/]+\//, "~/") || "~/.buzz")
               )
             )
           )
@@ -13937,6 +13337,1634 @@ function renderKanbanColumn(p, title, cards, badgeBg, badgeColor, renderAction, 
     )
   );
 }
+const PT_BR = {
+  appTitle: "OrgFy Factory",
+  nav: {
+    holding: "Holding",
+    inbox: "Inbox",
+    overview: "Visão geral",
+    board: "Fábrica · Board",
+    floor: "Fábrica · Andar",
+    costs: "Custos",
+    automations: "Automações",
+    agents: "Agentes",
+    vision: "Visão",
+    settings: "Configurações"
+  },
+  loopState: {
+    idle: "Rodando (ocioso)",
+    discovering: "Oráculo ativo",
+    building: "Executando",
+    verifying: "Verificando",
+    paused: "Pausado",
+    stopped: "Loop parado",
+    draining: "Drenando"
+  },
+  modes: {
+    manual: "Manual",
+    assisted: "Assistido",
+    software_factory: "Fábrica de Software",
+    dark_factory: "Dark Factory"
+  },
+  actions: {
+    checkNow: "Verificar agora",
+    runScout: "Rodar Oráculo",
+    killSwitchOn: "Ativar Kill Switch",
+    killSwitchOff: "Liberar Kill Switch",
+    drainOn: "Drenar (terminar atual)",
+    drainOff: "Cancelar Dreno",
+    refresh: "Atualizar",
+    openPmChat: "Abrir chat com PM",
+    retry: "Tentar novamente",
+    dismiss: "Dispensar"
+  },
+  pipelines: {
+    title: "Pipelines ao vivo",
+    subtitle: "Cada chip #id mostra onde o item está agora; clique para abrir o card ou a sessão do agente.",
+    scoutLabel: "Oráculo · Encontrar melhorias",
+    scoutBadge: "Scout",
+    scoutHelp: "Timer/Watch do Oráculo que analisa o repositório do tenant contra docs/VISION.md e propõe melhorias.",
+    issueLabel: "Issue (Relay NIP-34)",
+    issueBadge: "Humano ou scout",
+    issueHelp: "Issues kind 1621 abertas por autores confiáveis listados em empresas/<tenant>.json.",
+    classifyLabel: "Identificar tipo",
+    classifyBadge: "LLM",
+    classifyHelp: "Classifica a Natureza do card (bug, feature ou docs) via NexusMind/Decisions e encaminha para a raia correta.",
+    mergeLabel: "Merge automático",
+    mergeBadge: "Auto-merge",
+    mergeHelp: "Integra na main após CI verde no SHA resultante (ferramentas/ci.sh), aceite L-22 íntegro e GATE do revisor designado.",
+    reviseLabel: "Refazer",
+    reviseHelp: "GATE recusado devolve o card ao executor e incrementa o contador de voltas; na 2ª recusa repetida aciona o COO.",
+    lanes: {
+      bug: {
+        title: "BUG",
+        steps: [
+          { id: "reproduce", label: "Reproduzir", badge: "Agente", help: "Cria teste que falha reproduzindo o bug (comando de aceite L-22)." },
+          { id: "fix", label: "Corrigir", badge: "Agente", help: "Implementa a correção em worktree isolada dentro da Escrita exclusiva." },
+          { id: "review", label: "Revisar", badge: "Revisor", help: "Revisor independente (L-01) valida diff, aceite congelado e emite GATE." }
+        ]
+      },
+      feature: {
+        title: "FEATURE",
+        steps: [
+          { id: "analyze", label: "Analisar", badge: "Agente", help: "Produz spec.md e aguarda aprovação de spec quando exigido pelo Effort." },
+          { id: "implement", label: "Implementar", badge: "Agente", help: "Executa TDD RED->GREEN no worktree isolado e abre PR kind 1618." },
+          { id: "review", label: "Revisar", badge: "Revisor", help: "Revisor independente (L-01) valida critérios, CI verde e emite GATE." }
+        ]
+      },
+      docs: {
+        title: "DOCUMENTAÇÃO",
+        steps: [
+          { id: "implement_docs", label: "Implementar", badge: "Agente", help: "Atualiza documentação e contratos no escopo exclusivo do card." },
+          { id: "checks", label: "Checks (CI)", badge: "CI", help: "Executa ferramentas/ci.sh (segredos, soul-lint, card-lint, L-01 e pytest)." },
+          { id: "review_docs", label: "Revisar", badge: "Revisor", help: "Decisão L-01 mantida para Docs: revisor independente confere e emite GATE." }
+        ]
+      }
+    }
+  },
+  labels: {
+    unavailable: "indisponível",
+    coordinatorActive: "Coordenador ativo",
+    coordinatorStopped: "Coordenador parado",
+    evalBelowMin: "ABAIXO DE 8/10",
+    noItems: "Nenhum item ativo nesta seção.",
+    spendToday: "Gasto hoje",
+    mergesToday: "Merges hoje",
+    merges7d: "Merges (7d)",
+    fpyReal: "FPY real",
+    unknownHistory: "Sem histórico",
+    quarantine: "Quarentena",
+    limitsTitle: "Limites operacionais (controle-<tenant>.json)",
+    modelsTitle: "Agentes & Eval de Tool Call (R5.1)"
+  }
+};
+const VALID_MODES = /* @__PURE__ */ new Set(["manual", "assisted", "software_factory", "dark_factory"]);
+const VALID_LOOP_STATES = /* @__PURE__ */ new Set(["idle", "discovering", "building", "verifying", "paused", "stopped", "draining"]);
+function parseFactoryStatus(raw) {
+  if (!raw || typeof raw !== "object") {
+    throw new Error("FactoryStatus inválido: objeto esperado");
+  }
+  const obj = raw;
+  if (typeof obj.projectId !== "string" || !obj.projectId) {
+    throw new Error("FactoryStatus inválido: projectId obrigatório");
+  }
+  if (!VALID_MODES.has(String(obj.mode))) {
+    throw new Error(`FactoryStatus inválido: mode=${obj.mode}`);
+  }
+  if (!VALID_LOOP_STATES.has(String(obj.loopState))) {
+    throw new Error(`FactoryStatus inválido: loopState=${obj.loopState}`);
+  }
+  if (typeof obj.killSwitch !== "boolean" || typeof obj.globalKillSwitch !== "boolean") {
+    throw new Error("FactoryStatus inválido: killSwitch/globalKillSwitch boolean obrigatórios");
+  }
+  if (!obj.spendToday || typeof obj.spendToday.tokens !== "number" || typeof obj.spendToday.usd !== "number") {
+    throw new Error("FactoryStatus inválido: spendToday.tokens/usd obrigatórios");
+  }
+  if (!Array.isArray(obj.backlog) || !Array.isArray(obj.inProgress) || !Array.isArray(obj.recent)) {
+    throw new Error("FactoryStatus inválido: backlog/inProgress/recent devem ser arrays");
+  }
+  return obj;
+}
+function buildEmptyFactoryStatus(tenant, reason) {
+  return {
+    projectId: tenant,
+    mode: "software_factory",
+    experimental: true,
+    loopState: "stopped",
+    pausedReason: reason || "Coordenador parado ou indisponível",
+    killSwitch: false,
+    globalKillSwitch: false,
+    drain: null,
+    limits: {
+      maxConcurrentSessions: 2,
+      maxMergesPerDay: 5,
+      dailyBudget: {},
+      pauseAfterConsecutiveFailures: 3,
+      autoMerge: false,
+      mergePolicy: "strict"
+    },
+    spendToday: { tokens: 0, usd: 0 },
+    mergesToday: 0,
+    stats: { mergedToday: 0, failedToday: 0, revertedToday: 0, medianMergeMs7d: null, merged7d: 0 },
+    consecutiveFailures: 0,
+    activeSessions: 0,
+    wip: { openPrs: 0, limit: 2, holding: false, waitingOnProvider: 0, note: null },
+    backlog: [],
+    inProgress: [],
+    mergeChecks: [],
+    pullRequests: [],
+    recent: [],
+    viewRecent: [],
+    ignored: [],
+    held: [],
+    visionExists: false,
+    lessons: [],
+    lastDigest: null,
+    lastTickAt: null,
+    tenant,
+    coordenador: "parado",
+    modelos: [],
+    indisponivel: ["kpis-esteira.json", "lastDigest", "lessons", "mergeChecks", "pullRequests", "scout", "spotChecks"]
+  };
+}
+async function fetchFactoryStatus(ctx, tenant = "orgfy") {
+  const slug = (tenant || "orgfy").trim().toLowerCase() || "orgfy";
+  const host = ctx == null ? void 0 : ctx.host;
+  try {
+    if (host == null ? void 0 : host.spawn) {
+      const proc = await host.spawn("python", {
+        args: [FABRICA_STATUS_SCRIPT_PATH, "--empresa", slug, "--json"]
+      });
+      let out = "";
+      if ((proc == null ? void 0 : proc.stdout) && typeof proc.stdout.getReader === "function") {
+        const reader = proc.stdout.getReader();
+        const dec = new TextDecoder();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          out += typeof value === "string" ? value : dec.decode(value, { stream: true });
+        }
+      } else if (typeof (proc == null ? void 0 : proc.stdout) === "string") {
+        out = proc.stdout;
+      }
+      if (proc == null ? void 0 : proc.exited) {
+        await Promise.race([proc.exited, new Promise((r) => setTimeout(r, 15e3))]);
+      }
+      if (out.trim()) {
+        const parsed = parseFactoryStatus(JSON.parse(out.trim()));
+        return { ok: true, status: parsed, error: null };
+      }
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      status: buildEmptyFactoryStatus(slug, (err == null ? void 0 : err.message) || "Falha ao consultar fabrica_status.py"),
+      error: (err == null ? void 0 : err.message) || String(err)
+    };
+  }
+  return {
+    ok: false,
+    status: buildEmptyFactoryStatus(slug, "host.spawn indisponível"),
+    error: "host.spawn indisponível"
+  };
+}
+async function writeTenantControl(ctx, tenant, patch) {
+  const slug = (tenant || "orgfy").trim().toLowerCase() || "orgfy";
+  const path = getControlePath(slug);
+  const host = ctx == null ? void 0 : ctx.host;
+  let current = {
+    tenant: slug,
+    mode: "software_factory",
+    killSwitch: false,
+    drain: false,
+    limits: { gastoDiaUsd: 50, mergesDia: 20, agentes: 4, prsAbertos: 6, falhasSeguidas: 3 },
+    pausedReason: null
+  };
+  try {
+    if (host == null ? void 0 : host.readFile) {
+      const raw = await host.readFile(path);
+      const txt = raw instanceof Uint8Array ? new TextDecoder().decode(raw) : String(raw || "");
+      const parsed = JSON.parse(txt);
+      if (parsed && typeof parsed === "object") current = { ...current, ...parsed };
+    }
+  } catch {
+  }
+  const next = {
+    ...current,
+    ...patch,
+    limits: { ...current.limits || {}, ...patch.limits || {} },
+    tenant: slug,
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  if (host == null ? void 0 : host.writeFile) {
+    await host.writeFile(path, JSON.stringify(next, null, 2) + "\n");
+    return { ok: true, path, control: next };
+  }
+  return { ok: false, path, control: next };
+}
+const FACTORY_SHADOW_CSS = `
+:host, [data-orgfy-factory-root="true"] {
+  --background: var(--surface-base, #0b0d10);
+  --card: var(--surface-panel, #111419);
+  --card-elevated: var(--surface-elevated, #161a21);
+  --foreground: var(--text-standard, #f3f4f6);
+  --muted-foreground: var(--text-tertiary, #9ca3af);
+  --border: var(--border-standard, rgba(255, 255, 255, 0.09));
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --primary: #f59e0b;
+  --primary-soft: rgba(245, 158, 11, 0.14);
+  --primary-foreground: #0b0d10;
+  --success: #10b981;
+  --success-soft: rgba(16, 185, 129, 0.14);
+  --destructive: var(--surface-status-danger, #ef4444);
+  --destructive-soft: rgba(239, 68, 68, 0.15);
+  --info: #38bdf8;
+  --info-soft: rgba(56, 189, 248, 0.14);
+  --radius: 10px;
+  --font-sans: inherit;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  display: block;
+  width: 100%;
+  height: 100%;
+  color: var(--foreground);
+  background: var(--background);
+  font-family: var(--font-sans);
+  box-sizing: border-box;
+}
+
+.of-shell {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  width: 100%;
+  height: 100vh;
+  max-height: 100vh;
+  background: var(--background);
+  color: var(--foreground);
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.of-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 12px;
+  background: var(--card);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+
+.of-brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 6px;
+}
+
+.of-brand-title {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--foreground);
+}
+
+.of-tenant-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.of-tenant-select {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--card-elevated);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.of-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.of-nav-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.of-nav-btn:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--foreground);
+}
+
+.of-nav-btn[data-active="true"] {
+  background: var(--primary-soft);
+  border-color: rgba(245, 158, 11, 0.35);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.of-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 22px;
+  gap: 16px;
+  box-sizing: border-box;
+}
+
+.of-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  box-sizing: border-box;
+}
+
+.of-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.of-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  border: 1px solid var(--border);
+  background: var(--card-elevated);
+  color: var(--foreground);
+}
+
+.of-pill[data-tone="ok"] {
+  background: var(--success-soft);
+  border-color: rgba(16, 185, 129, 0.4);
+  color: var(--success);
+}
+
+.of-pill[data-tone="warn"] {
+  background: var(--primary-soft);
+  border-color: rgba(245, 158, 11, 0.4);
+  color: var(--primary);
+}
+
+.of-pill[data-tone="danger"] {
+  background: var(--destructive-soft);
+  border-color: rgba(239, 68, 68, 0.45);
+  color: #f87171;
+}
+
+.of-pill[data-tone="muted"] {
+  color: var(--muted-foreground);
+}
+
+.of-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--card-elevated);
+  color: var(--foreground);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.of-btn:hover {
+  border-color: var(--border-strong);
+}
+
+.of-btn[data-variant="primary"] {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.of-btn[data-variant="danger"] {
+  background: var(--destructive-soft);
+  border-color: rgba(239, 68, 68, 0.5);
+  color: #f87171;
+}
+
+.of-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.of-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+}
+
+.of-kpi-label {
+  font-size: 11px;
+  color: var(--muted-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.of-kpi-value {
+  font-size: 22px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  margin-top: 4px;
+}
+
+.of-kpi-sub {
+  font-size: 11px;
+  color: var(--muted-foreground);
+  margin-top: 4px;
+}
+
+.of-pipeline-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.of-pipeline-entry {
+  display: flex;
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.of-pipeline-lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.of-lane {
+  display: grid;
+  grid-template-columns: 112px repeat(3, minmax(0, 1fr)) 130px;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.of-lane-tag {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  border-radius: 8px;
+  border: 1px dashed var(--border-strong);
+  color: var(--muted-foreground);
+  background: rgba(255, 255, 255, 0.02);
+  padding: 6px;
+}
+
+.of-node {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--card-elevated);
+  min-height: 76px;
+  box-sizing: border-box;
+}
+
+.of-node[data-empty="true"] {
+  opacity: 0.62;
+}
+
+.of-node[data-alert="true"] {
+  border-color: rgba(239, 68, 68, 0.55);
+}
+
+.of-node-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.of-node-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.of-node-badge {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  padding: 1px 6px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted-foreground);
+}
+
+.of-help-btn {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.of-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.of-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 10.5px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.of-chip[data-alert="true"] {
+  border-color: rgba(239, 68, 68, 0.55);
+  background: var(--destructive-soft);
+  color: #f87171;
+}
+
+.of-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.of-table th,
+.of-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.of-table th {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted-foreground);
+}
+
+.of-board-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+}
+
+.of-floor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 10px;
+}
+
+.of-muted {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.of-mono {
+  font-family: var(--font-mono);
+}
+`;
+function attachFactoryShadowStyles(hostEl) {
+  if (!hostEl || typeof hostEl.attachShadow !== "function") return null;
+  const shadow = hostEl.shadowRoot || hostEl.attachShadow({ mode: "open" });
+  if (!shadow.querySelector("style[data-orgfy-factory-css]")) {
+    const styleEl = hostEl.ownerDocument.createElement("style");
+    styleEl.setAttribute("data-orgfy-factory-css", "true");
+    styleEl.textContent = FACTORY_SHADOW_CSS;
+    shadow.appendChild(styleEl);
+  }
+  if (!shadow.querySelector("slot")) {
+    const slotEl = hostEl.ownerDocument.createElement("slot");
+    shadow.appendChild(slotEl);
+  }
+  return shadow;
+}
+function classifyLane(item) {
+  if (item.type === "bug" || item.type === "feature" || item.type === "docs") return item.type;
+  const t = `${item.title} ${item.workKey}`.toLowerCase();
+  if (t.includes("fix") || t.includes("bug") || t.includes("hotfix")) return "bug";
+  if (t.includes("doc") || t.includes("readme") || t.includes("prd")) return "docs";
+  return "feature";
+}
+function bucketStep(item, lane) {
+  const st = String(item.step || item.stage || "").toLowerCase();
+  if (item.stage === "merged") return "merge";
+  if (item.stage === "verifying" || item.stage === "watching" || st.includes("revis") || st.includes("gate") || st.includes("review")) {
+    return lane === "docs" ? "review_docs" : "review";
+  }
+  if (lane === "bug") {
+    if (st.includes("reprod") || item.stage === "backlog") return "reproduce";
+    return "fix";
+  }
+  if (lane === "docs") {
+    if (st.includes("check") || st.includes("ci")) return "checks";
+    return "implement_docs";
+  }
+  if (st.includes("anal") || st.includes("spec") || item.stage === "backlog") return "analyze";
+  return "implement";
+}
+function renderPipelineDiagram(props) {
+  const { h, status, activeHelpKey, onToggleHelp, onSelectItem } = props;
+  const allActive = [...status.backlog, ...status.inProgress];
+  const recentMerged = status.recent.filter((i) => i.stage === "merged").slice(0, 6);
+  const failedItems = [...status.inProgress, ...status.recent].filter(
+    (i) => i.stage === "failed" || i.stage === "escalated" || i.stage === "reverted"
+  );
+  const retryCount = allActive.reduce((acc, i) => acc + Math.max(0, (i.attempts || 1) - 1), 0);
+  const laneBuckets = {
+    reproduce: [],
+    fix: [],
+    review_bug: [],
+    analyze: [],
+    implement: [],
+    review_feature: [],
+    implement_docs: [],
+    checks: [],
+    review_docs: []
+  };
+  for (const item of status.inProgress) {
+    const lane = classifyLane(item);
+    const step = bucketStep(item, lane);
+    if (lane === "bug" && step === "review") laneBuckets.review_bug.push(item);
+    else if (lane === "feature" && step === "review") laneBuckets.review_feature.push(item);
+    else if (laneBuckets[step]) laneBuckets[step].push(item);
+  }
+  const loopTone = status.killSwitch || status.globalKillSwitch || status.loopState === "stopped" ? "danger" : status.loopState === "draining" || status.loopState === "paused" ? "warn" : "ok";
+  const loopLabel = PT_BR.loopState[status.loopState] || status.loopState;
+  const renderNode = (opts) => {
+    const hasAlert = opts.items.some((i) => i.stage === "failed" || i.stage === "escalated" || i.stage === "reverted");
+    const isEmpty = opts.items.length === 0;
+    const isHelpOpen = activeHelpKey === opts.keyId;
+    return h(
+      "div",
+      {
+        key: opts.keyId,
+        className: "of-node",
+        "data-empty": isEmpty ? "true" : "false",
+        "data-alert": hasAlert ? "true" : "false"
+      },
+      h(
+        "div",
+        { className: "of-node-head" },
+        h("span", { className: "of-node-title" }, opts.title),
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", gap: "4px" } },
+          h("span", { className: "of-node-badge" }, opts.badge),
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-help-btn",
+              title: opts.help,
+              onClick: () => onToggleHelp(isHelpOpen ? null : opts.keyId)
+            },
+            "?"
+          )
+        )
+      ),
+      isHelpOpen && h(
+        "div",
+        {
+          style: {
+            fontSize: "11px",
+            color: "var(--muted-foreground)",
+            background: "rgba(0,0,0,0.28)",
+            padding: "6px 8px",
+            borderRadius: "6px",
+            lineHeight: 1.35
+          }
+        },
+        opts.help
+      ),
+      opts.items.length > 0 ? h(
+        "div",
+        { className: "of-chip-row" },
+        opts.items.slice(0, 8).map((item) => {
+          const itemAlert = item.stage === "failed" || item.stage === "escalated" || item.stage === "reverted";
+          return h(
+            "button",
+            {
+              key: `${opts.keyId}-${item.id}`,
+              type: "button",
+              className: "of-chip",
+              "data-alert": itemAlert ? "true" : "false",
+              title: `${item.title} (${item.stage})`,
+              onClick: () => onSelectItem(item)
+            },
+            itemAlert ? "⚠ " : "",
+            `#${item.id.slice(0, 8)}`
+          );
+        })
+      ) : h("span", { className: "of-muted", style: { fontSize: "10.5px" } }, "—")
+    );
+  };
+  return h(
+    "section",
+    { className: "of-card of-pipeline-flow" },
+    h(
+      "div",
+      { className: "of-header-bar" },
+      h(
+        "div",
+        null,
+        h("div", { style: { fontSize: "14px", fontWeight: 700 } }, PT_BR.pipelines.title),
+        h("div", { className: "of-muted", style: { marginTop: "2px" } }, PT_BR.pipelines.subtitle)
+      ),
+      h(
+        "div",
+        { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
+        h("span", { className: "of-pill", "data-tone": loopTone }, loopLabel),
+        h(
+          "span",
+          { className: "of-pill", "data-tone": retryCount > 0 ? "warn" : "muted", title: PT_BR.pipelines.reviseHelp },
+          `↻ ${PT_BR.pipelines.reviseLabel}: ${retryCount}`
+        ),
+        failedItems.length > 0 && h("span", { className: "of-pill", "data-tone": "danger" }, `⚠ ${failedItems.length} atenção`)
+      )
+    ),
+    // Entrada: Oráculo ⇢ Issue ⇢ Identificar tipo
+    h(
+      "div",
+      { className: "of-pipeline-entry" },
+      h("div", { style: { flex: "1 1 200px" } }, renderNode({
+        keyId: "scout",
+        title: PT_BR.pipelines.scoutLabel,
+        badge: PT_BR.pipelines.scoutBadge,
+        help: PT_BR.pipelines.scoutHelp,
+        items: []
+      })),
+      h("div", { style: { flex: "1 1 200px" } }, renderNode({
+        keyId: "issue",
+        title: PT_BR.pipelines.issueLabel,
+        badge: PT_BR.pipelines.issueBadge,
+        help: PT_BR.pipelines.issueHelp,
+        items: status.backlog
+      })),
+      h("div", { style: { flex: "1 1 200px" } }, renderNode({
+        keyId: "classify",
+        title: PT_BR.pipelines.classifyLabel,
+        badge: PT_BR.pipelines.classifyBadge,
+        help: PT_BR.pipelines.classifyHelp,
+        items: status.backlog.slice(0, 4)
+      }))
+    ),
+    // 3 Raias: Bug, Feature, Documentação (L-01 mantido!) -> Merge
+    h(
+      "div",
+      { className: "of-pipeline-lanes" },
+      // Raia Bug
+      h(
+        "div",
+        { className: "of-lane" },
+        h("div", { className: "of-lane-tag" }, PT_BR.pipelines.lanes.bug.title),
+        renderNode({
+          keyId: "bug-reproduce",
+          title: PT_BR.pipelines.lanes.bug.steps[0].label,
+          badge: PT_BR.pipelines.lanes.bug.steps[0].badge,
+          help: PT_BR.pipelines.lanes.bug.steps[0].help,
+          items: laneBuckets.reproduce
+        }),
+        renderNode({
+          keyId: "bug-fix",
+          title: PT_BR.pipelines.lanes.bug.steps[1].label,
+          badge: PT_BR.pipelines.lanes.bug.steps[1].badge,
+          help: PT_BR.pipelines.lanes.bug.steps[1].help,
+          items: laneBuckets.fix
+        }),
+        renderNode({
+          keyId: "bug-review",
+          title: PT_BR.pipelines.lanes.bug.steps[2].label,
+          badge: PT_BR.pipelines.lanes.bug.steps[2].badge,
+          help: PT_BR.pipelines.lanes.bug.steps[2].help,
+          items: laneBuckets.review_bug
+        }),
+        renderNode({
+          keyId: "merge-bug",
+          title: PT_BR.pipelines.mergeLabel,
+          badge: PT_BR.pipelines.mergeBadge,
+          help: PT_BR.pipelines.mergeHelp,
+          items: recentMerged.filter((i) => classifyLane(i) === "bug")
+        })
+      ),
+      // Raia Feature
+      h(
+        "div",
+        { className: "of-lane" },
+        h("div", { className: "of-lane-tag" }, PT_BR.pipelines.lanes.feature.title),
+        renderNode({
+          keyId: "feat-analyze",
+          title: PT_BR.pipelines.lanes.feature.steps[0].label,
+          badge: PT_BR.pipelines.lanes.feature.steps[0].badge,
+          help: PT_BR.pipelines.lanes.feature.steps[0].help,
+          items: laneBuckets.analyze
+        }),
+        renderNode({
+          keyId: "feat-implement",
+          title: PT_BR.pipelines.lanes.feature.steps[1].label,
+          badge: PT_BR.pipelines.lanes.feature.steps[1].badge,
+          help: PT_BR.pipelines.lanes.feature.steps[1].help,
+          items: laneBuckets.implement
+        }),
+        renderNode({
+          keyId: "feat-review",
+          title: PT_BR.pipelines.lanes.feature.steps[2].label,
+          badge: PT_BR.pipelines.lanes.feature.steps[2].badge,
+          help: PT_BR.pipelines.lanes.feature.steps[2].help,
+          items: laneBuckets.review_feature
+        }),
+        renderNode({
+          keyId: "merge-feat",
+          title: PT_BR.pipelines.mergeLabel,
+          badge: PT_BR.pipelines.mergeBadge,
+          help: PT_BR.pipelines.mergeHelp,
+          items: recentMerged.filter((i) => classifyLane(i) === "feature")
+        })
+      ),
+      // Raia Docs (com Revisor L-01 mantido!)
+      h(
+        "div",
+        { className: "of-lane" },
+        h("div", { className: "of-lane-tag" }, PT_BR.pipelines.lanes.docs.title),
+        renderNode({
+          keyId: "docs-impl",
+          title: PT_BR.pipelines.lanes.docs.steps[0].label,
+          badge: PT_BR.pipelines.lanes.docs.steps[0].badge,
+          help: PT_BR.pipelines.lanes.docs.steps[0].help,
+          items: laneBuckets.implement_docs
+        }),
+        renderNode({
+          keyId: "docs-checks",
+          title: PT_BR.pipelines.lanes.docs.steps[1].label,
+          badge: PT_BR.pipelines.lanes.docs.steps[1].badge,
+          help: PT_BR.pipelines.lanes.docs.steps[1].help,
+          items: laneBuckets.checks
+        }),
+        renderNode({
+          keyId: "docs-review",
+          title: PT_BR.pipelines.lanes.docs.steps[2].label,
+          badge: PT_BR.pipelines.lanes.docs.steps[2].badge,
+          help: PT_BR.pipelines.lanes.docs.steps[2].help,
+          items: laneBuckets.review_docs
+        }),
+        renderNode({
+          keyId: "merge-docs",
+          title: PT_BR.pipelines.mergeLabel,
+          badge: PT_BR.pipelines.mergeBadge,
+          help: PT_BR.pipelines.mergeHelp,
+          items: recentMerged.filter((i) => classifyLane(i) === "docs")
+        })
+      )
+    )
+  );
+}
+const TENANT_OPTIONS = [
+  { id: "orgfy", label: "OrgFy Core" },
+  { id: "lumen-iptv", label: "Lumen IPTV" },
+  { id: "saas-tributario", label: "SaaS Tributário" }
+];
+function createFactoryAppComponent(ctx, opts = {}) {
+  const React = ctx.react;
+  const h = React.createElement;
+  return function OrgFyFactoryApp() {
+    var _a, _b, _c;
+    const [tenant, setTenant] = React.useState("orgfy");
+    const [tab, setTab] = React.useState("overview");
+    const [status, setStatus] = React.useState(() => buildEmptyFactoryStatus("orgfy"));
+    const [loading, setLoading] = React.useState(true);
+    const [error, setError] = React.useState(null);
+    const [toast, setToast] = React.useState(null);
+    const [activeHelpKey, setActiveHelpKey] = React.useState(null);
+    const [selectedItem, setSelectedItem] = React.useState(null);
+    const [confirmKill, setConfirmKill] = React.useState(false);
+    const [gastoDiaUsd, setGastoDiaUsd] = React.useState(50);
+    const [mergesDia, setMergesDia] = React.useState(20);
+    const [agentesMax, setAgentesMax] = React.useState(4);
+    const [falhasSeguidas, setFalhasSeguidas] = React.useState(3);
+    const hostRef = React.useRef(null);
+    React.useEffect(() => {
+      if (hostRef.current) {
+        attachFactoryShadowStyles(hostRef.current);
+      }
+    }, []);
+    const notify2 = React.useCallback((msg) => {
+      setToast(msg);
+      setTimeout(() => setToast(null), 3500);
+    }, []);
+    const refresh = React.useCallback(async (targetTenant = tenant) => {
+      var _a2;
+      setLoading(true);
+      const res = await fetchFactoryStatus(ctx, targetTenant);
+      setStatus(res.status);
+      setError(res.error);
+      setGastoDiaUsd(((_a2 = res.status.limits.dailyBudget) == null ? void 0 : _a2.usd) ?? 50);
+      setMergesDia(res.status.limits.maxMergesPerDay ?? 20);
+      setAgentesMax(res.status.limits.maxConcurrentSessions ?? 4);
+      setFalhasSeguidas(res.status.limits.pauseAfterConsecutiveFailures ?? 3);
+      setLoading(false);
+    }, [tenant]);
+    React.useEffect(() => {
+      let disposed = false;
+      const run = () => {
+        if (!disposed) refresh(tenant);
+      };
+      run();
+      const timer = setInterval(run, 5e3);
+      const unsub = subscribeRelayUpdates(() => run());
+      return () => {
+        disposed = true;
+        clearInterval(timer);
+        unsub();
+      };
+    }, [tenant, refresh]);
+    const handleControlUpdate = React.useCallback(
+      async (patch, message) => {
+        const res = await writeTenantControl(ctx, tenant, patch);
+        if (res.ok) {
+          notify2(message);
+          await refresh(tenant);
+        } else {
+          notify2("Falha ao gravar controle-<tenant>.json (host.writeFile indisponível).");
+        }
+      },
+      [tenant, notify2, refresh]
+    );
+    const handleSelectItem = React.useCallback(
+      async (item) => {
+        setSelectedItem(item);
+        if (item.id && /^[0-9a-f]{64}$/i.test(item.id)) {
+          await openIssueInBuzz(ctx, { id: item.id, dtag: tenant }).catch(() => false);
+        }
+      },
+      [tenant]
+    );
+    const liveCrew = React.useMemo(() => {
+      var _a2, _b2;
+      try {
+        const snap = ((_b2 = (_a2 = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _a2.snapshot) == null ? void 0 : _b2.call(_a2)) || {};
+        const runningSet = new Set((snap.running || []).map((a) => String((a == null ? void 0 : a.key) || (a == null ? void 0 : a.name))));
+        const list = (snap.agents || []).map((a) => {
+          var _a3, _b3;
+          return {
+            key: String((a == null ? void 0 : a.key) || (a == null ? void 0 : a.name) || ""),
+            name: String((a == null ? void 0 : a.name) || (a == null ? void 0 : a.key) || "Agente"),
+            model: ((_a3 = a == null ? void 0 : a.config) == null ? void 0 : _a3.model) || PT_BR.labels.unavailable,
+            provider: ((_b3 = a == null ? void 0 : a.config) == null ? void 0 : _b3.provider) || "",
+            running: runningSet.has(String((a == null ? void 0 : a.key) || (a == null ? void 0 : a.name)))
+          };
+        });
+        return list;
+      } catch {
+        return [];
+      }
+    }, [status.lastTickAt]);
+    const qualidade = ((_a = status.kpis) == null ? void 0 : _a.qualidade) || null;
+    const economia = ((_b = status.kpis) == null ? void 0 : _b.economia) || null;
+    ((_c = status.kpis) == null ? void 0 : _c.fluxo) || null;
+    const modelos = status.modelos || [];
+    const abaixoMinimoCount = modelos.filter((m) => m.abaixo_minimo).length;
+    const navItems = [
+      { id: "holding", label: PT_BR.nav.holding },
+      { id: "inbox", label: PT_BR.nav.inbox, badge: status.held.length ? String(status.held.length) : void 0 },
+      { id: "overview", label: PT_BR.nav.overview },
+      { id: "board", label: PT_BR.nav.board, badge: String(status.backlog.length + status.inProgress.length) },
+      { id: "floor", label: PT_BR.nav.floor, badge: String(liveCrew.filter((c) => c.running).length) },
+      { id: "costs", label: PT_BR.nav.costs },
+      { id: "automations", label: PT_BR.nav.automations },
+      { id: "agents", label: PT_BR.nav.agents, badge: abaixoMinimoCount > 0 ? `⚠ ${abaixoMinimoCount}` : void 0 },
+      { id: "vision", label: PT_BR.nav.vision },
+      { id: "settings", label: PT_BR.nav.settings }
+    ];
+    const renderOverview = () => h(
+      "div",
+      { style: { display: "flex", flexDirection: "column", gap: "14px" } },
+      // Cabeçalho e barra de ações
+      h(
+        "div",
+        { className: "of-card of-header-bar" },
+        h(
+          "div",
+          null,
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
+            h("strong", { style: { fontSize: "16px" } }, `${PT_BR.appTitle} · ${tenant}`),
+            h(
+              "span",
+              { className: "of-pill", "data-tone": status.coordenador === "ativo" ? "ok" : "danger" },
+              status.coordenador === "ativo" ? PT_BR.labels.coordinatorActive : PT_BR.labels.coordinatorStopped
+            ),
+            h("span", { className: "of-pill", "data-tone": "warn" }, PT_BR.modes[status.mode] || status.mode),
+            status.killSwitch && h("span", { className: "of-pill", "data-tone": "danger" }, "KILL SWITCH ATIVO")
+          ),
+          status.pausedReason && h("div", { className: "of-muted", style: { marginTop: "4px" } }, `Motivo: ${status.pausedReason}`)
+        ),
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
+          h(
+            "button",
+            { type: "button", className: "of-btn", onClick: () => refresh(tenant), disabled: loading },
+            loading ? "Atualizando..." : PT_BR.actions.checkNow
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              onClick: () => handleControlUpdate(
+                { drain: !status.drain },
+                status.drain ? "Dreno cancelado." : "Modo Dreno ativado (termina os itens em andamento)."
+              )
+            },
+            status.drain ? PT_BR.actions.drainOff : PT_BR.actions.drainOn
+          ),
+          !confirmKill ? h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-variant": "danger",
+              onClick: () => {
+                if (status.killSwitch) {
+                  handleControlUpdate({ killSwitch: false, pausedReason: null }, "Kill Switch liberado.");
+                } else {
+                  setConfirmKill(true);
+                }
+              }
+            },
+            status.killSwitch ? PT_BR.actions.killSwitchOff : PT_BR.actions.killSwitchOn
+          ) : h(
+            "div",
+            { style: { display: "flex", gap: "6px", alignItems: "center" } },
+            h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                "data-variant": "danger",
+                onClick: async () => {
+                  setConfirmKill(false);
+                  await handleControlUpdate(
+                    { killSwitch: true, pausedReason: "Kill Switch acionado pelo operador" },
+                    "Kill Switch ativado imediatamente."
+                  );
+                }
+              },
+              "Confirmar Kill Switch"
+            ),
+            h(
+              "button",
+              { type: "button", className: "of-btn", onClick: () => setConfirmKill(false) },
+              "Cancelar"
+            )
+          )
+        )
+      ),
+      // KPIs reais (de kpis-esteira.json — zero números inventados)
+      h(
+        "div",
+        { className: "of-kpi-grid" },
+        h(
+          "div",
+          { className: "of-card" },
+          h("div", { className: "of-kpi-label" }, PT_BR.labels.fpyReal),
+          h(
+            "div",
+            { className: "of-kpi-value" },
+            typeof (qualidade == null ? void 0 : qualidade.fpy_real_pct) === "number" ? `${qualidade.fpy_real_pct.toFixed(1)}%` : PT_BR.labels.unavailable
+          ),
+          h(
+            "div",
+            { className: "of-kpi-sub" },
+            typeof (qualidade == null ? void 0 : qualidade.pct_desconhecido) === "number" ? `${PT_BR.labels.unknownHistory}: ${qualidade.pct_desconhecido.toFixed(1)}%` : PT_BR.labels.unavailable
+          )
+        ),
+        h(
+          "div",
+          { className: "of-card" },
+          h("div", { className: "of-kpi-label" }, PT_BR.labels.merges7d),
+          h("div", { className: "of-kpi-value" }, String(status.stats.merged7d)),
+          h("div", { className: "of-kpi-sub" }, `${PT_BR.labels.mergesToday}: ${status.mergesToday}`)
+        ),
+        h(
+          "div",
+          { className: "of-card" },
+          h("div", { className: "of-kpi-label" }, PT_BR.labels.spendToday),
+          h("div", { className: "of-kpi-value" }, `$${status.spendToday.usd.toFixed(2)}`),
+          h("div", { className: "of-kpi-sub" }, `${status.spendToday.tokens.toLocaleString("pt-BR")} tokens`)
+        ),
+        h(
+          "div",
+          { className: "of-card" },
+          h("div", { className: "of-kpi-label" }, PT_BR.labels.quarantine),
+          h("div", { className: "of-kpi-value" }, String(status.quarentenaCount ?? 0)),
+          h("div", { className: "of-kpi-sub" }, `WIP ativo: ${status.inProgress.length}`)
+        )
+      ),
+      // Diagrama de Pipelines ao vivo (prioridade #1)
+      renderPipelineDiagram({
+        h,
+        status,
+        activeHelpKey,
+        onToggleHelp: setActiveHelpKey,
+        onSelectItem: handleSelectItem
+      }),
+      // Transparência de fontes indisponíveis
+      status.indisponivel.length > 0 && h(
+        "div",
+        { className: "of-card", style: { fontSize: "11.5px", color: "var(--muted-foreground)" } },
+        `Fontes indisponíveis neste tenant (exibidas como "${PT_BR.labels.unavailable}"): ${status.indisponivel.join(", ")}`
+      )
+    );
+    const renderBoard = () => {
+      const cols = [
+        { title: "Triagem / Backlog", items: status.backlog },
+        { title: "Executando", items: status.inProgress.filter((i) => i.stage === "building") },
+        { title: "Revisando (Gate L-01)", items: status.inProgress.filter((i) => i.stage === "verifying" || i.stage === "watching") },
+        { title: "Integrado recente", items: status.recent.filter((i) => i.stage === "merged").slice(0, 12) }
+      ];
+      return h(
+        "div",
+        { className: "of-board-grid" },
+        cols.map(
+          (col) => h(
+            "div",
+            { key: col.title, className: "of-card", style: { display: "flex", flexDirection: "column", gap: "8px" } },
+            h(
+              "div",
+              { style: { display: "flex", justifyContent: "space-between", fontSize: "12px", fontWeight: 700 } },
+              h("span", null, col.title),
+              h("span", { className: "of-mono of-muted" }, String(col.items.length))
+            ),
+            col.items.length === 0 ? h("div", { className: "of-muted" }, PT_BR.labels.noItems) : col.items.map(
+              (item) => h(
+                "button",
+                {
+                  key: item.id,
+                  type: "button",
+                  onClick: () => handleSelectItem(item),
+                  style: {
+                    textAlign: "left",
+                    padding: "8px 10px",
+                    borderRadius: "8px",
+                    border: "1px solid var(--border)",
+                    background: "var(--card-elevated)",
+                    color: "var(--foreground)",
+                    cursor: "pointer"
+                  }
+                },
+                h("div", { className: "of-mono", style: { fontSize: "11px", color: "var(--primary)" } }, `#${item.id.slice(0, 8)}`),
+                h("div", { style: { fontSize: "12px", fontWeight: 600, marginTop: "2px" } }, item.title)
+              )
+            )
+          )
+        )
+      );
+    };
+    const renderFloor = () => h(
+      "div",
+      { className: "of-card", style: { display: "flex", flexDirection: "column", gap: "12px" } },
+      h("div", { style: { fontSize: "14px", fontWeight: 700 } }, "Andar da Fábrica · Equipe ao vivo"),
+      h(
+        "div",
+        { className: "of-floor-grid" },
+        liveCrew.length === 0 ? h("div", { className: "of-muted" }, "Nenhum agente reportado por ctx.agents.snapshot().") : liveCrew.map(
+          (agent) => h(
+            "div",
+            {
+              key: agent.key,
+              className: "of-node",
+              "data-empty": agent.running ? "false" : "true"
+            },
+            h(
+              "div",
+              { className: "of-node-head" },
+              h("span", { className: "of-node-title" }, agent.name),
+              h("span", { className: "of-pill", "data-tone": agent.running ? "ok" : "muted" }, agent.running ? "Ativo" : "Ocioso")
+            ),
+            h("div", { className: "of-mono of-muted", style: { fontSize: "11px" } }, `${agent.provider ? `${agent.provider}/` : ""}${agent.model}`)
+          )
+        )
+      )
+    );
+    const renderCosts = () => {
+      const porModelo = Array.isArray(economia == null ? void 0 : economia.por_modelo) ? economia.por_modelo : [];
+      return h(
+        "div",
+        { style: { display: "flex", flexDirection: "column", gap: "12px" } },
+        h(
+          "div",
+          { className: "of-kpi-grid" },
+          h(
+            "div",
+            { className: "of-card" },
+            h("div", { className: "of-kpi-label" }, "Custo amostra (USD)"),
+            h(
+              "div",
+              { className: "of-kpi-value" },
+              typeof (economia == null ? void 0 : economia.custo_usd_total_amostra) === "number" ? `$${economia.custo_usd_total_amostra.toFixed(2)}` : PT_BR.labels.unavailable
+            )
+          ),
+          h(
+            "div",
+            { className: "of-card" },
+            h("div", { className: "of-kpi-label" }, "Cache hit"),
+            h(
+              "div",
+              { className: "of-kpi-value" },
+              typeof (economia == null ? void 0 : economia.cache_hit_ratio_pct) === "number" ? `${economia.cache_hit_ratio_pct.toFixed(1)}%` : PT_BR.labels.unavailable
+            )
+          ),
+          h(
+            "div",
+            { className: "of-card" },
+            h("div", { className: "of-kpi-label" }, "Tokens (7d)"),
+            h(
+              "div",
+              { className: "of-kpi-value" },
+              typeof (economia == null ? void 0 : economia.tokens_7d) === "number" ? economia.tokens_7d.toLocaleString("pt-BR") : PT_BR.labels.unavailable
+            )
+          )
+        ),
+        h(
+          "div",
+          { className: "of-card" },
+          h("div", { style: { fontSize: "13px", fontWeight: 700, marginBottom: "8px" } }, "Quebra real por modelo (kpis-esteira.json)"),
+          porModelo.length === 0 ? h("div", { className: "of-muted" }, PT_BR.labels.unavailable) : h(
+            "table",
+            { className: "of-table" },
+            h(
+              "thead",
+              null,
+              h("tr", null, h("th", null, "Modelo"), h("th", null, "Chamadas"), h("th", null, "Custo USD"), h("th", null, "Cache"))
+            ),
+            h(
+              "tbody",
+              null,
+              porModelo.slice(0, 15).map(
+                (row, idx) => h(
+                  "tr",
+                  { key: `${row.modelo || idx}` },
+                  h("td", { className: "of-mono" }, String(row.modelo || PT_BR.labels.unavailable)),
+                  h("td", { className: "of-mono" }, String(row.requisicoes ?? row.chamadas ?? PT_BR.labels.unavailable)),
+                  h("td", { className: "of-mono" }, typeof row.custo_usd === "number" ? `$${row.custo_usd.toFixed(3)}` : PT_BR.labels.unavailable),
+                  h("td", { className: "of-mono" }, typeof row.cache_hit_pct === "number" ? `${row.cache_hit_pct.toFixed(1)}%` : PT_BR.labels.unavailable)
+                )
+              )
+            )
+          )
+        )
+      );
+    };
+    const renderAgents = () => h(
+      "div",
+      { className: "of-card" },
+      h("div", { style: { fontSize: "14px", fontWeight: 700, marginBottom: "8px" } }, PT_BR.labels.modelsTitle),
+      h(
+        "div",
+        { className: "of-muted", style: { marginBottom: "10px" } },
+        "Agentes com nota de tool call abaixo de 8/10 no eval R5.1 ficam destacados em vermelho."
+      ),
+      modelos.length === 0 ? h("div", { className: "of-muted" }, PT_BR.labels.unavailable) : h(
+        "table",
+        { className: "of-table" },
+        h(
+          "thead",
+          null,
+          h("tr", null, h("th", null, "Agente"), h("th", null, "Papel"), h("th", null, "Modelo"), h("th", null, "Eval Tool Call"))
+        ),
+        h(
+          "tbody",
+          null,
+          modelos.map(
+            (m) => h(
+              "tr",
+              { key: m.agente },
+              h("td", { style: { fontWeight: 600 } }, m.agente),
+              h("td", null, m.papel || "—"),
+              h("td", { className: "of-mono" }, m.modelo || PT_BR.labels.unavailable),
+              h(
+                "td",
+                null,
+                h(
+                  "span",
+                  {
+                    className: "of-pill",
+                    "data-tone": m.abaixo_minimo ? "danger" : m.toolcall_eval ? "ok" : "muted"
+                  },
+                  m.toolcall_eval ? m.abaixo_minimo ? `${m.toolcall_eval} · ${PT_BR.labels.evalBelowMin}` : m.toolcall_eval : PT_BR.labels.unavailable
+                )
+              )
+            )
+          )
+        )
+      )
+    );
+    const renderSettings = () => h(
+      "div",
+      { style: { display: "flex", flexDirection: "column", gap: "12px" } },
+      h(
+        "div",
+        { className: "of-card" },
+        h("div", { style: { fontSize: "14px", fontWeight: 700, marginBottom: "8px" } }, "Modo de autonomia"),
+        h(
+          "div",
+          { style: { display: "flex", gap: "8px", flexWrap: "wrap" } },
+          ["manual", "assisted", "software_factory", "dark_factory"].map(
+            (mode) => h(
+              "button",
+              {
+                key: mode,
+                type: "button",
+                className: "of-btn",
+                "data-variant": status.mode === mode ? "primary" : void 0,
+                onClick: () => handleControlUpdate({ mode }, `Modo alterado para ${PT_BR.modes[mode]}.`)
+              },
+              PT_BR.modes[mode]
+            )
+          )
+        )
+      ),
+      h(
+        "div",
+        { className: "of-card", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+        h("div", { style: { fontSize: "14px", fontWeight: 700 } }, PT_BR.labels.limitsTitle),
+        h(
+          "div",
+          { className: "of-kpi-grid" },
+          h(
+            "label",
+            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "12px" } },
+            "Gasto/dia (USD)",
+            h("input", {
+              type: "number",
+              value: gastoDiaUsd,
+              onChange: (e) => setGastoDiaUsd(Number(e.target.value)),
+              className: "of-tenant-select"
+            })
+          ),
+          h(
+            "label",
+            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "12px" } },
+            "Merges/dia",
+            h("input", {
+              type: "number",
+              value: mergesDia,
+              onChange: (e) => setMergesDia(Number(e.target.value)),
+              className: "of-tenant-select"
+            })
+          ),
+          h(
+            "label",
+            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "12px" } },
+            "Agentes simultâneos",
+            h("input", {
+              type: "number",
+              value: agentesMax,
+              onChange: (e) => setAgentesMax(Number(e.target.value)),
+              className: "of-tenant-select"
+            })
+          ),
+          h(
+            "label",
+            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "12px" } },
+            "Pausar após falhas seguidas",
+            h("input", {
+              type: "number",
+              value: falhasSeguidas,
+              onChange: (e) => setFalhasSeguidas(Number(e.target.value)),
+              className: "of-tenant-select"
+            })
+          )
+        ),
+        h(
+          "div",
+          null,
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-variant": "primary",
+              onClick: () => handleControlUpdate(
+                { limits: { gastoDiaUsd, mergesDia, agentes: agentesMax, falhasSeguidas } },
+                `Limites salvos em controle-${tenant}.json.`
+              )
+            },
+            "Salvar limites"
+          )
+        )
+      )
+    );
+    const renderSimpleTab = () => {
+      if (tab === "holding") {
+        return h(
+          "div",
+          { className: "of-card" },
+          h("div", { style: { fontSize: "14px", fontWeight: 700, marginBottom: "8px" } }, "Holding Cortexx · Empresas"),
+          h(
+            "div",
+            { className: "of-kpi-grid" },
+            TENANT_OPTIONS.map(
+              (t) => h(
+                "button",
+                {
+                  key: t.id,
+                  type: "button",
+                  className: "of-card",
+                  style: { textAlign: "left", cursor: "pointer", color: "var(--foreground)" },
+                  onClick: () => {
+                    setTenant(t.id);
+                    setTab("overview");
+                  }
+                },
+                h("div", { style: { fontWeight: 700, fontSize: "13px" } }, t.label),
+                h("div", { className: "of-mono of-muted", style: { marginTop: "4px" } }, t.id)
+              )
+            )
+          )
+        );
+      }
+      if (tab === "inbox") {
+        return h(
+          "div",
+          { className: "of-card" },
+          h("div", { style: { fontSize: "14px", fontWeight: 700, marginBottom: "8px" } }, "Inbox · Aguardando sua decisão"),
+          status.held.length === 0 ? h("div", { className: "of-muted" }, "Nenhuma pendência bloqueando a fábrica agora.") : h("pre", { className: "of-mono", style: { fontSize: "11px" } }, JSON.stringify(status.held, null, 2))
+        );
+      }
+      if (tab === "automations") {
+        return h(
+          "div",
+          { className: "of-card", style: { display: "flex", flexDirection: "column", gap: "8px" } },
+          h("div", { style: { fontSize: "14px", fontWeight: 700 } }, "Automações & LaunchAgents"),
+          h("div", { className: "of-mono", style: { fontSize: "12px" } }, `Coordenador (${status.launchAgent || "com.orgfy.esteira-minima"}): ${status.coordenador}`),
+          h("div", { className: "of-muted" }, "Rotina CEO: configurar/verificar no Buzz Desktop (canal #esteira-orgfy).")
+        );
+      }
+      return h(
+        "div",
+        { className: "of-card" },
+        h("div", { style: { fontSize: "14px", fontWeight: 700, marginBottom: "6px" } }, "Visão do produto (docs/VISION.md)"),
+        h(
+          "div",
+          { className: "of-muted" },
+          status.visionExists ? "docs/VISION.md encontrado no repositório do tenant." : "docs/VISION.md não encontrado ainda (indisponível)."
+        )
+      );
+    };
+    return h(
+      "div",
+      {
+        ref: hostRef,
+        "data-orgfy-factory-root": "true",
+        style: { width: "100%", height: "100vh", maxHeight: "100vh", overflow: "hidden" }
+      },
+      h("style", { "data-orgfy-factory-inline-fallback": "true" }, FACTORY_SHADOW_CSS),
+      h(
+        "div",
+        { className: "of-shell" },
+        h(
+          "aside",
+          { className: "of-sidebar" },
+          h(
+            "div",
+            { className: "of-brand" },
+            h("span", { className: "of-brand-title" }, PT_BR.appTitle),
+            h("span", { className: "of-pill", "data-tone": status.coordenador === "ativo" ? "ok" : "danger" }, status.coordenador)
+          ),
+          h(
+            "div",
+            { className: "of-tenant-picker" },
+            h(
+              "select",
+              {
+                className: "of-tenant-select",
+                value: tenant,
+                onChange: (e) => setTenant(e.target.value)
+              },
+              TENANT_OPTIONS.map((t) => h("option", { key: t.id, value: t.id }, t.label))
+            )
+          ),
+          h(
+            "nav",
+            { className: "of-nav" },
+            navItems.map(
+              (item) => h(
+                "button",
+                {
+                  key: item.id,
+                  type: "button",
+                  className: "of-nav-btn",
+                  "data-active": tab === item.id ? "true" : "false",
+                  onClick: () => setTab(item.id)
+                },
+                h("span", null, item.label),
+                item.badge && h("span", { className: "of-mono", style: { fontSize: "10.5px" } }, item.badge)
+              )
+            )
+          ),
+          opts.onOpenClassicCockpit && h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              style: { marginTop: "auto", justifyContent: "center" },
+              onClick: opts.onOpenClassicCockpit
+            },
+            "Control Room clássico"
+          )
+        ),
+        h(
+          "main",
+          { className: "of-main" },
+          toast && h("div", { className: "of-pill", "data-tone": "ok", style: { alignSelf: "flex-end" } }, toast),
+          error && h("div", { className: "of-pill", "data-tone": "danger" }, `Aviso: ${error}`),
+          selectedItem && h(
+            "div",
+            { className: "of-card of-header-bar" },
+            h(
+              "div",
+              null,
+              h("span", { className: "of-mono", style: { color: "var(--primary)", marginRight: "8px" } }, `#${selectedItem.id.slice(0, 8)}`),
+              h("strong", null, selectedItem.title),
+              h("span", { className: "of-muted", style: { marginLeft: "8px" } }, `(${selectedItem.stage})`)
+            ),
+            h("button", { type: "button", className: "of-btn", onClick: () => setSelectedItem(null) }, "Fechar")
+          ),
+          tab === "overview" ? renderOverview() : tab === "board" ? renderBoard() : tab === "floor" ? renderFloor() : tab === "costs" ? renderCosts() : tab === "agents" ? renderAgents() : tab === "settings" ? renderSettings() : renderSimpleTab()
+        )
+      )
+    );
+  };
+}
 const inject = [
   "react",
   "pages",
@@ -14203,7 +15231,7 @@ function apply(ctx) {
     const handleFailoverModelSession = React.useCallback(async (session) => {
       setFailingOverSessionId(session.session_id);
       try {
-        const res = await executeSmartModelFailover(ctx, {
+        const res = await requestModelFailover(ctx, {
           agente: session.agente,
           agent_pubkey: session.agent_pubkey,
           prefer_free: true,
@@ -15714,14 +16742,64 @@ function apply(ctx) {
   const ORGFY_PAGE_ICON = "data:image/svg+xml;base64," + btoa(
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 20 6.5 20 17.5 12 22 4 17.5 4 6.5 12 2"/><polyline points="4 6.5 12 11.5 20 6.5"/><line x1="12" y1="11.5" x2="12" y2="22"/></svg>'
   );
+  const OrgFyFactoryView = createFactoryAppComponent(ctx, {
+    onOpenClassicCockpit: () => {
+      try {
+        window.dispatchEvent(new CustomEvent("orgfy.view.toggle", { detail: { mode: "classic" } }));
+      } catch {
+      }
+    }
+  });
+  function OrgFyRoot() {
+    const [surface, setSurface] = React.useState("factory");
+    React.useEffect(() => {
+      const onToggle = (ev) => {
+        var _a2;
+        const next = ((_a2 = ev == null ? void 0 : ev.detail) == null ? void 0 : _a2.mode) === "classic" ? "classic" : "factory";
+        setSurface(next);
+      };
+      window.addEventListener("orgfy.view.toggle", onToggle);
+      return () => window.removeEventListener("orgfy.view.toggle", onToggle);
+    }, []);
+    if (surface === "classic") {
+      return h(
+        "div",
+        { style: { position: "relative", width: "100%", height: "100%" } },
+        h(
+          "button",
+          {
+            type: "button",
+            onClick: () => setSurface("factory"),
+            style: {
+              position: "fixed",
+              bottom: "14px",
+              right: "18px",
+              zIndex: 9999,
+              padding: "6px 12px",
+              borderRadius: "8px",
+              border: "1px solid rgba(245, 158, 11, 0.5)",
+              backgroundColor: "#f59e0b",
+              color: "#0b0d10",
+              fontWeight: 700,
+              fontSize: "11px",
+              cursor: "pointer"
+            }
+          },
+          "Voltar para OrgFy Factory"
+        ),
+        h(OrgFyCockpit, null)
+      );
+    }
+    return h(OrgFyFactoryView, null);
+  }
   ctx.pages.register({
     id: "orgfy",
-    title: "OrgFy Control Room",
+    title: "OrgFy Factory",
     layout: "workspace",
     primary: true,
     placement: "topbar",
     icon: ORGFY_PAGE_ICON,
-    component: OrgFyCockpit
+    component: OrgFyRoot
   });
   if (ctx.settingsCards) {
     ctx.settingsCards.register({
@@ -15811,16 +16889,20 @@ REGRAS POR PAPEL (APLIQUE APENAS O SEU):
 }
 export {
   AVAILABLE_AGENTS,
+  FACTORY_SHADOW_CSS,
   INITIAL_PIPELINE_CARDS,
   INITIAL_REGRAS_PROBATORIAS,
   ORGFY_FAILOVER_REQUEST_EVENT,
+  PT_BR,
   SVG,
   TENANTS,
   THEME,
   VERIFIED_TOOLCALL_FAILOVER_CHAIN,
   apply,
   applyStepUpdateToMarkdown,
+  attachFactoryShadowStyles,
   buildBuzzAttentionContract,
+  buildEmptyFactoryStatus,
   buildHandoffPack,
   buildLiveAgentRoster,
   buildUnifiedOrgfyTools,
@@ -15829,7 +16911,7 @@ export {
   cleanupAttentionOnStageChange,
   createCanonicalCard,
   executeCardProgress,
-  executeSmartModelFailover,
+  fetchFactoryStatus,
   getBuzzNativeState,
   getOrgfyPipelineEvents,
   getTelemetrySnapshot,
@@ -15837,13 +16919,16 @@ export {
   inject,
   isUnsupportedAgentModel,
   parseCardProgress,
+  parseFactoryStatus,
   reconcileAgentPresenceAndLocks,
   reconcileAgentsViaBuzzApi,
   registerBuzzNativeIntegrations,
+  requestModelFailover,
   resetPresenceStateForTests,
   resetTelemetryForTests,
   resetThreadWakeGuardForTests,
   runOneShotDecisionDispatch,
   triageCardWithDecisions,
-  triageDiffWithDecisions
+  triageDiffWithDecisions,
+  writeTenantControl
 };

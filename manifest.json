@@ -60,6 +60,12 @@
         "program": "python3",
         "args": ["ferramentas/esteira/quadro.py", "--json"],
         "maxOutputBytes": 131072
+      },
+      {
+        "id": "fabrica-status",
+        "program": "python3",
+        "args": ["ferramentas/esteira/fabrica_status.py", "--json"],
+        "maxOutputBytes": 262144
       }
     ]
   }

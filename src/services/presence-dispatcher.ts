@@ -29,8 +29,7 @@ import { isUnsupportedAgentModel } from "./model-failover";
 
 export const DEFAULT_LEASE_MS = 8 * 60 * 1000; // 8 min lease curto renovável
 export const DEFAULT_ORPHAN_GRACE_MS = 3 * 60 * 1000; // 3 min sem sessão ativa => órfão
-const CARDS_DIR = "/Users/heltonfraga/.buzz/REPOS/orgfy/cards";
-const EMPRESAS_DIR = "/Users/heltonfraga/.buzz/REPOS/orgfy/empresas";
+import { ORGFY_CARDS_DIR as CARDS_DIR, ORGFY_EMPRESAS_DIR as EMPRESAS_DIR } from "../config";
 
 export type OrgfyPipelineEventType =
   | "lock.orphaned_released"

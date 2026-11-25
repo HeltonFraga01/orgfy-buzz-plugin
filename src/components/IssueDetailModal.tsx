@@ -691,7 +691,7 @@ export function renderIssueDetailModal(p: any) {
                   )
                 ),
 
-                // Box C: Modelo Real do Executor (agents/state/ — Zero Hardcode)
+                // Box C: Modelo Real do Executor (via ctx.agents.snapshot — Zero Hardcode)
                 h(
                   "div",
                   {
@@ -712,7 +712,7 @@ export function renderIssueDetailModal(p: any) {
                     hydratedIssueDetail?.executorModel
                       ? `${hydratedIssueDetail.executorProvider ? hydratedIssueDetail.executorProvider + "/" : ""}${hydratedIssueDetail.executorModel}`
                       : isHydratingIssueDetail
-                      ? "Lendo agents/state/..."
+                      ? "Lendo ctx.agents.snapshot()..."
                       : "Modelo não identificado no state local"
                   ),
                   h(

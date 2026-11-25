@@ -11,7 +11,7 @@ import type { PipelineCard } from "../types/orgfy";
 import { fetchLiveKanbanCards, openIssueInBuzz } from "../services/orgfy-bridge";
 import { fetchGooseLoopRadar, type GooseLoopSession } from "../services/kpi-service";
 import { getTelemetrySnapshot, subscribeTelemetry, type TelemetrySnapshot } from "../services/telemetry-otel";
-import { executeSmartModelFailover } from "../services/model-failover";
+import { requestModelFailover } from "../services/model-failover";
 
 const CARD_BG = "rgba(255, 255, 255, 0.03)";
 const BORDER = "1px solid rgba(255, 255, 255, 0.08)";
@@ -92,7 +92,7 @@ export function createAgentOrgfyTabComponent(ctx: Context) {
       setFailoverBusy(true);
       setStatusBanner(null);
       try {
-        const res = await executeSmartModelFailover(ctx, {
+        const res = await requestModelFailover(ctx, {
           agente: agentName,
           agent_pubkey: agentPubkey || undefined,
           failed_model: currentModel !== "padrão" ? currentModel : undefined,

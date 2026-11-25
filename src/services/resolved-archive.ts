@@ -28,7 +28,8 @@ export interface ResolvedArchiveReadResult {
   itens: ResolvedIssueItem[];
 }
 
-export const RESOLVED_ARCHIVE_PATH = "/Users/heltonfraga/.buzz/.scratch/resolved-issues-archive.json";
+import { joinHome } from "../config";
+export const RESOLVED_ARCHIVE_PATH = joinHome(".buzz", ".scratch", "resolved-issues-archive.json");
 
 function decodeHostBytes(raw: unknown): string {
   if (typeof raw === "string") return raw;
