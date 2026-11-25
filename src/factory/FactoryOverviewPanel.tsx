@@ -214,8 +214,8 @@ export function renderFactoryOverviewPanel(props: FactoryOverviewProps) {
     h(
       "div",
       { className: "of-panel-body" },
-      // Banner de alerta condicional
-      (status.globalKillSwitch || status.pausedReason || !status.visionExists) &&
+      // Banner de alerta condicional (apenas bloqueios reais de operação — sem exigir docs/VISION.md do CodeDen)
+      (status.globalKillSwitch || status.pausedReason) &&
         h(
           "div",
           { className: "of-alert-banner" },
@@ -225,9 +225,7 @@ export function renderFactoryOverviewPanel(props: FactoryOverviewProps) {
             { style: { flex: 1 } },
             status.globalKillSwitch
               ? "Kill switch global ativado: nenhuma fábrica da Holding está rodando."
-              : status.pausedReason
-              ? `Pausado: ${status.pausedReason}`
-              : "Arquivo docs/VISION.md não encontrado no repositório do tenant."
+              : `Pausado: ${status.pausedReason}`
           )
         ),
 
