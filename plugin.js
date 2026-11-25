@@ -13587,32 +13587,33 @@ async function writeTenantControl(ctx, tenant, patch) {
 }
 const FACTORY_SHADOW_CSS = `
 :host, [data-orgfy-factory-root="true"] {
-  --background: var(--surface-base, oklch(0.165 0.008 264));
-  --foreground: var(--text-standard, oklch(0.94 0.006 264));
-  --card: var(--surface-panel, oklch(0.195 0.009 264));
-  --surface: var(--surface-elevated, oklch(0.185 0.009 264));
-  --panel: oklch(0.155 0.008 264);
-  --sidebar: oklch(0.145 0.007 264);
-  --muted: oklch(0.225 0.009 264);
-  --muted-foreground: var(--text-tertiary, oklch(0.66 0.014 264));
-  --accent: oklch(0.255 0.011 264);
-  --border: var(--border-standard, rgba(255, 255, 255, 0.085));
-  --border-strong: rgba(255, 255, 255, 0.16);
-  --primary: oklch(0.8 0.15 70);
-  --primary-soft: rgba(245, 158, 11, 0.12);
-  --primary-foreground: oklch(0.21 0.04 60);
+  /* Cores 100% nativas do Buzz Desktop (herda tema e cor de destaque personalizada do usuário) */
+  --background: var(--bg-app, var(--surface-base, #101010));
+  --foreground: var(--text-primary, var(--text-standard, #f3f4f6));
+  --card: var(--bg-panel, var(--surface-panel, #18181b));
+  --surface: var(--affordance-subtle, var(--surface-elevated, #202024));
+  --panel: var(--bg-panel, #161619);
+  --sidebar: var(--bg-app, #121215);
+  --muted: var(--affordance-subtle, #232327);
+  --muted-foreground: var(--text-tertiary, var(--text-subtle, #9ca3af));
+  --accent: var(--affordance-selected, #2c2c32);
+  --border: var(--border-primary, var(--border-standard, rgba(255, 255, 255, 0.09)));
+  --border-strong: var(--border-primary, rgba(255, 255, 255, 0.16));
+  --primary: var(--accent-primary, var(--brand-primary, var(--green-11, #3dd68c)));
+  --primary-soft: color-mix(in srgb, var(--primary) 14%, transparent);
+  --primary-foreground: var(--text-on-prominent, #08120c);
 
-  --status-running: oklch(0.72 0.13 235);
-  --status-waiting: oklch(0.8 0.15 75);
-  --status-done: oklch(0.74 0.14 155);
-  --status-failed: var(--surface-status-danger, oklch(0.68 0.19 24));
-  --status-idle: oklch(0.55 0.012 264);
+  --status-running: var(--blue-11, #60a5fa);
+  --status-waiting: var(--amber-11, #fbbf24);
+  --status-done: var(--green-11, #3dd68c);
+  --status-failed: var(--red-11, var(--surface-status-danger, #f87171));
+  --status-idle: var(--text-tertiary, #71717a);
 
-  --chart-1: oklch(0.8 0.15 70);
-  --chart-2: oklch(0.7 0.12 230);
-  --chart-3: oklch(0.72 0.14 155);
-  --chart-4: oklch(0.7 0.15 300);
-  --chart-5: oklch(0.7 0.17 25);
+  --chart-1: var(--primary);
+  --chart-2: var(--blue-11, #60a5fa);
+  --chart-3: var(--green-11, #3dd68c);
+  --chart-4: #c084fc;
+  --chart-5: var(--red-11, #f87171);
 
   --radius: 10px;
   --font-sans: inherit;
@@ -15578,7 +15579,7 @@ function renderFactoryBoardAndFloor(props) {
   );
 }
 function renderItemSheetDrawer(props) {
-  const { h, item, tenant, onClose } = props;
+  const { h, item, tenant, onClose, onOpenInBuzz } = props;
   if (!item) return null;
   const steps = ["Entrada", "Identificar tipo", "Execução (Worktree)", "Revisão L-01 + CI", "Merge na main"];
   const activeIdx = item.stage === "merged" ? 4 : item.stage === "verifying" || item.stage === "watching" ? 3 : item.stage === "building" ? 2 : item.stage === "candidate" ? 1 : 0;
@@ -15606,10 +15607,21 @@ function renderItemSheetDrawer(props) {
       ),
       h(
         "div",
-        { style: { display: "flex", gap: "6px", flexWrap: "wrap" } },
+        { style: { display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" } },
         h("span", { className: "of-pill", "data-tone": cardStateOf(item) === "person" ? "waiting" : cardStateOf(item) }, item.stage),
         item.type && h("span", { className: "of-pill" }, item.type),
-        item.attempts > 1 && h("span", { className: "of-pill", "data-tone": "waiting" }, `Refazer rodada ${item.attempts}`)
+        item.attempts > 1 && h("span", { className: "of-pill", "data-tone": "waiting" }, `Refazer rodada ${item.attempts}`),
+        onOpenInBuzz && h(
+          "button",
+          {
+            type: "button",
+            className: "of-btn",
+            "data-variant": "primary",
+            style: { marginLeft: "auto" },
+            onClick: () => onOpenInBuzz(item)
+          },
+          "Abrir no Buzz ↗"
+        )
       ),
       h(
         "section",
@@ -48147,19 +48159,21 @@ function renderFactorySecondaryPage(props) {
     )
   );
 }
-const TENANT_OPTIONS = [
-  { id: "orgfy", label: "OrgFy Core" },
-  { id: "lumen-iptv", label: "Lumen IPTV" },
-  { id: "saas-tributario", label: "SaaS Tributário" }
+const DEFAULT_WORKSPACES = [
+  { slug: "orgfy", nome: "OrgFy Core", estagio: "operacional" },
+  { slug: "lumen-iptv", nome: "Lumen IPTV", estagio: "operacional" },
+  { slug: "saas-tributario", nome: "SaaS Tributário", estagio: "planejado" }
 ];
 function createFactoryAppComponent(ctx, opts = {}) {
   const React = ctx.react;
   const h = React.createElement;
   const Floor3D = createFloor3DComponent(ctx);
   return function OrgFyFactoryApp() {
+    var _a;
     const [tenant, setTenant] = React.useState("orgfy");
     const [tab, setTab] = React.useState("overview");
     const [status, setStatus] = React.useState(() => buildEmptyFactoryStatus("orgfy"));
+    const [holding, setHolding] = React.useState(null);
     const [loading, setLoading] = React.useState(true);
     const [error2, setError] = React.useState(null);
     const [toast, setToast] = React.useState(null);
@@ -48199,16 +48213,20 @@ function createFactoryAppComponent(ctx, opts = {}) {
     }, []);
     const refresh = React.useCallback(
       async (targetTenant = tenant) => {
-        var _a, _b;
+        var _a2, _b;
         setLoading(true);
-        const res = await fetchFactoryStatus(ctx, targetTenant);
+        const [res, holdSnap] = await Promise.all([
+          fetchFactoryStatus(ctx, targetTenant),
+          fetchHoldingControlPlane(ctx).catch(() => null)
+        ]);
         setStatus(res.status);
         setError(res.error);
+        if (holdSnap) setHolding(holdSnap);
         setSettingsFormState({
           mode: res.status.mode,
           autoMerge: res.status.limits.autoMerge,
           mergePolicy: res.status.limits.mergePolicy,
-          gastoDiaUsd: ((_a = res.status.limits.dailyBudget) == null ? void 0 : _a.usd) ?? 50,
+          gastoDiaUsd: ((_a2 = res.status.limits.dailyBudget) == null ? void 0 : _a2.usd) ?? 50,
           mergesDia: res.status.limits.maxMergesPerDay ?? 20,
           agentesMax: res.status.limits.maxConcurrentSessions ?? 4,
           prsAbertos: ((_b = res.status.wip) == null ? void 0 : _b.limit) ?? 6,
@@ -48244,26 +48262,42 @@ function createFactoryAppComponent(ctx, opts = {}) {
       },
       [tenant, notify2, refresh]
     );
-    const handleSelectItem = React.useCallback(
+    const handleOpenInBuzz = React.useCallback(
       async (item) => {
-        setSelectedItem(item);
         if (item.id && /^[0-9a-f]{64}$/i.test(item.id)) {
-          await openIssueInBuzz(ctx, { id: item.id, dtag: tenant }).catch(() => false);
+          const ok2 = await openIssueInBuzz(ctx, { id: item.id, dtag: tenant }).catch(() => false);
+          notify2(ok2 ? `Issue #${item.id.slice(0, 8)} aberta no Buzz Repos.` : `Deep link preparado para #${item.id.slice(0, 8)}.`);
+        } else {
+          notify2(`Item local #${item.id.slice(0, 8)} (sem ID Nostr de 64 chars).`);
         }
       },
-      [tenant]
+      [tenant, notify2]
     );
-    const liveCrew = React.useMemo(() => {
-      var _a, _b;
+    const handleOpenChannelInBuzz = React.useCallback(async () => {
+      var _a2;
+      const emp = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant);
+      const canal = emp == null ? void 0 : emp.canal;
       try {
-        const snap = ((_b = (_a = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) || {};
+        if (canal && ((_a2 = ctx.navigation) == null ? void 0 : _a2.open)) {
+          await ctx.navigation.open({ kind: "channel", channelId: canal });
+          notify2(`Canal do workspace ${tenant} aberto no Buzz.`);
+          return;
+        }
+      } catch {
+      }
+      notify2(`Workspace ativo: ${tenant}${canal ? ` (canal ${canal.slice(0, 8)}…)` : ""}.`);
+    }, [holding, tenant, notify2]);
+    const liveCrew = React.useMemo(() => {
+      var _a2, _b;
+      try {
+        const snap = ((_b = (_a2 = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _a2.snapshot) == null ? void 0 : _b.call(_a2)) || {};
         const runningSet = new Set((snap.running || []).map((a) => String((a == null ? void 0 : a.key) || (a == null ? void 0 : a.name))));
         return (snap.agents || []).map((a) => {
-          var _a2, _b2;
+          var _a3, _b2;
           return {
             key: String((a == null ? void 0 : a.key) || (a == null ? void 0 : a.name) || ""),
             name: String((a == null ? void 0 : a.name) || (a == null ? void 0 : a.key) || "Agente"),
-            model: ((_a2 = a == null ? void 0 : a.config) == null ? void 0 : _a2.model) || PT_BR.labels.unavailable,
+            model: ((_a3 = a == null ? void 0 : a.config) == null ? void 0 : _a3.model) || PT_BR.labels.unavailable,
             provider: ((_b2 = a == null ? void 0 : a.config) == null ? void 0 : _b2.provider) || "",
             running: runningSet.has(String((a == null ? void 0 : a.key) || (a == null ? void 0 : a.name)))
           };
@@ -48272,6 +48306,15 @@ function createFactoryAppComponent(ctx, opts = {}) {
         return [];
       }
     }, [status.lastTickAt]);
+    const masterAgentName = ((_a = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _a.nome) || "OrgFy Iris";
+    const masterLive = liveCrew.find((a) => a.name.toLowerCase().includes("iris")) || liveCrew[0] || null;
+    const workspaces = (holding == null ? void 0 : holding.empresas) && holding.empresas.length > 0 ? holding.empresas.map((e) => ({
+      slug: e.slug,
+      nome: e.workspaceBuzz || e.nome,
+      estagio: e.estagio,
+      agentesInfo: `${e.agentesProntos}/${e.agentesTotal}`
+    })) : DEFAULT_WORKSPACES.map((w) => ({ ...w, agentesInfo: "" }));
+    const pendingApprovals = ((holding == null ? void 0 : holding.approvals) || []).filter((a) => a.status === "pendente").length;
     const abaixoMinimoCount = (status.modelos || []).filter((m) => m.abaixo_minimo).length;
     const inboxCount = status.held.length + [...status.inProgress, ...status.recent].filter((i) => i.stage === "escalated" || i.stage === "failed" || i.stage === "reverted").length;
     const renderNavBtn = (id, label, badge, tone) => h(
@@ -48297,7 +48340,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
       h(
         "div",
         { className: "of-shell" },
-        // Sidebar oficial estilo CodeDen
+        // Sidebar com a estrutura oficial OrgFy: CEO Master -> Conselho/Board & Inbox -> Workspaces (Empresas) -> Fábrica & Operação
         h(
           "aside",
           { className: "of-sidebar" },
@@ -48312,38 +48355,76 @@ function createFactoryAppComponent(ctx, opts = {}) {
             ),
             h("span", { className: "of-dot", "data-tone": status.coordenador === "ativo" ? "done" : "failed", title: `Coordenador: ${status.coordenador}` })
           ),
+          // 1. Orquestrador Principal / CEO Master (definido no Buzz/Holding, padrão Iris)
           h(
-            "select",
+            "div",
             {
-              className: "of-tenant-select",
-              value: tenant,
-              onChange: (e) => setTenant(e.target.value)
+              className: "of-surface",
+              style: { padding: "8px 10px", display: "flex", flexDirection: "column", gap: "3px" }
             },
-            TENANT_OPTIONS.map((t) => h("option", { key: t.id, value: t.id }, t.label))
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "10px", color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.06em" } },
+              h("span", null, "CEO Master · Orquestrador"),
+              h("span", { className: "of-dot", "data-tone": (masterLive == null ? void 0 : masterLive.running) ? "running" : "done" })
+            ),
+            h("div", { style: { fontSize: "12.5px", fontWeight: 700, color: "var(--foreground)" } }, masterAgentName),
+            h("div", { className: "of-mono of-muted", style: { fontSize: "10px" } }, masterLive ? masterLive.model : "Ativa no Buzz")
           ),
-          h("div", { className: "of-nav-group-label" }, "Holding"),
+          // 2. Conselho da Holding (Board) & Inbox
+          h("div", { className: "of-nav-group-label" }, "Holding & Conselho"),
           h(
             "nav",
             { className: "of-nav" },
-            renderNavBtn("holding", PT_BR.nav.holding),
+            renderNavBtn("holding", "Conselho (Board)", pendingApprovals > 0 ? String(pendingApprovals) : void 0, pendingApprovals > 0 ? "warn" : void 0),
             renderNavBtn("inbox", PT_BR.nav.inbox, inboxCount > 0 ? String(inboxCount) : void 0, inboxCount > 0 ? "warn" : void 0)
           ),
-          h("div", { className: "of-nav-group-label" }, "Fábrica"),
+          // 3. Empresas / Workspaces (carregadas de empresas/*.json)
+          h("div", { className: "of-nav-group-label" }, "Empresas · Workspaces"),
+          h(
+            "nav",
+            { className: "of-nav" },
+            workspaces.map(
+              (w) => h(
+                "button",
+                {
+                  key: w.slug,
+                  type: "button",
+                  className: "of-nav-btn",
+                  "data-active": tenant === w.slug ? "true" : "false",
+                  onClick: () => {
+                    setTenant(w.slug);
+                    if (tab === "holding") setTab("overview");
+                  }
+                },
+                h(
+                  "span",
+                  { style: { display: "inline-flex", alignItems: "center", gap: "6px", overflow: "hidden" } },
+                  h("span", { className: "of-dot", "data-tone": w.estagio === "operacional" ? "done" : "idle" }),
+                  h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, w.nome)
+                ),
+                w.agentesInfo && h("span", { className: "of-nav-badge" }, w.agentesInfo)
+              )
+            )
+          ),
+          // 4. Fábrica do Workspace Ativo
+          h("div", { className: "of-nav-group-label" }, `Fábrica · ${tenant}`),
           h(
             "nav",
             { className: "of-nav" },
             renderNavBtn("overview", PT_BR.nav.overview),
             renderNavBtn("board", PT_BR.nav.board, String(status.backlog.length + status.inProgress.length)),
-            renderNavBtn("floor", PT_BR.nav.floor, String(liveCrew.filter((a) => a.running).length))
+            renderNavBtn("floor", "Andar 3D", String(liveCrew.filter((a) => a.running).length))
           ),
+          // 5. Operação & Governança
           h("div", { className: "of-nav-group-label" }, "Operação"),
           h(
             "nav",
             { className: "of-nav" },
             renderNavBtn("costs", PT_BR.nav.costs),
-            renderNavBtn("automations", PT_BR.nav.automations),
+            renderNavBtn("vision", "Canvas / Visão"),
             renderNavBtn("agents", PT_BR.nav.agents, abaixoMinimoCount > 0 ? `⚠ ${abaixoMinimoCount}` : void 0, abaixoMinimoCount > 0 ? "danger" : void 0),
-            renderNavBtn("vision", PT_BR.nav.vision),
+            renderNavBtn("automations", PT_BR.nav.automations),
             renderNavBtn("settings", PT_BR.nav.settings)
           ),
           opts.onOpenClassicCockpit && h(
@@ -48357,17 +48438,28 @@ function createFactoryAppComponent(ctx, opts = {}) {
             "Control Room clássico"
           )
         ),
-        // Área principal com PageHeader + conteúdo da página ativa
+        // Área principal com PageHeader nativo + atalho de deep link para o canal do workspace
         h(
           "div",
           { className: "of-workspace" },
           h(
             "header",
             { className: "of-page-header" },
-            h("strong", { style: { fontSize: "13.5px" } }, PT_BR.nav[tab] || PT_BR.appTitle),
+            h("strong", { style: { fontSize: "13.5px" } }, tab === "vision" ? "Canvas / Visão" : tab === "floor" ? "Andar 3D" : PT_BR.nav[tab] || PT_BR.appTitle),
             h("span", { className: "of-mono of-muted" }, `/ ${tenant}`),
-            toast && h("span", { className: "of-pill", "data-tone": "done", style: { marginLeft: "auto" } }, toast),
-            error2 && !toast && h("span", { className: "of-pill", "data-tone": "failed", style: { marginLeft: "auto" } }, `Aviso: ${error2}`)
+            h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                "data-variant": "ghost",
+                style: { marginLeft: "auto" },
+                onClick: handleOpenChannelInBuzz
+              },
+              "Canal no Buzz ↗"
+            ),
+            toast && h("span", { className: "of-pill", "data-tone": "done" }, toast),
+            error2 && !toast && h("span", { className: "of-pill", "data-tone": "failed" }, `Aviso: ${error2}`)
           ),
           h(
             "main",
@@ -48381,9 +48473,9 @@ function createFactoryAppComponent(ctx, opts = {}) {
               setConfirmKill,
               activeHelpKey,
               onToggleHelp: setActiveHelpKey,
-              onSelectItem: handleSelectItem,
+              onSelectItem: setSelectedItem,
               onRefresh: () => refresh(tenant),
-              onOpenBoard: () => setTab("board"),
+              onOpenBoard: () => setTab("floor"),
               onOpenSettings: () => setTab("settings"),
               onOpenVision: () => setTab("vision"),
               onToggleDrain: () => handleControlUpdate(
@@ -48409,7 +48501,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
               onChangeStoreyFocus: setStoreyFocus,
               selectedAgentKey,
               onSelectAgentKey: setSelectedAgentKey,
-              onSelectItem: handleSelectItem,
+              onSelectItem: setSelectedItem,
               onRefresh: () => refresh(tenant),
               loading,
               Floor3D
@@ -48423,7 +48515,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
               },
               status,
               liveCrew,
-              onSelectItem: handleSelectItem,
+              onSelectItem: setSelectedItem,
               inboxFilter,
               setInboxFilter,
               costRange,
@@ -48452,7 +48544,13 @@ function createFactoryAppComponent(ctx, opts = {}) {
           )
         )
       ),
-      renderItemSheetDrawer({ h, item: selectedItem, tenant, onClose: () => setSelectedItem(null) })
+      renderItemSheetDrawer({
+        h,
+        item: selectedItem,
+        tenant,
+        onClose: () => setSelectedItem(null),
+        onOpenInBuzz: handleOpenInBuzz
+      })
     );
   };
 }

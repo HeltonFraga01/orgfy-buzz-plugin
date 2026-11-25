@@ -3,32 +3,33 @@
 
 export const FACTORY_SHADOW_CSS = `
 :host, [data-orgfy-factory-root="true"] {
-  --background: var(--surface-base, oklch(0.165 0.008 264));
-  --foreground: var(--text-standard, oklch(0.94 0.006 264));
-  --card: var(--surface-panel, oklch(0.195 0.009 264));
-  --surface: var(--surface-elevated, oklch(0.185 0.009 264));
-  --panel: oklch(0.155 0.008 264);
-  --sidebar: oklch(0.145 0.007 264);
-  --muted: oklch(0.225 0.009 264);
-  --muted-foreground: var(--text-tertiary, oklch(0.66 0.014 264));
-  --accent: oklch(0.255 0.011 264);
-  --border: var(--border-standard, rgba(255, 255, 255, 0.085));
-  --border-strong: rgba(255, 255, 255, 0.16);
-  --primary: oklch(0.8 0.15 70);
-  --primary-soft: rgba(245, 158, 11, 0.12);
-  --primary-foreground: oklch(0.21 0.04 60);
+  /* Cores 100% nativas do Buzz Desktop (herda tema e cor de destaque personalizada do usuário) */
+  --background: var(--bg-app, var(--surface-base, #101010));
+  --foreground: var(--text-primary, var(--text-standard, #f3f4f6));
+  --card: var(--bg-panel, var(--surface-panel, #18181b));
+  --surface: var(--affordance-subtle, var(--surface-elevated, #202024));
+  --panel: var(--bg-panel, #161619);
+  --sidebar: var(--bg-app, #121215);
+  --muted: var(--affordance-subtle, #232327);
+  --muted-foreground: var(--text-tertiary, var(--text-subtle, #9ca3af));
+  --accent: var(--affordance-selected, #2c2c32);
+  --border: var(--border-primary, var(--border-standard, rgba(255, 255, 255, 0.09)));
+  --border-strong: var(--border-primary, rgba(255, 255, 255, 0.16));
+  --primary: var(--accent-primary, var(--brand-primary, var(--green-11, #3dd68c)));
+  --primary-soft: color-mix(in srgb, var(--primary) 14%, transparent);
+  --primary-foreground: var(--text-on-prominent, #08120c);
 
-  --status-running: oklch(0.72 0.13 235);
-  --status-waiting: oklch(0.8 0.15 75);
-  --status-done: oklch(0.74 0.14 155);
-  --status-failed: var(--surface-status-danger, oklch(0.68 0.19 24));
-  --status-idle: oklch(0.55 0.012 264);
+  --status-running: var(--blue-11, #60a5fa);
+  --status-waiting: var(--amber-11, #fbbf24);
+  --status-done: var(--green-11, #3dd68c);
+  --status-failed: var(--red-11, var(--surface-status-danger, #f87171));
+  --status-idle: var(--text-tertiary, #71717a);
 
-  --chart-1: oklch(0.8 0.15 70);
-  --chart-2: oklch(0.7 0.12 230);
-  --chart-3: oklch(0.72 0.14 155);
-  --chart-4: oklch(0.7 0.15 300);
-  --chart-5: oklch(0.7 0.17 25);
+  --chart-1: var(--primary);
+  --chart-2: var(--blue-11, #60a5fa);
+  --chart-3: var(--green-11, #3dd68c);
+  --chart-4: #c084fc;
+  --chart-5: var(--red-11, #f87171);
 
   --radius: 10px;
   --font-sans: inherit;

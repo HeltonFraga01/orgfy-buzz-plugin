@@ -1,5 +1,5 @@
 // Adaptado de CodeDen (MIT) commit b0b2a5a: apps/web/src/components/shell/app-shell.tsx e routes/project.tsx
-// Shell principal da OrgFy Factory em Shadow DOM com navegação completa das páginas do CodeDen e multi-tenant OrgFy.
+// Shell nativo do Buzz para a OrgFy Factory: cores dinâmicas do Buzz, CEO Master (orquestrador), Conselho (Board), Workspaces das empresas e motor real OrgFy.
 
 import type { Context } from "@buzz/author";
 import { PT_BR } from "../i18n/pt-BR";
@@ -18,6 +18,7 @@ import { createFloor3DComponent } from "./codeden-floor/Floor3DCanvas";
 import { renderFactorySecondaryPage } from "./FactoryPages";
 import { subscribeRelayUpdates } from "../services/buzz-native";
 import { openIssueInBuzz } from "../services/orgfy-bridge";
+import { fetchHoldingControlPlane, type HoldingControlPlaneSnapshot } from "../services/holding-service";
 
 type FactoryTab =
   | "holding"
@@ -31,10 +32,10 @@ type FactoryTab =
   | "vision"
   | "settings";
 
-const TENANT_OPTIONS = [
-  { id: "orgfy", label: "OrgFy Core" },
-  { id: "lumen-iptv", label: "Lumen IPTV" },
-  { id: "saas-tributario", label: "SaaS Tributário" },
+const DEFAULT_WORKSPACES = [
+  { slug: "orgfy", nome: "OrgFy Core", estagio: "operacional" },
+  { slug: "lumen-iptv", nome: "Lumen IPTV", estagio: "operacional" },
+  { slug: "saas-tributario", nome: "SaaS Tributário", estagio: "planejado" },
 ];
 
 export interface CreateFactoryAppOptions {
@@ -50,6 +51,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     const [tenant, setTenant] = React.useState<string>("orgfy");
     const [tab, setTab] = React.useState<FactoryTab>("overview");
     const [status, setStatus] = React.useState<FactoryStatusPayload>(() => buildEmptyFactoryStatus("orgfy"));
+    const [holding, setHolding] = React.useState<HoldingControlPlaneSnapshot | null>(null);
     const [loading, setLoading] = React.useState<boolean>(true);
     const [error, setError] = React.useState<string | null>(null);
     const [toast, setToast] = React.useState<string | null>(null);
@@ -57,7 +59,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     const [selectedItem, setSelectedItem] = React.useState<FactoryWorkItem | null>(null);
     const [confirmKill, setConfirmKill] = React.useState<boolean>(false);
 
-    // Estados ricos das páginas CodeDen
+    // Estados das páginas
     const [scorecardView, setScorecardView] = React.useState<"builders" | "reviewers" | "pairs">("builders");
     const [scorecardDays, setScorecardDays] = React.useState<7 | 30 | 90>(30);
     const [storeyFocus, setStoreyFocus] = React.useState<"workshop" | "lookout" | "both">("both");
@@ -107,9 +109,13 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     const refresh = React.useCallback(
       async (targetTenant = tenant) => {
         setLoading(true);
-        const res = await fetchFactoryStatus(ctx, targetTenant);
+        const [res, holdSnap] = await Promise.all([
+          fetchFactoryStatus(ctx, targetTenant),
+          fetchHoldingControlPlane(ctx).catch(() => null),
+        ]);
         setStatus(res.status);
         setError(res.error);
+        if (holdSnap) setHolding(holdSnap);
         setSettingsFormState({
           mode: res.status.mode,
           autoMerge: res.status.limits.autoMerge,
@@ -154,15 +160,30 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       [tenant, notify, refresh]
     );
 
-    const handleSelectItem = React.useCallback(
+    const handleOpenInBuzz = React.useCallback(
       async (item: FactoryWorkItem) => {
-        setSelectedItem(item);
         if (item.id && /^[0-9a-f]{64}$/i.test(item.id)) {
-          await openIssueInBuzz(ctx, { id: item.id, dtag: tenant }).catch(() => false);
+          const ok = await openIssueInBuzz(ctx, { id: item.id, dtag: tenant }).catch(() => false);
+          notify(ok ? `Issue #${item.id.slice(0, 8)} aberta no Buzz Repos.` : `Deep link preparado para #${item.id.slice(0, 8)}.`);
+        } else {
+          notify(`Item local #${item.id.slice(0, 8)} (sem ID Nostr de 64 chars).`);
         }
       },
-      [tenant]
+      [tenant, notify]
     );
+
+    const handleOpenChannelInBuzz = React.useCallback(async () => {
+      const emp = holding?.empresas.find((e) => e.slug === tenant);
+      const canal = emp?.canal;
+      try {
+        if (canal && (ctx as any).navigation?.open) {
+          await (ctx as any).navigation.open({ kind: "channel", channelId: canal });
+          notify(`Canal do workspace ${tenant} aberto no Buzz.`);
+          return;
+        }
+      } catch {}
+      notify(`Workspace ativo: ${tenant}${canal ? ` (canal ${canal.slice(0, 8)}…)` : ""}.`);
+    }, [holding, tenant, notify]);
 
     const liveCrew: LiveCrewAgent[] = React.useMemo(() => {
       try {
@@ -180,6 +201,20 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       }
     }, [status.lastTickAt]);
 
+    // Agente principal / CEO Master (Iris ou agente principal configurado no Buzz/Holding)
+    const masterAgentName = holding?.ceoHolding?.nome || "OrgFy Iris";
+    const masterLive = liveCrew.find((a) => a.name.toLowerCase().includes("iris")) || liveCrew[0] || null;
+    const workspaces =
+      holding?.empresas && holding.empresas.length > 0
+        ? holding.empresas.map((e) => ({
+            slug: e.slug,
+            nome: e.workspaceBuzz || e.nome,
+            estagio: e.estagio,
+            agentesInfo: `${e.agentesProntos}/${e.agentesTotal}`,
+          }))
+        : DEFAULT_WORKSPACES.map((w) => ({ ...w, agentesInfo: "" }));
+
+    const pendingApprovals = (holding?.approvals || []).filter((a) => a.status === "pendente").length;
     const abaixoMinimoCount = (status.modelos || []).filter((m) => m.abaixo_minimo).length;
     const inboxCount =
       status.held.length +
@@ -210,7 +245,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       h(
         "div",
         { className: "of-shell" },
-        // Sidebar oficial estilo CodeDen
+        // Sidebar com a estrutura oficial OrgFy: CEO Master -> Conselho/Board & Inbox -> Workspaces (Empresas) -> Fábrica & Operação
         h(
           "aside",
           { className: "of-sidebar" },
@@ -225,40 +260,84 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
             ),
             h("span", { className: "of-dot", "data-tone": status.coordenador === "ativo" ? "done" : "failed", title: `Coordenador: ${status.coordenador}` })
           ),
+
+          // 1. Orquestrador Principal / CEO Master (definido no Buzz/Holding, padrão Iris)
           h(
-            "select",
+            "div",
             {
-              className: "of-tenant-select",
-              value: tenant,
-              onChange: (e: any) => setTenant(e.target.value),
+              className: "of-surface",
+              style: { padding: "8px 10px", display: "flex", flexDirection: "column", gap: "3px" },
             },
-            TENANT_OPTIONS.map((t) => h("option", { key: t.id, value: t.id }, t.label))
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "10px", color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.06em" } },
+              h("span", null, "CEO Master · Orquestrador"),
+              h("span", { className: "of-dot", "data-tone": masterLive?.running ? "running" : "done" })
+            ),
+            h("div", { style: { fontSize: "12.5px", fontWeight: 700, color: "var(--foreground)" } }, masterAgentName),
+            h("div", { className: "of-mono of-muted", style: { fontSize: "10px" } }, masterLive ? masterLive.model : "Ativa no Buzz")
           ),
-          h("div", { className: "of-nav-group-label" }, "Holding"),
+
+          // 2. Conselho da Holding (Board) & Inbox
+          h("div", { className: "of-nav-group-label" }, "Holding & Conselho"),
           h(
             "nav",
             { className: "of-nav" },
-            renderNavBtn("holding", PT_BR.nav.holding),
+            renderNavBtn("holding", "Conselho (Board)", pendingApprovals > 0 ? String(pendingApprovals) : undefined, pendingApprovals > 0 ? "warn" : undefined),
             renderNavBtn("inbox", PT_BR.nav.inbox, inboxCount > 0 ? String(inboxCount) : undefined, inboxCount > 0 ? "warn" : undefined)
           ),
-          h("div", { className: "of-nav-group-label" }, "Fábrica"),
+
+          // 3. Empresas / Workspaces (carregadas de empresas/*.json)
+          h("div", { className: "of-nav-group-label" }, "Empresas · Workspaces"),
+          h(
+            "nav",
+            { className: "of-nav" },
+            workspaces.map((w) =>
+              h(
+                "button",
+                {
+                  key: w.slug,
+                  type: "button",
+                  className: "of-nav-btn",
+                  "data-active": tenant === w.slug ? "true" : "false",
+                  onClick: () => {
+                    setTenant(w.slug);
+                    if (tab === "holding") setTab("overview");
+                  },
+                },
+                h(
+                  "span",
+                  { style: { display: "inline-flex", alignItems: "center", gap: "6px", overflow: "hidden" } },
+                  h("span", { className: "of-dot", "data-tone": w.estagio === "operacional" ? "done" : "idle" }),
+                  h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, w.nome)
+                ),
+                w.agentesInfo && h("span", { className: "of-nav-badge" }, w.agentesInfo)
+              )
+            )
+          ),
+
+          // 4. Fábrica do Workspace Ativo
+          h("div", { className: "of-nav-group-label" }, `Fábrica · ${tenant}`),
           h(
             "nav",
             { className: "of-nav" },
             renderNavBtn("overview", PT_BR.nav.overview),
             renderNavBtn("board", PT_BR.nav.board, String(status.backlog.length + status.inProgress.length)),
-            renderNavBtn("floor", PT_BR.nav.floor, String(liveCrew.filter((a) => a.running).length))
+            renderNavBtn("floor", "Andar 3D", String(liveCrew.filter((a) => a.running).length))
           ),
+
+          // 5. Operação & Governança
           h("div", { className: "of-nav-group-label" }, "Operação"),
           h(
             "nav",
             { className: "of-nav" },
             renderNavBtn("costs", PT_BR.nav.costs),
-            renderNavBtn("automations", PT_BR.nav.automations),
+            renderNavBtn("vision", "Canvas / Visão"),
             renderNavBtn("agents", PT_BR.nav.agents, abaixoMinimoCount > 0 ? `⚠ ${abaixoMinimoCount}` : undefined, abaixoMinimoCount > 0 ? "danger" : undefined),
-            renderNavBtn("vision", PT_BR.nav.vision),
+            renderNavBtn("automations", PT_BR.nav.automations),
             renderNavBtn("settings", PT_BR.nav.settings)
           ),
+
           opts.onOpenClassicCockpit &&
             h(
               "button",
@@ -272,17 +351,28 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
             )
         ),
 
-        // Área principal com PageHeader + conteúdo da página ativa
+        // Área principal com PageHeader nativo + atalho de deep link para o canal do workspace
         h(
           "div",
           { className: "of-workspace" },
           h(
             "header",
             { className: "of-page-header" },
-            h("strong", { style: { fontSize: "13.5px" } }, PT_BR.nav[tab] || PT_BR.appTitle),
+            h("strong", { style: { fontSize: "13.5px" } }, tab === "vision" ? "Canvas / Visão" : tab === "floor" ? "Andar 3D" : PT_BR.nav[tab] || PT_BR.appTitle),
             h("span", { className: "of-mono of-muted" }, `/ ${tenant}`),
-            toast && h("span", { className: "of-pill", "data-tone": "done", style: { marginLeft: "auto" } }, toast),
-            error && !toast && h("span", { className: "of-pill", "data-tone": "failed", style: { marginLeft: "auto" } }, `Aviso: ${error}`)
+            h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                "data-variant": "ghost",
+                style: { marginLeft: "auto" },
+                onClick: handleOpenChannelInBuzz,
+              },
+              "Canal no Buzz ↗"
+            ),
+            toast && h("span", { className: "of-pill", "data-tone": "done" }, toast),
+            error && !toast && h("span", { className: "of-pill", "data-tone": "failed" }, `Aviso: ${error}`)
           ),
           h(
             "main",
@@ -297,9 +387,9 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                   setConfirmKill,
                   activeHelpKey,
                   onToggleHelp: setActiveHelpKey,
-                  onSelectItem: handleSelectItem,
+                  onSelectItem: setSelectedItem,
                   onRefresh: () => refresh(tenant),
-                  onOpenBoard: () => setTab("board"),
+                  onOpenBoard: () => setTab("floor"),
                   onOpenSettings: () => setTab("settings"),
                   onOpenVision: () => setTab("vision"),
                   onToggleDrain: () =>
@@ -329,7 +419,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                   onChangeStoreyFocus: setStoreyFocus,
                   selectedAgentKey,
                   onSelectAgentKey: setSelectedAgentKey,
-                  onSelectItem: handleSelectItem,
+                  onSelectItem: setSelectedItem,
                   onRefresh: () => refresh(tenant),
                   loading,
                   Floor3D,
@@ -344,7 +434,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                   },
                   status,
                   liveCrew,
-                  onSelectItem: handleSelectItem,
+                  onSelectItem: setSelectedItem,
                   inboxFilter,
                   setInboxFilter,
                   costRange,
@@ -375,7 +465,13 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
           )
         )
       ),
-      renderItemSheetDrawer({ h, item: selectedItem, tenant, onClose: () => setSelectedItem(null) })
+      renderItemSheetDrawer({
+        h,
+        item: selectedItem,
+        tenant,
+        onClose: () => setSelectedItem(null),
+        onOpenInBuzz: handleOpenInBuzz,
+      })
     );
   };
 }
