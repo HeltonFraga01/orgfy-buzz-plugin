@@ -2580,7 +2580,7 @@ async function triageCardWithDecisions(ctx, input) {
   try {
     const res = await decisionsApi.decide({
       state: statePayload,
-      timeoutMs: 8e3,
+      timeoutMs: 15e3,
       questions: {
         escopo_atomico: {
           type: "yes_no",
@@ -2727,7 +2727,7 @@ ${input.saida_aceite || ""}`;
   try {
     const res = await decisionsApi.decide({
       state: statePayload,
-      timeoutMs: 8e3,
+      timeoutMs: 15e3,
       questions: {
         alegacao_sem_prova: {
           type: "yes_no",
@@ -10790,7 +10790,11 @@ const inject = [
   "panels",
   "artifactStorage",
   "notifications",
-  "decisions"
+  "decisions",
+  "relay",
+  "conversation",
+  "sidebarSections",
+  "shortcuts"
 ];
 const TENANTS = [
   { id: "all", name: "Holding OrgFy", badge: "Cross-Workspace", slug: "all" },

@@ -172,6 +172,10 @@ export const inject = [
   "artifactStorage",
   "notifications",
   "decisions",
+  "relay",
+  "conversation",
+  "sidebarSections",
+  "shortcuts",
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────

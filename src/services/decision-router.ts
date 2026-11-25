@@ -234,7 +234,7 @@ export async function triageCardWithDecisions(
   try {
     const res = await decisionsApi.decide({
       state: statePayload,
-      timeoutMs: 8000,
+      timeoutMs: 15000,
       questions: {
         escopo_atomico: {
           type: "yes_no",
@@ -436,7 +436,7 @@ export async function triageDiffWithDecisions(
   try {
     const res = await decisionsApi.decide({
       state: statePayload,
-      timeoutMs: 8000,
+      timeoutMs: 15000,
       questions: {
         alegacao_sem_prova: {
           type: "yes_no",
