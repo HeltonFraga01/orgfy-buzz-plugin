@@ -216,6 +216,9 @@ export function isUnsupportedAgentModel(modelId: string): boolean {
   const m = String(modelId || "").trim().toLowerCase();
   if (!m) return true;
   return (
+    m === "haiku" ||
+    m.includes("claude-opus-5-5") ||
+    m.includes("minimax-m3.1-flash") ||
     m.startsWith("auto/") ||
     m.includes("tab_jump") ||
     m.includes("autocomplete") ||

@@ -1481,15 +1481,20 @@ const SHARED_USAGE_PATHS = [
   "~/.buzz/.scratch/nm_usage.json"
 ];
 const MODEL_QUARANTINE_PATH = "/Users/heltonfraga/.buzz/.scratch/orgfy-model-quarantine.json";
-const DEFAULT_QUARANTINE_TTL_MS = 20 * 60 * 1e3;
+const BACKOFF_TTL_STEPS_MS = [5 * 60 * 1e3, 15 * 60 * 1e3, 45 * 60 * 1e3];
 const modelQuarantineMemory = /* @__PURE__ */ new Map();
-async function quarantineFailedModel(ctx, modelId, reason = "provider_5xx_or_429", ttlMs = DEFAULT_QUARANTINE_TTL_MS, nowMs = Date.now()) {
+async function quarantineFailedModel(ctx, modelId, reason = "provider_5xx_or_429", ttlMs, nowMs = Date.now()) {
   const norm = String(modelId || "").trim().toLowerCase();
   if (!norm) return;
+  const prev = modelQuarantineMemory.get(norm);
+  const failureCount = ((prev == null ? void 0 : prev.failureCount) || 0) + 1;
+  const effectiveTtl = BACKOFF_TTL_STEPS_MS[Math.min(failureCount - 1, BACKOFF_TTL_STEPS_MS.length - 1)];
   modelQuarantineMemory.set(norm, {
     model: String(modelId).trim(),
     failedAt: nowMs,
-    expiresAt: nowMs + ttlMs,
+    expiresAt: nowMs + effectiveTtl,
+    failureCount,
+    circuitState: "open",
     reason
   });
   const host = ctx == null ? void 0 : ctx.host;
@@ -1562,7 +1567,7 @@ function isFreeModelId(modelId) {
 function isUnsupportedAgentModel(modelId) {
   const m = String(modelId || "").trim().toLowerCase();
   if (!m) return true;
-  return m.startsWith("auto/") || m.includes("tab_jump") || m.includes("autocomplete") || m.includes("fim-") || m.includes("embedding") || m.includes("rerank") || m.includes("whisper") || m.includes("tts") || m.includes("imagen") || m.includes("dall-e") || m.includes("moderation");
+  return m === "haiku" || m.includes("claude-opus-5-5") || m.includes("minimax-m3.1-flash") || m.startsWith("auto/") || m.includes("tab_jump") || m.includes("autocomplete") || m.includes("fim-") || m.includes("embedding") || m.includes("rerank") || m.includes("whisper") || m.includes("tts") || m.includes("imagen") || m.includes("dall-e") || m.includes("moderation");
 }
 function estimateModelIntelligence(modelId) {
   const m = String(modelId || "").toLowerCase();
@@ -1882,6 +1887,13 @@ async function executeSmartModelFailover(ctx, input = {}) {
     if (previousModel) minimalExclude.add(previousModel.toLowerCase());
     sharedRanking = await loadSharedNexusMindRanking(ctx, minimalExclude, preferFree);
   }
+  const failedProvider = previousModel ? inferProviderId(previousModel) : failedNorm ? inferProviderId(failedNorm) : null;
+  if (failedProvider && sharedRanking.length > 1) {
+    sharedRanking = sharedRanking.map((c) => ({
+      ...c,
+      combinedScore: c.provider !== failedProvider ? Number((c.combinedScore + 12).toFixed(2)) : c.combinedScore
+    })).sort((a, b) => b.combinedScore - a.combinedScore);
+  }
   const host = ctx == null ? void 0 : ctx.host;
   let verifiedShared = [];
   if (sharedRanking.length > 0 && typeof (host == null ? void 0 : host.request) === "function") {
@@ -2083,1199 +2095,252 @@ async function executeSmartModelFailover(ctx, input = {}) {
     message: applyNote || `Melhor modelo disponível (${preferFree ? "FREE" : "PRODUÇÃO"}): ${winner.model} (${winner.provider} · ${sourceTag}).`
   };
 }
-async function resolveFullNostrIssueId(ctx, rawId) {
-  const clean = String(rawId || "").replace(/^#/, "").trim().toLowerCase();
-  if (/^[0-9a-f]{64}$/i.test(clean)) return clean;
-  if (!/^[0-9a-f]{6,63}$/i.test(clean)) return rawId.trim();
-  const host = ctx.host;
-  if (!(host == null ? void 0 : host.readFile)) return clean;
-  const decode = (raw) => typeof raw === "string" ? raw : raw instanceof Uint8Array ? new TextDecoder("utf-8").decode(raw) : String(raw ?? "");
-  try {
-    const rawT = await host.readFile("/Users/heltonfraga/.buzz/.scratch/esteira-transicoes.jsonl");
-    const lines = decode(rawT).split("\n");
-    for (let i = lines.length - 1; i >= 0; i--) {
-      if (!lines[i].includes(clean)) continue;
-      const m = lines[i].match(new RegExp(`"issue_id"\\s*:\\s*"(${clean}[0-9a-f]{${64 - clean.length}})"`, "i"));
-      if (m) return m[1].toLowerCase();
-    }
-  } catch {
-  }
-  try {
-    const rawE = await host.readFile("/Users/heltonfraga/.buzz/REPOS/orgfy/.esteira/estado/esteira-minima-state.json");
-    const parsed = JSON.parse(decode(rawE));
-    for (const k of Object.keys((parsed == null ? void 0 : parsed.aceites) || {})) {
-      if (k.toLowerCase().startsWith(clean) && /^[0-9a-f]{64}$/i.test(k)) {
-        return k.toLowerCase();
-      }
-    }
-  } catch {
-  }
-  return clean;
-}
-const LOCKS_FILE_PATH = "/Users/heltonfraga/.buzz/.scratch/orgfy-locks.json";
-const DEFAULT_LOCK_TTL_MS = 30 * 60 * 1e3;
-const DEFAULT_COOLDOWN_MS = 15 * 60 * 1e3;
-const memoryLocks = /* @__PURE__ */ new Map();
-const alertCooldowns = /* @__PURE__ */ new Map();
-const lastHealedProviderErrorTs = /* @__PURE__ */ new Map();
-function purgeExpiredLocks(now) {
-  let removed = 0;
-  for (const [key, rec] of memoryLocks.entries()) {
-    if (rec.expiresAt <= now) {
-      memoryLocks.delete(key);
-      removed++;
-    }
-  }
-  return removed;
-}
-async function syncLocksFromDisk(ctx, nowMs = Date.now()) {
-  const host = ctx.host;
-  if (!(host == null ? void 0 : host.readFile)) return 0;
-  let expiredOnDisk = 0;
-  try {
-    const raw = await host.readFile(LOCKS_FILE_PATH);
-    const text = typeof raw === "string" ? raw : raw instanceof Uint8Array ? new TextDecoder("utf-8").decode(raw) : raw instanceof ArrayBuffer ? new TextDecoder("utf-8").decode(new Uint8Array(raw)) : ArrayBuffer.isView(raw) ? new TextDecoder("utf-8").decode(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength)) : String(raw ?? "");
-    const parsed = JSON.parse(text);
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      for (const [k, v] of Object.entries(parsed)) {
-        if (v && typeof v.agentKey === "string" && typeof v.expiresAt === "number" && v.expiresAt > nowMs) {
-          if (!memoryLocks.has(k)) {
-            memoryLocks.set(k, {
-              issueId: k,
-              agentKey: v.agentKey,
-              acquiredAt: Number(v.acquiredAt || nowMs),
-              expiresAt: v.expiresAt,
-              title: typeof v.title === "string" ? v.title : void 0,
-              owner: typeof v.owner === "string" ? v.owner : void 0,
-              revisor: typeof v.revisor === "string" ? v.revisor : void 0,
-              acceptanceCommand: typeof v.acceptanceCommand === "string" ? v.acceptanceCommand : void 0,
-              branch: typeof v.branch === "string" ? v.branch : void 0
-            });
-          }
-        } else {
-          expiredOnDisk++;
-        }
-      }
-    }
-  } catch {
-  }
-  return expiredOnDisk;
-}
-async function persistLocksToDisk(ctx) {
-  const host = ctx.host;
-  if (!host) return;
-  const obj = {};
-  for (const [k, v] of memoryLocks.entries()) {
-    obj[k] = v;
-  }
-  const serialized = JSON.stringify(obj, null, 2);
-  if (host.writeFile) {
-    try {
-      await host.writeFile(LOCKS_FILE_PATH, serialized);
-      return;
-    } catch {
-    }
-  }
-  if (host.spawn) {
-    try {
-      const pyCode = "import pathlib, sys; p = pathlib.Path(sys.argv[1]); p.parent.mkdir(parents=True, exist_ok=True); p.write_text(sys.argv[2], encoding='utf-8')";
-      const proc = await host.spawn("python", {
-        args: ["-c", pyCode, LOCKS_FILE_PATH, serialized]
-      });
-      await proc.exited;
-    } catch {
-    }
-  }
-}
-async function acquireCheckoutLock(ctx, issueId, agentKey, ttlMs = DEFAULT_LOCK_TTL_MS, nowMs = Date.now(), meta) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o;
-  const rawIssue = String(issueId || "").trim();
-  const cleanIssue = await resolveFullNostrIssueId(ctx, rawIssue);
-  const cleanAgent = String(agentKey || "").trim();
-  const normalizedTtlMs = typeof ttlMs === "number" && Number.isFinite(ttlMs) && ttlMs > 0 ? ttlMs <= 1440 ? ttlMs * 60 * 1e3 : ttlMs : DEFAULT_LOCK_TTL_MS;
-  if (!cleanIssue || !cleanAgent) {
-    return {
-      ok: false,
-      code: "LOCK_CONFLICT",
-      message: "issueId e agentKey são obrigatórios para checkout atômico."
-    };
-  }
-  if (/^([0-9a-f]{4,16})\1+$/i.test(cleanIssue)) {
-    return {
-      ok: false,
-      code: "LOCK_CONFLICT",
-      message: `INVALID_SYNTHETIC_ID: issueId '${cleanIssue}' parece um prefixo repetido artificialmente. Informe o ID Nostr real (64 hex) ou apenas o prefixo de 8 chars para resolução automática.`
-    };
-  }
-  await syncLocksFromDisk(ctx);
-  purgeExpiredLocks(nowMs);
-  const shortKey = cleanIssue.slice(0, 8);
-  const existing = memoryLocks.get(cleanIssue) || (cleanIssue.length === 64 ? memoryLocks.get(shortKey) : void 0);
-  if (existing && existing.expiresAt > nowMs) {
-    if (existing.agentKey === cleanAgent) {
-      if (existing.issueId !== cleanIssue) {
-        memoryLocks.delete(existing.issueId);
-      }
-      const renewed = {
-        issueId: cleanIssue,
-        agentKey: cleanAgent,
-        acquiredAt: existing.acquiredAt,
-        expiresAt: nowMs + normalizedTtlMs,
-        title: ((_a = meta == null ? void 0 : meta.title) == null ? void 0 : _a.trim()) || existing.title,
-        owner: ((_b = meta == null ? void 0 : meta.owner) == null ? void 0 : _b.trim()) || existing.owner,
-        revisor: ((_c = meta == null ? void 0 : meta.revisor) == null ? void 0 : _c.trim()) || existing.revisor,
-        acceptanceCommand: ((_d = meta == null ? void 0 : meta.acceptanceCommand) == null ? void 0 : _d.trim()) || existing.acceptanceCommand,
-        branch: ((_e = meta == null ? void 0 : meta.branch) == null ? void 0 : _e.trim()) || existing.branch
-      };
-      memoryLocks.set(cleanIssue, renewed);
-      await persistLocksToDisk(ctx);
-      return {
-        ok: true,
-        code: "RENEWED",
-        lock: renewed,
-        message: `Lock de ${cleanIssue} renovado para ${cleanAgent}.`
-      };
-    }
-    const designatedRevisor = String(existing.revisor || "").trim();
-    let isDesignatedRevisor = false;
-    if (designatedRevisor) {
-      const candidates = [cleanAgent];
-      if (meta == null ? void 0 : meta.owner) candidates.push(String(meta.owner));
-      try {
-        const snap = (_g = (_f = ctx.agents) == null ? void 0 : _f.snapshot) == null ? void 0 : _g.call(_f);
-        const pool = [...Array.isArray(snap == null ? void 0 : snap.running) ? snap.running : [], ...Array.isArray(snap == null ? void 0 : snap.agents) ? snap.agents : []];
-        const matched = pool.find(
-          (a) => String((a == null ? void 0 : a.key) || "").toLowerCase() === cleanAgent.toLowerCase() || String((a == null ? void 0 : a.pubkey) || "").toLowerCase() === cleanAgent.toLowerCase()
-        );
-        if (matched == null ? void 0 : matched.name) candidates.push(String(matched.name));
-      } catch {
-      }
-      isDesignatedRevisor = candidates.some((c) => sameAgentName(c, designatedRevisor));
-    }
-    if (isDesignatedRevisor) {
-      const handedOff = {
-        issueId: cleanIssue,
-        agentKey: cleanAgent,
-        acquiredAt: nowMs,
-        expiresAt: nowMs + normalizedTtlMs,
-        title: ((_h = meta == null ? void 0 : meta.title) == null ? void 0 : _h.trim()) || existing.title,
-        owner: existing.owner,
-        revisor: existing.revisor,
-        acceptanceCommand: ((_i = meta == null ? void 0 : meta.acceptanceCommand) == null ? void 0 : _i.trim()) || existing.acceptanceCommand,
-        branch: ((_j = meta == null ? void 0 : meta.branch) == null ? void 0 : _j.trim()) || existing.branch
-      };
-      memoryLocks.set(cleanIssue, handedOff);
-      await persistLocksToDisk(ctx);
-      return {
-        ok: true,
-        code: "ACQUIRED",
-        lock: handedOff,
-        message: `Handoff automático de lock para o revisor designado (${designatedRevisor}) no card ${cleanIssue}.`
-      };
-    }
-    return {
-      ok: false,
-      code: "LOCK_CONFLICT",
-      conflictOwner: existing.agentKey,
-      lock: existing,
-      message: `LOCK_CONFLICT: Card ${cleanIssue} já está reservado por ${existing.agentKey} até ${new Date(existing.expiresAt).toISOString()}.`
-    };
-  }
-  const created = {
-    issueId: cleanIssue,
-    agentKey: cleanAgent,
-    acquiredAt: nowMs,
-    expiresAt: nowMs + normalizedTtlMs,
-    title: ((_k = meta == null ? void 0 : meta.title) == null ? void 0 : _k.trim()) || void 0,
-    owner: ((_l = meta == null ? void 0 : meta.owner) == null ? void 0 : _l.trim()) || void 0,
-    revisor: ((_m = meta == null ? void 0 : meta.revisor) == null ? void 0 : _m.trim()) || void 0,
-    acceptanceCommand: ((_n = meta == null ? void 0 : meta.acceptanceCommand) == null ? void 0 : _n.trim()) || void 0,
-    branch: ((_o = meta == null ? void 0 : meta.branch) == null ? void 0 : _o.trim()) || void 0
-  };
-  memoryLocks.set(cleanIssue, created);
-  await persistLocksToDisk(ctx);
-  return {
-    ok: true,
-    code: "ACQUIRED",
-    lock: created,
-    message: `Lock atômico adquirido para ${cleanIssue} por ${cleanAgent}.`
-  };
-}
-async function releaseCheckoutLock(ctx, issueId, agentKey, force = false) {
-  const rawIssue = String(issueId || "").trim();
-  const cleanIssue = await resolveFullNostrIssueId(ctx, rawIssue);
-  await syncLocksFromDisk(ctx);
-  purgeExpiredLocks(Date.now());
-  const shortKey = cleanIssue.slice(0, 8);
-  const existing = memoryLocks.get(cleanIssue) || memoryLocks.get(rawIssue) || memoryLocks.get(shortKey);
-  if (!existing) {
-    return {
-      ok: true,
-      code: "NOT_FOUND",
-      message: `Nenhum lock ativo encontrado para ${cleanIssue}.`
-    };
-  }
-  if (!force && agentKey && existing.agentKey !== agentKey) {
-    return {
-      ok: false,
-      code: "OWNER_MISMATCH",
-      conflictOwner: existing.agentKey,
-      message: `Lock de ${cleanIssue} pertence a ${existing.agentKey}, não a ${agentKey}.`
-    };
-  }
-  memoryLocks.delete(existing.issueId);
-  await persistLocksToDisk(ctx);
-  return {
-    ok: true,
-    code: "RELEASED",
-    message: `Lock de ${existing.issueId} liberado com sucesso.`
-  };
-}
-async function listActiveLocks(ctx, nowMs = Date.now()) {
-  const expiredOnDisk = await syncLocksFromDisk(ctx, nowMs);
-  const removedInMem = purgeExpiredLocks(nowMs);
-  if (expiredOnDisk > 0 || removedInMem > 0) {
-    await persistLocksToDisk(ctx);
-  }
-  return Array.from(memoryLocks.values());
-}
-function evaluateBudgetGate(kpis, boardOverride = false) {
-  var _a, _b;
-  const usoPct = ((_a = kpis == null ? void 0 : kpis.economia) == null ? void 0 : _a.uso_teto_diario_pct) ?? 0;
-  const status = ((_b = kpis == null ? void 0 : kpis.economia) == null ? void 0 : _b.status_orcamento) ?? "OK";
-  if (status === "BLOQUEADO_100" || usoPct >= 100) {
-    if (boardOverride) {
-      return {
-        allowed: true,
-        code: "OVERRIDE_ALLOWED",
-        usoPct,
-        statusOrcamento: "BLOQUEADO_100",
-        message: `Teto diário de 100% atingido (${usoPct}%), liberado excepcionalmente via boardOverride.`
-      };
-    }
-    return {
-      allowed: false,
-      code: "BUDGET_HARD_CAP_REACHED",
-      usoPct,
-      statusOrcamento: "BLOQUEADO_100",
-      message: `BUDGET_HARD_CAP_REACHED: Consumo diário em ${usoPct}% do teto. Informe boardOverride: true para liberar manualmente.`
-    };
-  }
-  if (status === "ALERTA_80" || usoPct >= 80) {
-    return {
-      allowed: true,
-      code: "SOFT_CAP_80",
-      usoPct,
-      statusOrcamento: "ALERTA_80",
-      message: `Alerta suave: consumo diário em ${usoPct}% do teto (priorizar modelos Tier 1).`
-    };
-  }
-  return {
-    allowed: true,
-    code: "OK",
-    usoPct,
-    statusOrcamento: "OK",
-    message: `Orçamento diário saudável (${usoPct}% do teto).`
-  };
-}
-function canTriggerWithCooldown(key, nowMs, commit = true, cooldownMs = DEFAULT_COOLDOWN_MS) {
-  const last = alertCooldowns.get(key);
-  if (last !== void 0 && nowMs - last < cooldownMs) {
-    return false;
-  }
-  if (commit) {
-    alertCooldowns.set(key, nowMs);
-  }
-  return true;
-}
-const DEFAULT_ORGFY_CHANNEL$1 = "e445491d-2fb3-4ebd-8e2e-f6813c33fb03";
-const EMPRESAS_DIR = "/Users/heltonfraga/.buzz/REPOS/orgfy/empresas";
-const KNOWN_COMPANY_SLUGS = ["orgfy", "lumen-iptv", "saas-tributario"];
-const radarEscalationCounts = /* @__PURE__ */ new Map();
-function decodeHostBytes$1(raw) {
+const MARK_TO_STATUS = {
+  " ": "todo",
+  "/": "in_progress",
+  "x": "done",
+  "X": "done",
+  "!": "blocked"
+};
+const STATUS_TO_MARK = {
+  todo: " ",
+  in_progress: "/",
+  done: "x",
+  blocked: "!"
+};
+function decodeBytes$1(raw) {
   if (typeof raw === "string") return raw;
   if (raw instanceof Uint8Array) return new TextDecoder("utf-8").decode(raw);
   if (raw instanceof ArrayBuffer) return new TextDecoder("utf-8").decode(new Uint8Array(raw));
-  if (ArrayBuffer.isView(raw)) {
-    return new TextDecoder("utf-8").decode(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength));
-  }
   return String(raw ?? "");
 }
-function sameAgentName(a, b) {
-  const na = String(a || "").trim().toLowerCase();
-  const nb = String(b || "").trim().toLowerCase();
-  return Boolean(na && nb && (na === nb || na.includes(nb) || nb.includes(na)));
-}
-async function resolveEscalationTargetForChannel(ctx, channelId, loopingAgents = [], escalationAttempt = 1) {
-  var _a;
-  const host = ctx.host;
-  const targetChannel = String(channelId).trim();
-  let matchedManifest = null;
-  let defaultManifest = null;
-  if (host == null ? void 0 : host.readFile) {
-    for (const slug of KNOWN_COMPANY_SLUGS) {
-      try {
-        const raw = await host.readFile(`${EMPRESAS_DIR}/${slug}.json`);
-        const parsed = JSON.parse(decodeHostBytes$1(raw));
-        if (slug === "orgfy") defaultManifest = parsed;
-        if ((parsed == null ? void 0 : parsed.canal) && String(parsed.canal).trim() === targetChannel) {
-          matchedManifest = parsed;
-          break;
-        }
-      } catch {
-      }
-    }
-  }
-  const manifest = matchedManifest || defaultManifest || {};
-  const empresaSlug = String(manifest.empresa || manifest.slug || "orgfy");
-  const empresaNome = String(
-    ((_a = manifest.hierarquia) == null ? void 0 : _a.workspace_buzz) || manifest.nome || (empresaSlug === "orgfy" ? "OrgFy" : empresaSlug)
-  );
-  const papeis = manifest.papeis && typeof manifest.papeis === "object" ? manifest.papeis : {};
-  const hierarquia = manifest.hierarquia && typeof manifest.hierarquia === "object" ? manifest.hierarquia : {};
-  const agentesEntries = Array.isArray(manifest.agentes) ? manifest.agentes.map((a) => ({ nome: String((a == null ? void 0 : a.nome) || ""), papel: String((a == null ? void 0 : a.papel) || "") })) : manifest.agentes && typeof manifest.agentes === "object" ? Object.entries(manifest.agentes).map(([nome, cfg]) => ({
-    nome,
-    papel: String((cfg == null ? void 0 : cfg.papel) || "")
-  })) : [];
-  const findByRole = (role) => {
-    var _a2;
-    return (_a2 = agentesEntries.find((a) => a.papel.toLowerCase() === role)) == null ? void 0 : _a2.nome;
-  };
-  const coo = String(papeis.coo || findByRole("coo") || "OrgFy Bento").trim();
-  const companyCeo = String(
-    hierarquia.ceo_empresa || papeis.ceo_empresa || findByRole("ceo_empresa") || papeis.ceo || findByRole("ceo") || "OrgFy Iris"
-  ).trim();
-  const holdingCeo = String(
-    hierarquia.ceo_holding || papeis.ceo_holding || findByRole("ceo_holding") || "OrgFy Iris"
-  ).trim();
-  const isCooLooping = loopingAgents.some((ag) => sameAgentName(ag, coo));
-  const isCompanyCeoLooping = loopingAgents.some((ag) => sameAgentName(ag, companyCeo));
-  const hasSeparateCompanyCeo = !sameAgentName(companyCeo, holdingCeo);
-  if (hasSeparateCompanyCeo && (isCompanyCeoLooping || escalationAttempt >= 3)) {
-    return {
-      empresaSlug,
-      empresaNome,
-      level: 3,
-      roleLabel: "CEO Holding",
-      targetAgent: holdingCeo,
-      nextEscalationAgent: null,
-      holdingCeo,
-      reason: isCompanyCeoLooping ? `CEO da empresa (${companyCeo}) está em loop` : `incidente persistiu após acionamento do COO (${coo}) e CEO (${companyCeo})`
-    };
-  }
-  if (isCooLooping || escalationAttempt >= 2) {
-    return {
-      empresaSlug,
-      empresaNome,
-      level: 2,
-      roleLabel: hasSeparateCompanyCeo ? `CEO ${empresaNome}` : "CEO Holding",
-      targetAgent: companyCeo,
-      nextEscalationAgent: hasSeparateCompanyCeo ? holdingCeo : null,
-      holdingCeo,
-      reason: isCooLooping ? `o próprio COO (${coo}) entrou em loop` : `COO (${coo}) não resolveu o loop no ciclo anterior`
-    };
-  }
+function summarizeSteps(steps) {
+  const total = steps.length;
+  const done = steps.filter((s) => s.status === "done").length;
+  const inProgress = steps.filter((s) => s.status === "in_progress").length;
+  const blocked = steps.filter((s) => s.status === "blocked").length;
+  const pct = total > 0 ? Math.round(done / total * 100) : 0;
+  const nextPending = steps.find((s) => s.status === "in_progress") || steps.find((s) => s.status === "todo") || steps.find((s) => s.status === "blocked") || null;
   return {
-    empresaSlug,
-    empresaNome,
-    level: 1,
-    roleLabel: `COO · ${empresaNome}`,
-    targetAgent: coo,
-    nextEscalationAgent: companyCeo,
-    holdingCeo,
-    reason: "primeiro acionamento operacional de auto-cura na esteira"
+    total,
+    done,
+    inProgress,
+    blocked,
+    pct,
+    steps,
+    nextPendingStepId: nextPending ? nextPending.id : null
   };
 }
-function resolveAgentKeyFromSnapshot(agentsApi, query) {
-  const clean = String(query || "").trim();
-  if (!clean || !(agentsApi == null ? void 0 : agentsApi.snapshot)) return clean;
-  try {
-    const snap = agentsApi.snapshot() || {};
-    const pool = [];
-    const seen = /* @__PURE__ */ new Set();
-    for (const list of [snap.running, snap.agents]) {
-      if (!Array.isArray(list)) continue;
-      for (const a of list) {
-        if (!a || !a.key || seen.has(a.key)) continue;
-        seen.add(a.key);
-        pool.push(a);
-      }
-    }
-    const lower = clean.toLowerCase();
-    const matched = pool.find((a) => String(a.key || "").toLowerCase() === lower) || pool.find((a) => String(a.pubkey || "").toLowerCase() === lower) || pool.find((a) => String(a.name || "").toLowerCase() === lower) || pool.find((a) => String(a.name || "").toLowerCase().includes(lower));
-    return (matched == null ? void 0 : matched.key) || clean;
-  } catch {
-    return clean;
-  }
-}
-async function evaluateGovernanceAndReact(ctx, options = {}) {
-  const nowMs = options.nowMs ?? Date.now();
-  const kpiRes = await fetchKpisEsteira(ctx);
-  const kpis = kpiRes.kpis;
-  const locks = await listActiveLocks(ctx, nowMs);
-  const budget = evaluateBudgetGate(kpis, false);
-  const notificationsSent = [];
-  const wakesTriggered = [];
-  const skippedByCooldown = [];
-  const alerts = [...(kpis == null ? void 0 : kpis.alertas_ativos) ?? []];
-  let radarChannelId;
-  let radarThreadRoot;
-  let radarLoopingAgents = [];
-  let radarIncidentKey = "";
-  if (options.includeRadar !== false) {
-    try {
-      const radar = await fetchGooseLoopRadar(ctx);
-      if (radar.ok && Array.isArray(radar.sessoes)) {
-        const healedSessionIds = /* @__PURE__ */ new Set();
-        if (!options.dryRun && options.autoWake !== false) {
-          const providerStormSessions = radar.sessoes.filter((s) => {
-            const isActive = typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15;
-            if (!isActive || s.ultima_atualizacao_min > 12) return false;
-            const lastIsErr = Boolean(s.last_msg_is_provider_error);
-            const recentErrs = Number(s.recent_provider_errors ?? 0);
-            const hasStormFlag = Array.isArray(s.flags) && s.flags.includes("TEMPESTADE_5XX");
-            return lastIsErr || recentErrs >= 2 || hasStormFlag && Number(s.errors_5xx ?? 0) >= 1;
-          });
-          const seenAgentsForFailover = /* @__PURE__ */ new Set();
-          for (const s of providerStormSessions) {
-            const agentDedupKey = String(s.agent_pubkey || s.agente || "").trim().toLowerCase();
-            if (!agentDedupKey || seenAgentsForFailover.has(agentDedupKey)) continue;
-            seenAgentsForFailover.add(agentDedupKey);
-            const errTs = typeof s.last_provider_error_ts === "number" ? s.last_provider_error_ts : null;
-            const prevHealedTs = lastHealedProviderErrorTs.get(agentDedupKey);
-            if (!options.bypassCooldown && errTs !== null && prevHealedTs !== void 0 && errTs <= prevHealedTs) {
-              skippedByCooldown.push(`auto_failover_already_healed:${s.agente}`);
-              continue;
-            }
-            const failCooldownKey = `auto_model_failover:${agentDedupKey}`;
-            if (!options.bypassCooldown && !canTriggerWithCooldown(failCooldownKey, nowMs, true, 30 * 1e3)) {
-              skippedByCooldown.push(`auto_failover:${s.agente}`);
-              continue;
-            }
-            if (errTs !== null) {
-              lastHealedProviderErrorTs.set(agentDedupKey, errTs);
-            }
-            try {
-              const agentsApi = ctx.agents;
-              if ((agentsApi == null ? void 0 : agentsApi.session) && (s.agente || s.agent_pubkey)) {
-                const targetKey = resolveAgentKeyFromSnapshot(agentsApi, s.agent_pubkey || s.agente);
-                if (targetKey) {
-                  try {
-                    const place = s.thread_root ? { channelId: s.channel_id || DEFAULT_ORGFY_CHANNEL$1, root: s.thread_root } : { channelId: s.channel_id || DEFAULT_ORGFY_CHANNEL$1 };
-                    await agentsApi.session(targetKey, place, "interrupt");
-                  } catch {
-                  }
-                }
-              }
-              const failoverRes = await executeSmartModelFailover(ctx, {
-                agente: s.agente,
-                agent_pubkey: s.agent_pubkey || null,
-                prefer_free: false,
-                apply: true,
-                retrigger: true,
-                channel_id: s.channel_id || DEFAULT_ORGFY_CHANNEL$1,
-                thread_root: s.thread_root || null
-              });
-              if (failoverRes.ok && failoverRes.selectedModel) {
-                wakesTriggered.push(
-                  `auto_failover:${s.agente}:${failoverRes.previousModel || "padrao"}->${failoverRes.selectedModel}`
-                );
-                notificationsSent.push(`AUTO_MODEL_FAILOVER:${s.agente}`);
-                try {
-                  const notifApi = ctx.notifications;
-                  if (notifApi == null ? void 0 : notifApi.notify) {
-                    await notifApi.notify({
-                      title: `OrgFy Auto-Failover [${s.agente}]`,
-                      body: failoverRes.message
-                    });
-                  }
-                } catch {
-                }
-                const otherFlags = (s.flags || []).filter((f) => f !== "TEMPESTADE_5XX");
-                if (otherFlags.length === 0) {
-                  healedSessionIds.add(s.session_id);
-                }
-              }
-            } catch (err) {
-              console.warn("[ORGFY] Falha no auto-failover direto de modelo:", { agente: s.agente, err });
-            }
-          }
-        }
-        const activeCrit = radar.sessoes.filter(
-          (s) => !healedSessionIds.has(s.session_id) && (typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15) && s.severidade === "critical"
-        );
-        const activeDup = radar.sessoes.filter(
-          (s) => (typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15) && (s.flags || []).includes("SESSAO_DUPLICADA")
-        );
-        const anchorSession = activeCrit[0] || activeDup[0];
-        if (anchorSession == null ? void 0 : anchorSession.channel_id) radarChannelId = anchorSession.channel_id;
-        if (anchorSession == null ? void 0 : anchorSession.thread_root) radarThreadRoot = anchorSession.thread_root;
-        radarLoopingAgents = Array.from(
-          new Set([...activeCrit, ...activeDup].map((s) => String(s.agente || "").trim()).filter(Boolean))
-        );
-        radarIncidentKey = `${radarChannelId || DEFAULT_ORGFY_CHANNEL$1}:${activeCrit.map((s) => s.session_id).sort().join(",")}`;
-        if (activeCrit.length > 0) {
-          const top = activeCrit.slice(0, 4).map((s) => `${s.agente} (${s.session_id}, ${s.shells} shells, ${s.duracao_min}m, flags=${(s.flags || []).join("+")})`).join("; ");
-          alerts.push({
-            codigo: "GOOSE_ACTIVE_LOOP",
-            severidade: "critical",
-            mensagem: `${activeCrit.length} sessão(ões) ativa(s) em loop no Goose: ${top}.`,
-            acao_sugerida: "Ciclo Fechado de Auto-Cura (PARAR NUNCA ENCERRA O TURNO): chame orgfy_loop_radar({ apenas_ativos: true }) e execute 1 dos 3 desfechos: (A) Erro de API/5xx/provider -> orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', reason }) + orgfy_model_failover({ agente, agent_pubkey, channel_id, thread_root, prefer_free: false, apply: true, retrigger: true }); (B) Card ainda aberto (ESCOPO_ABERTO, COMPACTACAO_LOOP, ERRO_REPETIDO) -> orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', relaunch: true, reset_session_before_relaunch: true, relaunch_instruction: '<o que fazer agora>', target_files: ['<1-3 arquivos>'], acceptance_command: '<comando L-22>', max_shells: 10, reason }); (C) PR/issue já na main -> orgfy_session_stop({ agente, action: 'interrupt', release_issue_id, reason }) sem relançar. Publique 'AUTO-CURA | agente | causa-raiz | ação' no canal."
-          });
-        }
-        if (activeDup.length >= 2) {
-          const dupAgents = Array.from(new Set(activeDup.map((s) => s.agente))).join(", ");
-          alerts.push({
-            codigo: "GOOSE_DUPLICATE_SESSIONS",
-            severidade: "warn",
-            mensagem: `${activeDup.length} sessões duplicadas ativas nos agentes: ${dupAgents}.`,
-            acao_sugerida: "Pausar cobranças/menções paralelas para esses agentes até concluírem o turno atual e designar dono único por card."
-          });
-        }
-      }
-    } catch {
-    }
-  }
-  for (const al of alerts) {
-    const isRadarAlert = al.codigo === "GOOSE_ACTIVE_LOOP" || al.codigo === "GOOSE_DUPLICATE_SESSIONS";
-    const cooldownKey = isRadarAlert && radarIncidentKey ? `alert:${al.codigo}:${radarIncidentKey}` : `alert:${al.codigo}`;
-    if (!options.bypassCooldown && !canTriggerWithCooldown(cooldownKey, nowMs, !options.dryRun)) {
-      skippedByCooldown.push(al.codigo);
+function parseCardProgress(markdown) {
+  if (!markdown) return null;
+  const secMatch = markdown.match(/##\s*O que fazer\s*\n([\s\S]*?)(?=\n##\s+|$)/i);
+  if (!(secMatch == null ? void 0 : secMatch[1])) return null;
+  const lines = secMatch[1].split("\n");
+  const steps = [];
+  let seq = 0;
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const cb = line.match(/^-\s+\[([ xX\/!])\]\s+(?:\*\*)?(P\d+)(?::)?(?:\*\*)?:?\s*(.+)$/);
+    if (cb) {
+      seq += 1;
+      const status = MARK_TO_STATUS[cb[1]] || "todo";
+      const id = cb[2].toUpperCase();
+      const rest = cb[3].trim();
+      const noteSplit = rest.split(/\s+—\s+`?\[/);
+      const text = noteSplit[0].trim();
+      const note = noteSplit.length > 1 ? rest.slice(text.length).replace(/^\s*—\s*/, "").trim() : void 0;
+      steps.push({ id, text, status, note });
       continue;
     }
-    if (!options.dryRun) {
-      try {
-        const notifApi = ctx.notifications;
-        if (notifApi == null ? void 0 : notifApi.notify) {
-          await notifApi.notify({
-            title: `OrgFy [${al.codigo}]`,
-            body: al.mensagem
-          });
-        }
-      } catch {
-      }
-      notificationsSent.push(al.codigo);
-    }
-    if (options.autoWake && !options.dryRun && (al.codigo === "REVIEW_QUEUE_BOTTLENECK" || al.codigo === "STAGNATION_LEVEL_3" || isRadarAlert)) {
-      const wakeChannel = isRadarAlert && radarChannelId || options.channel || DEFAULT_ORGFY_CHANNEL$1;
-      const attempt = isRadarAlert && radarIncidentKey ? (radarEscalationCounts.get(radarIncidentKey) || 0) + 1 : 1;
-      const escalation = isRadarAlert ? await resolveEscalationTargetForChannel(ctx, wakeChannel, radarLoopingAgents, attempt) : null;
-      const wakeKey = options.reviewerAgentKey || (escalation == null ? void 0 : escalation.targetAgent) || "OrgFy Bento";
-      const wakeRoot = isRadarAlert && radarThreadRoot ? radarThreadRoot : void 0;
-      const wakeCooldownKey = isRadarAlert && radarIncidentKey ? `wake:${al.codigo}:${radarIncidentKey}:${wakeKey}` : `wake:${al.codigo}:${wakeKey}`;
-      const threadGuard = checkThreadWakeAntiLoop({
-        agentKey: wakeKey,
-        threadRoot: wakeRoot,
-        contextText: al.mensagem,
-        nowMs,
-        bypass: Boolean(options.bypassCooldown)
+    const cbSimple = line.match(/^-\s+\[([ xX\/!])\]\s+(.+)$/);
+    if (cbSimple) {
+      seq += 1;
+      steps.push({
+        id: `P${seq}`,
+        text: cbSimple[2].trim(),
+        status: MARK_TO_STATUS[cbSimple[1]] || "todo"
       });
-      if (!threadGuard.allow) {
-        skippedByCooldown.push(`wake_guard:${al.codigo}:${threadGuard.reason}`);
-      } else if (options.bypassCooldown || canTriggerWithCooldown(wakeCooldownKey, nowMs)) {
-        try {
-          const agentsApi = ctx.agents;
-          if (agentsApi == null ? void 0 : agentsApi.wake) {
-            const targetAgentKey = resolveAgentKeyFromSnapshot(agentsApi, wakeKey);
-            const escalationSuffix = escalation && escalation.nextEscalationAgent ? ` Se não conseguir resolver em 1 ciclo, escale para @${escalation.nextEscalationAgent} (nunca acione a CEO da Holding sem passar antes pela liderança da empresa).` : "";
-            const headerLabel = escalation ? `Nível ${escalation.level} · ${escalation.roleLabel}` : al.codigo;
-            await agentsApi.wake(targetAgentKey, {
-              channel: wakeChannel,
-              ...wakeRoot ? { root: wakeRoot } : {},
-              text: isRadarAlert ? `@${wakeKey} ORDEM OPERACIONAL OBRIGATÓRIA [ORGFY RADAR AUTO-CURA · ${headerLabel} · ${al.codigo}] (Isto NÃO é telemetria passiva — execute agora e publique o resultado no canal). ${al.mensagem} Ação obrigatória agora: ${al.acao_sugerida}${escalationSuffix}` : `[ORGFY GOVERNANÇA] ${al.mensagem} Ação recomendada: ${al.acao_sugerida}`
-            });
-            if (isRadarAlert && radarIncidentKey) {
-              radarEscalationCounts.set(radarIncidentKey, attempt);
-            }
-            wakesTriggered.push(`${wakeKey}:${al.codigo}`);
-          }
-        } catch (err) {
-          console.warn("[ORGFY] Falha ao acordar agente via ctx.agents.wake:", { wakeKey, err });
-        }
-      } else {
-        skippedByCooldown.push(`wake:${al.codigo}`);
-      }
+      continue;
     }
-  }
-  return {
-    ok: true,
-    evaluatedAt: new Date(nowMs).toISOString(),
-    budget,
-    activeLocksCount: locks.length,
-    alertsDetected: alerts.length,
-    notificationsSent,
-    wakesTriggered,
-    skippedByCooldown
-  };
-}
-function normalizeTextForFallback(text) {
-  return String(text || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
-}
-function classifyFallbackRiskAndSurface(titulo, descricao) {
-  const blob = normalizeTextForFallback(`${titulo} ${descricao}`);
-  const z6Terms = [
-    "faturamento",
-    "pagamento",
-    "pix",
-    "stripe",
-    "billing",
-    "sats",
-    "secret",
-    "segredo",
-    "token",
-    "oauth",
-    "chmod",
-    "credencial",
-    "nsec",
-    "rls",
-    "auth",
-    "deploy",
-    "producao",
-    "production",
-    "swarm",
-    "portainer",
-    "stack",
-    "migration",
-    "migracao",
-    "drop table"
-  ];
-  const isZ6 = z6Terms.some((t) => blob.includes(t));
-  let surface = "codigo";
-  if (["seguranca", "secret", "auth", "oauth", "token", "rls", "chmod"].some((t) => blob.includes(t))) {
-    surface = "seguranca";
-  } else if (["ui", "ux", "css", "tsx", "react", "kanban", "modal", "layout"].some((t) => blob.includes(t))) {
-    surface = "ui";
-  } else if (["docker", "swarm", "portainer", "deploy", "cron", "worktree"].some((t) => blob.includes(t))) {
-    surface = "infra";
-  } else if (["spec", "licao", "playbook", "governanca", "manifesto"].some((t) => blob.includes(t))) {
-    surface = "metodo";
-  }
-  if (isZ6) return { riskLevel: "Z6", requiresHumanApproval: true, surface };
-  if (surface === "seguranca" || surface === "infra") return { riskLevel: "Z4", requiresHumanApproval: false, surface };
-  return { riskLevel: "Z2", requiresHumanApproval: false, surface };
-}
-async function lintCardForDispatch(ctx, input) {
-  var _a, _b;
-  const issues = [];
-  const titulo = String(input.titulo || "").trim();
-  const cmd = String(input.acceptanceCommand || "").trim();
-  const desc = String(input.descricao || "").trim();
-  const md = String(input.cardMarkdown || "").trim();
-  if (!titulo || titulo.length < 10) {
-    issues.push("Título muito curto ou ausente (mínimo 10 caracteres).");
-  }
-  if (!cmd) {
-    issues.push("Regra L-22 violada: comando de aceite executável (acceptanceCommand) ausente.");
-  } else if (/^(todo|tbd|none|n\/a|true|:|exit\s+0)$/i.test(cmd) || /^echo\b/i.test(cmd) && !/(pytest|node |npm |pnpm |cargo |shasum|python|curl |git )/i.test(cmd)) {
-    issues.push("Regra L-22 violada: acceptanceCommand é placeholder ou comando inócuo (carimbo).");
-  }
-  if (input.executor && input.revisor && input.executor.trim() === input.revisor.trim()) {
-    issues.push("Regra L-01 violada: executor e revisor não podem ser o mesmo agente.");
-  }
-  if (md) {
-    if (!/<!--\s*orgfy:card\s+(?:v3|v4|v7\.1|v7\.2)\s*-->/i.test(md)) {
-      issues.push("Template OrgFy ausente: marcador '<!-- orgfy:card v4 -->' ou '<!-- orgfy:card v3 -->' obrigatório (use ./ferramentas/orgfy-card-new).");
-    }
-    if (!/(specs\/[a-z0-9_/-]+|SPEC-\d{4}|\*\*Autoridade:\*\*)/i.test(md) && !((_a = input.specPath) == null ? void 0 : _a.trim())) {
-      issues.push("Spec-Kit obrigatório: informe referência à spec ('specs/.../spec.md' ou 'SPEC-NNNN') e Autoridade.");
-    }
-    if (!/(?:\*\*Leitura:\*\*|Leitura:)/i.test(md) || !/(?:\*\*Escrita\s+exclusiva:\*\*|Escrita\s+exclusiva:)/i.test(md)) {
-      issues.push("Paths obrigatórios ausentes: preencha 'Leitura:' e 'Escrita exclusiva:' conforme contratos/card.md.");
-    }
-    if (!/##\s+Pap[eé]is\s+e\s+ambiente/i.test(md)) {
-      issues.push("Seção obrigatória ausente: '## Papéis e ambiente' (com Executor, Revisor, Decisor e Workspace).");
-    }
-  }
-  const fallbackCls = classifyFallbackRiskAndSurface(titulo, desc);
-  let usedDecisionsApi = false;
-  let decisionSource = "deterministic_fallback";
-  let fallbackReason = "decisions_api_not_available";
-  let score = issues.length === 0 ? 1 : Math.max(0.2, 1 - issues.length * 0.3);
-  const decisionsApi = ctx.decisions;
-  if ((decisionsApi == null ? void 0 : decisionsApi.decide) && issues.length === 0 && (titulo || desc)) {
-    try {
-      const decisionRes = await decisionsApi.decide({
-        state: {
-          issueId: input.issueId || "draft",
-          titulo,
-          acceptanceCommand: cmd,
-          descricao: desc,
-          fallbackRisk: fallbackCls.riskLevel
-        },
-        questions: [
-          {
-            id: "atomic_scope",
-            type: "yes_no",
-            prompt: "O escopo deste card é atômico e verificável pelo comando de aceite informado?"
-          }
-        ]
+    const num = line.match(/^(\d+)\.\s+(.+)$/);
+    if (num) {
+      seq += 1;
+      steps.push({
+        id: `P${num[1]}`,
+        text: num[2].trim(),
+        status: "todo"
       });
-      usedDecisionsApi = true;
-      decisionSource = "decisions_api";
-      fallbackReason = null;
-      const ans = ((_b = decisionRes == null ? void 0 : decisionRes.answers) == null ? void 0 : _b.atomic_scope) ?? (decisionRes == null ? void 0 : decisionRes.atomic_scope);
-      if (ans === false || ans === "no") {
-        issues.push("Avaliação semântica (ctx.decisions): escopo amplo demais ou pouco verificável.");
-        score = 0.55;
-      }
-    } catch (err) {
-      const msg = String((err == null ? void 0 : err.message) || err || "unknown_error");
-      fallbackReason = /(402|429|quota|balance|credit|saldo|timeout)/i.test(msg) ? `decisions_api_quota_or_timeout:${msg.slice(0, 80)}` : `decisions_api_error:${msg.slice(0, 80)}`;
     }
   }
-  const approved = issues.length === 0;
-  return {
-    approved,
-    score: Number(score.toFixed(2)),
-    usedDecisionsApi,
-    decisionSource,
-    fallbackReason,
-    riskLevel: fallbackCls.riskLevel,
-    requiresHumanApproval: fallbackCls.requiresHumanApproval,
-    surface: fallbackCls.surface,
-    issues,
-    recommendation: approved ? usedDecisionsApi ? "Card aprovado via Decisions API + invariantes L-01/L-22." : "Card aprovado via fallback determinístico offline (L-01/L-22/Z6 preservados)." : "Corrija as pendências acima antes de despachar para evitar retrabalho no Gate."
-  };
+  return steps.length > 0 ? summarizeSteps(steps) : null;
 }
-async function bindConversationContextForCard(ctx, input) {
-  var _a;
-  const agentsApi = ctx.agents;
-  const host = ctx.host;
-  const notes = [];
-  let folderAssigned = false;
-  let sectionsInjected = false;
-  let remoteOrMissingAgent = false;
-  const worktreePath = ((_a = input.worktreePath) == null ? void 0 : _a.trim()) || null;
-  const isMissingAgentErr = (msg) => /(does not exist|not found|n[aã]o existe|unknown agent|agent.*missing|no such conversation)/i.test(msg);
-  if (worktreePath && (agentsApi == null ? void 0 : agentsApi.assignConversationFolder)) {
-    try {
-      await agentsApi.assignConversationFolder(input.conversationId, worktreePath);
-      folderAssigned = true;
-    } catch (err) {
-      const msg = String((err == null ? void 0 : err.message) || err);
-      if (isMissingAgentErr(msg)) remoteOrMissingAgent = true;
-      notes.push(`Falha em assignConversationFolder: ${msg}`);
-    }
-  } else if (worktreePath) {
-    notes.push("API ctx.agents.assignConversationFolder indisponível neste host.");
+function applyStepUpdateToMarkdown(markdown, stepId, status, note, agent) {
+  const targetId = String(stepId || "").trim().toUpperCase();
+  const parsed = parseCardProgress(markdown);
+  if (!parsed) {
+    return { updatedMarkdown: markdown, progress: null, matched: false };
   }
-  const sections = [
-    {
-      id: `orgfy-card-${input.issueId}`,
-      title: `Contexto OrgFy — Card #${input.issueId}`,
-      content: [
-        input.titulo ? `Título: ${input.titulo}` : null,
-        input.executor ? `Executor (L-01): ${input.executor}` : null,
-        input.revisor ? `Revisor (L-01): ${input.revisor}` : null,
-        worktreePath ? `Worktree Isolado: ${worktreePath}` : null
-      ].filter(Boolean).join("\n")
-    },
-    {
-      id: `orgfy-rules-${input.issueId}`,
-      title: "Regras Vivas L-22 / L-90 (Injetadas Automaticamente)",
-      content: [
-        `Regra L-22 (Comando de Aceite Imutável): ${input.acceptanceCommand || "Não informado"}`,
-        input.acceptanceHash ? `Hash SHA-256 L-22: ${input.acceptanceHash}` : null,
-        "Regra L-01: Executor e revisor devem ser estritamente segregados.",
-        "Regra L-90: Nunca afrouxe testes, critérios de aceite ou gates caixa-preta."
-      ].filter(Boolean).join("\n")
-    }
-  ];
-  if (agentsApi == null ? void 0 : agentsApi.setConversationSections) {
-    try {
-      await agentsApi.setConversationSections(input.conversationId, sections);
-      sectionsInjected = true;
-    } catch (err) {
-      const msg = String((err == null ? void 0 : err.message) || err);
-      if (isMissingAgentErr(msg)) remoteOrMissingAgent = true;
-      notes.push(`Falha em setConversationSections: ${msg}`);
-    }
-  } else {
-    notes.push("API ctx.agents.setConversationSections indisponível neste host.");
-  }
-  let fallbackContextFile = null;
-  let degradedFallback = false;
-  if (!folderAssigned && !sectionsInjected && remoteOrMissingAgent) {
-    const safeId = String(input.issueId || "card").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 16) || "card";
-    const ctxPath = `/Users/heltonfraga/.buzz/.scratch/orgfy-context-${safeId}.json`;
-    const payload = JSON.stringify(
-      {
-        issueId: input.issueId,
-        conversationId: input.conversationId,
-        worktreePath,
-        sections,
-        savedAt: (/* @__PURE__ */ new Date()).toISOString()
-      },
-      null,
-      2
-    );
-    if (host == null ? void 0 : host.writeFile) {
-      try {
-        await host.writeFile(ctxPath, payload);
-        fallbackContextFile = ctxPath;
-        degradedFallback = true;
-        notes.push(`Fallback aplicado: agente/conversa não local neste aparelho; contexto L-22/L-90 persistido em ${ctxPath}.`);
-      } catch (wErr) {
-        notes.push(`Falha ao gravar fallback de contexto: ${(wErr == null ? void 0 : wErr.message) || wErr}`);
-      }
-    }
-  }
-  return {
-    ok: folderAssigned || sectionsInjected || degradedFallback,
-    conversationId: input.conversationId,
-    folderAssigned,
-    worktreePath,
-    sectionsInjected,
-    sectionsCount: sectionsInjected || degradedFallback ? sections.length : 0,
-    fallbackContextFile,
-    degradedFallback,
-    notes
-  };
-}
-async function stopAgentSession(ctx, input) {
-  const agentsApi = ctx.agents;
-  const action = input.action === "new" || input.action === "compact" ? input.action : "interrupt";
-  const channelId = String(input.channel_id || DEFAULT_ORGFY_CHANNEL$1).trim() || DEFAULT_ORGFY_CHANNEL$1;
-  const root = input.thread_root ? String(input.thread_root).trim() : void 0;
-  const place = root ? { channelId, root } : { channelId };
-  if (!(agentsApi == null ? void 0 : agentsApi.snapshot) || !(agentsApi == null ? void 0 : agentsApi.session) && !(agentsApi == null ? void 0 : agentsApi.interrupt)) {
-    return {
-      ok: false,
-      action,
-      agentName: null,
-      agentKey: null,
-      agentPlace: null,
-      place,
-      previousState: null,
-      lockReleased: false,
-      relaunched: false,
-      message: "API nativa ctx.agents.session / snapshot indisponível neste host."
-    };
-  }
-  const snap = agentsApi.snapshot() || {};
-  const pool = [];
-  const seen = /* @__PURE__ */ new Set();
-  for (const list of [snap.running, snap.agents]) {
-    if (!Array.isArray(list)) continue;
-    for (const a of list) {
-      if (!a || !a.key || seen.has(a.key)) continue;
-      seen.add(a.key);
-      pool.push(a);
-    }
-  }
-  const queryRaw = String(input.agente || "").trim();
-  const queryLower = queryRaw.toLowerCase();
-  const pubkeyLower = String(input.agent_pubkey || "").trim().toLowerCase();
-  const matched = pubkeyLower && pool.find((a) => String(a.pubkey || "").toLowerCase() === pubkeyLower) || pool.find((a) => String(a.key || "").toLowerCase() === queryLower) || pool.find((a) => String(a.pubkey || "").toLowerCase() === queryLower) || pool.find((a) => String(a.name || "").toLowerCase() === queryLower) || (queryLower ? pool.find((a) => String(a.name || "").toLowerCase().includes(queryLower)) : void 0);
-  if (!matched) {
-    const available = pool.map((a) => a.name || a.key).slice(0, 12).join(", ");
-    return {
-      ok: false,
-      action,
-      agentName: null,
-      agentKey: null,
-      agentPlace: null,
-      place,
-      previousState: null,
-      lockReleased: false,
-      relaunched: false,
-      message: `Agente '${queryRaw || pubkeyLower}' não encontrado no Buzz Desktop. Disponíveis: ${available || "nenhum"}`
-    };
-  }
-  const resolvedName = String(matched.name || matched.key);
-  let previousState = null;
-  try {
-    if (agentsApi.sessionState) {
-      previousState = String(agentsApi.sessionState(matched.key, place));
-    }
-  } catch {
-    previousState = null;
-  }
-  try {
-    if (matched.place === "hosted" && action === "interrupt" && agentsApi.interrupt) {
-      await agentsApi.interrupt(matched.key, {
-        channelId: place.channelId,
-        ...place.root ? { threadRootId: place.root } : {}
-      });
-    } else if (agentsApi.session) {
-      await agentsApi.session(matched.key, place, action);
-    } else if (action === "interrupt" && agentsApi.interrupt) {
-      await agentsApi.interrupt(matched.key, {
-        channelId: place.channelId,
-        ...place.root ? { threadRootId: place.root } : {}
-      });
-    } else {
+  let matched = false;
+  const noteTag = note ? `[${agent ? `${agent}: ` : ""}${note.replace(/\n/g, " ").trim().slice(0, 120)}]` : void 0;
+  const updatedSteps = parsed.steps.map((s) => {
+    if (s.id.toUpperCase() === targetId) {
+      matched = true;
       return {
-        ok: false,
-        action,
-        agentName: resolvedName,
-        agentKey: matched.key,
-        agentPlace: matched.place || null,
-        place,
-        previousState,
-        lockReleased: false,
-        relaunched: false,
-        message: `Host não suporta ação '${action}' para ${resolvedName}.`
+        ...s,
+        status,
+        note: noteTag ?? s.note
       };
     }
-  } catch (err) {
-    return {
-      ok: false,
-      action,
-      agentName: resolvedName,
-      agentKey: matched.key,
-      agentPlace: matched.place || null,
-      place,
-      previousState,
-      lockReleased: false,
-      relaunched: false,
-      message: `Falha ao executar '${action}' em ${resolvedName}: ${(err == null ? void 0 : err.message) || err}`
-    };
-  }
-  let lockReleased = false;
-  if (input.release_issue_id && String(input.release_issue_id).trim()) {
-    try {
-      const rel = await releaseCheckoutLock(ctx, String(input.release_issue_id).trim(), void 0, true);
-      lockReleased = rel.ok && rel.code === "RELEASED";
-    } catch {
-      lockReleased = false;
-    }
-  }
-  let relaunched = false;
-  let relaunchMessage = null;
-  const wantRelaunch = Boolean(input.relaunch);
-  const relaunchInstr = String(input.relaunch_instruction || "").trim();
-  if (wantRelaunch && (agentsApi == null ? void 0 : agentsApi.wake)) {
-    try {
-      if (input.reset_session_before_relaunch && action !== "new" && agentsApi.session) {
-        try {
-          await agentsApi.session(matched.key, place, "new");
-        } catch {
-        }
-      }
-      const files = Array.isArray(input.target_files) ? input.target_files.map((f) => String(f || "").trim()).filter(Boolean) : [];
-      const maxShells = Number.isFinite(Number(input.max_shells)) && Number(input.max_shells) > 0 ? Math.min(20, Math.max(3, Math.round(Number(input.max_shells)))) : 10;
-      const accCmd = String(input.acceptance_command || "").trim();
-      const parts = [
-        `@${resolvedName} [ORGFY AUTO-CURA · RELANÇAMENTO ESCOPO FECHADO]`,
-        `Sua sessão anterior foi interrompida (${String(input.reason || "loop/travamento").trim()}).`,
-        relaunchInstr ? `Objetivo único agora: ${relaunchInstr}` : "Retome a tarefa atual com foco estrito no escopo fechado.",
-        files.length > 0 ? `Arquivos-alvo exclusivos: ${files.join(", ")}.` : null,
-        accCmd ? `Comando de aceite L-22 obrigatório: ${accCmd}` : null,
-        `Limite estrito: máximo ${maxShells} comandos shell (sem --help, sem explorar fora do escopo). Ao passar o aceite, entregue imediatamente; se bater 2 falhas consecutivas, publique BLOQUEADO.`
-      ].filter(Boolean);
-      relaunchMessage = parts.join(" ");
-      await agentsApi.wake(matched.key, {
-        channel: place.channelId,
-        ...place.root ? { root: place.root } : {},
-        text: relaunchMessage
-      });
-      relaunched = true;
-    } catch (wakeErr) {
-      relaunchMessage = `Falha no relaunch automático: ${(wakeErr == null ? void 0 : wakeErr.message) || wakeErr}`;
-    }
-  }
-  const nextRequiredAction = relaunched ? null : `AÇÃO OBRIGATÓRIA DO COO (parar nunca encerra o turno): escolha 1 dos 3 desfechos para ${resolvedName}: (1) Se erro de API/5xx, chame orgfy_model_failover({ agente: '${resolvedName}', channel_id: '${place.channelId}'${place.root ? `, thread_root: '${place.root}'` : ""}, prefer_free: false, apply: true, retrigger: true }); (2) Se a demanda ainda está aberta, chame orgfy_session_stop({ agente: '${resolvedName}', channel_id: '${place.channelId}'${place.root ? `, thread_root: '${place.root}'` : ""}, relaunch: true, relaunch_instruction: '<o que fazer>', target_files: ['...'], acceptance_command: '<L-22>', max_shells: 10 }); (3) Se o PR já foi integrado na main, apenas registre 'AUTO-CURA | ${resolvedName} | ITEM_JA_FECHADO | encerrado sem relançar'.`;
-  const reasonSuffix = input.reason ? ` Motivo: ${String(input.reason).trim()}.` : "";
-  return {
-    ok: true,
-    action,
-    agentName: resolvedName,
-    agentKey: matched.key,
-    agentPlace: matched.place || null,
-    place,
-    previousState,
-    lockReleased,
-    relaunched,
-    relaunchMessage,
-    next_required_action: nextRequiredAction,
-    message: `Comando '${action}' enviado com sucesso para ${resolvedName} (canal ${place.channelId.slice(0, 8)}${place.root ? `, thread ${place.root.slice(0, 8)}` : ""}).${lockReleased ? " Lock liberado." : ""}${relaunched ? " Agente relançado automaticamente com @menção e escopo fechado." : ""}${reasonSuffix}`
-  };
-}
-const DEFAULT_WATCHDOG_INTERVAL_MS = 45 * 1e3;
-const DEFAULT_WATCHDOG_INITIAL_DELAY_MS = 10 * 1e3;
-let radarWatchdogTimer = null;
-let radarWatchdogInitialTimer = null;
-let radarWatchdogRunning = false;
-function stopGovernanceRadarWatchdog() {
-  if (radarWatchdogInitialTimer) {
-    clearTimeout(radarWatchdogInitialTimer);
-    radarWatchdogInitialTimer = null;
-  }
-  if (radarWatchdogTimer) {
-    clearInterval(radarWatchdogTimer);
-    radarWatchdogTimer = null;
-  }
-}
-function startGovernanceRadarWatchdog(ctx, options = {}) {
-  const agentsApi = ctx.agents;
-  if (!(agentsApi == null ? void 0 : agentsApi.wake)) return false;
-  stopGovernanceRadarWatchdog();
-  const intervalMs = options.intervalMs ?? DEFAULT_WATCHDOG_INTERVAL_MS;
-  const initialDelayMs = options.initialDelayMs ?? DEFAULT_WATCHDOG_INITIAL_DELAY_MS;
-  const tick = async () => {
-    if (radarWatchdogRunning) return;
-    radarWatchdogRunning = true;
-    try {
-      await evaluateGovernanceAndReact(ctx, { dryRun: false, autoWake: true, includeRadar: true });
-    } catch {
-    } finally {
-      radarWatchdogRunning = false;
-    }
-  };
-  radarWatchdogInitialTimer = setTimeout(() => {
-    radarWatchdogInitialTimer = null;
-    void tick();
-  }, initialDelayMs);
-  if (typeof (radarWatchdogInitialTimer == null ? void 0 : radarWatchdogInitialTimer.unref) === "function") {
-    radarWatchdogInitialTimer.unref();
-  }
-  radarWatchdogTimer = setInterval(() => {
-    void tick();
-  }, intervalMs);
-  if (typeof (radarWatchdogTimer == null ? void 0 : radarWatchdogTimer.unref) === "function") {
-    radarWatchdogTimer.unref();
-  }
-  return true;
-}
-function isRateLimitOrProviderError(text) {
-  const low = String(text || "").toLowerCase();
-  return [
-    "rate limit exceeded",
-    "upstream rate limit",
-    "too many requests",
-    "429",
-    "no available accounts",
-    "model requires available accounts",
-    "service temporarily unavailable",
-    "503 service unavailable",
-    "502 bad gateway",
-    "504 gateway timeout",
-    "resource not found (404)",
-    "[404]:",
-    "bad request (400)",
-    "no target in combo",
-    "supports tool calling",
-    "upstream request failed",
-    "upstream_malformed_function_call",
-    "overloaded_error",
-    "model is overloaded"
-  ].some((marker) => low.includes(marker));
-}
-function normalizeAgentAlias(raw) {
-  return String(raw || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/^@/, "").replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
-}
-function checkMentionTargetIdentity(input) {
-  const text = String(input.messageText || "");
-  const matches = Array.from(
-    text.matchAll(/@((?:OrgFy|Lumen|Tributario)\s+[A-ZÀ-Ú][a-zà-ú]+(?:\s+[A-ZÀ-Ú][a-zà-ú]+)?)/g)
-  ).map((m) => m[1].trim());
-  const mentionedTargets = Array.from(new Set(matches));
-  if (mentionedTargets.length === 0) {
-    return {
-      isForMe: true,
-      action: "PROCEED",
-      mentionedTargets: [],
-      reason: "Sem menção nominal explícita a outro agente."
-    };
-  }
-  const meNorm = normalizeAgentAlias(input.currentAgentName);
-  const isAddressedToMe = mentionedTargets.some((t) => {
-    const tNorm = normalizeAgentAlias(t);
-    return tNorm === meNorm || tNorm.includes(meNorm) || meNorm.includes(tNorm);
+    return s;
   });
-  if (isAddressedToMe) {
-    return {
-      isForMe: true,
-      action: "PROCEED",
-      mentionedTargets,
-      reason: `Menção compatível com o perfil ativo (${input.currentAgentName}).`
-    };
+  if (!matched) {
+    return { updatedMarkdown: markdown, progress: parsed, matched: false };
+  }
+  const newSectionBody = updatedSteps.map((s) => {
+    const mark = STATUS_TO_MARK[s.status];
+    const suffix = s.note ? ` — ${s.note}` : "";
+    return `- [${mark}] **${s.id}:** ${s.text}${suffix}`;
+  }).join("\n");
+  let nextMd = markdown.replace(
+    /(##\s*O que fazer\s*\n)([\s\S]*?)(?=\n##\s+|$)/i,
+    `$1${newSectionBody}
+`
+  );
+  const mermaidMatch = nextMd.match(/(##\s*Fluxo\s*\n```mermaid\s*\n)([\s\S]*?)(```)/i);
+  if (mermaidMatch) {
+    const cleanMermaidLines = mermaidMatch[2].split("\n").filter((l) => !/^\s*style\s+P\d+\s+/i.test(l)).join("\n").trimEnd();
+    const styleLines = [];
+    for (const s of updatedSteps) {
+      if (s.status === "done") {
+        styleLines.push(`    style ${s.id} fill:#064e3b,stroke:#10b981,color:#d1fae5`);
+      } else if (s.status === "in_progress") {
+        styleLines.push(`    style ${s.id} fill:#451a03,stroke:#f59e0b,color:#fef3c7`);
+      } else if (s.status === "blocked") {
+        styleLines.push(`    style ${s.id} fill:#450a0a,stroke:#ef4444,color:#fee2e2`);
+      }
+    }
+    const rebuiltMermaid = styleLines.length > 0 ? `${cleanMermaidLines}
+${styleLines.join("\n")}
+` : `${cleanMermaidLines}
+`;
+    nextMd = nextMd.replace(
+      /(##\s*Fluxo\s*\n```mermaid\s*\n)([\s\S]*?)(```)/i,
+      `$1${rebuiltMermaid}$3`
+    );
   }
   return {
-    isForMe: false,
-    action: "[SILENT]",
-    mentionedTargets,
-    reason: `Menção endereçada a [${mentionedTargets.join(", ")}], não a ${input.currentAgentName}. Responder [SILENT].`
+    updatedMarkdown: nextMd,
+    progress: summarizeSteps(updatedSteps),
+    matched: true
   };
 }
-const THREAD_WAKE_COOLDOWN_MS = 10 * 60 * 1e3;
-const threadWakeTimestamps = /* @__PURE__ */ new Map();
-function resetThreadWakeGuardForTests() {
-  threadWakeTimestamps.clear();
-}
-function checkThreadWakeAntiLoop(input) {
-  if (input.bypass) {
-    return { allow: true, reason: "bypass" };
-  }
-  const nowMs = input.nowMs ?? Date.now();
-  const ctxLow = String(input.contextText || "").toLowerCase();
-  const waitingOtherGate = (ctxLow.includes("aguardando gate") || ctxLow.includes("waiting for gate")) && !ctxLow.includes(normalizeAgentAlias(input.agentKey));
-  if (waitingOtherGate && input.threadRoot) {
+async function executeCardProgress(ctx, input) {
+  const rawSlug = String(input.slug || "").trim().replace(/^cards\//i, "").replace(/\.md$/i, "");
+  if (!rawSlug) {
     return {
-      allow: false,
-      reason: "waiting_for_other_reviewer_gate"
+      ok: false,
+      code: "MISSING_SLUG",
+      message: "Informe o 'slug' do card (ex.: SPEC-0006-T020).",
+      cardPath: "",
+      progress: null,
+      writtenToDisk: false
     };
   }
-  if (input.threadRoot) {
-    const key = `thread_wake:${normalizeAgentAlias(input.agentKey)}:${input.threadRoot}`;
-    const last = threadWakeTimestamps.get(key);
-    if (last !== void 0 && nowMs - last < THREAD_WAKE_COOLDOWN_MS) {
-      return {
-        allow: false,
-        reason: "thread_wake_cooldown_10m"
-      };
-    }
-    threadWakeTimestamps.set(key, nowMs);
+  const host = ctx == null ? void 0 : ctx.host;
+  if (!(host == null ? void 0 : host.readFile)) {
+    return {
+      ok: false,
+      code: "HOST_READ_UNAVAILABLE",
+      message: "ctx.host.readFile indisponível neste ambiente.",
+      cardPath: `cards/${rawSlug.toUpperCase()}.md`,
+      progress: null,
+      writtenToDisk: false
+    };
   }
-  return { allow: true, reason: "ok" };
-}
-function registerGovernanceAgentHooks(ctx) {
-  const agentsApi = ctx.agents;
-  let registered = false;
-  if (agentsApi == null ? void 0 : agentsApi.registerHook) {
+  const candidates = Array.from(
+    /* @__PURE__ */ new Set([`cards/${rawSlug.toUpperCase()}.md`, `cards/${rawSlug}.md`, `cards/${rawSlug.toLowerCase()}.md`])
+  );
+  let foundPath = null;
+  let content = null;
+  for (const rel of candidates) {
     try {
-      const handleProviderHookFailover = async (payload) => {
-        const errText = String((payload == null ? void 0 : payload.error) || (payload == null ? void 0 : payload.reason) || (payload == null ? void 0 : payload.output) || (payload == null ? void 0 : payload.message) || "");
-        const agentPubkey = String((payload == null ? void 0 : payload.agentPubkey) || (payload == null ? void 0 : payload.pubkey) || "").trim();
-        const agentName = String((payload == null ? void 0 : payload.agentName) || (payload == null ? void 0 : payload.agent) || "").trim();
-        if ((agentPubkey || agentName) && isRateLimitOrProviderError(errText)) {
-          await executeSmartModelFailover(ctx, {
-            agente: agentName || void 0,
-            agent_pubkey: agentPubkey || null,
-            failed_model: (payload == null ? void 0 : payload.model) ? String(payload.model) : null,
-            prefer_free: false,
-            apply: true,
-            retrigger: true,
-            channel_id: String((payload == null ? void 0 : payload.channelId) || (payload == null ? void 0 : payload.channel) || DEFAULT_ORGFY_CHANNEL$1),
-            thread_root: (payload == null ? void 0 : payload.threadRoot) || (payload == null ? void 0 : payload.root) || null
-          });
-        }
-      };
-      agentsApi.registerHook({
-        id: "orgfy-post-turn-governance",
-        harness: "all",
-        event: "turn.completed",
-        run: async (payload) => {
-          await handleProviderHookFailover(payload);
-          await evaluateGovernanceAndReact(ctx, { dryRun: false, autoWake: true, includeRadar: true });
-        }
-      });
-      agentsApi.registerHook({
-        id: "orgfy-turn-failed-model-failover",
-        harness: "all",
-        event: "turn.failed",
-        run: async (payload) => {
-          await handleProviderHookFailover(payload);
-        }
-      });
-      registered = true;
+      const raw = await host.readFile(`${ORGFY_ABS_PATH}/${rel}`);
+      content = decodeBytes$1(raw);
+      foundPath = rel;
+      break;
     } catch {
-      registered = false;
     }
   }
-  const watchdogStarted = startGovernanceRadarWatchdog(ctx);
-  return registered || watchdogStarted;
+  if (!foundPath || !content) {
+    return {
+      ok: false,
+      code: "CARD_NOT_FOUND",
+      message: `Card não encontrado em ${ORGFY_ABS_PATH}/cards/ (tentativas: ${candidates.join(", ")}).`,
+      cardPath: candidates[0],
+      progress: null,
+      writtenToDisk: false
+    };
+  }
+  const action = input.action || (input.step_id && input.status ? "update" : "read");
+  if (action === "read") {
+    const progress = parseCardProgress(content);
+    return {
+      ok: Boolean(progress),
+      code: progress ? "OK" : "NO_STEPS_FOUND",
+      message: progress ? `Progresso de ${foundPath}: ${progress.done}/${progress.total} concluídas (${progress.pct}%). Próxima etapa: ${progress.nextPendingStepId || "nenhuma (concluído)"}.` : `Nenhuma etapa encontrada na seção '## O que fazer' de ${foundPath}.`,
+      cardPath: foundPath,
+      progress,
+      writtenToDisk: false
+    };
+  }
+  if (!input.step_id || !input.status) {
+    return {
+      ok: false,
+      code: "MISSING_STEP_OR_STATUS",
+      message: "Para action='update', informe 'step_id' (ex.: 'P1') e 'status' ('todo' | 'in_progress' | 'done' | 'blocked').",
+      cardPath: foundPath,
+      progress: parseCardProgress(content),
+      writtenToDisk: false
+    };
+  }
+  const applied = applyStepUpdateToMarkdown(content, input.step_id, input.status, input.note, input.agent);
+  if (!applied.matched || !applied.progress) {
+    return {
+      ok: false,
+      code: "STEP_NOT_FOUND",
+      message: `Etapa '${input.step_id}' não encontrada em ${foundPath}.`,
+      cardPath: foundPath,
+      progress: applied.progress,
+      writtenToDisk: false
+    };
+  }
+  let writtenToDisk = false;
+  const absCardFile = `${ORGFY_ABS_PATH}/${foundPath}`;
+  if (typeof host.writeFile === "function") {
+    await host.writeFile(absCardFile, applied.updatedMarkdown);
+    writtenToDisk = true;
+  } else if (typeof host.spawn === "function") {
+    try {
+      const b64 = typeof globalThis.Buffer !== "undefined" ? globalThis.Buffer.from(applied.updatedMarkdown, "utf-8").toString("base64") : btoa(unescape(encodeURIComponent(applied.updatedMarkdown)));
+      const proc = await host.spawn("bash", {
+        args: [`python3 -c "import base64, pathlib, sys; pathlib.Path(sys.argv[1]).write_bytes(base64.b64decode(sys.argv[2]))" "${absCardFile}" "${b64}"`]
+      });
+      const code = await proc.exited;
+      writtenToDisk = code === 0;
+    } catch {
+      writtenToDisk = false;
+    }
+  }
+  return {
+    ok: true,
+    code: "UPDATED",
+    message: `Etapa ${input.step_id.toUpperCase()} marcada como '${input.status}' em ${foundPath} (${applied.progress.done}/${applied.progress.total} · ${applied.progress.pct}%).`,
+    cardPath: foundPath,
+    progress: applied.progress,
+    updatedStepId: input.step_id.toUpperCase(),
+    writtenToDisk
+  };
 }
 const MAX_SPANS = 200;
 const spansBuffer = [];
@@ -3430,7 +2495,7 @@ function resetTelemetryForTests() {
   decisionsStats.totalLatencyMs = 0;
   decisionsStats.byMode = {};
 }
-const DEFAULT_ORGFY_CHANNEL = "e445491d-2fb3-4ebd-8e2e-f6813c33fb03";
+const DEFAULT_ORGFY_CHANNEL$1 = "e445491d-2fb3-4ebd-8e2e-f6813c33fb03";
 const RISCO_LABELS = [
   "muito_baixo",
   "baixo",
@@ -3748,7 +2813,7 @@ function buildBuzzAttentionContract(params) {
   const slug = sanitizeSlug$1(params.slug || params.titulo);
   const interestId = `orgfy-card-${slug}`.slice(0, 64);
   const now = typeof params.nowUnixSecs === "number" ? params.nowUnixSecs : Math.floor(Date.now() / 1e3);
-  const channel = (params.channel || DEFAULT_ORGFY_CHANNEL).trim();
+  const channel = (params.channel || DEFAULT_ORGFY_CHANNEL$1).trim();
   const presets = {
     timer_curto: { intervalSecs: 600, maxOccurrences: 3, windowSecs: 3600, label: "Timer curto (10m x 3, janela 1h)" },
     event_driven: { intervalSecs: 900, maxOccurrences: 4, windowSecs: 7200, label: "Event-driven + Watchdog (15m x 4, janela 2h)" },
@@ -3804,6 +2869,1832 @@ function buildBuzzAttentionContract(params) {
     };
   }
   return contract;
+}
+const DEFAULT_LEASE_MS = 8 * 60 * 1e3;
+const DEFAULT_ORPHAN_GRACE_MS = 3 * 60 * 1e3;
+const CARDS_DIR = "/Users/heltonfraga/.buzz/REPOS/orgfy/cards";
+const EMPRESAS_DIR$1 = "/Users/heltonfraga/.buzz/REPOS/orgfy/empresas";
+const pipelineEventsBuffer = [];
+const pipelineEventListeners = /* @__PURE__ */ new Set();
+const MAX_PIPELINE_EVENTS = 80;
+function emitOrgfyPipelineEvent(event) {
+  const full = {
+    id: `ev-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+    ...event
+  };
+  pipelineEventsBuffer.push(full);
+  if (pipelineEventsBuffer.length > MAX_PIPELINE_EVENTS) {
+    pipelineEventsBuffer.splice(0, pipelineEventsBuffer.length - MAX_PIPELINE_EVENTS);
+  }
+  recordGenAISpan({
+    operationName: "attention.emit",
+    agentName: event.agent || "orgfy-presence-engine",
+    durationMs: 0,
+    status: "ok",
+    attributes: {
+      "orgfy.event.type": event.type,
+      "orgfy.empresa": event.empresa,
+      ...event.issueId ? { "orgfy.issue_id": event.issueId } : {}
+    }
+  });
+  for (const fn of pipelineEventListeners) {
+    try {
+      fn(full);
+    } catch {
+    }
+  }
+  return full;
+}
+function getOrgfyPipelineEvents(limit = 30) {
+  return pipelineEventsBuffer.slice(-Math.max(1, limit)).reverse();
+}
+function resetPresenceStateForTests() {
+  pipelineEventsBuffer.length = 0;
+}
+function decodeText(raw) {
+  if (typeof raw === "string") return raw;
+  if (raw instanceof Uint8Array) return new TextDecoder("utf-8").decode(raw);
+  if (raw instanceof ArrayBuffer) return new TextDecoder("utf-8").decode(new Uint8Array(raw));
+  if (ArrayBuffer.isView(raw)) {
+    return new TextDecoder("utf-8").decode(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength));
+  }
+  return String(raw ?? "");
+}
+function normName$1(v) {
+  return String(v || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/^@/, "").replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
+}
+function namesMatch(a, b) {
+  const na = normName$1(a);
+  const nb = normName$1(b);
+  return Boolean(na && nb && (na === nb || na.includes(nb) || nb.includes(na)));
+}
+async function reconcileAgentPresenceAndLocks(ctx, options = {}) {
+  var _a;
+  const nowMs = options.nowMs ?? Date.now();
+  const orphanGraceMs = options.orphanGraceMs ?? DEFAULT_ORPHAN_GRACE_MS;
+  const leaseMs = options.leaseMs ?? DEFAULT_LEASE_MS;
+  const empresa = options.empresa || "orgfy";
+  const locks = await listActiveLocks(ctx, nowMs);
+  const agentsApi = ctx == null ? void 0 : ctx.agents;
+  const snap = ((_a = agentsApi == null ? void 0 : agentsApi.snapshot) == null ? void 0 : _a.call(agentsApi)) || {};
+  const runningList = Array.isArray(snap.running) ? snap.running : [];
+  const allAgents = Array.isArray(snap.agents) ? snap.agents : [];
+  const radar = await fetchGooseLoopRadar(ctx).catch(() => null);
+  const activeRadarSessions = ((radar == null ? void 0 : radar.ok) && Array.isArray(radar.sessoes) ? radar.sessoes : []).filter(
+    (s) => typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 5
+  );
+  let renewedCount = 0;
+  const orphanedReleased = [];
+  const remainingActive = [];
+  for (const lock of locks) {
+    const matchedAgent = runningList.find(
+      (a) => namesMatch((a == null ? void 0 : a.key) || "", lock.agentKey) || namesMatch((a == null ? void 0 : a.name) || "", lock.agentKey) || namesMatch((a == null ? void 0 : a.pubkey) || "", lock.agentKey)
+    ) || allAgents.find(
+      (a) => namesMatch((a == null ? void 0 : a.key) || "", lock.agentKey) || namesMatch((a == null ? void 0 : a.name) || "", lock.agentKey) || namesMatch((a == null ? void 0 : a.pubkey) || "", lock.agentKey)
+    );
+    const isInRunning = runningList.some(
+      (a) => namesMatch((a == null ? void 0 : a.key) || "", lock.agentKey) || namesMatch((a == null ? void 0 : a.name) || "", lock.agentKey) || namesMatch((a == null ? void 0 : a.pubkey) || "", lock.agentKey)
+    );
+    let sessionStateVal = null;
+    if ((matchedAgent == null ? void 0 : matchedAgent.key) && typeof (agentsApi == null ? void 0 : agentsApi.sessionState) === "function") {
+      try {
+        sessionStateVal = String(
+          agentsApi.sessionState(matchedAgent.key, { channelId: DEFAULT_ORGFY_CHANNEL }) || ""
+        ).toLowerCase();
+      } catch {
+        sessionStateVal = null;
+      }
+    }
+    const recentRadarSession = activeRadarSessions.find(
+      (s) => namesMatch(s.agente || "", lock.agentKey) || s.agent_pubkey && namesMatch(s.agent_pubkey, lock.agentKey)
+    );
+    const hasRecentRadarActivity = Boolean(
+      recentRadarSession && Number(recentRadarSession.ultima_atualizacao_min ?? 99) <= Math.max(2, orphanGraceMs / 6e4) && !recentRadarSession.last_msg_is_provider_error
+    );
+    const isActuallyWorking = isInRunning || sessionStateVal === "active" || sessionStateVal === "running" || hasRecentRadarActivity;
+    const lastBeat = Number(lock.lastHeartbeatAt || lock.acquiredAt || nowMs);
+    const idleMs = Math.max(0, nowMs - lastBeat);
+    const isPreBootStale = Boolean(options.isStartup && options.bootMs && lock.acquiredAt < options.bootMs);
+    if (isActuallyWorking) {
+      const renewed = await acquireCheckoutLock(ctx, lock.issueId, lock.agentKey, leaseMs, nowMs, {
+        title: lock.title,
+        owner: lock.owner,
+        revisor: lock.revisor,
+        acceptanceCommand: lock.acceptanceCommand,
+        branch: lock.branch,
+        exclusivePaths: lock.exclusivePaths
+      });
+      if (renewed.ok && renewed.lock) {
+        renewed.lock.lastHeartbeatAt = nowMs;
+        remainingActive.push(renewed.lock);
+        renewedCount++;
+      } else {
+        remainingActive.push(lock);
+      }
+    } else if (isPreBootStale || idleMs >= orphanGraceMs) {
+      const reason = isPreBootStale ? "ORPHANED_AFTER_RESTART: lock anterior ao boot sem sessão ativa no Buzz Desktop" : `ORPHANED_IDLE_${Math.round(idleMs / 6e4)}M: agente sem sessão ativa/heartbeat no Buzz Desktop`;
+      await releaseCheckoutLock(ctx, lock.issueId, void 0, true);
+      const releasedItem = {
+        issueId: lock.issueId,
+        agentKey: lock.agentKey,
+        title: lock.title,
+        exclusivePaths: lock.exclusivePaths,
+        reason,
+        releasedAt: new Date(nowMs).toISOString()
+      };
+      orphanedReleased.push(releasedItem);
+      emitOrgfyPipelineEvent({
+        type: "lock.orphaned_released",
+        empresa,
+        issueId: lock.issueId,
+        agent: lock.agentKey,
+        summary: `Lock órfão de ${lock.agentKey} em ${lock.issueId.slice(0, 8)} liberado automaticamente (${reason}).`,
+        payload: releasedItem
+      });
+    } else {
+      remainingActive.push(lock);
+    }
+  }
+  return {
+    ok: true,
+    reconciledAt: new Date(nowMs).toISOString(),
+    checkedLocks: locks.length,
+    renewedCount,
+    activeLocks: remainingActive,
+    orphanedReleased
+  };
+}
+async function loadEmpresaRoles(ctx, empresa) {
+  const map = /* @__PURE__ */ new Map();
+  const host = ctx == null ? void 0 : ctx.host;
+  if (!(host == null ? void 0 : host.readFile)) return map;
+  try {
+    const raw = await host.readFile(`${EMPRESAS_DIR$1}/${empresa}.json`);
+    const parsed = JSON.parse(decodeText(raw));
+    if (Array.isArray(parsed == null ? void 0 : parsed.agentes)) {
+      for (const a of parsed.agentes) {
+        if (a == null ? void 0 : a.nome) map.set(normName$1(a.nome), String(a.papel || "executor"));
+      }
+    } else if ((parsed == null ? void 0 : parsed.agentes) && typeof parsed.agentes === "object") {
+      for (const [nome, cfg] of Object.entries(parsed.agentes)) {
+        map.set(normName$1(nome), String((cfg == null ? void 0 : cfg.papel) || "executor"));
+      }
+    }
+  } catch {
+  }
+  return map;
+}
+async function buildLiveAgentRoster(ctx, options = {}) {
+  var _a;
+  const nowMs = options.nowMs ?? Date.now();
+  const empresa = String(options.empresa || "orgfy").trim() || "orgfy";
+  const recon = options.reconcile !== false ? await reconcileAgentPresenceAndLocks(ctx, { nowMs, empresa }) : {
+    activeLocks: await listActiveLocks(ctx, nowMs),
+    orphanedReleased: []
+  };
+  const rolesMap = await loadEmpresaRoles(ctx, empresa);
+  const agentsApi = ctx == null ? void 0 : ctx.agents;
+  const snap = ((_a = agentsApi == null ? void 0 : agentsApi.snapshot) == null ? void 0 : _a.call(agentsApi)) || {};
+  const runningList = Array.isArray(snap.running) ? snap.running : [];
+  const allList = Array.isArray(snap.agents) ? snap.agents : [];
+  const radar = await fetchGooseLoopRadar(ctx).catch(() => null);
+  const radarSessions = (radar == null ? void 0 : radar.ok) && Array.isArray(radar.sessoes) ? radar.sessoes : [];
+  const seen = /* @__PURE__ */ new Set();
+  const pool = [];
+  for (const a of [...runningList, ...allList]) {
+    if (!a) continue;
+    const id = String(a.key || a.name || "").trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    pool.push(a);
+  }
+  const agentes = pool.map((a) => {
+    var _a2, _b;
+    const name = String(a.name || a.key || "unknown").trim();
+    const key = String(a.key || name).trim();
+    const pubkey = a.pubkey ? String(a.pubkey) : void 0;
+    const model = ((_a2 = a == null ? void 0 : a.config) == null ? void 0 : _a2.model) ? String(a.config.model) : null;
+    const provider = ((_b = a == null ? void 0 : a.config) == null ? void 0 : _b.provider) ? String(a.config.provider) : null;
+    const isRunningInBuzz = runningList.some(
+      (r) => String((r == null ? void 0 : r.key) || "") === key || namesMatch((r == null ? void 0 : r.name) || "", name)
+    );
+    let sessionState = null;
+    if (typeof (agentsApi == null ? void 0 : agentsApi.sessionState) === "function") {
+      try {
+        sessionState = String(
+          agentsApi.sessionState(key, { channelId: DEFAULT_ORGFY_CHANNEL }) || ""
+        ).toLowerCase() || null;
+      } catch {
+        sessionState = null;
+      }
+    }
+    const activeLockRec = recon.activeLocks.find(
+      (l) => namesMatch(l.agentKey, name) || namesMatch(l.agentKey, key) || pubkey && namesMatch(l.agentKey, pubkey)
+    );
+    const agentRadar = radarSessions.find(
+      (s) => (typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15) && (namesMatch(s.agente || "", name) || pubkey && s.agent_pubkey && namesMatch(s.agent_pubkey, pubkey))
+    );
+    const radarFlags = Array.isArray(agentRadar == null ? void 0 : agentRadar.flags) ? agentRadar.flags : [];
+    const hasCriticalRadar = Boolean(
+      agentRadar && (agentRadar.severidade === "critical" || agentRadar.last_msg_is_provider_error)
+    );
+    const badModel = Boolean(model && isUnsupportedAgentModel(model));
+    let status = "FREE";
+    if (badModel) {
+      status = "MODEL_UNSUPPORTED";
+    } else if (hasCriticalRadar) {
+      status = "ALERT_RADAR";
+    } else if (isRunningInBuzz || sessionState === "active" || Boolean(activeLockRec)) {
+      status = "WORKING_REAL";
+    }
+    const role = rolesMap.get(normName$1(name)) || (normName$1(name).includes("iris") ? "ceo_holding" : normName$1(name).includes("bento arquiteto") ? "arquiteto" : normName$1(name).includes("bento") ? "coo" : normName$1(name).includes("teo") || normName$1(name).includes("vera") || normName$1(name).includes("sentinel") ? "revisor" : "executor");
+    return {
+      name,
+      key,
+      pubkey,
+      role,
+      status,
+      model,
+      provider,
+      isRunningInBuzz,
+      sessionState,
+      activeLock: activeLockRec ? {
+        issueId: activeLockRec.issueId,
+        title: activeLockRec.title,
+        exclusivePaths: activeLockRec.exclusivePaths,
+        leaseRemainingMin: Math.max(0, Math.round((activeLockRec.expiresAt - nowMs) / 6e4))
+      } : null,
+      radarFlags,
+      lastRadarUpdateMin: agentRadar ? Number(agentRadar.ultima_atualizacao_min ?? null) : null
+    };
+  });
+  return {
+    ok: true,
+    empresa,
+    generatedAt: new Date(nowMs).toISOString(),
+    resumo: {
+      total: agentes.length,
+      livres: agentes.filter((a) => a.status === "FREE").length,
+      trabalhando_real: agentes.filter((a) => a.status === "WORKING_REAL").length,
+      em_alerta_radar: agentes.filter((a) => a.status === "ALERT_RADAR").length,
+      modelo_invalido: agentes.filter((a) => a.status === "MODEL_UNSUPPORTED").length,
+      locks_orfaos_liberados: recon.orphanedReleased.length
+    },
+    agentes,
+    orphanedReleased: recon.orphanedReleased
+  };
+}
+function extractFieldFromCardMd(md, regex) {
+  const m = md.match(regex);
+  return m && m[1] ? m[1].trim() : null;
+}
+function extractExclusivePathsFromMd(md) {
+  const m = md.match(/\*\*Escrita\s+exclusiva:\*\*\s*([^\n]+)/i);
+  if (!m || !m[1]) return [];
+  return m[1].split(/[,;]+/).map((s) => s.replace(/`/g, "").trim()).filter((s) => Boolean(s) && !/^nenhum/i.test(s));
+}
+async function runQuickGit(host, cwd, args) {
+  if (!(host == null ? void 0 : host.spawn)) return null;
+  try {
+    const proc = await host.spawn("git", { args: ["-C", cwd, ...args] });
+    const out = proc.stdout ? await new Response(proc.stdout).text() : "";
+    const code = await proc.exited;
+    return code === 0 ? out.trim() || "(limpo)" : null;
+  } catch {
+    return null;
+  }
+}
+async function buildHandoffPack(ctx, input) {
+  var _a;
+  const host = ctx == null ? void 0 : ctx.host;
+  const slug = input.slug ? String(input.slug).trim().replace(/\.md$/i, "") : null;
+  const issueId = input.issue_id ? String(input.issue_id).trim() : null;
+  let md = input.card_markdown ? String(input.card_markdown) : "";
+  let cardFile = null;
+  if (!md && slug && (host == null ? void 0 : host.readFile)) {
+    const candidate = `${CARDS_DIR}/${slug}.md`;
+    try {
+      md = decodeText(await host.readFile(candidate));
+      cardFile = `cards/${slug}.md`;
+    } catch {
+      cardFile = null;
+    }
+  }
+  const progress = md ? parseCardProgress(md) : null;
+  const exclusivePaths = md ? extractExclusivePathsFromMd(md) : [];
+  const acceptanceCommand = md ? extractFieldFromCardMd(md, /(?:\*\*Comando de aceite(?:\s*\(L-22\))?:\*\*|Comando de aceite:)\s*`?([^\n`]+)`?/i) : null;
+  const worktreePath = ((_a = input.worktree_path) == null ? void 0 : _a.trim()) || null;
+  let statusShort = null;
+  let recentCommits = null;
+  let diffStat = null;
+  if (worktreePath && (host == null ? void 0 : host.spawn)) {
+    [statusShort, recentCommits, diffStat] = await Promise.all([
+      runQuickGit(host, worktreePath, ["status", "--short"]),
+      runQuickGit(host, worktreePath, ["log", "-n", "3", "--oneline"]),
+      runQuickGit(host, worktreePath, ["diff", "--stat"])
+    ]);
+  }
+  const nextStep = (progress == null ? void 0 : progress.nextPendingStepId) ? progress.steps.find((s) => s.id === progress.nextPendingStepId) : null;
+  const resumeLines = [
+    `[HANDOFF PACK · ${slug || issueId || "card"}]`,
+    progress ? `Progresso: ${progress.done}/${progress.total} (${progress.pct}%). Próximo passo: ${nextStep ? `${nextStep.id} — ${nextStep.text}` : "todos concluídos (rodar L-22 e entregar)"}.` : "Progresso: checklist não encontrado no card.",
+    exclusivePaths.length > 0 ? `Escrita exclusiva: ${exclusivePaths.join(", ")}.` : null,
+    acceptanceCommand ? `Aceite L-22: ${acceptanceCommand}` : null,
+    worktreePath ? `Worktree: ${worktreePath}` : null,
+    recentCommits ? `Últimos commits: ${recentCommits.replace(/\n/g, " | ")}` : null,
+    statusShort && statusShort !== "(limpo)" ? `Alterações pendentes: ${statusShort.replace(/\n/g, ", ")}` : null
+  ].filter(Boolean);
+  return {
+    ok: Boolean(md || worktreePath || issueId),
+    slug,
+    issueId,
+    cardFile,
+    progress,
+    exclusivePaths,
+    acceptanceCommand,
+    gitSummary: {
+      worktreePath,
+      statusShort,
+      recentCommits,
+      diffStat
+    },
+    resumePrompt: resumeLines.join("\n"),
+    ...md || worktreePath || issueId ? {} : { error: "Informe slug, issue_id, card_markdown ou worktree_path." }
+  };
+}
+async function runOneShotDecisionDispatch(ctx, input) {
+  var _a;
+  const t0 = Date.now();
+  const nowMs = input.nowMs ?? Date.now();
+  const empresa = String(input.empresa || "orgfy").trim() || "orgfy";
+  const minConfidence = typeof input.min_confidence === "number" ? input.min_confidence : 0.8;
+  const dryRun = input.auto_execute ? false : input.dry_run !== false;
+  const roster = await buildLiveAgentRoster(ctx, { empresa, nowMs, reconcile: true });
+  const activeLocks = await listActiveLocks(ctx, nowMs);
+  const wsConflict = findWriteSetOverlap(input.exclusive_paths, activeLocks, input.issue_id, nowMs);
+  if (wsConflict) {
+    return {
+      ok: false,
+      action: "BLOCKED_WRITE_SET",
+      decisionSource: "deterministic_fallback",
+      selectedAgent: null,
+      confidence: 1,
+      riscoScore: 0,
+      writeSetConflict: {
+        issueId: wsConflict.lock.issueId,
+        owner: wsConflict.lock.agentKey,
+        paths: wsConflict.overlappingPaths
+      },
+      candidatesEvaluated: [],
+      wokeAgent: false,
+      reason: `WRITE_SET_CONFLICT com ${wsConflict.lock.agentKey} (${wsConflict.lock.issueId.slice(0, 8)}) em ${wsConflict.overlappingPaths.join(", ")}.`
+    };
+  }
+  const freeAll = roster.agentes.filter(
+    (a) => a.status === "FREE" && !namesMatch(a.name, input.revisor) && !namesMatch(a.key, input.revisor)
+  );
+  const freeExecutors = freeAll.filter((a) => !["ceo_holding", "ceo", "coo"].includes(a.role));
+  const candidates = freeExecutors.length > 0 ? freeExecutors : freeAll;
+  if (candidates.length === 0) {
+    return {
+      ok: false,
+      action: "NO_FREE_AGENTS",
+      decisionSource: "deterministic_fallback",
+      selectedAgent: null,
+      confidence: 0,
+      riscoScore: 0,
+      candidatesEvaluated: [],
+      wokeAgent: false,
+      reason: "Nenhum agente livre e saudável elegível (respeitando L-01) no momento."
+    };
+  }
+  const triage = await triageCardWithDecisions(ctx, {
+    slug: input.slug,
+    titulo: input.titulo,
+    objetivo: input.objetivo,
+    escrita_exclusiva: input.exclusive_paths,
+    acceptance_command: input.acceptance_command,
+    revisor: input.revisor
+  });
+  let selectedAgent = candidates[0].name;
+  let confidence = 0.85;
+  let decisionSource = "deterministic_fallback";
+  const decisionsApi = ctx == null ? void 0 : ctx.decisions;
+  if ((decisionsApi == null ? void 0 : decisionsApi.decide) && candidates.length > 1) {
+    const optionsMap = {};
+    for (const c of candidates) {
+      optionsMap[c.name] = `Papel: ${c.role} | Modelo: ${c.model || "padrão"} | Livre no Buzz`;
+    }
+    try {
+      const dec = await decisionsApi.decide({
+        state: `Card: ${input.titulo}
+Escrita exclusiva: ${input.exclusive_paths.join(", ")}
+Revisor L-01: ${input.revisor}`,
+        timeoutMs: 8e3,
+        questions: {
+          best_executor: {
+            type: "choice",
+            instructions: "Escolha o agente livre com maior aderência técnica para executar este card com alta taxa de acerto.",
+            options: optionsMap
+          }
+        }
+      });
+      const ans = (_a = dec == null ? void 0 : dec.answers) == null ? void 0 : _a.best_executor;
+      if ((dec == null ? void 0 : dec.outcome) === "answered" && (ans == null ? void 0 : ans.type) === "choice" && optionsMap[ans.choice]) {
+        selectedAgent = ans.choice;
+        confidence = Number(ans.confidence ?? 0.85);
+        decisionSource = "decisions_api";
+        recordDecisionTelemetry({
+          mode: "smart_dispatch",
+          source: "decisions_api",
+          model: dec.model || null,
+          backend: dec.backend || null,
+          durationMs: Date.now() - t0,
+          preventedExpensiveWake: true
+        });
+      }
+    } catch {
+      decisionSource = "deterministic_fallback";
+    }
+  } else if (candidates.length === 1) {
+    confidence = 0.92;
+  }
+  const attentionContract = buildBuzzAttentionContract({
+    slug: input.slug || input.issue_id.slice(0, 16),
+    titulo: input.titulo,
+    executor: selectedAgent,
+    revisor: input.revisor,
+    policy: triage.attentionPolicy,
+    channel: input.channel_id || DEFAULT_ORGFY_CHANNEL,
+    threadRoot: input.thread_root
+  });
+  const needsCooEscalation = triage.riscoScore >= 4 || confidence < minConfidence;
+  if (needsCooEscalation) {
+    const ev2 = emitOrgfyPipelineEvent({
+      type: "card.escalated_coo",
+      empresa,
+      issueId: input.issue_id,
+      agent: selectedAgent,
+      summary: `Card ${input.issue_id.slice(0, 8)} recomendado para ${selectedAgent} (conf=${confidence.toFixed(2)}, risco=${triage.riscoScore}/5) — escalado ao COO.`
+    });
+    return {
+      ok: true,
+      action: "ESCALATE_COO",
+      decisionSource,
+      selectedAgent,
+      confidence,
+      riscoScore: triage.riscoScore,
+      candidatesEvaluated: candidates.map((c) => c.name),
+      wokeAgent: false,
+      attentionContract,
+      eventEmitted: ev2,
+      reason: `Risco ${triage.riscoScore}/5 ou confiança ${confidence.toFixed(2)} < ${minConfidence}: escalar decisão final para OrgFy Bento (COO).`
+    };
+  }
+  if (dryRun) {
+    return {
+      ok: true,
+      action: "RECOMMENDED_DRY_RUN",
+      decisionSource,
+      selectedAgent,
+      confidence,
+      riscoScore: triage.riscoScore,
+      candidatesEvaluated: candidates.map((c) => c.name),
+      wokeAgent: false,
+      attentionContract,
+      reason: `Dry-run: melhor agente livre é ${selectedAgent} (confiança ${confidence.toFixed(2)}, risco ${triage.riscoScore}/5). Passe auto_execute: true para despachar.`
+    };
+  }
+  const lockRes = await acquireCheckoutLock(ctx, input.issue_id, selectedAgent, DEFAULT_LEASE_MS, nowMs, {
+    title: input.titulo,
+    revisor: input.revisor,
+    acceptanceCommand: input.acceptance_command,
+    exclusivePaths: input.exclusive_paths
+  });
+  if (!lockRes.ok) {
+    return {
+      ok: false,
+      action: lockRes.code === "WRITE_SET_CONFLICT" ? "BLOCKED_WRITE_SET" : "ESCALATE_COO",
+      decisionSource,
+      selectedAgent,
+      confidence,
+      riscoScore: triage.riscoScore,
+      candidatesEvaluated: candidates.map((c) => c.name),
+      wokeAgent: false,
+      reason: lockRes.message
+    };
+  }
+  let wokeAgent = false;
+  const agentsApi = ctx == null ? void 0 : ctx.agents;
+  if (agentsApi == null ? void 0 : agentsApi.wake) {
+    const matched = candidates.find((c) => c.name === selectedAgent);
+    try {
+      await agentsApi.wake((matched == null ? void 0 : matched.key) || selectedAgent, {
+        channel: input.channel_id || DEFAULT_ORGFY_CHANNEL,
+        ...input.thread_root ? { root: input.thread_root } : {},
+        text: `@${selectedAgent} [ORGFY ONE-SHOT DISPATCH] Card ${input.issue_id.slice(0, 8)} ("${input.titulo}") atribuído com lease curto (8m). Escrita exclusiva: ${input.exclusive_paths.join(", ")}. Revisor L-01: ${input.revisor}. Aceite L-22: ${input.acceptance_command}`
+      });
+      wokeAgent = true;
+    } catch {
+      wokeAgent = false;
+    }
+  }
+  const ev = emitOrgfyPipelineEvent({
+    type: "card.auto_dispatched",
+    empresa,
+    issueId: input.issue_id,
+    agent: selectedAgent,
+    summary: `Card ${input.issue_id.slice(0, 8)} despachado via One-Shot Decision para ${selectedAgent} (conf=${confidence.toFixed(2)}).`
+  });
+  return {
+    ok: true,
+    action: "AUTO_DISPATCHED",
+    decisionSource,
+    selectedAgent,
+    confidence,
+    riscoScore: triage.riscoScore,
+    candidatesEvaluated: candidates.map((c) => c.name),
+    lockAcquired: lockRes.lock || null,
+    wokeAgent,
+    attentionContract,
+    eventEmitted: ev,
+    reason: `Card despachado para ${selectedAgent} via ${decisionSource} (confiança ${confidence.toFixed(2)}, lease 8m).`
+  };
+}
+async function cleanupAttentionOnStageChange(ctx, input) {
+  const rel = await releaseCheckoutLock(ctx, input.issueId, void 0, true);
+  const interestId = `orgfy-card-${String(input.slug || input.issueId).toLowerCase().slice(0, 40)}`;
+  const event = emitOrgfyPipelineEvent({
+    type: "attention.cleaned_up",
+    empresa: input.empresa || "orgfy",
+    issueId: input.issueId,
+    summary: `Stage '${input.newStage}' atingido em ${input.issueId.slice(0, 8)}: lock liberado (${rel.code}) e interest '${interestId}' marcado para encerramento.`,
+    payload: { interestId, newStage: input.newStage, lockCode: rel.code }
+  });
+  return {
+    ok: true,
+    lockReleased: rel.ok && rel.code === "RELEASED",
+    interestId,
+    event
+  };
+}
+async function resolveFullNostrIssueId(ctx, rawId) {
+  const clean = String(rawId || "").replace(/^#/, "").trim().toLowerCase();
+  if (/^[0-9a-f]{64}$/i.test(clean)) return clean;
+  if (!/^[0-9a-f]{6,63}$/i.test(clean)) return rawId.trim();
+  const host = ctx.host;
+  if (!(host == null ? void 0 : host.readFile)) return clean;
+  const decode = (raw) => typeof raw === "string" ? raw : raw instanceof Uint8Array ? new TextDecoder("utf-8").decode(raw) : String(raw ?? "");
+  try {
+    const rawT = await host.readFile("/Users/heltonfraga/.buzz/.scratch/esteira-transicoes.jsonl");
+    const lines = decode(rawT).split("\n");
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (!lines[i].includes(clean)) continue;
+      const m = lines[i].match(new RegExp(`"issue_id"\\s*:\\s*"(${clean}[0-9a-f]{${64 - clean.length}})"`, "i"));
+      if (m) return m[1].toLowerCase();
+    }
+  } catch {
+  }
+  try {
+    const rawE = await host.readFile("/Users/heltonfraga/.buzz/REPOS/orgfy/.esteira/estado/esteira-minima-state.json");
+    const parsed = JSON.parse(decode(rawE));
+    for (const k of Object.keys((parsed == null ? void 0 : parsed.aceites) || {})) {
+      if (k.toLowerCase().startsWith(clean) && /^[0-9a-f]{64}$/i.test(k)) {
+        return k.toLowerCase();
+      }
+    }
+  } catch {
+  }
+  return clean;
+}
+const LOCKS_FILE_PATH = "/Users/heltonfraga/.buzz/.scratch/orgfy-locks.json";
+const DEFAULT_LOCK_TTL_MS = 30 * 60 * 1e3;
+const DEFAULT_COOLDOWN_MS = 15 * 60 * 1e3;
+const memoryLocks = /* @__PURE__ */ new Map();
+const alertCooldowns = /* @__PURE__ */ new Map();
+const lastHealedProviderErrorTs = /* @__PURE__ */ new Map();
+function purgeExpiredLocks(now) {
+  let removed = 0;
+  for (const [key, rec] of memoryLocks.entries()) {
+    if (rec.expiresAt <= now) {
+      memoryLocks.delete(key);
+      removed++;
+    }
+  }
+  return removed;
+}
+async function syncLocksFromDisk(ctx, nowMs = Date.now()) {
+  const host = ctx.host;
+  if (!(host == null ? void 0 : host.readFile)) return 0;
+  let expiredOnDisk = 0;
+  try {
+    const raw = await host.readFile(LOCKS_FILE_PATH);
+    const text = typeof raw === "string" ? raw : raw instanceof Uint8Array ? new TextDecoder("utf-8").decode(raw) : raw instanceof ArrayBuffer ? new TextDecoder("utf-8").decode(new Uint8Array(raw)) : ArrayBuffer.isView(raw) ? new TextDecoder("utf-8").decode(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength)) : String(raw ?? "");
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      for (const [k, v] of Object.entries(parsed)) {
+        if (v && typeof v.agentKey === "string" && typeof v.expiresAt === "number" && v.expiresAt > nowMs) {
+          if (!memoryLocks.has(k)) {
+            memoryLocks.set(k, {
+              issueId: k,
+              agentKey: v.agentKey,
+              acquiredAt: Number(v.acquiredAt || nowMs),
+              expiresAt: v.expiresAt,
+              lastHeartbeatAt: typeof v.lastHeartbeatAt === "number" ? v.lastHeartbeatAt : Number(v.acquiredAt || nowMs),
+              title: typeof v.title === "string" ? v.title : void 0,
+              owner: typeof v.owner === "string" ? v.owner : void 0,
+              revisor: typeof v.revisor === "string" ? v.revisor : void 0,
+              acceptanceCommand: typeof v.acceptanceCommand === "string" ? v.acceptanceCommand : void 0,
+              branch: typeof v.branch === "string" ? v.branch : void 0,
+              exclusivePaths: Array.isArray(v.exclusivePaths) ? v.exclusivePaths.filter((p) => typeof p === "string" && p.trim()) : void 0
+            });
+          }
+        } else {
+          expiredOnDisk++;
+        }
+      }
+    }
+  } catch {
+  }
+  return expiredOnDisk;
+}
+async function persistLocksToDisk(ctx) {
+  const host = ctx.host;
+  if (!host) return;
+  const obj = {};
+  for (const [k, v] of memoryLocks.entries()) {
+    obj[k] = v;
+  }
+  const serialized = JSON.stringify(obj, null, 2);
+  if (host.writeFile) {
+    try {
+      await host.writeFile(LOCKS_FILE_PATH, serialized);
+      return;
+    } catch {
+    }
+  }
+  if (host.spawn) {
+    try {
+      const pyCode = "import pathlib, sys; p = pathlib.Path(sys.argv[1]); p.parent.mkdir(parents=True, exist_ok=True); p.write_text(sys.argv[2], encoding='utf-8')";
+      const proc = await host.spawn("python", {
+        args: ["-c", pyCode, LOCKS_FILE_PATH, serialized]
+      });
+      await proc.exited;
+    } catch {
+    }
+  }
+}
+function normalizeExclusivePath(raw) {
+  return String(raw || "").trim().replace(/^\.\//, "").replace(/\/+/g, "/").replace(/\/$/, "");
+}
+function normalizeExclusivePaths(paths) {
+  if (!Array.isArray(paths)) return void 0;
+  const cleaned = Array.from(new Set(paths.map(normalizeExclusivePath).filter(Boolean)));
+  return cleaned.length > 0 ? cleaned : void 0;
+}
+function pathsOverlap(a, b) {
+  const na = normalizeExclusivePath(a);
+  const nb = normalizeExclusivePath(b);
+  if (!na || !nb) return false;
+  return na === nb || na.startsWith(`${nb}/`) || nb.startsWith(`${na}/`);
+}
+function findWriteSetOverlap(requestedPaths, activeLocks, ignoreIssueId, nowMs) {
+  const req = normalizeExclusivePaths(requestedPaths);
+  if (!req || req.length === 0) return null;
+  for (const rec of activeLocks) {
+    if (rec.expiresAt <= nowMs) continue;
+    if (rec.issueId === ignoreIssueId) continue;
+    const otherPaths = normalizeExclusivePaths(rec.exclusivePaths);
+    if (!otherPaths || otherPaths.length === 0) continue;
+    const overlapping = [];
+    for (const rp of req) {
+      for (const op of otherPaths) {
+        if (pathsOverlap(rp, op)) {
+          overlapping.push(rp);
+        }
+      }
+    }
+    if (overlapping.length > 0) {
+      return { lock: rec, overlappingPaths: Array.from(new Set(overlapping)) };
+    }
+  }
+  return null;
+}
+async function acquireCheckoutLock(ctx, issueId, agentKey, ttlMs = DEFAULT_LOCK_TTL_MS, nowMs = Date.now(), meta) {
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o;
+  const rawIssue = String(issueId || "").trim();
+  const cleanIssue = await resolveFullNostrIssueId(ctx, rawIssue);
+  const cleanAgent = String(agentKey || "").trim();
+  const normalizedTtlMs = typeof ttlMs === "number" && Number.isFinite(ttlMs) && ttlMs > 0 ? ttlMs <= 1440 ? ttlMs * 60 * 1e3 : ttlMs : DEFAULT_LOCK_TTL_MS;
+  if (!cleanIssue || !cleanAgent) {
+    return {
+      ok: false,
+      code: "LOCK_CONFLICT",
+      message: "issueId e agentKey são obrigatórios para checkout atômico."
+    };
+  }
+  if (/^([0-9a-f]{4,16})\1+$/i.test(cleanIssue)) {
+    return {
+      ok: false,
+      code: "LOCK_CONFLICT",
+      message: `INVALID_SYNTHETIC_ID: issueId '${cleanIssue}' parece um prefixo repetido artificialmente. Informe o ID Nostr real (64 hex) ou apenas o prefixo de 8 chars para resolução automática.`
+    };
+  }
+  await syncLocksFromDisk(ctx);
+  purgeExpiredLocks(nowMs);
+  const shortKey = cleanIssue.slice(0, 8);
+  const existing = memoryLocks.get(cleanIssue) || (cleanIssue.length === 64 ? memoryLocks.get(shortKey) : void 0);
+  const requestedExclusivePaths = normalizeExclusivePaths(meta == null ? void 0 : meta.exclusivePaths);
+  const writeSetConflict = findWriteSetOverlap(
+    requestedExclusivePaths,
+    memoryLocks.values(),
+    (existing == null ? void 0 : existing.issueId) || cleanIssue,
+    nowMs
+  );
+  if (writeSetConflict) {
+    return {
+      ok: false,
+      code: "WRITE_SET_CONFLICT",
+      conflictOwner: writeSetConflict.lock.agentKey,
+      conflictIssueId: writeSetConflict.lock.issueId,
+      conflictingPaths: writeSetConflict.overlappingPaths,
+      lock: writeSetConflict.lock,
+      message: `WRITE_SET_CONFLICT: Escrita exclusiva em conflito (${writeSetConflict.overlappingPaths.join(", ")}) com card ${writeSetConflict.lock.issueId} reservado por ${writeSetConflict.lock.agentKey}. Aguarde o merge ou segregue os arquivos antes de iniciar em paralelo.`
+    };
+  }
+  if (existing && existing.expiresAt > nowMs) {
+    if (existing.agentKey === cleanAgent) {
+      if (existing.issueId !== cleanIssue) {
+        memoryLocks.delete(existing.issueId);
+      }
+      const renewed = {
+        issueId: cleanIssue,
+        agentKey: cleanAgent,
+        acquiredAt: existing.acquiredAt,
+        expiresAt: nowMs + normalizedTtlMs,
+        lastHeartbeatAt: nowMs,
+        title: ((_a = meta == null ? void 0 : meta.title) == null ? void 0 : _a.trim()) || existing.title,
+        owner: ((_b = meta == null ? void 0 : meta.owner) == null ? void 0 : _b.trim()) || existing.owner,
+        revisor: ((_c = meta == null ? void 0 : meta.revisor) == null ? void 0 : _c.trim()) || existing.revisor,
+        acceptanceCommand: ((_d = meta == null ? void 0 : meta.acceptanceCommand) == null ? void 0 : _d.trim()) || existing.acceptanceCommand,
+        branch: ((_e = meta == null ? void 0 : meta.branch) == null ? void 0 : _e.trim()) || existing.branch,
+        exclusivePaths: requestedExclusivePaths || existing.exclusivePaths
+      };
+      memoryLocks.set(cleanIssue, renewed);
+      await persistLocksToDisk(ctx);
+      return {
+        ok: true,
+        code: "RENEWED",
+        lock: renewed,
+        message: `Lock de ${cleanIssue} renovado para ${cleanAgent}.`
+      };
+    }
+    const designatedRevisor = String(existing.revisor || "").trim();
+    let isDesignatedRevisor = false;
+    if (designatedRevisor) {
+      const candidates = [cleanAgent];
+      if (meta == null ? void 0 : meta.owner) candidates.push(String(meta.owner));
+      try {
+        const snap = (_g = (_f = ctx.agents) == null ? void 0 : _f.snapshot) == null ? void 0 : _g.call(_f);
+        const pool = [...Array.isArray(snap == null ? void 0 : snap.running) ? snap.running : [], ...Array.isArray(snap == null ? void 0 : snap.agents) ? snap.agents : []];
+        const matched = pool.find(
+          (a) => String((a == null ? void 0 : a.key) || "").toLowerCase() === cleanAgent.toLowerCase() || String((a == null ? void 0 : a.pubkey) || "").toLowerCase() === cleanAgent.toLowerCase()
+        );
+        if (matched == null ? void 0 : matched.name) candidates.push(String(matched.name));
+      } catch {
+      }
+      isDesignatedRevisor = candidates.some((c) => sameAgentName(c, designatedRevisor));
+    }
+    if (isDesignatedRevisor) {
+      const handedOff = {
+        issueId: cleanIssue,
+        agentKey: cleanAgent,
+        acquiredAt: nowMs,
+        expiresAt: nowMs + normalizedTtlMs,
+        title: ((_h = meta == null ? void 0 : meta.title) == null ? void 0 : _h.trim()) || existing.title,
+        owner: existing.owner,
+        revisor: existing.revisor,
+        acceptanceCommand: ((_i = meta == null ? void 0 : meta.acceptanceCommand) == null ? void 0 : _i.trim()) || existing.acceptanceCommand,
+        branch: ((_j = meta == null ? void 0 : meta.branch) == null ? void 0 : _j.trim()) || existing.branch,
+        exclusivePaths: requestedExclusivePaths || existing.exclusivePaths
+      };
+      memoryLocks.set(cleanIssue, handedOff);
+      await persistLocksToDisk(ctx);
+      return {
+        ok: true,
+        code: "ACQUIRED",
+        lock: handedOff,
+        message: `Handoff automático de lock para o revisor designado (${designatedRevisor}) no card ${cleanIssue}.`
+      };
+    }
+    return {
+      ok: false,
+      code: "LOCK_CONFLICT",
+      conflictOwner: existing.agentKey,
+      lock: existing,
+      message: `LOCK_CONFLICT: Card ${cleanIssue} já está reservado por ${existing.agentKey} até ${new Date(existing.expiresAt).toISOString()}.`
+    };
+  }
+  const created = {
+    issueId: cleanIssue,
+    agentKey: cleanAgent,
+    acquiredAt: nowMs,
+    expiresAt: nowMs + normalizedTtlMs,
+    lastHeartbeatAt: nowMs,
+    title: ((_k = meta == null ? void 0 : meta.title) == null ? void 0 : _k.trim()) || void 0,
+    owner: ((_l = meta == null ? void 0 : meta.owner) == null ? void 0 : _l.trim()) || void 0,
+    revisor: ((_m = meta == null ? void 0 : meta.revisor) == null ? void 0 : _m.trim()) || void 0,
+    acceptanceCommand: ((_n = meta == null ? void 0 : meta.acceptanceCommand) == null ? void 0 : _n.trim()) || void 0,
+    branch: ((_o = meta == null ? void 0 : meta.branch) == null ? void 0 : _o.trim()) || void 0,
+    exclusivePaths: requestedExclusivePaths
+  };
+  memoryLocks.set(cleanIssue, created);
+  await persistLocksToDisk(ctx);
+  return {
+    ok: true,
+    code: "ACQUIRED",
+    lock: created,
+    message: `Lock atômico adquirido para ${cleanIssue} por ${cleanAgent}.`
+  };
+}
+async function releaseCheckoutLock(ctx, issueId, agentKey, force = false) {
+  const rawIssue = String(issueId || "").trim();
+  const cleanIssue = await resolveFullNostrIssueId(ctx, rawIssue);
+  await syncLocksFromDisk(ctx);
+  purgeExpiredLocks(Date.now());
+  const shortKey = cleanIssue.slice(0, 8);
+  const existing = memoryLocks.get(cleanIssue) || memoryLocks.get(rawIssue) || memoryLocks.get(shortKey);
+  if (!existing) {
+    return {
+      ok: true,
+      code: "NOT_FOUND",
+      message: `Nenhum lock ativo encontrado para ${cleanIssue}.`
+    };
+  }
+  if (!force && agentKey && existing.agentKey !== agentKey) {
+    return {
+      ok: false,
+      code: "OWNER_MISMATCH",
+      conflictOwner: existing.agentKey,
+      message: `Lock de ${cleanIssue} pertence a ${existing.agentKey}, não a ${agentKey}.`
+    };
+  }
+  memoryLocks.delete(existing.issueId);
+  await persistLocksToDisk(ctx);
+  return {
+    ok: true,
+    code: "RELEASED",
+    message: `Lock de ${existing.issueId} liberado com sucesso.`
+  };
+}
+async function listActiveLocks(ctx, nowMs = Date.now()) {
+  const expiredOnDisk = await syncLocksFromDisk(ctx, nowMs);
+  const removedInMem = purgeExpiredLocks(nowMs);
+  if (expiredOnDisk > 0 || removedInMem > 0) {
+    await persistLocksToDisk(ctx);
+  }
+  return Array.from(memoryLocks.values());
+}
+function evaluateBudgetGate(kpis, boardOverride = false) {
+  var _a, _b;
+  const usoPct = ((_a = kpis == null ? void 0 : kpis.economia) == null ? void 0 : _a.uso_teto_diario_pct) ?? 0;
+  const status = ((_b = kpis == null ? void 0 : kpis.economia) == null ? void 0 : _b.status_orcamento) ?? "OK";
+  if (status === "BLOQUEADO_100" || usoPct >= 100) {
+    if (boardOverride) {
+      return {
+        allowed: true,
+        code: "OVERRIDE_ALLOWED",
+        usoPct,
+        statusOrcamento: "BLOQUEADO_100",
+        message: `Teto diário de 100% atingido (${usoPct}%), liberado excepcionalmente via boardOverride.`
+      };
+    }
+    return {
+      allowed: false,
+      code: "BUDGET_HARD_CAP_REACHED",
+      usoPct,
+      statusOrcamento: "BLOQUEADO_100",
+      message: `BUDGET_HARD_CAP_REACHED: Consumo diário em ${usoPct}% do teto. Informe boardOverride: true para liberar manualmente.`
+    };
+  }
+  if (status === "ALERTA_80" || usoPct >= 80) {
+    return {
+      allowed: true,
+      code: "SOFT_CAP_80",
+      usoPct,
+      statusOrcamento: "ALERTA_80",
+      message: `Alerta suave: consumo diário em ${usoPct}% do teto (priorizar modelos Tier 1).`
+    };
+  }
+  return {
+    allowed: true,
+    code: "OK",
+    usoPct,
+    statusOrcamento: "OK",
+    message: `Orçamento diário saudável (${usoPct}% do teto).`
+  };
+}
+function canTriggerWithCooldown(key, nowMs, commit = true, cooldownMs = DEFAULT_COOLDOWN_MS) {
+  const last = alertCooldowns.get(key);
+  if (last !== void 0 && nowMs - last < cooldownMs) {
+    return false;
+  }
+  if (commit) {
+    alertCooldowns.set(key, nowMs);
+  }
+  return true;
+}
+const DEFAULT_ORGFY_CHANNEL = "e445491d-2fb3-4ebd-8e2e-f6813c33fb03";
+const EMPRESAS_DIR = "/Users/heltonfraga/.buzz/REPOS/orgfy/empresas";
+const KNOWN_COMPANY_SLUGS = ["orgfy", "lumen-iptv", "saas-tributario"];
+const radarEscalationCounts = /* @__PURE__ */ new Map();
+function decodeHostBytes$1(raw) {
+  if (typeof raw === "string") return raw;
+  if (raw instanceof Uint8Array) return new TextDecoder("utf-8").decode(raw);
+  if (raw instanceof ArrayBuffer) return new TextDecoder("utf-8").decode(new Uint8Array(raw));
+  if (ArrayBuffer.isView(raw)) {
+    return new TextDecoder("utf-8").decode(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength));
+  }
+  return String(raw ?? "");
+}
+function sameAgentName(a, b) {
+  const na = String(a || "").trim().toLowerCase();
+  const nb = String(b || "").trim().toLowerCase();
+  return Boolean(na && nb && (na === nb || na.includes(nb) || nb.includes(na)));
+}
+async function resolveEscalationTargetForChannel(ctx, channelId, loopingAgents = [], escalationAttempt = 1) {
+  var _a;
+  const host = ctx.host;
+  const targetChannel = String(channelId).trim();
+  let matchedManifest = null;
+  let defaultManifest = null;
+  if (host == null ? void 0 : host.readFile) {
+    for (const slug of KNOWN_COMPANY_SLUGS) {
+      try {
+        const raw = await host.readFile(`${EMPRESAS_DIR}/${slug}.json`);
+        const parsed = JSON.parse(decodeHostBytes$1(raw));
+        if (slug === "orgfy") defaultManifest = parsed;
+        if ((parsed == null ? void 0 : parsed.canal) && String(parsed.canal).trim() === targetChannel) {
+          matchedManifest = parsed;
+          break;
+        }
+      } catch {
+      }
+    }
+  }
+  const manifest = matchedManifest || defaultManifest || {};
+  const empresaSlug = String(manifest.empresa || manifest.slug || "orgfy");
+  const empresaNome = String(
+    ((_a = manifest.hierarquia) == null ? void 0 : _a.workspace_buzz) || manifest.nome || (empresaSlug === "orgfy" ? "OrgFy" : empresaSlug)
+  );
+  const papeis = manifest.papeis && typeof manifest.papeis === "object" ? manifest.papeis : {};
+  const hierarquia = manifest.hierarquia && typeof manifest.hierarquia === "object" ? manifest.hierarquia : {};
+  const agentesEntries = Array.isArray(manifest.agentes) ? manifest.agentes.map((a) => ({ nome: String((a == null ? void 0 : a.nome) || ""), papel: String((a == null ? void 0 : a.papel) || "") })) : manifest.agentes && typeof manifest.agentes === "object" ? Object.entries(manifest.agentes).map(([nome, cfg]) => ({
+    nome,
+    papel: String((cfg == null ? void 0 : cfg.papel) || "")
+  })) : [];
+  const findByRole = (role) => {
+    var _a2;
+    return (_a2 = agentesEntries.find((a) => a.papel.toLowerCase() === role)) == null ? void 0 : _a2.nome;
+  };
+  const coo = String(papeis.coo || findByRole("coo") || "OrgFy Bento").trim();
+  const companyCeo = String(
+    hierarquia.ceo_empresa || papeis.ceo_empresa || findByRole("ceo_empresa") || papeis.ceo || findByRole("ceo") || "OrgFy Iris"
+  ).trim();
+  const holdingCeo = String(
+    hierarquia.ceo_holding || papeis.ceo_holding || findByRole("ceo_holding") || "OrgFy Iris"
+  ).trim();
+  const isCooLooping = loopingAgents.some((ag) => sameAgentName(ag, coo));
+  const isCompanyCeoLooping = loopingAgents.some((ag) => sameAgentName(ag, companyCeo));
+  const hasSeparateCompanyCeo = !sameAgentName(companyCeo, holdingCeo);
+  if (hasSeparateCompanyCeo && (isCompanyCeoLooping || escalationAttempt >= 3)) {
+    return {
+      empresaSlug,
+      empresaNome,
+      level: 3,
+      roleLabel: "CEO Holding",
+      targetAgent: holdingCeo,
+      nextEscalationAgent: null,
+      holdingCeo,
+      reason: isCompanyCeoLooping ? `CEO da empresa (${companyCeo}) está em loop` : `incidente persistiu após acionamento do COO (${coo}) e CEO (${companyCeo})`
+    };
+  }
+  if (isCooLooping || escalationAttempt >= 2) {
+    return {
+      empresaSlug,
+      empresaNome,
+      level: 2,
+      roleLabel: hasSeparateCompanyCeo ? `CEO ${empresaNome}` : "CEO Holding",
+      targetAgent: companyCeo,
+      nextEscalationAgent: hasSeparateCompanyCeo ? holdingCeo : null,
+      holdingCeo,
+      reason: isCooLooping ? `o próprio COO (${coo}) entrou em loop` : `COO (${coo}) não resolveu o loop no ciclo anterior`
+    };
+  }
+  return {
+    empresaSlug,
+    empresaNome,
+    level: 1,
+    roleLabel: `COO · ${empresaNome}`,
+    targetAgent: coo,
+    nextEscalationAgent: companyCeo,
+    holdingCeo,
+    reason: "primeiro acionamento operacional de auto-cura na esteira"
+  };
+}
+function resolveAgentKeyFromSnapshot(agentsApi, query) {
+  const clean = String(query || "").trim();
+  if (!clean || !(agentsApi == null ? void 0 : agentsApi.snapshot)) return clean;
+  try {
+    const snap = agentsApi.snapshot() || {};
+    const pool = [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const list of [snap.running, snap.agents]) {
+      if (!Array.isArray(list)) continue;
+      for (const a of list) {
+        if (!a || !a.key || seen.has(a.key)) continue;
+        seen.add(a.key);
+        pool.push(a);
+      }
+    }
+    const lower = clean.toLowerCase();
+    const matched = pool.find((a) => String(a.key || "").toLowerCase() === lower) || pool.find((a) => String(a.pubkey || "").toLowerCase() === lower) || pool.find((a) => String(a.name || "").toLowerCase() === lower) || pool.find((a) => String(a.name || "").toLowerCase().includes(lower));
+    return (matched == null ? void 0 : matched.key) || clean;
+  } catch {
+    return clean;
+  }
+}
+async function evaluateGovernanceAndReact(ctx, options = {}) {
+  const nowMs = options.nowMs ?? Date.now();
+  const kpiRes = await fetchKpisEsteira(ctx);
+  const kpis = kpiRes.kpis;
+  const locks = await listActiveLocks(ctx, nowMs);
+  const budget = evaluateBudgetGate(kpis, false);
+  const notificationsSent = [];
+  const wakesTriggered = [];
+  const skippedByCooldown = [];
+  const alerts = [...(kpis == null ? void 0 : kpis.alertas_ativos) ?? []];
+  let radarChannelId;
+  let radarThreadRoot;
+  let radarLoopingAgents = [];
+  let radarIncidentKey = "";
+  if (options.includeRadar !== false) {
+    try {
+      const radar = await fetchGooseLoopRadar(ctx);
+      if (radar.ok && Array.isArray(radar.sessoes)) {
+        const healedSessionIds = /* @__PURE__ */ new Set();
+        if (!options.dryRun && options.autoWake !== false) {
+          const providerStormSessions = radar.sessoes.filter((s) => {
+            const isActive = typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15;
+            if (!isActive || s.ultima_atualizacao_min > 12) return false;
+            const lastIsErr = Boolean(s.last_msg_is_provider_error);
+            const recentErrs = Number(s.recent_provider_errors ?? 0);
+            const hasStormFlag = Array.isArray(s.flags) && s.flags.includes("TEMPESTADE_5XX");
+            return lastIsErr || recentErrs >= 2 || hasStormFlag && Number(s.errors_5xx ?? 0) >= 1;
+          });
+          const seenAgentsForFailover = /* @__PURE__ */ new Set();
+          for (const s of providerStormSessions) {
+            const agentDedupKey = String(s.agent_pubkey || s.agente || "").trim().toLowerCase();
+            if (!agentDedupKey || seenAgentsForFailover.has(agentDedupKey)) continue;
+            seenAgentsForFailover.add(agentDedupKey);
+            const errTs = typeof s.last_provider_error_ts === "number" ? s.last_provider_error_ts : null;
+            const prevHealedTs = lastHealedProviderErrorTs.get(agentDedupKey);
+            if (!options.bypassCooldown && errTs !== null && prevHealedTs !== void 0 && errTs <= prevHealedTs) {
+              skippedByCooldown.push(`auto_failover_already_healed:${s.agente}`);
+              continue;
+            }
+            const failCooldownKey = `auto_model_failover:${agentDedupKey}`;
+            if (!options.bypassCooldown && !canTriggerWithCooldown(failCooldownKey, nowMs, true, 30 * 1e3)) {
+              skippedByCooldown.push(`auto_failover:${s.agente}`);
+              continue;
+            }
+            if (errTs !== null) {
+              lastHealedProviderErrorTs.set(agentDedupKey, errTs);
+            }
+            try {
+              const agentsApi = ctx.agents;
+              if ((agentsApi == null ? void 0 : agentsApi.session) && (s.agente || s.agent_pubkey)) {
+                const targetKey = resolveAgentKeyFromSnapshot(agentsApi, s.agent_pubkey || s.agente);
+                if (targetKey) {
+                  try {
+                    const place = s.thread_root ? { channelId: s.channel_id || DEFAULT_ORGFY_CHANNEL, root: s.thread_root } : { channelId: s.channel_id || DEFAULT_ORGFY_CHANNEL };
+                    await agentsApi.session(targetKey, place, "interrupt");
+                  } catch {
+                  }
+                }
+              }
+              const failoverRes = await executeSmartModelFailover(ctx, {
+                agente: s.agente,
+                agent_pubkey: s.agent_pubkey || null,
+                prefer_free: false,
+                apply: true,
+                retrigger: true,
+                channel_id: s.channel_id || DEFAULT_ORGFY_CHANNEL,
+                thread_root: s.thread_root || null
+              });
+              if (failoverRes.ok && failoverRes.selectedModel) {
+                wakesTriggered.push(
+                  `auto_failover:${s.agente}:${failoverRes.previousModel || "padrao"}->${failoverRes.selectedModel}`
+                );
+                notificationsSent.push(`AUTO_MODEL_FAILOVER:${s.agente}`);
+                try {
+                  const notifApi = ctx.notifications;
+                  if (notifApi == null ? void 0 : notifApi.notify) {
+                    await notifApi.notify({
+                      title: `OrgFy Auto-Failover [${s.agente}]`,
+                      body: failoverRes.message
+                    });
+                  }
+                } catch {
+                }
+                const otherFlags = (s.flags || []).filter((f) => f !== "TEMPESTADE_5XX");
+                if (otherFlags.length === 0) {
+                  healedSessionIds.add(s.session_id);
+                }
+              }
+            } catch (err) {
+              console.warn("[ORGFY] Falha no auto-failover direto de modelo:", { agente: s.agente, err });
+            }
+          }
+        }
+        const activeCrit = radar.sessoes.filter(
+          (s) => !healedSessionIds.has(s.session_id) && (typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15) && s.severidade === "critical"
+        );
+        const activeDup = radar.sessoes.filter(
+          (s) => (typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15) && (s.flags || []).includes("SESSAO_DUPLICADA")
+        );
+        const anchorSession = activeCrit[0] || activeDup[0];
+        if (anchorSession == null ? void 0 : anchorSession.channel_id) radarChannelId = anchorSession.channel_id;
+        if (anchorSession == null ? void 0 : anchorSession.thread_root) radarThreadRoot = anchorSession.thread_root;
+        radarLoopingAgents = Array.from(
+          new Set([...activeCrit, ...activeDup].map((s) => String(s.agente || "").trim()).filter(Boolean))
+        );
+        radarIncidentKey = `${radarChannelId || DEFAULT_ORGFY_CHANNEL}:${activeCrit.map((s) => s.session_id).sort().join(",")}`;
+        if (activeCrit.length > 0) {
+          const top = activeCrit.slice(0, 4).map((s) => `${s.agente} (${s.session_id}, ${s.shells} shells, ${s.duracao_min}m, flags=${(s.flags || []).join("+")})`).join("; ");
+          alerts.push({
+            codigo: "GOOSE_ACTIVE_LOOP",
+            severidade: "critical",
+            mensagem: `${activeCrit.length} sessão(ões) ativa(s) em loop no Goose: ${top}.`,
+            acao_sugerida: "Ciclo Fechado de Auto-Cura (PARAR NUNCA ENCERRA O TURNO): chame orgfy_loop_radar({ apenas_ativos: true }) e execute 1 dos 3 desfechos: (A) Erro de API/5xx/provider -> orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', reason }) + orgfy_model_failover({ agente, agent_pubkey, channel_id, thread_root, prefer_free: false, apply: true, retrigger: true }); (B) Card ainda aberto (ESCOPO_ABERTO, COMPACTACAO_LOOP, ERRO_REPETIDO) -> orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', relaunch: true, reset_session_before_relaunch: true, relaunch_instruction: '<o que fazer agora>', target_files: ['<1-3 arquivos>'], acceptance_command: '<comando L-22>', max_shells: 10, reason }); (C) PR/issue já na main -> orgfy_session_stop({ agente, action: 'interrupt', release_issue_id, reason }) sem relançar. Publique 'AUTO-CURA | agente | causa-raiz | ação' no canal."
+          });
+        }
+        if (activeDup.length >= 2) {
+          const dupAgents = Array.from(new Set(activeDup.map((s) => s.agente))).join(", ");
+          alerts.push({
+            codigo: "GOOSE_DUPLICATE_SESSIONS",
+            severidade: "warn",
+            mensagem: `${activeDup.length} sessões duplicadas ativas nos agentes: ${dupAgents}.`,
+            acao_sugerida: "Pausar cobranças/menções paralelas para esses agentes até concluírem o turno atual e designar dono único por card."
+          });
+        }
+      }
+    } catch {
+    }
+  }
+  for (const al of alerts) {
+    const isRadarAlert = al.codigo === "GOOSE_ACTIVE_LOOP" || al.codigo === "GOOSE_DUPLICATE_SESSIONS";
+    const cooldownKey = isRadarAlert && radarIncidentKey ? `alert:${al.codigo}:${radarIncidentKey}` : `alert:${al.codigo}`;
+    if (!options.bypassCooldown && !canTriggerWithCooldown(cooldownKey, nowMs, !options.dryRun)) {
+      skippedByCooldown.push(al.codigo);
+      continue;
+    }
+    if (!options.dryRun) {
+      try {
+        const notifApi = ctx.notifications;
+        if (notifApi == null ? void 0 : notifApi.notify) {
+          await notifApi.notify({
+            title: `OrgFy [${al.codigo}]`,
+            body: al.mensagem
+          });
+        }
+      } catch {
+      }
+      notificationsSent.push(al.codigo);
+    }
+    if (options.autoWake && !options.dryRun && (al.codigo === "REVIEW_QUEUE_BOTTLENECK" || al.codigo === "STAGNATION_LEVEL_3" || isRadarAlert)) {
+      const wakeChannel = isRadarAlert && radarChannelId || options.channel || DEFAULT_ORGFY_CHANNEL;
+      const attempt = isRadarAlert && radarIncidentKey ? (radarEscalationCounts.get(radarIncidentKey) || 0) + 1 : 1;
+      const escalation = isRadarAlert ? await resolveEscalationTargetForChannel(ctx, wakeChannel, radarLoopingAgents, attempt) : null;
+      const wakeKey = options.reviewerAgentKey || (escalation == null ? void 0 : escalation.targetAgent) || "OrgFy Bento";
+      const wakeRoot = isRadarAlert && radarThreadRoot ? radarThreadRoot : void 0;
+      const wakeCooldownKey = isRadarAlert && radarIncidentKey ? `wake:${al.codigo}:${radarIncidentKey}:${wakeKey}` : `wake:${al.codigo}:${wakeKey}`;
+      const threadGuard = checkThreadWakeAntiLoop({
+        agentKey: wakeKey,
+        threadRoot: wakeRoot,
+        contextText: al.mensagem,
+        nowMs,
+        bypass: Boolean(options.bypassCooldown)
+      });
+      if (!threadGuard.allow) {
+        skippedByCooldown.push(`wake_guard:${al.codigo}:${threadGuard.reason}`);
+      } else if (options.bypassCooldown || canTriggerWithCooldown(wakeCooldownKey, nowMs)) {
+        try {
+          const agentsApi = ctx.agents;
+          if (agentsApi == null ? void 0 : agentsApi.wake) {
+            const targetAgentKey = resolveAgentKeyFromSnapshot(agentsApi, wakeKey);
+            const escalationSuffix = escalation && escalation.nextEscalationAgent ? ` Se não conseguir resolver em 1 ciclo, escale para @${escalation.nextEscalationAgent} (nunca acione a CEO da Holding sem passar antes pela liderança da empresa).` : "";
+            const headerLabel = escalation ? `Nível ${escalation.level} · ${escalation.roleLabel}` : al.codigo;
+            await agentsApi.wake(targetAgentKey, {
+              channel: wakeChannel,
+              ...wakeRoot ? { root: wakeRoot } : {},
+              text: isRadarAlert ? `@${wakeKey} ORDEM OPERACIONAL OBRIGATÓRIA [ORGFY RADAR AUTO-CURA · ${headerLabel} · ${al.codigo}] (Isto NÃO é telemetria passiva — execute agora e publique o resultado no canal). ${al.mensagem} Ação obrigatória agora: ${al.acao_sugerida}${escalationSuffix}` : `[ORGFY GOVERNANÇA] ${al.mensagem} Ação recomendada: ${al.acao_sugerida}`
+            });
+            if (isRadarAlert && radarIncidentKey) {
+              radarEscalationCounts.set(radarIncidentKey, attempt);
+            }
+            wakesTriggered.push(`${wakeKey}:${al.codigo}`);
+          }
+        } catch (err) {
+          console.warn("[ORGFY] Falha ao acordar agente via ctx.agents.wake:", { wakeKey, err });
+        }
+      } else {
+        skippedByCooldown.push(`wake:${al.codigo}`);
+      }
+    }
+  }
+  return {
+    ok: true,
+    evaluatedAt: new Date(nowMs).toISOString(),
+    budget,
+    activeLocksCount: locks.length,
+    alertsDetected: alerts.length,
+    notificationsSent,
+    wakesTriggered,
+    skippedByCooldown
+  };
+}
+function normalizeTextForFallback(text) {
+  return String(text || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
+}
+function classifyFallbackRiskAndSurface(titulo, descricao) {
+  const blob = normalizeTextForFallback(`${titulo} ${descricao}`);
+  const z6Terms = [
+    "faturamento",
+    "pagamento",
+    "pix",
+    "stripe",
+    "billing",
+    "sats",
+    "secret",
+    "segredo",
+    "token",
+    "oauth",
+    "chmod",
+    "credencial",
+    "nsec",
+    "rls",
+    "auth",
+    "deploy",
+    "producao",
+    "production",
+    "swarm",
+    "portainer",
+    "stack",
+    "migration",
+    "migracao",
+    "drop table"
+  ];
+  const isZ6 = z6Terms.some((t) => blob.includes(t));
+  let surface = "codigo";
+  if (["seguranca", "secret", "auth", "oauth", "token", "rls", "chmod"].some((t) => blob.includes(t))) {
+    surface = "seguranca";
+  } else if (["ui", "ux", "css", "tsx", "react", "kanban", "modal", "layout"].some((t) => blob.includes(t))) {
+    surface = "ui";
+  } else if (["docker", "swarm", "portainer", "deploy", "cron", "worktree"].some((t) => blob.includes(t))) {
+    surface = "infra";
+  } else if (["spec", "licao", "playbook", "governanca", "manifesto"].some((t) => blob.includes(t))) {
+    surface = "metodo";
+  }
+  if (isZ6) return { riskLevel: "Z6", requiresHumanApproval: true, surface };
+  if (surface === "seguranca" || surface === "infra") return { riskLevel: "Z4", requiresHumanApproval: false, surface };
+  return { riskLevel: "Z2", requiresHumanApproval: false, surface };
+}
+async function lintCardForDispatch(ctx, input) {
+  var _a, _b;
+  const issues = [];
+  const titulo = String(input.titulo || "").trim();
+  const cmd = String(input.acceptanceCommand || "").trim();
+  const desc = String(input.descricao || "").trim();
+  const md = String(input.cardMarkdown || "").trim();
+  if (!titulo || titulo.length < 10) {
+    issues.push("Título muito curto ou ausente (mínimo 10 caracteres).");
+  }
+  if (!cmd) {
+    issues.push("Regra L-22 violada: comando de aceite executável (acceptanceCommand) ausente.");
+  } else if (/^(todo|tbd|none|n\/a|true|:|exit\s+0)$/i.test(cmd) || /^echo\b/i.test(cmd) && !/(pytest|node |npm |pnpm |cargo |shasum|python|curl |git )/i.test(cmd)) {
+    issues.push("Regra L-22 violada: acceptanceCommand é placeholder ou comando inócuo (carimbo).");
+  }
+  if (input.executor && input.revisor && input.executor.trim() === input.revisor.trim()) {
+    issues.push("Regra L-01 violada: executor e revisor não podem ser o mesmo agente.");
+  }
+  if (md) {
+    if (!/<!--\s*orgfy:card\s+(?:v3|v4|v7\.1|v7\.2)\s*-->/i.test(md)) {
+      issues.push("Template OrgFy ausente: marcador '<!-- orgfy:card v4 -->' ou '<!-- orgfy:card v3 -->' obrigatório (use ./ferramentas/orgfy-card-new).");
+    }
+    if (!/(specs\/[a-z0-9_/-]+|SPEC-\d{4}|\*\*Autoridade:\*\*)/i.test(md) && !((_a = input.specPath) == null ? void 0 : _a.trim())) {
+      issues.push("Spec-Kit obrigatório: informe referência à spec ('specs/.../spec.md' ou 'SPEC-NNNN') e Autoridade.");
+    }
+    if (!/(?:\*\*Leitura:\*\*|Leitura:)/i.test(md) || !/(?:\*\*Escrita\s+exclusiva:\*\*|Escrita\s+exclusiva:)/i.test(md)) {
+      issues.push("Paths obrigatórios ausentes: preencha 'Leitura:' e 'Escrita exclusiva:' conforme contratos/card.md.");
+    }
+    if (!/##\s+Pap[eé]is\s+e\s+ambiente/i.test(md)) {
+      issues.push("Seção obrigatória ausente: '## Papéis e ambiente' (com Executor, Revisor, Decisor e Workspace).");
+    }
+  }
+  const fallbackCls = classifyFallbackRiskAndSurface(titulo, desc);
+  let usedDecisionsApi = false;
+  let decisionSource = "deterministic_fallback";
+  let fallbackReason = "decisions_api_not_available";
+  let score = issues.length === 0 ? 1 : Math.max(0.2, 1 - issues.length * 0.3);
+  const decisionsApi = ctx.decisions;
+  if ((decisionsApi == null ? void 0 : decisionsApi.decide) && issues.length === 0 && (titulo || desc)) {
+    try {
+      const decisionRes = await decisionsApi.decide({
+        state: {
+          issueId: input.issueId || "draft",
+          titulo,
+          acceptanceCommand: cmd,
+          descricao: desc,
+          fallbackRisk: fallbackCls.riskLevel
+        },
+        questions: [
+          {
+            id: "atomic_scope",
+            type: "yes_no",
+            prompt: "O escopo deste card é atômico e verificável pelo comando de aceite informado?"
+          }
+        ]
+      });
+      usedDecisionsApi = true;
+      decisionSource = "decisions_api";
+      fallbackReason = null;
+      const ans = ((_b = decisionRes == null ? void 0 : decisionRes.answers) == null ? void 0 : _b.atomic_scope) ?? (decisionRes == null ? void 0 : decisionRes.atomic_scope);
+      if (ans === false || ans === "no") {
+        issues.push("Avaliação semântica (ctx.decisions): escopo amplo demais ou pouco verificável.");
+        score = 0.55;
+      }
+    } catch (err) {
+      const msg = String((err == null ? void 0 : err.message) || err || "unknown_error");
+      fallbackReason = /(402|429|quota|balance|credit|saldo|timeout)/i.test(msg) ? `decisions_api_quota_or_timeout:${msg.slice(0, 80)}` : `decisions_api_error:${msg.slice(0, 80)}`;
+    }
+  }
+  const approved = issues.length === 0;
+  return {
+    approved,
+    score: Number(score.toFixed(2)),
+    usedDecisionsApi,
+    decisionSource,
+    fallbackReason,
+    riskLevel: fallbackCls.riskLevel,
+    requiresHumanApproval: fallbackCls.requiresHumanApproval,
+    surface: fallbackCls.surface,
+    issues,
+    recommendation: approved ? usedDecisionsApi ? "Card aprovado via Decisions API + invariantes L-01/L-22." : "Card aprovado via fallback determinístico offline (L-01/L-22/Z6 preservados)." : "Corrija as pendências acima antes de despachar para evitar retrabalho no Gate."
+  };
+}
+async function bindConversationContextForCard(ctx, input) {
+  var _a;
+  const agentsApi = ctx.agents;
+  const host = ctx.host;
+  const notes = [];
+  let folderAssigned = false;
+  let sectionsInjected = false;
+  let remoteOrMissingAgent = false;
+  const worktreePath = ((_a = input.worktreePath) == null ? void 0 : _a.trim()) || null;
+  const isMissingAgentErr = (msg) => /(does not exist|not found|n[aã]o existe|unknown agent|agent.*missing|no such conversation)/i.test(msg);
+  if (worktreePath && (agentsApi == null ? void 0 : agentsApi.assignConversationFolder)) {
+    try {
+      await agentsApi.assignConversationFolder(input.conversationId, worktreePath);
+      folderAssigned = true;
+    } catch (err) {
+      const msg = String((err == null ? void 0 : err.message) || err);
+      if (isMissingAgentErr(msg)) remoteOrMissingAgent = true;
+      notes.push(`Falha em assignConversationFolder: ${msg}`);
+    }
+  } else if (worktreePath) {
+    notes.push("API ctx.agents.assignConversationFolder indisponível neste host.");
+  }
+  const sections = [
+    {
+      id: `orgfy-card-${input.issueId}`,
+      title: `Contexto OrgFy — Card #${input.issueId}`,
+      content: [
+        input.titulo ? `Título: ${input.titulo}` : null,
+        input.executor ? `Executor (L-01): ${input.executor}` : null,
+        input.revisor ? `Revisor (L-01): ${input.revisor}` : null,
+        worktreePath ? `Worktree Isolado: ${worktreePath}` : null
+      ].filter(Boolean).join("\n")
+    },
+    {
+      id: `orgfy-rules-${input.issueId}`,
+      title: "Regras Vivas L-22 / L-90 (Injetadas Automaticamente)",
+      content: [
+        `Regra L-22 (Comando de Aceite Imutável): ${input.acceptanceCommand || "Não informado"}`,
+        input.acceptanceHash ? `Hash SHA-256 L-22: ${input.acceptanceHash}` : null,
+        "Regra L-01: Executor e revisor devem ser estritamente segregados.",
+        "Regra L-90: Nunca afrouxe testes, critérios de aceite ou gates caixa-preta."
+      ].filter(Boolean).join("\n")
+    }
+  ];
+  if (agentsApi == null ? void 0 : agentsApi.setConversationSections) {
+    try {
+      await agentsApi.setConversationSections(input.conversationId, sections);
+      sectionsInjected = true;
+    } catch (err) {
+      const msg = String((err == null ? void 0 : err.message) || err);
+      if (isMissingAgentErr(msg)) remoteOrMissingAgent = true;
+      notes.push(`Falha em setConversationSections: ${msg}`);
+    }
+  } else {
+    notes.push("API ctx.agents.setConversationSections indisponível neste host.");
+  }
+  let fallbackContextFile = null;
+  let degradedFallback = false;
+  if (!folderAssigned && !sectionsInjected && remoteOrMissingAgent) {
+    const safeId = String(input.issueId || "card").replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 16) || "card";
+    const ctxPath = `/Users/heltonfraga/.buzz/.scratch/orgfy-context-${safeId}.json`;
+    const payload = JSON.stringify(
+      {
+        issueId: input.issueId,
+        conversationId: input.conversationId,
+        worktreePath,
+        sections,
+        savedAt: (/* @__PURE__ */ new Date()).toISOString()
+      },
+      null,
+      2
+    );
+    if (host == null ? void 0 : host.writeFile) {
+      try {
+        await host.writeFile(ctxPath, payload);
+        fallbackContextFile = ctxPath;
+        degradedFallback = true;
+        notes.push(`Fallback aplicado: agente/conversa não local neste aparelho; contexto L-22/L-90 persistido em ${ctxPath}.`);
+      } catch (wErr) {
+        notes.push(`Falha ao gravar fallback de contexto: ${(wErr == null ? void 0 : wErr.message) || wErr}`);
+      }
+    }
+  }
+  return {
+    ok: folderAssigned || sectionsInjected || degradedFallback,
+    conversationId: input.conversationId,
+    folderAssigned,
+    worktreePath,
+    sectionsInjected,
+    sectionsCount: sectionsInjected || degradedFallback ? sections.length : 0,
+    fallbackContextFile,
+    degradedFallback,
+    notes
+  };
+}
+async function stopAgentSession(ctx, input) {
+  const agentsApi = ctx.agents;
+  const action = input.action === "new" || input.action === "compact" ? input.action : "interrupt";
+  const channelId = String(input.channel_id || DEFAULT_ORGFY_CHANNEL).trim() || DEFAULT_ORGFY_CHANNEL;
+  const root = input.thread_root ? String(input.thread_root).trim() : void 0;
+  const place = root ? { channelId, root } : { channelId };
+  if (!(agentsApi == null ? void 0 : agentsApi.snapshot) || !(agentsApi == null ? void 0 : agentsApi.session) && !(agentsApi == null ? void 0 : agentsApi.interrupt)) {
+    return {
+      ok: false,
+      action,
+      agentName: null,
+      agentKey: null,
+      agentPlace: null,
+      place,
+      previousState: null,
+      lockReleased: false,
+      relaunched: false,
+      message: "API nativa ctx.agents.session / snapshot indisponível neste host."
+    };
+  }
+  const snap = agentsApi.snapshot() || {};
+  const pool = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const list of [snap.running, snap.agents]) {
+    if (!Array.isArray(list)) continue;
+    for (const a of list) {
+      if (!a || !a.key || seen.has(a.key)) continue;
+      seen.add(a.key);
+      pool.push(a);
+    }
+  }
+  const queryRaw = String(input.agente || "").trim();
+  const queryLower = queryRaw.toLowerCase();
+  const pubkeyLower = String(input.agent_pubkey || "").trim().toLowerCase();
+  const matched = pubkeyLower && pool.find((a) => String(a.pubkey || "").toLowerCase() === pubkeyLower) || pool.find((a) => String(a.key || "").toLowerCase() === queryLower) || pool.find((a) => String(a.pubkey || "").toLowerCase() === queryLower) || pool.find((a) => String(a.name || "").toLowerCase() === queryLower) || (queryLower ? pool.find((a) => String(a.name || "").toLowerCase().includes(queryLower)) : void 0);
+  if (!matched) {
+    const available = pool.map((a) => a.name || a.key).slice(0, 12).join(", ");
+    return {
+      ok: false,
+      action,
+      agentName: null,
+      agentKey: null,
+      agentPlace: null,
+      place,
+      previousState: null,
+      lockReleased: false,
+      relaunched: false,
+      message: `Agente '${queryRaw || pubkeyLower}' não encontrado no Buzz Desktop. Disponíveis: ${available || "nenhum"}`
+    };
+  }
+  const resolvedName = String(matched.name || matched.key);
+  let previousState = null;
+  try {
+    if (agentsApi.sessionState) {
+      previousState = String(agentsApi.sessionState(matched.key, place));
+    }
+  } catch {
+    previousState = null;
+  }
+  try {
+    if (matched.place === "hosted" && action === "interrupt" && agentsApi.interrupt) {
+      await agentsApi.interrupt(matched.key, {
+        channelId: place.channelId,
+        ...place.root ? { threadRootId: place.root } : {}
+      });
+    } else if (agentsApi.session) {
+      await agentsApi.session(matched.key, place, action);
+    } else if (action === "interrupt" && agentsApi.interrupt) {
+      await agentsApi.interrupt(matched.key, {
+        channelId: place.channelId,
+        ...place.root ? { threadRootId: place.root } : {}
+      });
+    } else {
+      return {
+        ok: false,
+        action,
+        agentName: resolvedName,
+        agentKey: matched.key,
+        agentPlace: matched.place || null,
+        place,
+        previousState,
+        lockReleased: false,
+        relaunched: false,
+        message: `Host não suporta ação '${action}' para ${resolvedName}.`
+      };
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      action,
+      agentName: resolvedName,
+      agentKey: matched.key,
+      agentPlace: matched.place || null,
+      place,
+      previousState,
+      lockReleased: false,
+      relaunched: false,
+      message: `Falha ao executar '${action}' em ${resolvedName}: ${(err == null ? void 0 : err.message) || err}`
+    };
+  }
+  let lockReleased = false;
+  if (input.release_issue_id && String(input.release_issue_id).trim()) {
+    try {
+      const rel = await releaseCheckoutLock(ctx, String(input.release_issue_id).trim(), void 0, true);
+      lockReleased = rel.ok && rel.code === "RELEASED";
+    } catch {
+      lockReleased = false;
+    }
+  }
+  let relaunched = false;
+  let relaunchMessage = null;
+  const wantRelaunch = Boolean(input.relaunch);
+  const relaunchInstr = String(input.relaunch_instruction || "").trim();
+  if (wantRelaunch && (agentsApi == null ? void 0 : agentsApi.wake)) {
+    try {
+      if (input.reset_session_before_relaunch && action !== "new" && agentsApi.session) {
+        try {
+          await agentsApi.session(matched.key, place, "new");
+        } catch {
+        }
+      }
+      const files = Array.isArray(input.target_files) ? input.target_files.map((f) => String(f || "").trim()).filter(Boolean) : [];
+      const maxShells = Number.isFinite(Number(input.max_shells)) && Number(input.max_shells) > 0 ? Math.min(20, Math.max(3, Math.round(Number(input.max_shells)))) : 10;
+      const accCmd = String(input.acceptance_command || "").trim();
+      const parts = [
+        `@${resolvedName} [ORGFY AUTO-CURA · RELANÇAMENTO ESCOPO FECHADO]`,
+        `Sua sessão anterior foi interrompida (${String(input.reason || "loop/travamento").trim()}).`,
+        relaunchInstr ? `Objetivo único agora: ${relaunchInstr}` : "Retome a tarefa atual com foco estrito no escopo fechado.",
+        files.length > 0 ? `Arquivos-alvo exclusivos: ${files.join(", ")}.` : null,
+        accCmd ? `Comando de aceite L-22 obrigatório: ${accCmd}` : null,
+        `Limite estrito: máximo ${maxShells} comandos shell (sem --help, sem explorar fora do escopo). Ao passar o aceite, entregue imediatamente; se bater 2 falhas consecutivas, publique BLOQUEADO.`
+      ].filter(Boolean);
+      relaunchMessage = parts.join(" ");
+      await agentsApi.wake(matched.key, {
+        channel: place.channelId,
+        ...place.root ? { root: place.root } : {},
+        text: relaunchMessage
+      });
+      relaunched = true;
+    } catch (wakeErr) {
+      relaunchMessage = `Falha no relaunch automático: ${(wakeErr == null ? void 0 : wakeErr.message) || wakeErr}`;
+    }
+  }
+  const nextRequiredAction = relaunched ? null : `AÇÃO OBRIGATÓRIA DO COO (parar nunca encerra o turno): escolha 1 dos 3 desfechos para ${resolvedName}: (1) Se erro de API/5xx, chame orgfy_model_failover({ agente: '${resolvedName}', channel_id: '${place.channelId}'${place.root ? `, thread_root: '${place.root}'` : ""}, prefer_free: false, apply: true, retrigger: true }); (2) Se a demanda ainda está aberta, chame orgfy_session_stop({ agente: '${resolvedName}', channel_id: '${place.channelId}'${place.root ? `, thread_root: '${place.root}'` : ""}, relaunch: true, relaunch_instruction: '<o que fazer>', target_files: ['...'], acceptance_command: '<L-22>', max_shells: 10 }); (3) Se o PR já foi integrado na main, apenas registre 'AUTO-CURA | ${resolvedName} | ITEM_JA_FECHADO | encerrado sem relançar'.`;
+  const reasonSuffix = input.reason ? ` Motivo: ${String(input.reason).trim()}.` : "";
+  return {
+    ok: true,
+    action,
+    agentName: resolvedName,
+    agentKey: matched.key,
+    agentPlace: matched.place || null,
+    place,
+    previousState,
+    lockReleased,
+    relaunched,
+    relaunchMessage,
+    next_required_action: nextRequiredAction,
+    message: `Comando '${action}' enviado com sucesso para ${resolvedName} (canal ${place.channelId.slice(0, 8)}${place.root ? `, thread ${place.root.slice(0, 8)}` : ""}).${lockReleased ? " Lock liberado." : ""}${relaunched ? " Agente relançado automaticamente com @menção e escopo fechado." : ""}${reasonSuffix}`
+  };
+}
+const DEFAULT_WATCHDOG_INTERVAL_MS = 45 * 1e3;
+const DEFAULT_WATCHDOG_INITIAL_DELAY_MS = 10 * 1e3;
+let radarWatchdogTimer = null;
+let radarWatchdogInitialTimer = null;
+let radarWatchdogRunning = false;
+function stopGovernanceRadarWatchdog() {
+  if (radarWatchdogInitialTimer) {
+    clearTimeout(radarWatchdogInitialTimer);
+    radarWatchdogInitialTimer = null;
+  }
+  if (radarWatchdogTimer) {
+    clearInterval(radarWatchdogTimer);
+    radarWatchdogTimer = null;
+  }
+}
+function startGovernanceRadarWatchdog(ctx, options = {}) {
+  const agentsApi = ctx.agents;
+  if (!(agentsApi == null ? void 0 : agentsApi.wake)) return false;
+  stopGovernanceRadarWatchdog();
+  const intervalMs = options.intervalMs ?? DEFAULT_WATCHDOG_INTERVAL_MS;
+  const initialDelayMs = options.initialDelayMs ?? DEFAULT_WATCHDOG_INITIAL_DELAY_MS;
+  const bootMs = Date.now();
+  const tick = async (isStartup = false) => {
+    if (radarWatchdogRunning) return;
+    radarWatchdogRunning = true;
+    try {
+      await reconcileAgentPresenceAndLocks(ctx, { isStartup, bootMs });
+      await evaluateGovernanceAndReact(ctx, { dryRun: false, autoWake: true, includeRadar: true });
+    } catch {
+    } finally {
+      radarWatchdogRunning = false;
+    }
+  };
+  radarWatchdogInitialTimer = setTimeout(() => {
+    radarWatchdogInitialTimer = null;
+    void tick(true);
+  }, initialDelayMs);
+  if (typeof (radarWatchdogInitialTimer == null ? void 0 : radarWatchdogInitialTimer.unref) === "function") {
+    radarWatchdogInitialTimer.unref();
+  }
+  radarWatchdogTimer = setInterval(() => {
+    void tick();
+  }, intervalMs);
+  if (typeof (radarWatchdogTimer == null ? void 0 : radarWatchdogTimer.unref) === "function") {
+    radarWatchdogTimer.unref();
+  }
+  return true;
+}
+function isRateLimitOrProviderError(text) {
+  const low = String(text || "").toLowerCase();
+  return [
+    "rate limit exceeded",
+    "upstream rate limit",
+    "too many requests",
+    "429",
+    "no available accounts",
+    "model requires available accounts",
+    "service temporarily unavailable",
+    "503 service unavailable",
+    "502 bad gateway",
+    "504 gateway timeout",
+    "resource not found (404)",
+    "[404]:",
+    "bad request (400)",
+    "no target in combo",
+    "supports tool calling",
+    "upstream request failed",
+    "upstream_malformed_function_call",
+    "overloaded_error",
+    "model is overloaded"
+  ].some((marker) => low.includes(marker));
+}
+function normalizeAgentAlias(raw) {
+  return String(raw || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/^@/, "").replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
+}
+function checkMentionTargetIdentity(input) {
+  const text = String(input.messageText || "");
+  const matches = Array.from(
+    text.matchAll(/@((?:OrgFy|Lumen|Tributario)\s+[A-ZÀ-Ú][a-zà-ú]+(?:\s+[A-ZÀ-Ú][a-zà-ú]+)?)/g)
+  ).map((m) => m[1].trim());
+  const mentionedTargets = Array.from(new Set(matches));
+  if (mentionedTargets.length === 0) {
+    return {
+      isForMe: true,
+      action: "PROCEED",
+      mentionedTargets: [],
+      reason: "Sem menção nominal explícita a outro agente."
+    };
+  }
+  const meNorm = normalizeAgentAlias(input.currentAgentName);
+  const isAddressedToMe = mentionedTargets.some((t) => {
+    const tNorm = normalizeAgentAlias(t);
+    return tNorm === meNorm || tNorm.includes(meNorm) || meNorm.includes(tNorm);
+  });
+  if (isAddressedToMe) {
+    return {
+      isForMe: true,
+      action: "PROCEED",
+      mentionedTargets,
+      reason: `Menção compatível com o perfil ativo (${input.currentAgentName}).`
+    };
+  }
+  return {
+    isForMe: false,
+    action: "[SILENT]",
+    mentionedTargets,
+    reason: `Menção endereçada a [${mentionedTargets.join(", ")}], não a ${input.currentAgentName}. Responder [SILENT].`
+  };
+}
+const THREAD_WAKE_COOLDOWN_MS = 10 * 60 * 1e3;
+const threadWakeTimestamps = /* @__PURE__ */ new Map();
+function resetThreadWakeGuardForTests() {
+  threadWakeTimestamps.clear();
+}
+function checkThreadWakeAntiLoop(input) {
+  if (input.bypass) {
+    return { allow: true, reason: "bypass" };
+  }
+  const nowMs = input.nowMs ?? Date.now();
+  const ctxLow = String(input.contextText || "").toLowerCase();
+  const waitingOtherGate = (ctxLow.includes("aguardando gate") || ctxLow.includes("waiting for gate")) && !ctxLow.includes(normalizeAgentAlias(input.agentKey));
+  if (waitingOtherGate && input.threadRoot) {
+    return {
+      allow: false,
+      reason: "waiting_for_other_reviewer_gate"
+    };
+  }
+  if (input.threadRoot) {
+    const key = `thread_wake:${normalizeAgentAlias(input.agentKey)}:${input.threadRoot}`;
+    const last = threadWakeTimestamps.get(key);
+    if (last !== void 0 && nowMs - last < THREAD_WAKE_COOLDOWN_MS) {
+      return {
+        allow: false,
+        reason: "thread_wake_cooldown_10m"
+      };
+    }
+    threadWakeTimestamps.set(key, nowMs);
+  }
+  return { allow: true, reason: "ok" };
+}
+function registerGovernanceAgentHooks(ctx) {
+  const agentsApi = ctx.agents;
+  let registered = false;
+  if (agentsApi == null ? void 0 : agentsApi.registerHook) {
+    try {
+      const handleProviderHookFailover = async (payload) => {
+        const errText = String((payload == null ? void 0 : payload.error) || (payload == null ? void 0 : payload.reason) || (payload == null ? void 0 : payload.output) || (payload == null ? void 0 : payload.message) || "");
+        const agentPubkey = String((payload == null ? void 0 : payload.agentPubkey) || (payload == null ? void 0 : payload.pubkey) || "").trim();
+        const agentName = String((payload == null ? void 0 : payload.agentName) || (payload == null ? void 0 : payload.agent) || "").trim();
+        if ((agentPubkey || agentName) && isRateLimitOrProviderError(errText)) {
+          await executeSmartModelFailover(ctx, {
+            agente: agentName || void 0,
+            agent_pubkey: agentPubkey || null,
+            failed_model: (payload == null ? void 0 : payload.model) ? String(payload.model) : null,
+            prefer_free: false,
+            apply: true,
+            retrigger: true,
+            channel_id: String((payload == null ? void 0 : payload.channelId) || (payload == null ? void 0 : payload.channel) || DEFAULT_ORGFY_CHANNEL),
+            thread_root: (payload == null ? void 0 : payload.threadRoot) || (payload == null ? void 0 : payload.root) || null
+          });
+        }
+      };
+      agentsApi.registerHook({
+        id: "orgfy-post-turn-governance",
+        harness: "all",
+        event: "turn.completed",
+        run: async (payload) => {
+          await handleProviderHookFailover(payload);
+          await evaluateGovernanceAndReact(ctx, { dryRun: false, autoWake: true, includeRadar: true });
+        }
+      });
+      agentsApi.registerHook({
+        id: "orgfy-turn-failed-model-failover",
+        harness: "all",
+        event: "turn.failed",
+        run: async (payload) => {
+          await handleProviderHookFailover(payload);
+        }
+      });
+      registered = true;
+    } catch {
+      registered = false;
+    }
+  }
+  const watchdogStarted = startGovernanceRadarWatchdog(ctx);
+  return registered || watchdogStarted;
 }
 function sanitizeSlug(raw) {
   return String(raw || "").trim().toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 50) || "card";
@@ -4904,253 +5795,6 @@ async function searchResolvedArchive(ctx, options = {}) {
     resultados: matched.slice(0, limit)
   };
 }
-const MARK_TO_STATUS = {
-  " ": "todo",
-  "/": "in_progress",
-  "x": "done",
-  "X": "done",
-  "!": "blocked"
-};
-const STATUS_TO_MARK = {
-  todo: " ",
-  in_progress: "/",
-  done: "x",
-  blocked: "!"
-};
-function decodeBytes$1(raw) {
-  if (typeof raw === "string") return raw;
-  if (raw instanceof Uint8Array) return new TextDecoder("utf-8").decode(raw);
-  if (raw instanceof ArrayBuffer) return new TextDecoder("utf-8").decode(new Uint8Array(raw));
-  return String(raw ?? "");
-}
-function summarizeSteps(steps) {
-  const total = steps.length;
-  const done = steps.filter((s) => s.status === "done").length;
-  const inProgress = steps.filter((s) => s.status === "in_progress").length;
-  const blocked = steps.filter((s) => s.status === "blocked").length;
-  const pct = total > 0 ? Math.round(done / total * 100) : 0;
-  const nextPending = steps.find((s) => s.status === "in_progress") || steps.find((s) => s.status === "todo") || steps.find((s) => s.status === "blocked") || null;
-  return {
-    total,
-    done,
-    inProgress,
-    blocked,
-    pct,
-    steps,
-    nextPendingStepId: nextPending ? nextPending.id : null
-  };
-}
-function parseCardProgress(markdown) {
-  if (!markdown) return null;
-  const secMatch = markdown.match(/##\s*O que fazer\s*\n([\s\S]*?)(?=\n##\s+|$)/i);
-  if (!(secMatch == null ? void 0 : secMatch[1])) return null;
-  const lines = secMatch[1].split("\n");
-  const steps = [];
-  let seq = 0;
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (!line) continue;
-    const cb = line.match(/^-\s+\[([ xX\/!])\]\s+(?:\*\*)?(P\d+)(?::)?(?:\*\*)?:?\s*(.+)$/);
-    if (cb) {
-      seq += 1;
-      const status = MARK_TO_STATUS[cb[1]] || "todo";
-      const id = cb[2].toUpperCase();
-      const rest = cb[3].trim();
-      const noteSplit = rest.split(/\s+—\s+`?\[/);
-      const text = noteSplit[0].trim();
-      const note = noteSplit.length > 1 ? rest.slice(text.length).replace(/^\s*—\s*/, "").trim() : void 0;
-      steps.push({ id, text, status, note });
-      continue;
-    }
-    const cbSimple = line.match(/^-\s+\[([ xX\/!])\]\s+(.+)$/);
-    if (cbSimple) {
-      seq += 1;
-      steps.push({
-        id: `P${seq}`,
-        text: cbSimple[2].trim(),
-        status: MARK_TO_STATUS[cbSimple[1]] || "todo"
-      });
-      continue;
-    }
-    const num = line.match(/^(\d+)\.\s+(.+)$/);
-    if (num) {
-      seq += 1;
-      steps.push({
-        id: `P${num[1]}`,
-        text: num[2].trim(),
-        status: "todo"
-      });
-    }
-  }
-  return steps.length > 0 ? summarizeSteps(steps) : null;
-}
-function applyStepUpdateToMarkdown(markdown, stepId, status, note, agent) {
-  const targetId = String(stepId || "").trim().toUpperCase();
-  const parsed = parseCardProgress(markdown);
-  if (!parsed) {
-    return { updatedMarkdown: markdown, progress: null, matched: false };
-  }
-  let matched = false;
-  const noteTag = note ? `[${agent ? `${agent}: ` : ""}${note.replace(/\n/g, " ").trim().slice(0, 120)}]` : void 0;
-  const updatedSteps = parsed.steps.map((s) => {
-    if (s.id.toUpperCase() === targetId) {
-      matched = true;
-      return {
-        ...s,
-        status,
-        note: noteTag ?? s.note
-      };
-    }
-    return s;
-  });
-  if (!matched) {
-    return { updatedMarkdown: markdown, progress: parsed, matched: false };
-  }
-  const newSectionBody = updatedSteps.map((s) => {
-    const mark = STATUS_TO_MARK[s.status];
-    const suffix = s.note ? ` — ${s.note}` : "";
-    return `- [${mark}] **${s.id}:** ${s.text}${suffix}`;
-  }).join("\n");
-  let nextMd = markdown.replace(
-    /(##\s*O que fazer\s*\n)([\s\S]*?)(?=\n##\s+|$)/i,
-    `$1${newSectionBody}
-`
-  );
-  const mermaidMatch = nextMd.match(/(##\s*Fluxo\s*\n```mermaid\s*\n)([\s\S]*?)(```)/i);
-  if (mermaidMatch) {
-    const cleanMermaidLines = mermaidMatch[2].split("\n").filter((l) => !/^\s*style\s+P\d+\s+/i.test(l)).join("\n").trimEnd();
-    const styleLines = [];
-    for (const s of updatedSteps) {
-      if (s.status === "done") {
-        styleLines.push(`    style ${s.id} fill:#064e3b,stroke:#10b981,color:#d1fae5`);
-      } else if (s.status === "in_progress") {
-        styleLines.push(`    style ${s.id} fill:#451a03,stroke:#f59e0b,color:#fef3c7`);
-      } else if (s.status === "blocked") {
-        styleLines.push(`    style ${s.id} fill:#450a0a,stroke:#ef4444,color:#fee2e2`);
-      }
-    }
-    const rebuiltMermaid = styleLines.length > 0 ? `${cleanMermaidLines}
-${styleLines.join("\n")}
-` : `${cleanMermaidLines}
-`;
-    nextMd = nextMd.replace(
-      /(##\s*Fluxo\s*\n```mermaid\s*\n)([\s\S]*?)(```)/i,
-      `$1${rebuiltMermaid}$3`
-    );
-  }
-  return {
-    updatedMarkdown: nextMd,
-    progress: summarizeSteps(updatedSteps),
-    matched: true
-  };
-}
-async function executeCardProgress(ctx, input) {
-  const rawSlug = String(input.slug || "").trim().replace(/^cards\//i, "").replace(/\.md$/i, "");
-  if (!rawSlug) {
-    return {
-      ok: false,
-      code: "MISSING_SLUG",
-      message: "Informe o 'slug' do card (ex.: SPEC-0006-T020).",
-      cardPath: "",
-      progress: null,
-      writtenToDisk: false
-    };
-  }
-  const host = ctx == null ? void 0 : ctx.host;
-  if (!(host == null ? void 0 : host.readFile)) {
-    return {
-      ok: false,
-      code: "HOST_READ_UNAVAILABLE",
-      message: "ctx.host.readFile indisponível neste ambiente.",
-      cardPath: `cards/${rawSlug.toUpperCase()}.md`,
-      progress: null,
-      writtenToDisk: false
-    };
-  }
-  const candidates = Array.from(
-    /* @__PURE__ */ new Set([`cards/${rawSlug.toUpperCase()}.md`, `cards/${rawSlug}.md`, `cards/${rawSlug.toLowerCase()}.md`])
-  );
-  let foundPath = null;
-  let content = null;
-  for (const rel of candidates) {
-    try {
-      const raw = await host.readFile(`${ORGFY_ABS_PATH}/${rel}`);
-      content = decodeBytes$1(raw);
-      foundPath = rel;
-      break;
-    } catch {
-    }
-  }
-  if (!foundPath || !content) {
-    return {
-      ok: false,
-      code: "CARD_NOT_FOUND",
-      message: `Card não encontrado em ${ORGFY_ABS_PATH}/cards/ (tentativas: ${candidates.join(", ")}).`,
-      cardPath: candidates[0],
-      progress: null,
-      writtenToDisk: false
-    };
-  }
-  const action = input.action || (input.step_id && input.status ? "update" : "read");
-  if (action === "read") {
-    const progress = parseCardProgress(content);
-    return {
-      ok: Boolean(progress),
-      code: progress ? "OK" : "NO_STEPS_FOUND",
-      message: progress ? `Progresso de ${foundPath}: ${progress.done}/${progress.total} concluídas (${progress.pct}%). Próxima etapa: ${progress.nextPendingStepId || "nenhuma (concluído)"}.` : `Nenhuma etapa encontrada na seção '## O que fazer' de ${foundPath}.`,
-      cardPath: foundPath,
-      progress,
-      writtenToDisk: false
-    };
-  }
-  if (!input.step_id || !input.status) {
-    return {
-      ok: false,
-      code: "MISSING_STEP_OR_STATUS",
-      message: "Para action='update', informe 'step_id' (ex.: 'P1') e 'status' ('todo' | 'in_progress' | 'done' | 'blocked').",
-      cardPath: foundPath,
-      progress: parseCardProgress(content),
-      writtenToDisk: false
-    };
-  }
-  const applied = applyStepUpdateToMarkdown(content, input.step_id, input.status, input.note, input.agent);
-  if (!applied.matched || !applied.progress) {
-    return {
-      ok: false,
-      code: "STEP_NOT_FOUND",
-      message: `Etapa '${input.step_id}' não encontrada em ${foundPath}.`,
-      cardPath: foundPath,
-      progress: applied.progress,
-      writtenToDisk: false
-    };
-  }
-  let writtenToDisk = false;
-  const absCardFile = `${ORGFY_ABS_PATH}/${foundPath}`;
-  if (typeof host.writeFile === "function") {
-    await host.writeFile(absCardFile, applied.updatedMarkdown);
-    writtenToDisk = true;
-  } else if (typeof host.spawn === "function") {
-    try {
-      const b64 = typeof globalThis.Buffer !== "undefined" ? globalThis.Buffer.from(applied.updatedMarkdown, "utf-8").toString("base64") : btoa(unescape(encodeURIComponent(applied.updatedMarkdown)));
-      const proc = await host.spawn("bash", {
-        args: [`python3 -c "import base64, pathlib, sys; pathlib.Path(sys.argv[1]).write_bytes(base64.b64decode(sys.argv[2]))" "${absCardFile}" "${b64}"`]
-      });
-      const code = await proc.exited;
-      writtenToDisk = code === 0;
-    } catch {
-      writtenToDisk = false;
-    }
-  }
-  return {
-    ok: true,
-    code: "UPDATED",
-    message: `Etapa ${input.step_id.toUpperCase()} marcada como '${input.status}' em ${foundPath} (${applied.progress.done}/${applied.progress.total} · ${applied.progress.pct}%).`,
-    cardPath: foundPath,
-    progress: applied.progress,
-    updatedStepId: input.step_id.toUpperCase(),
-    writtenToDisk
-  };
-}
 function buildUnifiedOrgfyTools(ctx) {
   const rawTools = [
     {
@@ -5321,8 +5965,16 @@ function buildUnifiedOrgfyTools(ctx) {
           motivo: (args == null ? void 0 : args.motivo) || "Decisão emitida via OrgFy Control Room",
           revisor: (args == null ? void 0 : args.revisor) || "QA Sentinel"
         });
+        let attentionCleanup = null;
+        if (res.code === 0 && acao === "aceito") {
+          attentionCleanup = await cleanupAttentionOnStageChange(ctx, {
+            issueId: prId,
+            newStage: "feito",
+            empresa: (args == null ? void 0 : args.empresa) || "orgfy"
+          });
+        }
         return {
-          text: JSON.stringify({ status: res.code === 0 ? "ok" : "error", exitCode: res.code, output: res.output }, null, 2),
+          text: JSON.stringify({ status: res.code === 0 ? "ok" : "error", exitCode: res.code, attentionCleanup, output: res.output }, null, 2),
           isError: res.code !== 0
         };
       }
@@ -5390,7 +6042,8 @@ function buildUnifiedOrgfyTools(ctx) {
           owner: { type: "string" },
           revisor: { type: "string" },
           acceptance_command: { type: "string" },
-          branch: { type: "string" }
+          branch: { type: "string" },
+          exclusive_paths: { type: "array", items: { type: "string" }, description: "Paths de Escrita exclusiva para detectar colisão paralela (WRITE_SET_CONFLICT)" }
         },
         required: ["action"]
       },
@@ -5409,7 +6062,8 @@ function buildUnifiedOrgfyTools(ctx) {
             owner: args == null ? void 0 : args.owner,
             revisor: args == null ? void 0 : args.revisor,
             acceptanceCommand: args == null ? void 0 : args.acceptance_command,
-            branch: args == null ? void 0 : args.branch
+            branch: args == null ? void 0 : args.branch,
+            exclusivePaths: Array.isArray(args == null ? void 0 : args.exclusive_paths) ? args.exclusive_paths : void 0
           });
           return { text: JSON.stringify(res, null, 2), isError: !res.ok };
         }
@@ -5745,6 +6399,87 @@ function buildUnifiedOrgfyTools(ctx) {
           status: args == null ? void 0 : args.status,
           note: args == null ? void 0 : args.note,
           agent: args == null ? void 0 : args.agent
+        });
+        return { text: JSON.stringify(res, null, 2), isError: !res.ok };
+      }
+    },
+    {
+      name: "orgfy_roster_live",
+      description: "Raio-X real de presença em 1 chamada: reconcilia locks zumbis (lease 8m x snapshot/sessionState) e retorna quem está realmente FREE, WORKING_REAL, ALERT_RADAR ou MODEL_UNSUPPORTED.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          empresa: { type: "string", description: "Slug da empresa (default: 'orgfy')" },
+          reconcile: { type: "boolean", description: "Se true (padrão), limpa locks órfãos antes de listar" }
+        }
+      },
+      execute: async (args) => {
+        const res = await buildLiveAgentRoster(ctx, {
+          empresa: (args == null ? void 0 : args.empresa) || "orgfy",
+          reconcile: (args == null ? void 0 : args.reconcile) !== false
+        });
+        return { text: JSON.stringify(res, null, 2), isError: !res.ok };
+      }
+    },
+    {
+      name: "orgfy_handoff_pack",
+      description: "Gera pacote compacto de retomada ou revisão (checklist P1..Pn, Escrita exclusiva, comando L-22, git status/commits/diff e resumePrompt pronto) para zero desperdício de shells.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          slug: { type: "string", description: "Slug do card (ex.: 'SPEC-0006-T020')" },
+          issue_id: { type: "string" },
+          worktree_path: { type: "string" },
+          card_markdown: { type: "string" }
+        }
+      },
+      execute: async (args) => {
+        const res = await buildHandoffPack(ctx, {
+          slug: args == null ? void 0 : args.slug,
+          issue_id: args == null ? void 0 : args.issue_id,
+          worktree_path: args == null ? void 0 : args.worktree_path,
+          card_markdown: args == null ? void 0 : args.card_markdown
+        });
+        return { text: JSON.stringify(res, null, 2), isError: !res.ok };
+      }
+    },
+    {
+      name: "orgfy_smart_dispatch",
+      description: "Dispatcher Híbrido SOTA (Fase A Zero-Token: presença real + WRITE_SET_CONFLICT + L-01; Fase B One-Shot ctx.decisions.decide): recomenda ou despacha automaticamente para o melhor agente livre.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          issue_id: { type: "string" },
+          slug: { type: "string" },
+          titulo: { type: "string" },
+          objetivo: { type: "string" },
+          revisor: { type: "string" },
+          exclusive_paths: { type: "array", items: { type: "string" } },
+          acceptance_command: { type: "string" },
+          empresa: { type: "string" },
+          dry_run: { type: "boolean", description: "Padrão true (seguro): retorna recomendação sem despachar" },
+          auto_execute: { type: "boolean", description: "Se true, adquire lease curto 8m e acorda o agente escolhido quando confiança >= min_confidence e risco <= 3" },
+          min_confidence: { type: "number" },
+          channel_id: { type: "string" },
+          thread_root: { type: "string" }
+        },
+        required: ["issue_id", "titulo", "revisor", "exclusive_paths", "acceptance_command"]
+      },
+      execute: async (args) => {
+        const res = await runOneShotDecisionDispatch(ctx, {
+          issue_id: String((args == null ? void 0 : args.issue_id) || ""),
+          slug: args == null ? void 0 : args.slug,
+          titulo: String((args == null ? void 0 : args.titulo) || ""),
+          objetivo: args == null ? void 0 : args.objetivo,
+          revisor: String((args == null ? void 0 : args.revisor) || ""),
+          exclusive_paths: Array.isArray(args == null ? void 0 : args.exclusive_paths) ? args.exclusive_paths : [],
+          acceptance_command: String((args == null ? void 0 : args.acceptance_command) || ""),
+          empresa: (args == null ? void 0 : args.empresa) || "orgfy",
+          dry_run: args == null ? void 0 : args.dry_run,
+          auto_execute: Boolean(args == null ? void 0 : args.auto_execute),
+          min_confidence: typeof (args == null ? void 0 : args.min_confidence) === "number" ? args.min_confidence : void 0,
+          channel_id: args == null ? void 0 : args.channel_id,
+          thread_root: args == null ? void 0 : args.thread_root
         });
         return { text: JSON.stringify(res, null, 2), isError: !res.ok };
       }
@@ -15012,50 +15747,19 @@ testes/esteira/test_gate_state.py::test_regras_probatorias_eval PASSED
   if ((_b = ctx.agents) == null ? void 0 : _b.addInstructions) {
     try {
       ctx.agents.addInstructions({
-        id: "orgfy-governance-v11",
-        text: `Esteira OrgFy v12 (Holding Cortexx) — Governança Determinística & Ciclo Fechado:
-Você opera sobre a fábrica de software agêntica da holding Cortexx (empresas: orgfy, lumen-iptv, saas-tributario).
-Regras Invariantes:
-- Metodologia Specsfy + TDD Obrigatória por Nível/Effort (FAIL-CLOSED): NUNCA crie issues com 'buzz issues create' direto nem pule o Specsfy usando '--gate gate:qa'. Antes de abrir ou executar qualquer card: (1) carregue a skill Specsfy do Ato em '.agents/skills/' (Ato I: specsfy-01..04/interviewer; Ato II: specsfy-05/06-tdd-bdd; Ato III: specsfy-07-implement/documentator); (2) classifique Effort (1-10): Effort 1-2 (Z2 hotfix cirúrgico) exige prova TDD RED->GREEN + DECIDIDO ou specs/inbox/; Effort 3-6 (Z3) exige specs/<estado>/<NNNN>-<slug>/spec.md com Definition Gate: Passed e Plan Gate: Passed; Effort 7-10 (Z4) exige além disso entrevista estruturada e DECIDIDO explícito; (3) execute TDD real (teste falhando em RED pelo motivo certo -> alteração cirúrgica em Escrita exclusiva -> GREEN + REFACTOR); (4) gere via 'orgfy_card_create' (com effort, spec_path, ato), valide com './ferramentas/card-lint.sh' e publique exclusivamente via './ferramentas/buzz-issue-guard.sh'.
-- L-01 a L-90: Qualquer modificação de código deve ser estritamente rastreada e validada pela esteira determinística.
-- L-22: O comando de aceite é imutável e blindado por hash SHA-256 no momento do despacho. Nunca afrouxe critérios de aceite.
-- L-90: Regras probatórias RSI em .esteira/estado/regras-probatorias.json são avaliadas contra o FPY histórico (First Pass Yield).
-- Hard Cap Orçamentário (80% alerta / 100% bloqueio): Despachos são bloqueados ao atingir 100% do teto diário salvo board_override=true.
-- Checkout Lock Atômico (Nostr 64-hex): Nenhum card pode ser executado em paralelo por dois agentes; adquira lock passando SEMPRE o issue_id Nostr completo (64 hex) + title, revisor, acceptance_command e branch.
-- DSAP Backtracking: Na 2ª recusa consecutiva com similaridade >= 0.70, o card entra em backtracking para o COO re-escopar.
-- Atribuição de Issues (FERR-ASSIGN-AUTH): NUNCA execute 'buzz issues assign' diretamente (falha com auth_error Kind 1 em chamadores locais); use sempre 'python3 ferramentas/assign_issue.py' na raiz do REPOS/orgfy.
-- Placar / Contagem de Issues Abertas (Regra do Desktop NIP-34): NUNCA use 'buzz issues list' cru para contar issues abertas (ele retorna todos os 533+ eventos kind:1621 sem status). Use SEMPRE 'python3 ferramentas/issue_status.py --resumo' (que aplica a regra do Desktop via kinds 1621+1630-1633) ou 'orgfy_status' / 'orgfy_kanban_read'.
-- Push autenticado no Relay (worktree): Se 'git push relay' falhar com exit 128 ('no nostr key configured'), chame a tool 'buzz__repo' para obter o header 'Authorization: Nostr ...', injete via 'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.<relay_git_url>.extraHeader GIT_CONFIG_VALUE_0="Authorization: Nostr ..."' (sem persistir segredo) e reexecute 'entregar'.
-- Leitura Direta de Cards e PRs (Zero '--help'): Arquivos 'cards/*.md' ficam na raiz '/Users/heltonfraga/.buzz/REPOS/orgfy/cards/' (não dentro da worktree). Sem desperdiçar turnos em '--help': (a) ler issue: 'buzz issues get --event <id-64> --repo 7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20/orgfy'; (b) atualizar PR após novo commit/rebase: 'buzz pr update --repo-owner 7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20 --repo orgfy --pr <pr-id-64> --commit <sha-40>'.
-- Freio Anti-Loop (Máximo 12 'shell's): NUNCA ultrapasse 12 comandos 'shell' sem commit nem repita o mesmo erro 2 vezes seguidas. Ao bater 2 falhas consecutivas no mesmo passo ou 12 'shell's sem avanço, PARE imediatamente e publique 'BLOQUEADO | por: <seu perfil> | motivo: ... | falta: ... | resolve: <perfil>'.
-- Escalonamento Hierárquico por Empresa (Preservação da CEO Holding): A ordem obrigatória de escalonamento operacional é Agente → COO da empresa (ex.: OrgFy Bento) → CEO da empresa específica (ex.: Lumen Lara na Lumen IPTV, Tributario CEO no SaaS Tributário) → CEO da Holding (OrgFy Iris) APENAS em último caso. PROIBIDO acionar OrgFy Iris para loops rotineiros de esteira; o COO da empresa resolve em Nível 1 e só escala ao CEO da empresa se não conseguir resolver ou se o próprio COO travar.
-- Regra Anti-Escopo Aberto (Iris / CEOs / Despachos ao COO e Executores): PROIBIDO delegar ao COO ou a executores com pedido aberto (ex.: 'escolha o próximo item da auditoria', 'veja o que falta'). Todo acionamento DEVE declarar: (a) alvo concreto (slug/bug + 1 a 3 arquivos exatos), (b) critério de pronto / comando de aceite L-22 esperado e (c) o que NÃO refazer.
-- Consistência Card ↔ Issue & Escrita Exclusiva: Antes de despachar, garanta que o card versionado em 'cards/' tenha exatamente o mesmo Executor, Revisor, Branch e lista de 'Escrita exclusiva' que a issue Nostr despachada (todo arquivo citado em 'O que fazer' DEVE constar em 'Escrita exclusiva').
-- Orçamento de Exploração do COO (Bento): ao receber acionamento para emitir card, limite a leitura exploratória a no máximo 10 comandos 'shell' (<= 5 min). Se o escopo chegar aberto ou ambíguo, NÃO varra o repositório inteiro — responda em 1 turno pedindo o alvo fechado (ou proponha 1 candidato concreto para aprovação).
-- Limite de Turno para Revisores (Teo, Bento Arquiteto, Vera, QA Sentinel — Máximo 15 'shell's): em uma revisão, rode o comando de aceite L-22, confira o diff/escopo e emita imediatamente 'GATE: aceito' ou 'GATE: recusado' (e encerre). PROIBIDO abrir sessões longas de debug de 'porteiro.py'/'esteira_minima.py' durante uma revisão — se o merge atrasar, reporte em 1 linha e saia.
-- Isolamento Estrito de Worktree (Proibido git checkout na raiz): NUNCA execute 'git checkout --detach' ou troque de branch dentro da raiz '/Users/heltonfraga/.buzz/REPOS/orgfy' (isso corrompe o estado compartilhado para todos os agentes). Para revisar ou comparar BASE_VS_AGORA, crie SEMPRE uma worktree isolada e remova-a ao final.
-- Protocolo de Auto-Cura em Ciclo Fechado (Função Nível 1 do COO — Bento; CEO da empresa em Nível 2; Iris só em último caso): TODO wake '[ORGFY RADAR AUTO-CURA]' é uma ORDEM OPERACIONAL OBRIGATÓRIA (NUNCA trate como 'dado passivo de plugin' nem ignore em silêncio) e INTERROMPER UM AGENTE NUNCA ENCERRA O TURNO DO COO. ANTES de despachar ou cobrar (e SEMPRE que acordado pelo Radar), chame 'orgfy_loop_radar({ apenas_ativos: true })'. Ao interromper uma sessão em loop, execute obrigatoriamente 1 dos 3 desfechos imediatos: (A) Erro de API/provider (502/503/No available accounts/Kiro) -> 'orgfy_session_stop(action="interrupt")' + 'orgfy_model_failover({ agente, agent_pubkey, channel_id, thread_root, prefer_free: true, apply: true, retrigger: true })'; (B) Demanda ainda aberta (ESCOPO_ABERTO, COMPACTACAO_LOOP, ERRO_REPETIDO) -> chame 'orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: "interrupt", relaunch: true, reset_session_before_relaunch: true, relaunch_instruction: "<o que corrigir/fazer>", target_files: ["<1-3 arquivos>"], acceptance_command: "<comando L-22>", max_shells: 10, reason })' para que a própria ferramenta relance o agente já com '@Nome Exato' e escopo fechado; (C) ITEM_JA_FECHADO (já na main) -> interrompa sem relançar. Publique 'AUTO-CURA | agente | causa-raiz | ação tomada' no canal.
-- Decisor Híbrido v12: orgfy_lint_card usa Decisions API com fallback determinístico offline automático (ferramentas/esteira/decisor_fallback.py) em caso de falta de saldo ou timeout.
-- Guarda de Identidade & Anti-Loop de Wake (Zero Desperdício): (1) Se você for acordado por uma menção '@OrgFy <OutroPerfil>' que não corresponde exatamente ao seu nome de agente (ex.: '@OrgFy Hugo' caindo na sessão de 'OrgFy Teo'), NÃO execute comandos nem tente adivinhar — responda imediatamente apenas '[SILENT]'; (2) Se um wake repetido chegar numa thread em que o card já está explicitamente aguardando GATE/parecer de outro agente (e não houve novo commit/evento), responda apenas '[SILENT]'.
-Ferramentas nativas disponíveis neste plugin:
-1. orgfy_status({ empresa? }): Consulta o placar de 20h, FPY, CPI de tokens, contagem de aceites, merged e raias da esteira.
-2. orgfy_kanban_read({ stage?, empresa? }): Lê a matriz Kanban completa (triagem, despachado, execucao, revisao, feito) apenas com cards vinculados a Issues Nostr reais (64 hex).
-3. orgfy_despachar({ issue_id, executor, revisor, empresa?, board_override? }): Despacha card em worktree isolado respeitando Hard Cap orçamentário, template OrgFy/Spec-Kit e lock atômico.
-4. orgfy_gate({ pr_id, decisao, motivo, revisor, empresa? }): Aplica o Gate Caixa-Preta (aceito/recusado) com probes de validação.
-5. orgfy_porteiro_sync({ empresa? }): Dispara sincronização determinística de eventos Nostr e ciclo de execução.
-6. orgfy_kpis({ recalcular? }): Lê os KPIs reais de Fluxo, Qualidade, Economia e Higiene (kpis-esteira.json) e opcionalmente recalcula via script Python.
-7. orgfy_checkout_lock({ action, issue_id?, agent_id?, ttl_minutes?, title?, revisor?, acceptance_command?, branch? }): Gerencia lock atômico de checkout (acquire, release, list) com resolução automática para 64-hex Nostr.
-8. orgfy_governanca_avaliar({ dry_run?, auto_wake? }): Avalia orçamento, fila de revisão, WIP órfão e estagnação nível 3, disparando alertas/wakes com cooldown anti-spam.
-9. orgfy_lint_card({ title, objective?, done_when?, acceptance_command?, executor?, revisor?, card_markdown?, spec_path? }): Audita template OrgFy/Spec-Kit, qualidade semântica e regras L-01/L-22 antes do despacho.
-10. orgfy_bind_context({ conversation_id, issue_id, worktree_path?, title?, acceptance_command?, acceptance_hash?, executor?, revisor? }): Vincula o worktree e injeta regras vivas L-22/L-90 direto na conversa do agente.
-11. orgfy_historico_buscar({ query?, spec?, limit? }): Busca just-in-time no Arquivo de Issues Resolvidas por código, causa raiz, arquivo ou SHA.
-12. orgfy_loop_radar({ apenas_ativos?, agente? }): Inspeciona o Radar de Loops & Sessões Zumbis do Goose em tempo real (LOOP_SUSPEITO, STALLED_THINKING, SESSAO_DUPLICADA, EXPLORACAO_CLI_HELP) com channel_id, thread_root, agent_pubkey, ultimo_shell e acao_sugerida.
-13. orgfy_session_stop({ agente, agent_pubkey?, channel_id?, thread_root?, action?, release_issue_id?, reason? }): Interrompe (Stop) ou reinicia imediatamente o turno de um agente travado ou em trabalho inútil via API nativa do Buzz Desktop (action: 'interrupt' | 'new' | 'compact'), com liberação opcional de lock.
-14. orgfy_model_failover({ agente?, agent_pubkey?, failed_model?, prefer_free?, apply?, retrigger?, channel_id?, thread_root?, retrigger_text? }): Integração OrgFy ↔ NexusMind Gateway — faz ping real nos modelos mais inteligentes disponíveis no NexusMind, elege o melhor online (inteligência + menor latência real em ms), atualiza o modelo do agente via ctx.agents.save() e re-dispara na thread original.
-15. orgfy_card_create({ slug, titulo, autoridade, decisao, executor, revisor, escrita_exclusiva, feito_quando, acceptance_command, ... }): Abertura schema-first de card OrgFy com triagem em cascata via Decisions API (risco, tier modelo, política Attention), hash L-22 SHA-256 congelado, contrato nativo Buzz Attention/Watch (interest_set + watch_add) e validação opcional via card-lint.sh.
-16. orgfy_decision_triage({ mode: 'card' | 'diff', ... }): Classificação rápida em batch via Buzz Decisions API (yes_no + score + choice) com fallback determinístico offline para triagem de card ou pre-flight de diff/entrega (Escrita exclusiva + L-24).
-17. orgfy_card_progress({ slug, action?: 'read' | 'update', step_id?, status?, note?, agent? }): Lê ou atualiza o checklist vivo P1..Pn em cards/<SLUG>.md e colore automaticamente o grafo Mermaid '## Fluxo'. Use ao iniciar/concluir cada etapa para retomada determinística pós-queda.
-Consulte sempre orgfy_status, orgfy_kpis, orgfy_loop_radar ou orgfy_kanban_read para inspecionar métricas reais antes de agir. Ao abrir novos cards, prefira sempre orgfy_card_create em vez de redigir Markdown livre.`
+        id: "orgfy-governance-v13-lean",
+        text: `Esteira OrgFy v13.5 (Holding Cortexx: orgfy, lumen-iptv, saas-tributario) — Núcleo Lean & Role-Scoped:
+INVARIANTS UNIVERSAIS (TODOS OS PAPÉIS):
+- L-01 / L-22 / L-90: Executor != Revisor; aceite L-22 imutável (SHA-256); nunca afrouxe testes ou gates.
+- Specsfy + TDD (FAIL-CLOSED): nunca use 'buzz issues create' direto nem '--gate gate:qa'. Effort 1-2 (Z2): TDD RED->GREEN; Effort 3-6 (Z3): exige spec.md com Definition/Plan Gate Passed; Effort 7-10 (Z4): + DECIDIDO. Crie via 'orgfy_card_create', valide com './ferramentas/card-lint.sh' e publique via './ferramentas/buzz-issue-guard.sh'.
+- Guarda de Identidade & Freio Anti-Loop: menção para '@OutroPerfil' ou thread aguardando GATE de outro -> responda apenas '[SILENT]'. Máx 12 shells sem commit / 2 falhas consecutivas -> pare e publique 'BLOQUEADO | por | motivo | falta | resolve'. Nunca faça 'git checkout' na raiz do repo (use worktree isolado).
+- Ferramentas-chave de 1 chamada: 'orgfy_roster_live' (quem está livre de verdade + limpa locks zumbis), 'orgfy_handoff_pack' (retomada/revisão P1..Pn + git), 'orgfy_smart_dispatch' (delegação one-shot L-01 + WRITE_SET_CONFLICT), 'orgfy_card_progress', 'orgfy_checkout_lock' (sempre passe exclusive_paths), 'orgfy_loop_radar', 'orgfy_session_stop', 'orgfy_model_failover', 'orgfy_gate'.
+
+REGRAS POR PAPEL (APLIQUE APENAS O SEU):
+- [Executor]: use 'orgfy_handoff_pack' ao retomar; mantenha 'orgfy_card_progress' atualizado; edite apenas Escrita exclusiva; se 'git push relay' der exit 128, pegue o header via 'buzz__repo' com GIT_CONFIG_COUNT=1.
+- [Revisor]: máx 15 shells; use 'orgfy_handoff_pack', rode o comando L-22, confira diff/escopo e emita 'GATE: aceito' ou 'GATE: recusado' imediatamente (nunca debugue porteiro.py em revisão).
+- [COO]: antes de delegar chame 'orgfy_roster_live' e 'orgfy_smart_dispatch'; limite exploração a 10 shells; escale Agente -> COO -> CEO Empresa -> Iris (só último caso). Todo wake '[ORGFY RADAR AUTO-CURA]' exige 1 desfecho fechado: (A) erro API -> stop + 'orgfy_model_failover'; (B) aberto -> 'orgfy_session_stop(relaunch=true, reset_session_before_relaunch=true)'; (C) já na main -> stop sem relançar. Use 'python3 ferramentas/assign_issue.py' (nunca 'buzz issues assign' direto) e 'python3 ferramentas/issue_status.py --resumo' para placar.
+- [CEO / Board]: delegue sempre com alvo fechado (1-3 arquivos + critério L-22 + o que não refazer).`
       });
       console.log("[ORGFY] ctx.agents.addInstructions registrado com sucesso.");
     } catch (err) {
@@ -15108,19 +15812,26 @@ export {
   apply,
   applyStepUpdateToMarkdown,
   buildBuzzAttentionContract,
+  buildHandoffPack,
+  buildLiveAgentRoster,
   buildUnifiedOrgfyTools,
   checkMentionTargetIdentity,
   checkThreadWakeAntiLoop,
+  cleanupAttentionOnStageChange,
   createCanonicalCard,
   executeCardProgress,
   getBuzzNativeState,
+  getOrgfyPipelineEvents,
   getTelemetrySnapshot,
   hydrateIssueDetail,
   inject,
   parseCardProgress,
+  reconcileAgentPresenceAndLocks,
   registerBuzzNativeIntegrations,
+  resetPresenceStateForTests,
   resetTelemetryForTests,
   resetThreadWakeGuardForTests,
+  runOneShotDecisionDispatch,
   triageCardWithDecisions,
   triageDiffWithDecisions
 };

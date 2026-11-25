@@ -530,10 +530,16 @@ def main() -> int:
                 flags.append("ITEM_JA_FECHADO")
                 severidade = "critical"
 
-            # 2. Estouro de contexto (compactação) em sessão ativa
-            if item["compactions"] >= 1:
+            # 2. Estouro de contexto (compactação) em sessão ativa (só crítico se houver trabalho/erro real, evitando auto-loop de telemetria)
+            if item["compactions"] >= 1 and (
+                shell_count >= 8 or item["consecutive_errors"] >= 2 or item["last_msg_is_provider_error"]
+            ):
                 flags.append("CONTEXTO_COMPACTADO")
                 severidade = "critical"
+            elif item["compactions"] >= 3:
+                flags.append("CONTEXTO_COMPACTADO")
+                if severidade == "ok":
+                    severidade = "warn"
 
             # 3. Turno contínuo excessivo (>= 35m OU >= 35 shells desde último <mention> real)
             if item["turno_min"] >= 35.0 or shell_count >= 35:
