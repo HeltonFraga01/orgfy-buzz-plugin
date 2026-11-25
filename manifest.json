@@ -16,6 +16,11 @@
     ]
   },
   "host": {
+    "agentHooks": [
+      "buzz.pi/pi",
+      "buzz.claude-code/claude-code",
+      "buzz.goose/goose"
+    ],
     "networkOrigins": [
       "https://api.cortexx.digital",
       "https://api.nexusmind.digital",

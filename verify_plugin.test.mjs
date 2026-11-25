@@ -739,7 +739,7 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
 
   orgfyMod.resetTelemetryForTests();
 
-  const nativeEvents = { relay: 0, completions: 0, actions: 0, sidebars: [], shortcuts: 0, attentionSources: 0, hooks: [], agentTabs: [] };
+  const nativeEvents = { relay: 0, completions: [], actions: [], sidebars: [], shortcuts: [], attentionSources: [], hooks: [], agentTabs: [] };
   const nativeCtx = {
     react: { createElement: () => null },
     relay: {
@@ -747,15 +747,15 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
       subscribe: () => { nativeEvents.relay++; return () => {}; },
     },
     conversation: {
-      registerCompletion: () => { nativeEvents.completions++; },
-      registerMessageAction: () => { nativeEvents.actions++; },
+      registerCompletion: (comp) => { nativeEvents.completions.push(comp); },
+      registerMessageAction: (act) => { nativeEvents.actions.push(act); },
     },
     reflect: {
       get: (name) => name === "sidebarSections" ? { register: (sec) => { nativeEvents.sidebars.push(sec); } } : undefined,
     },
-    shortcuts: { register: () => { nativeEvents.shortcuts++; } },
+    shortcuts: { register: (sc) => { nativeEvents.shortcuts.push(sc); } },
     agents: {
-      addAttentionSource: () => { nativeEvents.attentionSources++; },
+      addAttentionSource: (src) => { nativeEvents.attentionSources.push(src); },
       registerHook: (hk) => { nativeEvents.hooks.push(hk); },
       registerTab: (tab) => { nativeEvents.agentTabs.push(tab); },
     },
@@ -764,23 +764,30 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
   const nativeState = orgfyMod.registerBuzzNativeIntegrations(nativeCtx);
   assert.equal(nativeState.relayConnected, true);
   assert.equal(nativeState.conversationRegistered, true);
+  assert.equal(nativeEvents.completions.length, 1);
+  assert.equal(typeof nativeEvents.completions[0].match, "function", "registerCompletion deve usar match()");
+  assert.deepEqual(nativeEvents.completions[0].match({ text: "/orgfy-card", end: 11, revision: 1 }, {}), { start: 0, end: 11, query: "orgfy-card" });
+  assert.equal(nativeEvents.actions.length, 1);
+  assert.equal(typeof nativeEvents.actions[0].matches, "function", "registerMessageAction deve usar matches()");
   assert.equal(nativeState.sidebarRegistered, true);
   assert.equal(nativeEvents.sidebars.length, 1);
   const sidebarSec = nativeEvents.sidebars[0];
   assert.strictEqual(sidebarSec.rows.snapshot(), sidebarSec.rows.snapshot(), "sidebar snapshot() deve retornar referência estável para useSyncExternalStore");
   assert.equal(sidebarSec.select(sidebarSec.rows.snapshot()[0]).pluginId, "digital.cortexx.orgfy", "sidebar select() deve usar pluginId digital.cortexx.orgfy");
   assert.equal(nativeState.shortcutsRegistered, true);
+  assert.deepEqual(nativeEvents.shortcuts[0].binding, { key: "o", mod: true, shift: true }, "shortcut deve usar objeto KeyBinding");
   assert.equal(nativeState.attentionSourceRegistered, true);
+  assert.equal(typeof nativeEvents.attentionSources[0].run, "function", "AttentionSource deve implementar run(input)");
   assert.equal(nativeState.otelHookRegistered, true);
   assert.equal(nativeState.agentTabRegistered, true, "aba OrgFy deve ser registrada nos perfis dos agentes via ctx.agents.registerTab");
   assert.equal(nativeEvents.agentTabs.length, 1);
   assert.equal(nativeEvents.agentTabs[0].title, "OrgFy");
   assert.equal(orgfyMod.getBuzzNativeState().agentTabRegistered, true);
 
-  const failHook = nativeEvents.hooks.find((hk) => hk.event === "turn.failed");
-  assert.ok(failHook, "hook OTel turn.failed deve estar registrado");
-  failHook.run({ model: "gemini-3.8-flash-medium", error: "HTTP 429" }, { agent: "OrgFy Val", session: "s1" });
-  failHook.run({ model: "gemini-3.8-flash-medium", error: "HTTP 429" }, { agent: "OrgFy Val", session: "s1" });
+  const failHook = nativeEvents.hooks.find((hk) => hk.harness === "buzz.pi/pi" && hk.event === "afterTool");
+  assert.ok(failHook, "hook OTel buzz.pi/pi afterTool deve estar registrado");
+  failHook.run({ toolName: "bash", isError: true, error: "HTTP 429" }, { agent: "OrgFy Val", session: "s1" });
+  failHook.run({ toolName: "bash", isError: true, error: "HTTP 429" }, { agent: "OrgFy Val", session: "s1" });
 
   await orgfyMod.triageCardWithDecisions({}, {
     titulo: "Atualizar README de fixture",

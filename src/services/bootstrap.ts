@@ -80,10 +80,8 @@ export async function executeBootstrapFlow(
   update("repo", "running", "Auditando estrutura de REPOS/orgfy, manifestos e provisionando .worktrees/...");
   try {
     if (ctx?.host?.spawn) {
-      const proc = await ctx.host.spawn("bash", {
-        args: [
-          `cd "${ORGFY_ABS_PATH}" && mkdir -p .worktrees && git worktree prune && (git worktree list | grep -q "_runner_esteira" || git worktree add -B _runner_esteira .worktrees/_runner_esteira HEAD 2>/dev/null || mkdir -p .worktrees/_runner_esteira)`
-        ],
+      const proc = await ctx.host.spawn("git", {
+        args: ["-C", ORGFY_ABS_PATH, "worktree", "prune"],
       });
       await proc.exited;
     }
@@ -238,17 +236,21 @@ export async function ensureCardWorktree(
 ): Promise<{ ok: boolean; path: string }> {
   const slug = cardSlugOrId.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "card-worktree";
   const wtPath = `${ORGFY_ABS_PATH}/.worktrees/${slug}`;
-  const branchName = branch || `card/${slug}`;
+  const branchName = String(branch || `card/${slug}`).trim();
+  if (!/^[A-Za-z0-9._/-]{1,120}$/.test(branchName) || branchName.includes("..")) {
+    return { ok: false, path: wtPath };
+  }
 
   if (!ctx?.host?.spawn) {
-    return { ok: true, path: wtPath };
+    return { ok: false, path: wtPath };
   }
 
   try {
-    const cmd = `cd "${ORGFY_ABS_PATH}" && mkdir -p .worktrees && if [ ! -d ".worktrees/${slug}" ]; then git worktree add -B "${branchName}" ".worktrees/${slug}" HEAD 2>/dev/null || mkdir -p ".worktrees/${slug}"; fi`;
-    const proc = await ctx.host.spawn("bash", { args: [cmd] });
-    await proc.exited;
-    return { ok: true, path: wtPath };
+    const proc = await ctx.host.spawn("git", {
+      args: ["-C", ORGFY_ABS_PATH, "worktree", "add", "-B", branchName, wtPath, "HEAD"],
+    });
+    const code = await proc.exited;
+    return { ok: code === 0, path: wtPath };
   } catch (_e) {
     return { ok: false, path: wtPath };
   }

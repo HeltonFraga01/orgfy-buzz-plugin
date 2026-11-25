@@ -351,8 +351,8 @@ export async function executeCardProgress(
       const b64 = typeof (globalThis as any).Buffer !== "undefined"
         ? (globalThis as any).Buffer.from(applied.updatedMarkdown, "utf-8").toString("base64")
         : btoa(unescape(encodeURIComponent(applied.updatedMarkdown)));
-      const proc = await host.spawn("bash", {
-        args: [`python3 -c "import base64, pathlib, sys; pathlib.Path(sys.argv[1]).write_bytes(base64.b64decode(sys.argv[2]))" "${absCardFile}" "${b64}"`],
+      const proc = await host.spawn("python3", {
+        args: ["-c", "import base64, pathlib, sys; pathlib.Path(sys.argv[1]).write_bytes(base64.b64decode(sys.argv[2]))", absCardFile, b64],
       });
       const code = await proc.exited;
       writtenToDisk = code === 0;

@@ -129,8 +129,8 @@ export async function executeAgentMigration(
   appendChunk("[MIGRATION] Iniciando sincronização atômica de agentes OrgFy para v10...\n");
 
   if (!ctx?.host?.spawn) {
-    appendChunk("[SIMULADO] 16 agentes migrados para /Users/heltonfraga/.buzz/REPOS/orgfy com sucesso.\n");
-    return { success: true, output: combinedOutput };
+    appendChunk("[ERRO] ctx.host.spawn indisponível para executar migração.\n");
+    return { success: false, output: combinedOutput };
   }
 
   try {

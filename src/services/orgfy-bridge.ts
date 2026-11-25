@@ -1002,8 +1002,8 @@ export async function executeDespachar(
   appendChunk(`[EXEC] python3 ${pyArgs.join(" ")}\n`);
 
   if (!ctx?.host?.spawn) {
-    appendChunk("[SIMULADO] Aceite congelado para " + options.issueId + ". Tier classificado. Despachado com sucesso.\n");
-    return { code: 0, output: combinedOutput };
+    appendChunk("[ERRO] ctx.host.spawn indisponível para despachar " + options.issueId + ".\n");
+    return { code: 1, output: combinedOutput };
   }
 
   const isTransientRelayMiss = (text: string) =>
@@ -1088,8 +1088,8 @@ export async function executeGate(
   appendChunk(`[EXEC] python3 ${pyArgs.join(" ")}\n`);
 
   if (!ctx?.host?.spawn) {
-    appendChunk(`[SIMULADO] Gate ${options.acao} emitido para ${options.prId} por ${options.revisor}.\n`);
-    return { code: 0, output: combinedOutput };
+    appendChunk(`[ERRO] ctx.host.spawn indisponível para executar Gate em ${options.prId}.\n`);
+    return { code: 1, output: combinedOutput };
   }
 
   try {
@@ -1135,8 +1135,8 @@ export async function executePorteiroSync(
   appendChunk(`[EXEC] python3 ${pyArgs.join(" ")}\n`);
 
   if (!ctx?.host?.spawn) {
-    appendChunk("[SIMULADO] Porteiro sincronizado com sucesso.\n");
-    return { code: 0, output: combinedOutput };
+    appendChunk("[ERRO] ctx.host.spawn indisponível para sincronizar Porteiro.\n");
+    return { code: 1, output: combinedOutput };
   }
 
   try {
@@ -1353,7 +1353,7 @@ export async function ensureWorktreeInfrastructure(ctx: any): Promise<{
   output: string;
 }> {
   if (!ctx?.host?.spawn) {
-    return { success: true, worktrees: ["_runner_esteira"], output: "[SIMULADO] Worktrees garantidas.\n" };
+    return { success: false, worktrees: [], output: "[ERRO] ctx.host.spawn indisponível para listar worktrees.\n" };
   }
 
   let output = "";

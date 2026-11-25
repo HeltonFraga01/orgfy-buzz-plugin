@@ -490,8 +490,8 @@ export async function createCanonicalCard(
       const b64 = typeof (globalThis as any).Buffer !== "undefined"
         ? (globalThis as any).Buffer.from(markdown, "utf-8").toString("base64")
         : btoa(unescape(encodeURIComponent(markdown)));
-      const proc = await ctx.host.spawn("bash", {
-        args: [`python3 -c "import base64, pathlib, sys; p = pathlib.Path(sys.argv[1]); p.parent.mkdir(parents=True, exist_ok=True); p.write_bytes(base64.b64decode(sys.argv[2]))" "${absCardPath}" "${b64}"`],
+      const proc = await ctx.host.spawn("python3", {
+        args: ["-c", "import base64, pathlib, sys; p = pathlib.Path(sys.argv[1]); p.parent.mkdir(parents=True, exist_ok=True); p.write_bytes(base64.b64decode(sys.argv[2]))", absCardPath, b64],
       });
       const code = await proc.exited;
       writtenToDisk = code === 0;
@@ -503,8 +503,9 @@ export async function createCanonicalCard(
   if (input.run_lint && writtenToDisk && ctx?.host?.spawn) {
     try {
       let combined = "";
-      const proc = await ctx.host.spawn("bash", {
-        args: [`cd "${ORGFY_ABS_PATH}" && ./ferramentas/card-lint.sh "${cardPath}"`],
+      const proc = await ctx.host.spawn("./ferramentas/card-lint.sh", {
+        args: [cardPath],
+        cwd: ORGFY_ABS_PATH,
         onStdout: (chunk: string) => {
           combined += chunk;
         },

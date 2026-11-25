@@ -126,7 +126,7 @@ export function recordGenAISpan(
   }
 
   // Atualiza contadores por agente para detecção de retry cascades
-  if (span.operationName === "invoke_agent") {
+  if (span.operationName === "invoke_agent" || span.operationName === "execute_tool") {
     const key = span.agentName;
     const prev = agentCounters.get(key) || {
       totalTurns: 0,

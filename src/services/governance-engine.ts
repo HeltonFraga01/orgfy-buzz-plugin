@@ -1611,9 +1611,9 @@ export interface ModelFailoverResult {
 }
 
 export const MODEL_FAILOVER_CHAIN: ModelFailoverEntry[] = [
-  { provider: "nexusmind_openai", model: "antigravity/gemini-3.8-flash-medium" },
-  { provider: "nexusmind_openai", model: "gpt-6.1-terra" },
+  { provider: "nexusmind_anthropic", model: "claude-sonnet-4-6" },
   { provider: "nexusmind_anthropic", model: "claude-sonnet-5-5" },
+  { provider: "nexusmind_antigravity", model: "gemini-2.5-flash" },
   { provider: "nexusmind_grok", model: "grok-4.1-fast" },
 ];
 

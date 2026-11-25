@@ -739,8 +739,8 @@ async function executeDespachar(ctx, options) {
   appendChunk(`[EXEC] python3 ${pyArgs.join(" ")}
 `);
   if (!((_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.spawn)) {
-    appendChunk("[SIMULADO] Aceite congelado para " + options.issueId + ". Tier classificado. Despachado com sucesso.\n");
-    return { code: 0, output: combinedOutput };
+    appendChunk("[ERRO] ctx.host.spawn indisponível para despachar " + options.issueId + ".\n");
+    return { code: 1, output: combinedOutput };
   }
   const isTransientRelayMiss = (text) => /(n[aã]o foi poss[ií]vel obter conte[uú]do|not found|n[aã]o encontrad|timeout|timed out|relay)/i.test(text);
   const maxAttempts = 3;
@@ -809,9 +809,9 @@ async function executeGate(ctx, options) {
   appendChunk(`[EXEC] python3 ${pyArgs.join(" ")}
 `);
   if (!((_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.spawn)) {
-    appendChunk(`[SIMULADO] Gate ${options.acao} emitido para ${options.prId} por ${options.revisor}.
+    appendChunk(`[ERRO] ctx.host.spawn indisponível para executar Gate em ${options.prId}.
 `);
-    return { code: 0, output: combinedOutput };
+    return { code: 1, output: combinedOutput };
   }
   try {
     const proc = await ctx.host.spawn("bash", {
@@ -848,8 +848,8 @@ async function executePorteiroSync(ctx, options) {
   appendChunk(`[EXEC] python3 ${pyArgs.join(" ")}
 `);
   if (!((_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.spawn)) {
-    appendChunk("[SIMULADO] Porteiro sincronizado com sucesso.\n");
-    return { code: 0, output: combinedOutput };
+    appendChunk("[ERRO] ctx.host.spawn indisponível para sincronizar Porteiro.\n");
+    return { code: 1, output: combinedOutput };
   }
   try {
     const proc = await ctx.host.spawn("bash", {
@@ -1089,10 +1089,8 @@ async function executeBootstrapFlow(ctx, onStepUpdate) {
   update("repo", "running", "Auditando estrutura de REPOS/orgfy, manifestos e provisionando .worktrees/...");
   try {
     if ((_b = ctx == null ? void 0 : ctx.host) == null ? void 0 : _b.spawn) {
-      const proc = await ctx.host.spawn("bash", {
-        args: [
-          `cd "${ORGFY_ABS_PATH}" && mkdir -p .worktrees && git worktree prune && (git worktree list | grep -q "_runner_esteira" || git worktree add -B _runner_esteira .worktrees/_runner_esteira HEAD 2>/dev/null || mkdir -p .worktrees/_runner_esteira)`
-        ]
+      const proc = await ctx.host.spawn("git", {
+        args: ["-C", ORGFY_ABS_PATH, "worktree", "prune"]
       });
       await proc.exited;
     }
@@ -2323,8 +2321,8 @@ async function executeCardProgress(ctx, input) {
   } else if (typeof host.spawn === "function") {
     try {
       const b64 = typeof globalThis.Buffer !== "undefined" ? globalThis.Buffer.from(applied.updatedMarkdown, "utf-8").toString("base64") : btoa(unescape(encodeURIComponent(applied.updatedMarkdown)));
-      const proc = await host.spawn("bash", {
-        args: [`python3 -c "import base64, pathlib, sys; pathlib.Path(sys.argv[1]).write_bytes(base64.b64decode(sys.argv[2]))" "${absCardFile}" "${b64}"`]
+      const proc = await host.spawn("python3", {
+        args: ["-c", "import base64, pathlib, sys; pathlib.Path(sys.argv[1]).write_bytes(base64.b64decode(sys.argv[2]))", absCardFile, b64]
       });
       const code = await proc.exited;
       writtenToDisk = code === 0;
@@ -2394,7 +2392,7 @@ function recordGenAISpan(input) {
   if (spansBuffer.length > MAX_SPANS) {
     spansBuffer.length = MAX_SPANS;
   }
-  if (span.operationName === "invoke_agent") {
+  if (span.operationName === "invoke_agent" || span.operationName === "execute_tool") {
     const key = span.agentName;
     const prev = agentCounters.get(key) || {
       totalTurns: 0,
@@ -5024,8 +5022,8 @@ async function createCanonicalCard(ctx, input) {
   } else if (shouldWrite && typeof ((_k = ctx == null ? void 0 : ctx.host) == null ? void 0 : _k.spawn) === "function") {
     try {
       const b64 = typeof globalThis.Buffer !== "undefined" ? globalThis.Buffer.from(markdown, "utf-8").toString("base64") : btoa(unescape(encodeURIComponent(markdown)));
-      const proc = await ctx.host.spawn("bash", {
-        args: [`python3 -c "import base64, pathlib, sys; p = pathlib.Path(sys.argv[1]); p.parent.mkdir(parents=True, exist_ok=True); p.write_bytes(base64.b64decode(sys.argv[2]))" "${absCardPath}" "${b64}"`]
+      const proc = await ctx.host.spawn("python3", {
+        args: ["-c", "import base64, pathlib, sys; p = pathlib.Path(sys.argv[1]); p.parent.mkdir(parents=True, exist_ok=True); p.write_bytes(base64.b64decode(sys.argv[2]))", absCardPath, b64]
       });
       const code = await proc.exited;
       writtenToDisk = code === 0;
@@ -5036,8 +5034,9 @@ async function createCanonicalCard(ctx, input) {
   if (input.run_lint && writtenToDisk && ((_l = ctx == null ? void 0 : ctx.host) == null ? void 0 : _l.spawn)) {
     try {
       let combined = "";
-      const proc = await ctx.host.spawn("bash", {
-        args: [`cd "${ORGFY_ABS_PATH}" && ./ferramentas/card-lint.sh "${cardPath}"`],
+      const proc = await ctx.host.spawn("./ferramentas/card-lint.sh", {
+        args: [cardPath],
+        cwd: ORGFY_ABS_PATH,
         onStdout: (chunk) => {
           combined += chunk;
         },
@@ -5656,8 +5655,8 @@ async function executeAgentMigration(ctx, onOutput) {
   };
   appendChunk("[MIGRATION] Iniciando sincronização atômica de agentes OrgFy para v10...\n");
   if (!((_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.spawn)) {
-    appendChunk("[SIMULADO] 16 agentes migrados para /Users/heltonfraga/.buzz/REPOS/orgfy com sucesso.\n");
-    return { success: true, output: combinedOutput };
+    appendChunk("[ERRO] ctx.host.spawn indisponível para executar migração.\n");
+    return { success: false, output: combinedOutput };
   }
   try {
     const proc = await ctx.host.spawn("bash", {
@@ -7140,65 +7139,99 @@ function registerBuzzNativeIntegrations(ctx) {
   }
   try {
     const conv = ctx == null ? void 0 : ctx.conversation;
+    const React = ctx == null ? void 0 : ctx.react;
     if (conv == null ? void 0 : conv.registerCompletion) {
+      const ORGFY_SLASH_COMMANDS = [
+        {
+          id: "orgfy-card",
+          label: "/orgfy-card",
+          detail: "Abrir card OrgFy schema-first (L-22 + Buzz Attention)",
+          text: "Chame `orgfy_card_create` para abrir um novo card com escopo fechado, Escrita exclusiva e comando de aceite L-22. "
+        },
+        {
+          id: "orgfy-despachar",
+          label: "/orgfy-despachar",
+          detail: "Despachar issue para executor + revisor independente (L-01)",
+          text: "Chame `orgfy_despachar` passando issue_id, executor e revisor. "
+        },
+        {
+          id: "orgfy-gate",
+          label: "/orgfy-gate",
+          detail: "Emitir veredito de Gate Caixa-Preta (aceito/recusado)",
+          text: "Chame `orgfy_gate` com pr_id, decisao e motivo. "
+        },
+        {
+          id: "orgfy-triage",
+          label: "/orgfy-triage",
+          detail: "Rodar triagem rápida via Decisions API (card ou diff)",
+          text: "Chame `orgfy_decision_triage` (mode: 'card' ou 'diff') para avaliação rápida. "
+        },
+        {
+          id: "orgfy-radar",
+          label: "/orgfy-radar",
+          detail: "Inspecionar Radar de Loops & sessões travadas no Goose",
+          text: "Chame `orgfy_loop_radar({ apenas_ativos: true })` e reporte sessões críticas. "
+        }
+      ];
+      const OrgfySlashCompletion = (props) => {
+        var _a2, _b2;
+        const q = String(((_a2 = props == null ? void 0 : props.query) == null ? void 0 : _a2.query) || "").toLowerCase();
+        (_b2 = React == null ? void 0 : React.useEffect) == null ? void 0 : _b2.call(React, () => {
+          var _a3;
+          const filtered = ORGFY_SLASH_COMMANDS.filter(
+            (c) => !q || c.label.slice(1).includes(q) || c.detail.toLowerCase().includes(q)
+          );
+          const items = filtered.map((c) => ({
+            id: c.id,
+            label: c.label,
+            detail: c.detail,
+            edit: { text: c.text }
+          }));
+          const withdraw = (_a3 = props == null ? void 0 : props.publish) == null ? void 0 : _a3.call(props, { items });
+          return () => {
+            if (typeof withdraw === "function") withdraw();
+          };
+        }, [q, props == null ? void 0 : props.publish]);
+        return null;
+      };
       conv.registerCompletion({
         id: "orgfy-slash-commands",
-        trigger: "/",
-        complete: (query) => {
-          const text = String((query == null ? void 0 : query.text) || (query == null ? void 0 : query.query) || "").toLowerCase();
-          const commands = [
-            {
-              id: "orgfy-card",
-              label: "/orgfy-card",
-              description: "Abrir card OrgFy schema-first (L-22 + Buzz Attention)",
-              insertText: "Chame `orgfy_card_create` para abrir um novo card com escopo fechado, Escrita exclusiva e comando de aceite L-22."
-            },
-            {
-              id: "orgfy-despachar",
-              label: "/orgfy-despachar",
-              description: "Despachar issue para executor + revisor independente (L-01)",
-              insertText: "Chame `orgfy_despachar` passando issue_id, executor e revisor."
-            },
-            {
-              id: "orgfy-gate",
-              label: "/orgfy-gate",
-              description: "Emitir veredito de Gate Caixa-Preta (aceito/recusado)",
-              insertText: "Chame `orgfy_gate` com pr_id, decisao e motivo."
-            },
-            {
-              id: "orgfy-triage",
-              label: "/orgfy-triage",
-              description: "Rodar triagem rápida via Decisions API (card ou diff)",
-              insertText: "Chame `orgfy_decision_triage` (mode: 'card' ou 'diff') para avaliação rápida."
-            },
-            {
-              id: "orgfy-radar",
-              label: "/orgfy-radar",
-              description: "Inspecionar Radar de Loops & sessões travadas no Goose",
-              insertText: "Chame `orgfy_loop_radar({ apenas_ativos: true })` e reporte sessões críticas."
-            }
-          ];
-          const filtered = text ? commands.filter((c) => c.label.includes(text) || c.description.toLowerCase().includes(text)) : commands;
-          return { suggestions: filtered };
-        }
+        title: "Comandos OrgFy",
+        match: (observation) => {
+          const text = String((observation == null ? void 0 : observation.text) || "");
+          const end = typeof (observation == null ? void 0 : observation.end) === "number" ? observation.end : text.length;
+          const before = text.slice(0, end);
+          const m = /(?:^|\s)(\/orgfy[-a-z]*)$/i.exec(before) || /(?:^|\s)(\/)$/i.exec(before);
+          if (!m) return null;
+          const token = m[1];
+          return { start: end - token.length, end, query: token.slice(1) };
+        },
+        component: OrgfySlashCompletion
       });
       state.conversationRegistered = true;
     }
     if (conv == null ? void 0 : conv.registerMessageAction) {
-      conv.registerMessageAction({
-        id: "orgfy-open-control-room",
-        label: "Abrir no OrgFy Control Room",
-        run: () => {
-          var _a2, _b2;
+      const OpenControlRoomAction = (props) => {
+        var _a2;
+        (_a2 = React == null ? void 0 : React.useEffect) == null ? void 0 : _a2.call(React, () => {
+          var _a3, _b2, _c2;
           try {
-            if ((_a2 = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a2.open) {
+            if ((_a3 = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a3.open) {
               ctx.navigation.open({ version: 1, kind: "page", pluginId: "digital.cortexx.orgfy", pageId: "orgfy" });
             } else if ((_b2 = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _b2.navigate) {
               ctx.navigation.navigate("orgfy");
             }
           } catch {
           }
-        }
+          (_c2 = props == null ? void 0 : props.close) == null ? void 0 : _c2.call(props);
+        }, []);
+        return null;
+      };
+      conv.registerMessageAction({
+        id: "orgfy-open-control-room",
+        title: "Abrir no OrgFy Control Room",
+        matches: () => true,
+        component: OpenControlRoomAction
       });
       state.conversationRegistered = true;
     }
@@ -7251,7 +7284,7 @@ function registerBuzzNativeIntegrations(ctx) {
       shortcuts.register({
         id: "orgfy-open-cockpit",
         title: "Abrir OrgFy Control Room",
-        binding: "Mod+Shift+O",
+        binding: { key: "o", mod: true, shift: true },
         run: () => {
           var _a2, _b2;
           try {
@@ -7274,8 +7307,8 @@ function registerBuzzNativeIntegrations(ctx) {
     if (agents == null ? void 0 : agents.addAttentionSource) {
       agents.addAttentionSource({
         id: "orgfy.pipeline",
-        label: "OrgFy Esteira & Gate",
         description: "Emite eventos estruturados da esteira OrgFy (card.ready_for_review, gate.rejected_dsap, loop.detected, budget.80pct) compatíveis com classifier pré-LLM.",
+        configExample: { empresa: "orgfy" },
         present: (watch, title) => {
           var _a2;
           return {
@@ -7283,7 +7316,15 @@ function registerBuzzNativeIntegrations(ctx) {
             target: String(((_a2 = watch == null ? void 0 : watch.config) == null ? void 0 : _a2.empresa) || "orgfy"),
             subtitle: title || "Monitoramento determinístico de cards, PRs e loops"
           };
-        }
+        },
+        run: (input) => new Promise((resolve) => {
+          var _a2, _b2, _c2;
+          if ((_a2 = input == null ? void 0 : input.signal) == null ? void 0 : _a2.aborted) {
+            resolve();
+            return;
+          }
+          (_c2 = (_b2 = input == null ? void 0 : input.signal) == null ? void 0 : _b2.addEventListener) == null ? void 0 : _c2.call(_b2, "abort", () => resolve(), { once: true });
+        })
       });
       state.attentionSourceRegistered = true;
     }
@@ -7293,23 +7334,23 @@ function registerBuzzNativeIntegrations(ctx) {
   try {
     const agents = ctx == null ? void 0 : ctx.agents;
     if (agents == null ? void 0 : agents.registerHook) {
-      const registerOtel = (event, status) => {
+      const registerOtel = (harness, event) => {
         agents.registerHook({
-          id: `orgfy-otel-${event}`,
-          harness: "goose",
+          id: `orgfy-otel-${harness.replace(/[^a-z0-9]/gi, "-")}-${event}`,
+          harness,
           event,
           run: (input, hookCtx) => {
-            const errMsg = (input == null ? void 0 : input.error) ? String(input.error).slice(0, 140) : void 0;
+            const errMsg = (input == null ? void 0 : input.error) || (input == null ? void 0 : input.isError) ? String((input == null ? void 0 : input.error) || "tool_error").slice(0, 140) : void 0;
             recordGenAISpan({
-              operationName: "invoke_agent",
+              operationName: "execute_tool",
               agentName: String((hookCtx == null ? void 0 : hookCtx.agent) || (input == null ? void 0 : input.agent) || "unknown-agent"),
-              model: (input == null ? void 0 : input.model) ? String(input.model) : null,
-              provider: (input == null ? void 0 : input.provider) ? String(input.provider) : null,
+              toolName: (input == null ? void 0 : input.toolName) || (input == null ? void 0 : input.tool) ? String(input.toolName || input.tool) : void 0,
               durationMs: Number((input == null ? void 0 : input.durationMs) || (input == null ? void 0 : input.duration_ms) || 0),
-              status: errMsg ? "error" : status,
-              finishReason: errMsg || (status === "ok" ? "stop" : "error"),
+              status: errMsg ? "error" : "ok",
+              finishReason: errMsg || "ok",
               attributes: {
-                "gen_ai.operation.name": "invoke_agent",
+                "gen_ai.operation.name": "execute_tool",
+                "buzz.hook.harness": harness,
                 "buzz.hook.event": event,
                 "buzz.session.id": String((hookCtx == null ? void 0 : hookCtx.session) || "")
               }
@@ -7318,8 +7359,10 @@ function registerBuzzNativeIntegrations(ctx) {
           }
         });
       };
-      registerOtel("turn.completed", "ok");
-      registerOtel("turn.failed", "error");
+      registerOtel("buzz.pi/pi", "beforeTool");
+      registerOtel("buzz.pi/pi", "afterTool");
+      registerOtel("buzz.claude-code/claude-code", "beforeTool");
+      registerOtel("buzz.claude-code/claude-code", "afterTool");
       state.otelHookRegistered = true;
     }
   } catch (err) {
