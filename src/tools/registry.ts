@@ -299,6 +299,7 @@ export function buildUnifiedOrgfyTools(ctx: Context | any): UnifiedOrgfyTool[] {
           revisor: { type: "string" },
           acceptance_command: { type: "string" },
           branch: { type: "string" },
+          exclusive_paths: { type: "array", items: { type: "string" }, description: "Paths de Escrita exclusiva para detectar colisão paralela (WRITE_SET_CONFLICT)" },
         },
         required: ["action"],
       },
@@ -318,6 +319,7 @@ export function buildUnifiedOrgfyTools(ctx: Context | any): UnifiedOrgfyTool[] {
             revisor: args?.revisor,
             acceptanceCommand: args?.acceptance_command,
             branch: args?.branch,
+            exclusivePaths: Array.isArray(args?.exclusive_paths) ? args.exclusive_paths : undefined,
           });
           return { text: JSON.stringify(res, null, 2), isError: !res.ok };
         }

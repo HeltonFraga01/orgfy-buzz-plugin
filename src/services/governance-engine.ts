@@ -12,6 +12,7 @@ export interface CheckoutLockRecord {
   revisor?: string;
   acceptanceCommand?: string;
   branch?: string;
+  exclusivePaths?: string[];
 }
 
 export interface LockMetadataInput {
@@ -20,6 +21,7 @@ export interface LockMetadataInput {
   revisor?: string;
   acceptanceCommand?: string;
   branch?: string;
+  exclusivePaths?: string[];
 }
 
 async function resolveFullNostrIssueId(ctx: Context, rawId: string): Promise<string> {
@@ -61,9 +63,11 @@ async function resolveFullNostrIssueId(ctx: Context, rawId: string): Promise<str
 
 export interface LockActionResult {
   ok: boolean;
-  code: "ACQUIRED" | "RENEWED" | "LOCK_CONFLICT" | "RELEASED" | "NOT_FOUND" | "OWNER_MISMATCH";
+  code: "ACQUIRED" | "RENEWED" | "LOCK_CONFLICT" | "WRITE_SET_CONFLICT" | "RELEASED" | "NOT_FOUND" | "OWNER_MISMATCH";
   lock?: CheckoutLockRecord;
   conflictOwner?: string;
+  conflictIssueId?: string;
+  conflictingPaths?: string[];
   message: string;
 }
 
@@ -165,6 +169,9 @@ async function syncLocksFromDisk(ctx: Context, nowMs: number = Date.now()): Prom
               revisor: typeof v.revisor === "string" ? v.revisor : undefined,
               acceptanceCommand: typeof v.acceptanceCommand === "string" ? v.acceptanceCommand : undefined,
               branch: typeof v.branch === "string" ? v.branch : undefined,
+              exclusivePaths: Array.isArray(v.exclusivePaths)
+                ? v.exclusivePaths.filter((p: any) => typeof p === "string" && p.trim())
+                : undefined,
             });
           }
         } else {
@@ -210,6 +217,55 @@ async function persistLocksToDisk(ctx: Context): Promise<void> {
   }
 }
 
+function normalizeExclusivePath(raw: string): string {
+  return String(raw || "")
+    .trim()
+    .replace(/^\.\//, "")
+    .replace(/\/+/g, "/")
+    .replace(/\/$/, "");
+}
+
+function normalizeExclusivePaths(paths?: string[]): string[] | undefined {
+  if (!Array.isArray(paths)) return undefined;
+  const cleaned = Array.from(new Set(paths.map(normalizeExclusivePath).filter(Boolean)));
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
+function pathsOverlap(a: string, b: string): boolean {
+  const na = normalizeExclusivePath(a);
+  const nb = normalizeExclusivePath(b);
+  if (!na || !nb) return false;
+  return na === nb || na.startsWith(`${nb}/`) || nb.startsWith(`${na}/`);
+}
+
+export function findWriteSetOverlap(
+  requestedPaths: string[] | undefined,
+  activeLocks: Iterable<CheckoutLockRecord>,
+  ignoreIssueId: string,
+  nowMs: number
+): { lock: CheckoutLockRecord; overlappingPaths: string[] } | null {
+  const req = normalizeExclusivePaths(requestedPaths);
+  if (!req || req.length === 0) return null;
+  for (const rec of activeLocks) {
+    if (rec.expiresAt <= nowMs) continue;
+    if (rec.issueId === ignoreIssueId) continue;
+    const otherPaths = normalizeExclusivePaths(rec.exclusivePaths);
+    if (!otherPaths || otherPaths.length === 0) continue;
+    const overlapping: string[] = [];
+    for (const rp of req) {
+      for (const op of otherPaths) {
+        if (pathsOverlap(rp, op)) {
+          overlapping.push(rp);
+        }
+      }
+    }
+    if (overlapping.length > 0) {
+      return { lock: rec, overlappingPaths: Array.from(new Set(overlapping)) };
+    }
+  }
+  return null;
+}
+
 export async function acquireCheckoutLock(
   ctx: Context,
   issueId: string,
@@ -250,6 +306,25 @@ export async function acquireCheckoutLock(
   const existing =
     memoryLocks.get(cleanIssue) ||
     (cleanIssue.length === 64 ? memoryLocks.get(shortKey) : undefined);
+  const requestedExclusivePaths = normalizeExclusivePaths(meta?.exclusivePaths);
+
+  const writeSetConflict = findWriteSetOverlap(
+    requestedExclusivePaths,
+    memoryLocks.values(),
+    existing?.issueId || cleanIssue,
+    nowMs
+  );
+  if (writeSetConflict) {
+    return {
+      ok: false,
+      code: "WRITE_SET_CONFLICT",
+      conflictOwner: writeSetConflict.lock.agentKey,
+      conflictIssueId: writeSetConflict.lock.issueId,
+      conflictingPaths: writeSetConflict.overlappingPaths,
+      lock: writeSetConflict.lock,
+      message: `WRITE_SET_CONFLICT: Escrita exclusiva em conflito (${writeSetConflict.overlappingPaths.join(", ")}) com card ${writeSetConflict.lock.issueId} reservado por ${writeSetConflict.lock.agentKey}. Aguarde o merge ou segregue os arquivos antes de iniciar em paralelo.`,
+    };
+  }
 
   if (existing && existing.expiresAt > nowMs) {
     if (existing.agentKey === cleanAgent) {
@@ -266,6 +341,7 @@ export async function acquireCheckoutLock(
         revisor: meta?.revisor?.trim() || existing.revisor,
         acceptanceCommand: meta?.acceptanceCommand?.trim() || existing.acceptanceCommand,
         branch: meta?.branch?.trim() || existing.branch,
+        exclusivePaths: requestedExclusivePaths || existing.exclusivePaths,
       };
       memoryLocks.set(cleanIssue, renewed);
       await persistLocksToDisk(ctx);
@@ -307,6 +383,7 @@ export async function acquireCheckoutLock(
         revisor: existing.revisor,
         acceptanceCommand: meta?.acceptanceCommand?.trim() || existing.acceptanceCommand,
         branch: meta?.branch?.trim() || existing.branch,
+        exclusivePaths: requestedExclusivePaths || existing.exclusivePaths,
       };
       memoryLocks.set(cleanIssue, handedOff);
       await persistLocksToDisk(ctx);
@@ -336,6 +413,7 @@ export async function acquireCheckoutLock(
     revisor: meta?.revisor?.trim() || undefined,
     acceptanceCommand: meta?.acceptanceCommand?.trim() || undefined,
     branch: meta?.branch?.trim() || undefined,
+    exclusivePaths: requestedExclusivePaths,
   };
   memoryLocks.set(cleanIssue, created);
   await persistLocksToDisk(ctx);

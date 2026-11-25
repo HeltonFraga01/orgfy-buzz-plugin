@@ -1219,3 +1219,42 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
   assert.equal(wakes.length, 1, "deve re-disparar o agente na thread original");
   console.log("[AUTO-FAILOVER V2 TOOL-CALLING + SESSION RESET OK]", JSON.stringify({ selected: saves[0].change.config.model, sessionResets: sessions.length }));
 }
+
+// 20. SOTA AAA: Write-Set Conflict Guard (WRITE_SET_CONFLICT) em orgfy_checkout_lock
+{
+  const wsIssueA = "1111222233334444555566667777888899990000aaaabbbbccccddddeeee0001";
+  const wsIssueB = "1111222233334444555566667777888899990000aaaabbbbccccddddeeee0002";
+  const wsIssueC = "1111222233334444555566667777888899990000aaaabbbbccccddddeeee0003";
+
+  const lockA = JSON.parse(await lockTool.call({}, {}, {
+    action: "acquire",
+    issue_id: wsIssueA,
+    agent_id: "OrgFy Otto",
+    exclusive_paths: ["ferramentas/esteira/"],
+  }));
+  assert.equal(lockA.ok, true);
+
+  // Card B toca arquivo dentro do diretório de A -> WRITE_SET_CONFLICT (impede conflito de merge antes de executar!)
+  const lockB = JSON.parse(await lockTool.call({}, {}, {
+    action: "acquire",
+    issue_id: wsIssueB,
+    agent_id: "OrgFy Val",
+    exclusive_paths: ["ferramentas/esteira/porteiro.py"],
+  }));
+  assert.equal(lockB.ok, false);
+  assert.equal(lockB.code, "WRITE_SET_CONFLICT");
+  assert.ok(lockB.conflictingPaths.includes("ferramentas/esteira/porteiro.py"));
+
+  // Card C toca caminho independente -> liberado em paralelo!
+  const lockC = JSON.parse(await lockTool.call({}, {}, {
+    action: "acquire",
+    issue_id: wsIssueC,
+    agent_id: "OrgFy Atlas",
+    exclusive_paths: ["docs/NOVO_GUIA.md"],
+  }));
+  assert.equal(lockC.ok, true);
+
+  await lockTool.call({}, {}, { action: "release", issue_id: wsIssueA, agent_id: "OrgFy Otto" });
+  await lockTool.call({}, {}, { action: "release", issue_id: wsIssueC, agent_id: "OrgFy Atlas" });
+  console.log("[SOTA WRITE-SET CONFLICT GUARD OK]", JSON.stringify({ blockedCode: lockB.code, independentParallelOk: lockC.ok }));
+}

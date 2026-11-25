@@ -86,12 +86,14 @@ const SHARED_USAGE_PATHS = [
   "~/.buzz/.scratch/nm_usage.json",
 ];
 export const MODEL_QUARANTINE_PATH = "/Users/heltonfraga/.buzz/.scratch/orgfy-model-quarantine.json";
-const DEFAULT_QUARANTINE_TTL_MS = 20 * 60 * 1000;
+const BACKOFF_TTL_STEPS_MS = [5 * 60 * 1000, 15 * 60 * 1000, 45 * 60 * 1000];
 
 export interface QuarantinedModelRecord {
   model: string;
   failedAt: number;
   expiresAt: number;
+  failureCount?: number;
+  circuitState?: "open" | "half_open";
   reason?: string;
 }
 
@@ -105,15 +107,20 @@ export async function quarantineFailedModel(
   ctx: Context,
   modelId: string,
   reason: string = "provider_5xx_or_429",
-  ttlMs: number = DEFAULT_QUARANTINE_TTL_MS,
+  ttlMs?: number,
   nowMs: number = Date.now()
 ): Promise<void> {
   const norm = String(modelId || "").trim().toLowerCase();
   if (!norm) return;
+  const prev = modelQuarantineMemory.get(norm);
+  const failureCount = (prev?.failureCount || 0) + 1;
+  const effectiveTtl = ttlMs ?? BACKOFF_TTL_STEPS_MS[Math.min(failureCount - 1, BACKOFF_TTL_STEPS_MS.length - 1)];
   modelQuarantineMemory.set(norm, {
     model: String(modelId).trim(),
     failedAt: nowMs,
-    expiresAt: nowMs + ttlMs,
+    expiresAt: nowMs + effectiveTtl,
+    failureCount,
+    circuitState: "open",
     reason,
   });
   const host = (ctx as any)?.host;
@@ -634,6 +641,16 @@ export async function executeSmartModelFailover(
     if (failedNorm) minimalExclude.add(failedNorm);
     if (previousModel) minimalExclude.add(previousModel.toLowerCase());
     sharedRanking = await loadSharedNexusMindRanking(ctx, minimalExclude, preferFree);
+  }
+  // Separação de domínio de falha (Cross-Provider Preference): prioriza provedor distinto do modelo que falhou
+  const failedProvider = previousModel ? inferProviderId(previousModel) : failedNorm ? inferProviderId(failedNorm) : null;
+  if (failedProvider && sharedRanking.length > 1) {
+    sharedRanking = sharedRanking
+      .map((c) => ({
+        ...c,
+        combinedScore: c.provider !== failedProvider ? Number((c.combinedScore + 12).toFixed(2)) : c.combinedScore,
+      }))
+      .sort((a, b) => b.combinedScore - a.combinedScore);
   }
 
   // 1b. Quando ctx.host.request está disponível, valida ao vivo os top candidatos do ranking compartilhado
