@@ -10117,7 +10117,7 @@ function renderOrgChartTab(props) {
     )
   );
 }
-const TENANTS = [
+const TENANTS$1 = [
   { id: "all", name: "Holding OrgFy", badge: "Cross-Workspace", slug: "all" },
   { id: "orgfy", name: "OrgFy Core", badge: "Core Framework", slug: "orgfy" },
   { id: "lumen-iptv", name: "Lumen IPTV", badge: "Subsidiária IPTV", slug: "lumen-iptv" },
@@ -13584,22 +13584,33 @@ async function writeTenantControl(ctx, tenant, patch) {
 }
 const FACTORY_SHADOW_CSS = `
 :host, [data-orgfy-factory-root="true"] {
-  --background: var(--surface-base, #0b0d10);
-  --card: var(--surface-panel, #111419);
-  --card-elevated: var(--surface-elevated, #161a21);
-  --foreground: var(--text-standard, #f3f4f6);
-  --muted-foreground: var(--text-tertiary, #9ca3af);
-  --border: var(--border-standard, rgba(255, 255, 255, 0.09));
+  --background: var(--surface-base, oklch(0.165 0.008 264));
+  --foreground: var(--text-standard, oklch(0.94 0.006 264));
+  --card: var(--surface-panel, oklch(0.195 0.009 264));
+  --surface: var(--surface-elevated, oklch(0.185 0.009 264));
+  --panel: oklch(0.155 0.008 264);
+  --sidebar: oklch(0.145 0.007 264);
+  --muted: oklch(0.225 0.009 264);
+  --muted-foreground: var(--text-tertiary, oklch(0.66 0.014 264));
+  --accent: oklch(0.255 0.011 264);
+  --border: var(--border-standard, rgba(255, 255, 255, 0.085));
   --border-strong: rgba(255, 255, 255, 0.16);
-  --primary: #f59e0b;
-  --primary-soft: rgba(245, 158, 11, 0.14);
-  --primary-foreground: #0b0d10;
-  --success: #10b981;
-  --success-soft: rgba(16, 185, 129, 0.14);
-  --destructive: var(--surface-status-danger, #ef4444);
-  --destructive-soft: rgba(239, 68, 68, 0.15);
-  --info: #38bdf8;
-  --info-soft: rgba(56, 189, 248, 0.14);
+  --primary: oklch(0.8 0.15 70);
+  --primary-soft: rgba(245, 158, 11, 0.12);
+  --primary-foreground: oklch(0.21 0.04 60);
+
+  --status-running: oklch(0.72 0.13 235);
+  --status-waiting: oklch(0.8 0.15 75);
+  --status-done: oklch(0.74 0.14 155);
+  --status-failed: var(--surface-status-danger, oklch(0.68 0.19 24));
+  --status-idle: oklch(0.55 0.012 264);
+
+  --chart-1: oklch(0.8 0.15 70);
+  --chart-2: oklch(0.7 0.12 230);
+  --chart-3: oklch(0.72 0.14 155);
+  --chart-4: oklch(0.7 0.15 300);
+  --chart-5: oklch(0.7 0.17 25);
+
   --radius: 10px;
   --font-sans: inherit;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -13611,11 +13622,22 @@ const FACTORY_SHADOW_CSS = `
   background: var(--background);
   font-family: var(--font-sans);
   box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
+}
+
+@keyframes of-rise {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes of-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.82); }
 }
 
 .of-shell {
   display: grid;
-  grid-template-columns: 232px minmax(0, 1fr);
+  grid-template-columns: 236px minmax(0, 1fr);
   width: 100%;
   height: 100vh;
   max-height: 100vh;
@@ -13629,8 +13651,8 @@ const FACTORY_SHADOW_CSS = `
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 14px 12px;
-  background: var(--card);
+  padding: 12px 10px;
+  background: var(--sidebar);
   border-right: 1px solid var(--border);
   overflow-y: auto;
   box-sizing: border-box;
@@ -13644,29 +13666,54 @@ const FACTORY_SHADOW_CSS = `
   padding: 4px 6px;
 }
 
-.of-brand-title {
+.of-brand-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-size: 13px;
   font-weight: 700;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
   color: var(--foreground);
 }
 
-.of-tenant-picker {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+.of-brand-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 800;
 }
 
-.of-tenant-select {
+.of-tenant-select, .of-input, .of-textarea {
   width: 100%;
-  padding: 6px 8px;
-  border-radius: 8px;
-  background: var(--card-elevated);
+  padding: 6px 9px;
+  border-radius: 7px;
+  background: var(--surface);
   color: var(--foreground);
   border: 1px solid var(--border);
   font-size: 12px;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.of-textarea {
+  font-family: var(--font-mono);
+  min-height: 64px;
+  resize: vertical;
+}
+
+.of-nav-group-label {
+  font-size: 10px;
   font-weight: 600;
-  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted-foreground);
+  padding: 8px 8px 2px;
 }
 
 .of-nav {
@@ -13679,13 +13726,14 @@ const FACTORY_SHADOW_CSS = `
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   width: 100%;
-  padding: 7px 10px;
-  border-radius: 8px;
+  padding: 7px 9px;
+  border-radius: 7px;
   border: 1px solid transparent;
   background: transparent;
   color: var(--muted-foreground);
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 500;
   text-align: left;
   cursor: pointer;
@@ -13693,96 +13741,185 @@ const FACTORY_SHADOW_CSS = `
 }
 
 .of-nav-btn:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.045);
   color: var(--foreground);
 }
 
 .of-nav-btn[data-active="true"] {
-  background: var(--primary-soft);
-  border-color: rgba(245, 158, 11, 0.35);
-  color: var(--primary);
+  background: var(--accent);
+  border-color: var(--border);
+  color: var(--foreground);
   font-weight: 600;
+}
+
+.of-nav-badge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--muted-foreground);
+}
+
+.of-nav-badge[data-tone="warn"] {
+  background: rgba(245, 158, 11, 0.16);
+  color: var(--status-waiting);
+}
+
+.of-nav-badge[data-tone="danger"] {
+  background: rgba(239, 68, 68, 0.18);
+  color: var(--status-failed);
+}
+
+.of-workspace {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.of-page-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  flex-shrink: 0;
 }
 
 .of-main {
   display: flex;
   flex-direction: column;
+  flex: 1;
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
-  padding: 18px 22px;
-  gap: 16px;
+  padding: 16px 20px 28px;
+  gap: 14px;
   box-sizing: border-box;
 }
 
 .of-card {
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: 12px;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.of-card-pad {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
   padding: 14px 16px;
   box-sizing: border-box;
 }
 
-.of-header-bar {
+.of-surface {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  box-sizing: border-box;
+}
+
+.of-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.of-panel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 16px;
+}
+
+.of-alert-banner {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 9px;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.08);
+  font-size: 11.5px;
+  color: var(--foreground);
 }
 
 .of-pill {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 9px;
+  gap: 5px;
+  padding: 2px 8px;
   border-radius: 9999px;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
   font-family: var(--font-mono);
   border: 1px solid var(--border);
-  background: var(--card-elevated);
-  color: var(--foreground);
-}
-
-.of-pill[data-tone="ok"] {
-  background: var(--success-soft);
-  border-color: rgba(16, 185, 129, 0.4);
-  color: var(--success);
-}
-
-.of-pill[data-tone="warn"] {
-  background: var(--primary-soft);
-  border-color: rgba(245, 158, 11, 0.4);
-  color: var(--primary);
-}
-
-.of-pill[data-tone="danger"] {
-  background: var(--destructive-soft);
-  border-color: rgba(239, 68, 68, 0.45);
-  color: #f87171;
-}
-
-.of-pill[data-tone="muted"] {
+  background: var(--surface);
   color: var(--muted-foreground);
+  white-space: nowrap;
+}
+
+.of-pill[data-tone="running"] {
+  background: rgba(56, 189, 248, 0.13);
+  border-color: rgba(56, 189, 248, 0.35);
+  color: var(--status-running);
+}
+
+.of-pill[data-tone="ok"], .of-pill[data-tone="done"] {
+  background: rgba(16, 185, 129, 0.13);
+  border-color: rgba(16, 185, 129, 0.35);
+  color: var(--status-done);
+}
+
+.of-pill[data-tone="warn"], .of-pill[data-tone="waiting"] {
+  background: rgba(245, 158, 11, 0.13);
+  border-color: rgba(245, 158, 11, 0.38);
+  color: var(--status-waiting);
+}
+
+.of-pill[data-tone="danger"], .of-pill[data-tone="failed"] {
+  background: rgba(239, 68, 68, 0.14);
+  border-color: rgba(239, 68, 68, 0.42);
+  color: var(--status-failed);
+}
+
+.of-exp-badge {
+  border-radius: 9999px;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--primary);
 }
 
 .of-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border-radius: 8px;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 7px;
   border: 1px solid var(--border);
-  background: var(--card-elevated);
+  background: var(--surface);
   color: var(--foreground);
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 600;
   cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
 }
 
-.of-btn:hover {
+.of-btn:hover:not(:disabled) {
   border-color: var(--border-strong);
+  background: var(--accent);
 }
 
 .of-btn[data-variant="primary"] {
@@ -13792,161 +13929,507 @@ const FACTORY_SHADOW_CSS = `
 }
 
 .of-btn[data-variant="danger"] {
-  background: var(--destructive-soft);
-  border-color: rgba(239, 68, 68, 0.5);
-  color: #f87171;
+  background: rgba(239, 68, 68, 0.14);
+  border-color: rgba(239, 68, 68, 0.45);
+  color: var(--status-failed);
+}
+
+.of-btn[data-variant="ghost"] {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted-foreground);
+}
+
+.of-btn[data-variant="ghost"]:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--foreground);
 }
 
 .of-btn:disabled {
-  opacity: 0.55;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
-.of-kpi-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: 10px;
+.of-segmented {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
 }
 
-.of-kpi-label {
-  font-size: 11px;
+.of-seg-btn {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
   color: var(--muted-foreground);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
 }
 
-.of-kpi-value {
-  font-size: 22px;
-  font-weight: 700;
-  font-family: var(--font-mono);
-  margin-top: 4px;
+.of-seg-btn[data-active="true"] {
+  background: var(--accent);
+  color: var(--foreground);
 }
 
-.of-kpi-sub {
-  font-size: 11px;
-  color: var(--muted-foreground);
-  margin-top: 4px;
-}
-
-.of-pipeline-flow {
+/* ── CodeDen Progress Meters ── */
+.of-meters-row {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.of-pipeline-entry {
-  display: flex;
-  align-items: stretch;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.of-pipeline-lanes {
+.of-meter {
+  min-width: 145px;
+  flex: 1 1 155px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 8px 12px;
+}
+
+.of-meter-top {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.of-lane {
-  display: grid;
-  grid-template-columns: 112px repeat(3, minmax(0, 1fr)) 130px;
+  align-items: baseline;
+  justify-content: space-between;
   gap: 8px;
-  align-items: stretch;
 }
 
-.of-lane-tag {
+.of-meter-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted-foreground);
+}
+
+.of-meter-val {
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.of-bar-track {
+  margin-top: 6px;
+  height: 4px;
+  border-radius: 9999px;
+  background: var(--muted);
+  overflow: hidden;
+}
+
+.of-bar-fill {
+  height: 100%;
+  border-radius: 9999px;
+  transition: width 0.25s ease;
+}
+
+/* ── CodeDen Live Pipeline Diagram (pipeline-diagram.tsx) ── */
+.of-pd-scroll {
+  overflow-x: auto;
+  padding: 4px 0 8px;
+}
+
+.of-pd-canvas {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 900px;
+}
+
+.of-pd-group {
   display: flex;
   align-items: center;
-  justify-content: center;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  border-radius: 8px;
-  border: 1px dashed var(--border-strong);
-  color: var(--muted-foreground);
-  background: rgba(255, 255, 255, 0.02);
-  padding: 6px;
+  gap: 4px;
 }
 
-.of-node {
+.of-pd-arrow {
+  display: inline-flex;
+  align-items: center;
+  color: var(--muted-foreground);
+  flex-shrink: 0;
+}
+
+.of-pd-arrow-line {
+  width: 12px;
+  height: 1px;
+  background: rgba(156, 163, 175, 0.55);
+}
+
+.of-pd-arrow-line[data-dashed="true"] {
+  background: transparent;
+  border-top: 1px dashed rgba(156, 163, 175, 0.55);
+}
+
+.of-pd-fan {
+  position: relative;
+  display: grid;
+  width: 24px;
+  flex-shrink: 0;
+  grid-template-rows: repeat(3, 1fr);
+  align-self: stretch;
+}
+
+.of-pd-fan-spine {
+  position: absolute;
+  top: 16.6%;
+  bottom: 16.6%;
+  left: 50%;
+  border-left: 1px solid rgba(156, 163, 175, 0.45);
+}
+
+.of-pd-fan-stem {
+  position: absolute;
+  top: 50%;
+  height: 1px;
+  width: 50%;
+  background: rgba(156, 163, 175, 0.45);
+}
+
+.of-pd-lanes {
+  display: grid;
+  grid-template-rows: repeat(3, auto);
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.of-pd-lane {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: repeating-linear-gradient(
+    135deg,
+    transparent,
+    transparent 6px,
+    rgba(255, 255, 255, 0.025) 6px,
+    rgba(255, 255, 255, 0.025) 7px
+  );
+  padding: 20px 8px 10px;
+}
+
+.of-pd-lane-tag {
+  position: absolute;
+  top: 4px;
+  left: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.of-pd-node {
+  position: relative;
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 6px;
-  padding: 10px;
+  min-height: 68px;
+  min-width: 0;
+  flex: 1;
   border-radius: 8px;
   border: 1px solid var(--border);
-  background: var(--card-elevated);
-  min-height: 76px;
+  background: var(--card);
+  padding: 14px 8px 8px;
+  text-align: center;
   box-sizing: border-box;
 }
 
-.of-node[data-empty="true"] {
-  opacity: 0.62;
+.of-pd-node[data-active="true"] {
+  border-color: rgba(245, 158, 11, 0.55);
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1);
 }
 
-.of-node[data-alert="true"] {
-  border-color: rgba(239, 68, 68, 0.55);
-}
-
-.of-node-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-}
-
-.of-node-title {
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.of-node-badge {
-  font-size: 10px;
-  font-family: var(--font-mono);
+.of-pd-badge {
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  transform: translateX(-50%);
   padding: 1px 6px;
   border-radius: 9999px;
-  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-family: var(--font-mono);
+  font-size: 9px;
   color: var(--muted-foreground);
+  white-space: nowrap;
 }
 
-.of-help-btn {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  border: 1px solid var(--border-strong);
-  background: transparent;
-  color: var(--muted-foreground);
-  font-size: 10px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0;
-}
+.of-pd-badge[data-kind="llm"] { color: var(--chart-4); border-color: rgba(192, 132, 252, 0.35); }
+.of-pd-badge[data-kind="auto"] { color: var(--status-done); border-color: rgba(16, 185, 129, 0.35); }
+.of-pd-badge[data-kind="checks"] { color: var(--status-running); border-color: rgba(56, 189, 248, 0.35); }
 
-.of-chip-row {
-  display: flex;
-  flex-wrap: wrap;
+.of-pd-revise {
+  position: absolute;
+  bottom: -9px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
   gap: 4px;
+  padding: 0 7px;
+  border-radius: 9999px;
+  border: 1px dashed var(--border-strong);
+  background: var(--card);
+  font-size: 9.5px;
+  line-height: 16px;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+
+.of-pd-revise[data-active="true"] {
+  border-color: rgba(245, 158, 11, 0.6);
+  color: var(--status-waiting);
 }
 
 .of-chip {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 7px;
+  max-width: 100%;
+  padding: 2px 6px;
   border-radius: 6px;
-  border: 1px solid rgba(245, 158, 11, 0.4);
-  background: var(--primary-soft);
-  color: var(--primary);
-  font-size: 10.5px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--foreground);
   font-family: var(--font-mono);
-  font-weight: 600;
+  font-size: 10.5px;
+  line-height: 15px;
   cursor: pointer;
 }
 
+.of-chip:hover {
+  border-color: rgba(245, 158, 11, 0.6);
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.of-chip[data-queued="true"] {
+  border-style: dashed;
+  color: var(--muted-foreground);
+}
+
 .of-chip[data-alert="true"] {
-  border-color: rgba(239, 68, 68, 0.55);
-  background: var(--destructive-soft);
-  color: #f87171;
+  border-color: rgba(245, 158, 11, 0.55);
+  color: var(--status-waiting);
+}
+
+.of-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+}
+
+.of-dot[data-tone="running"] { background: var(--status-running); animation: of-pulse 1.8s ease-in-out infinite; }
+.of-dot[data-tone="waiting"] { background: var(--status-waiting); }
+.of-dot[data-tone="done"] { background: var(--status-done); }
+.of-dot[data-tone="failed"] { background: var(--status-failed); }
+.of-dot[data-tone="idle"] { background: var(--status-idle); }
+
+.of-help-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 9.5px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.of-help-pop {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted-foreground);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  text-align: left;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* ── 3-column Factory Panel grid & Tables ── */
+.of-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.of-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.of-stats-6 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.of-board-6 {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(175px, 1fr));
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.of-stage-col {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 300px;
+  border-radius: 11px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.of-stage-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.of-view-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--foreground);
+  cursor: pointer;
+  animation: of-rise 180ms ease both;
+}
+
+.of-view-card:hover {
+  border-color: rgba(245, 158, 11, 0.55);
+}
+
+.of-view-card[data-state="person"] {
+  border-color: rgba(245, 158, 11, 0.5);
+  background: rgba(245, 158, 11, 0.05);
+}
+
+.of-view-card[data-state="failed"] {
+  border-color: rgba(239, 68, 68, 0.5);
+  background: rgba(239, 68, 68, 0.06);
+}
+
+.of-needs-you {
+  border-radius: 11px;
+  border: 1px solid rgba(245, 158, 11, 0.42);
+  background: rgba(245, 158, 11, 0.05);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ── Factory Floor (Workshop + Lookout Blueprint) ── */
+.of-floor-shell {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr);
+  gap: 12px;
+  min-height: 440px;
+}
+
+.of-floor-hall {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border-strong);
+  background:
+    radial-gradient(circle at 15% 10%, rgba(245, 158, 11, 0.06), transparent 45%),
+    linear-gradient(180deg, oklch(0.18 0.009 264), oklch(0.15 0.008 264));
+}
+
+.of-floor-zones {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(120px, 1fr));
+  gap: 8px;
+  overflow-x: auto;
+}
+
+.of-zone-bay {
+  border-radius: 9px;
+  border: 1px dashed var(--border-strong);
+  background: rgba(255, 255, 255, 0.02);
+  padding: 8px;
+  min-height: 150px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.of-repair-bay {
+  border-radius: 9px;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  background: repeating-linear-gradient(
+    -45deg,
+    rgba(245, 158, 11, 0.06),
+    rgba(245, 158, 11, 0.06) 8px,
+    transparent 8px,
+    transparent 16px
+  );
+  padding: 10px 12px;
+}
+
+.of-lookout-pods {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(125px, 1fr));
+  gap: 8px;
+}
+
+/* ── Slide-over ItemSheet Drawer ── */
+.of-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.of-sheet-panel {
+  width: min(440px, 94vw);
+  height: 100%;
+  background: var(--card);
+  border-left: 1px solid var(--border-strong);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 16px 18px;
+  gap: 14px;
+  box-sizing: border-box;
 }
 
 .of-table {
@@ -13955,40 +14438,22 @@ const FACTORY_SHADOW_CSS = `
   font-size: 12px;
 }
 
-.of-table th,
-.of-table td {
+.of-table th, .of-table td {
   text-align: left;
-  padding: 8px 10px;
+  padding: 7px 10px;
   border-bottom: 1px solid var(--border);
 }
 
 .of-table th {
-  font-size: 10.5px;
+  font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
   color: var(--muted-foreground);
 }
 
-.of-board-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: 10px;
-}
-
-.of-floor-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
-  gap: 10px;
-}
-
-.of-muted {
-  color: var(--muted-foreground);
-  font-size: 12px;
-}
-
-.of-mono {
-  font-family: var(--font-mono);
-}
+.of-muted { color: var(--muted-foreground); font-size: 11.5px; }
+.of-mono { font-family: var(--font-mono); }
+.of-num { font-variant-numeric: tabular-nums; }
 `;
 function attachFactoryShadowStyles(hostEl) {
   if (!hostEl || typeof hostEl.attachShadow !== "function") return null;
@@ -14005,6 +14470,7 @@ function attachFactoryShadowStyles(hostEl) {
   }
   return shadow;
 }
+const MAX_CHIPS = 4;
 function classifyLane(item) {
   if (item.type === "bug" || item.type === "feature" || item.type === "docs") return item.type;
   const t = `${item.title} ${item.workKey}`.toLowerCase();
@@ -14014,7 +14480,7 @@ function classifyLane(item) {
 }
 function bucketStep(item, lane) {
   const st = String(item.step || item.stage || "").toLowerCase();
-  if (item.stage === "merged") return "merge";
+  if (item.stage === "merged" || st === "merge") return "merge";
   if (item.stage === "verifying" || item.stage === "watching" || st.includes("revis") || st.includes("gate") || st.includes("review")) {
     return lane === "docs" ? "review_docs" : "review";
   }
@@ -14029,14 +14495,22 @@ function bucketStep(item, lane) {
   if (st.includes("anal") || st.includes("spec") || item.stage === "backlog") return "analyze";
   return "implement";
 }
+function toneOfItem(item) {
+  if (item.stage === "failed" || item.stage === "reverted") return "failed";
+  if (item.stage === "escalated" || item.stage === "verifying") return "waiting";
+  if (item.stage === "building" || item.stage === "watching") return "running";
+  if (item.stage === "merged") return "done";
+  return "idle";
+}
 function renderPipelineDiagram(props) {
   const { h, status, activeHelpKey, onToggleHelp, onSelectItem } = props;
-  const allActive = [...status.backlog, ...status.inProgress];
-  const recentMerged = status.recent.filter((i) => i.stage === "merged").slice(0, 6);
-  const failedItems = [...status.inProgress, ...status.recent].filter(
-    (i) => i.stage === "failed" || i.stage === "escalated" || i.stage === "reverted"
-  );
-  const retryCount = allActive.reduce((acc, i) => acc + Math.max(0, (i.attempts || 1) - 1), 0);
+  const live = [
+    ...status.backlog,
+    ...status.inProgress,
+    ...status.recent.filter((w) => w.stage === "escalated")
+  ];
+  const mergeItems = live.filter((w) => w.step === "merge" || w.stage === "watching");
+  const recentMerged = status.recent.filter((w) => w.stage === "merged").slice(0, 4);
   const laneBuckets = {
     reproduce: [],
     fix: [],
@@ -14055,231 +14529,1839 @@ function renderPipelineDiagram(props) {
     else if (lane === "feature" && step === "review") laneBuckets.review_feature.push(item);
     else if (laneBuckets[step]) laneBuckets[step].push(item);
   }
-  const loopTone = status.killSwitch || status.globalKillSwitch || status.loopState === "stopped" ? "danger" : status.loopState === "draining" || status.loopState === "paused" ? "warn" : "ok";
-  const loopLabel = PT_BR.loopState[status.loopState] || status.loopState;
-  const renderNode = (opts) => {
-    const hasAlert = opts.items.some((i) => i.stage === "failed" || i.stage === "escalated" || i.stage === "reverted");
-    const isEmpty = opts.items.length === 0;
+  const revising = (lane) => live.filter((w) => classifyLane(w) === lane && (w.attempts || 0) > 1).length;
+  const Arrow = (dashed = false) => h(
+    "span",
+    { className: "of-pd-arrow", "aria-hidden": "true" },
+    h("span", { className: "of-pd-arrow-line", "data-dashed": dashed ? "true" : "false" }),
+    h("span", { style: { fontSize: "10px", marginLeft: "-3px" } }, "›")
+  );
+  const Fan = (side) => h(
+    "div",
+    { className: "of-pd-fan", "aria-hidden": "true" },
+    h("span", { className: "of-pd-fan-spine" }),
+    h("span", {
+      className: "of-pd-fan-stem",
+      style: side === "out" ? { left: 0 } : { right: 0 }
+    }),
+    [0, 1, 2].map(
+      (idx) => h(
+        "span",
+        { key: idx, style: { position: "relative" } },
+        h("span", {
+          className: "of-pd-fan-stem",
+          style: side === "out" ? { right: 0 } : { left: 0 }
+        })
+      )
+    )
+  );
+  const Node = (opts) => {
+    const queued = opts.queued || [];
+    const shown = [...opts.items, ...queued];
+    const extra = shown.length - MAX_CHIPS;
+    const isActive = opts.items.length > 0;
     const isHelpOpen = activeHelpKey === opts.keyId;
     return h(
       "div",
       {
         key: opts.keyId,
-        className: "of-node",
-        "data-empty": isEmpty ? "true" : "false",
-        "data-alert": hasAlert ? "true" : "false"
+        className: "of-pd-node",
+        "data-active": isActive ? "true" : "false",
+        style: opts.width ? { width: opts.width, flex: "0 0 auto" } : void 0
       },
+      h("span", { className: "of-pd-badge", "data-kind": opts.kind }, opts.badge),
       h(
         "div",
-        { className: "of-node-head" },
-        h("span", { className: "of-node-title" }, opts.title),
+        { style: { display: "flex", alignItems: "center", justifyContent: "center", gap: "4px" } },
+        h("span", { style: { fontSize: "11.5px", fontWeight: 600, lineHeight: 1.2 } }, opts.title),
+        h(
+          "button",
+          {
+            type: "button",
+            className: "of-help-btn",
+            title: opts.help,
+            onClick: () => onToggleHelp(isHelpOpen ? null : opts.keyId)
+          },
+          "?"
+        )
+      ),
+      isHelpOpen && h("div", { className: "of-help-pop" }, opts.help),
+      shown.length > 0 && h(
+        "div",
+        { style: { display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "4px", width: "100%" } },
+        opts.items.slice(0, MAX_CHIPS).map((w) => {
+          const alert = w.stage === "escalated" || w.stage === "failed" || w.stage === "reverted";
+          return h(
+            "button",
+            {
+              key: `${opts.keyId}-${w.id}`,
+              type: "button",
+              className: "of-chip",
+              "data-alert": alert ? "true" : "false",
+              title: `${w.title}
+Etapa: ${w.stage}${w.attempts > 1 ? `
+Refazer rodada ${w.attempts}` : ""}
+Clique para abrir o card/sessão`,
+              onClick: () => onSelectItem(w)
+            },
+            alert ? h("span", null, "⚠") : h("span", { className: "of-dot", "data-tone": toneOfItem(w) }),
+            h("span", { style: { overflow: "hidden", textOverflow: "ellipsis" } }, `#${w.id.slice(0, 8)}`),
+            w.attempts > 1 && h("span", { style: { opacity: 0.75 } }, `↻${w.attempts}`)
+          );
+        }),
+        queued.slice(0, Math.max(0, MAX_CHIPS - opts.items.length)).map(
+          (w) => h(
+            "button",
+            {
+              key: `${opts.keyId}-q-${w.id}`,
+              type: "button",
+              className: "of-chip",
+              "data-queued": "true",
+              title: `${w.title}
+Na fila aguardando agente livre`,
+              onClick: () => onSelectItem(w)
+            },
+            h("span", { className: "of-dot", "data-tone": "idle" }),
+            h("span", null, `#${w.id.slice(0, 8)}`)
+          )
+        ),
+        extra > 0 && h("span", { className: "of-muted", style: { fontSize: "10px" } }, `+${extra}`)
+      ),
+      opts.footer
+    );
+  };
+  const Lane = (laneKey, title, help, children) => h(
+    "div",
+    { key: laneKey, className: "of-pd-lane" },
+    h(
+      "span",
+      { className: "of-pd-lane-tag" },
+      title,
+      h(
+        "button",
+        {
+          type: "button",
+          className: "of-help-btn",
+          title: help,
+          onClick: () => onToggleHelp(activeHelpKey === `lane-${laneKey}` ? null : `lane-${laneKey}`)
+        },
+        "?"
+      )
+    ),
+    ...children
+  );
+  const RevisePill = (count) => h(
+    "span",
+    {
+      className: "of-pd-revise",
+      "data-active": count > 0 ? "true" : "false",
+      title: PT_BR.pipelines.reviseHelp
+    },
+    `↻ ${PT_BR.pipelines.reviseLabel}${count > 0 ? ` · ${count}` : ""}`
+  );
+  const ignored = status.ignored.length;
+  const held = status.held.length;
+  const isDark = status.mode === "dark_factory";
+  return h(
+    "div",
+    { className: "of-pd-scroll" },
+    h(
+      "div",
+      { className: "of-pd-canvas" },
+      // Entrada: Oráculo (em Dark Factory ou sempre visível como Scout) ⇢ Issue ⇢ Identificar tipo
+      h(
+        "div",
+        { className: "of-pd-group" },
+        Node({
+          keyId: "scout",
+          kind: "agent",
+          badge: PT_BR.pipelines.scoutBadge,
+          title: PT_BR.pipelines.scoutLabel,
+          help: PT_BR.pipelines.scoutHelp,
+          items: [],
+          width: "112px",
+          footer: h(
+            "span",
+            { className: "of-muted", style: { fontSize: "10px" } },
+            isDark ? "agendado" : "sob demanda"
+          )
+        }),
+        Arrow(true),
+        Node({
+          keyId: "issue",
+          kind: "human",
+          badge: PT_BR.pipelines.issueBadge,
+          title: PT_BR.pipelines.issueLabel,
+          help: PT_BR.pipelines.issueHelp,
+          items: [],
+          queued: status.backlog.slice(0, 3),
+          width: "116px",
+          footer: h(
+            "div",
+            { style: { display: "flex", flexDirection: "column", alignItems: "center", fontSize: "10px" } },
+            h(
+              "span",
+              { style: { color: ignored > 0 ? "var(--status-waiting)" : "var(--muted-foreground)" } },
+              ignored > 0 ? `${ignored} ignoradas` : "autores confiáveis"
+            ),
+            held > 0 && h("span", { className: "of-muted", style: { fontSize: "10px" } }, `${held} retidas`)
+          )
+        }),
+        Arrow(true),
+        Node({
+          keyId: "classify",
+          kind: "llm",
+          badge: PT_BR.pipelines.classifyBadge,
+          title: PT_BR.pipelines.classifyLabel,
+          help: PT_BR.pipelines.classifyHelp,
+          items: status.backlog.filter((i) => i.step === "intake"),
+          width: "118px"
+        })
+      ),
+      Fan("out"),
+      // 3 Raias Listradas: Bug, Feature, Documentação (Revisor L-01 mantido!)
+      h(
+        "div",
+        { className: "of-pd-lanes" },
+        Lane(
+          "bug",
+          PT_BR.pipelines.lanes.bug.title,
+          "Bugs são reproduzidos com teste falhando (L-22) antes da correção e revisão independente (L-01).",
+          [
+            Node({
+              keyId: "bug-reproduce",
+              kind: "workspace",
+              badge: "Worktree",
+              title: PT_BR.pipelines.lanes.bug.steps[0].label,
+              help: PT_BR.pipelines.lanes.bug.steps[0].help,
+              items: laneBuckets.reproduce
+            }),
+            Arrow(false),
+            Node({
+              keyId: "bug-fix",
+              kind: "workspace",
+              badge: "Worktree",
+              title: PT_BR.pipelines.lanes.bug.steps[1].label,
+              help: PT_BR.pipelines.lanes.bug.steps[1].help,
+              items: laneBuckets.fix
+            }),
+            Arrow(false),
+            h(
+              "div",
+              { style: { position: "relative", display: "flex", flex: 1, minWidth: 0 } },
+              Node({
+                keyId: "bug-review",
+                kind: "workspace",
+                badge: "Revisor L-01",
+                title: PT_BR.pipelines.lanes.bug.steps[2].label,
+                help: PT_BR.pipelines.lanes.bug.steps[2].help,
+                items: laneBuckets.review_bug
+              }),
+              RevisePill(revising("bug"))
+            )
+          ]
+        ),
+        Lane(
+          "feature",
+          PT_BR.pipelines.lanes.feature.title,
+          "Features passam por análise/spec, implementação TDD em worktree isolada e revisão independente (L-01).",
+          [
+            Node({
+              keyId: "feat-analyze",
+              kind: "agent",
+              badge: "Agente",
+              title: PT_BR.pipelines.lanes.feature.steps[0].label,
+              help: PT_BR.pipelines.lanes.feature.steps[0].help,
+              items: laneBuckets.analyze
+            }),
+            Arrow(false),
+            Node({
+              keyId: "feat-implement",
+              kind: "workspace",
+              badge: "Worktree",
+              title: PT_BR.pipelines.lanes.feature.steps[1].label,
+              help: PT_BR.pipelines.lanes.feature.steps[1].help,
+              items: laneBuckets.implement
+            }),
+            Arrow(false),
+            h(
+              "div",
+              { style: { position: "relative", display: "flex", flex: 1, minWidth: 0 } },
+              Node({
+                keyId: "feat-review",
+                kind: "workspace",
+                badge: "Revisor L-01",
+                title: PT_BR.pipelines.lanes.feature.steps[2].label,
+                help: PT_BR.pipelines.lanes.feature.steps[2].help,
+                items: laneBuckets.review_feature
+              }),
+              RevisePill(revising("feature"))
+            )
+          ]
+        ),
+        Lane(
+          "docs",
+          PT_BR.pipelines.lanes.docs.title,
+          "Documentação roda CI (ci.sh) e mantém revisão independente L-01 (decisão do Helton).",
+          [
+            Node({
+              keyId: "docs-impl",
+              kind: "workspace",
+              badge: "Worktree",
+              title: PT_BR.pipelines.lanes.docs.steps[0].label,
+              help: PT_BR.pipelines.lanes.docs.steps[0].help,
+              items: laneBuckets.implement_docs
+            }),
+            Arrow(false),
+            Node({
+              keyId: "docs-checks",
+              kind: "checks",
+              badge: "CI",
+              title: PT_BR.pipelines.lanes.docs.steps[1].label,
+              help: PT_BR.pipelines.lanes.docs.steps[1].help,
+              items: laneBuckets.checks
+            }),
+            Arrow(false),
+            Node({
+              keyId: "docs-review",
+              kind: "workspace",
+              badge: "Revisor L-01",
+              title: PT_BR.pipelines.lanes.docs.steps[2].label,
+              help: PT_BR.pipelines.lanes.docs.steps[2].help,
+              items: laneBuckets.review_docs
+            })
+          ]
+        )
+      ),
+      Fan("in"),
+      // Merge
+      h(
+        "div",
+        { className: "of-pd-group" },
+        Node({
+          keyId: "merge",
+          kind: status.limits.autoMerge ? "auto" : "human",
+          badge: status.limits.autoMerge ? "Auto-merge" : "Humano",
+          title: PT_BR.pipelines.mergeLabel,
+          help: PT_BR.pipelines.mergeHelp,
+          items: mergeItems.length > 0 ? mergeItems : recentMerged,
+          width: "126px",
+          footer: h(
+            "span",
+            { className: "of-muted", style: { fontSize: "10px" } },
+            status.limits.autoMerge ? "quando checks passam" : "pronto para GATE"
+          )
+        })
+      )
+    )
+  );
+}
+function Meter(h, props) {
+  const pct = props.max > 0 ? Math.min(100, props.value / props.max * 100) : 0;
+  const color = !props.warn ? "var(--status-running)" : pct > 85 ? "var(--status-failed)" : pct > 60 ? "var(--status-waiting)" : "var(--primary)";
+  return h(
+    "div",
+    { className: "of-meter" },
+    h(
+      "div",
+      { className: "of-meter-top" },
+      h("span", { className: "of-meter-label" }, props.label),
+      h("span", { className: "of-meter-val" }, props.display)
+    ),
+    h(
+      "div",
+      { className: "of-bar-track" },
+      h("div", { className: "of-bar-fill", style: { width: `${pct}%`, background: color } })
+    )
+  );
+}
+function renderFactoryOverviewPanel(props) {
+  var _a, _b, _c;
+  const {
+    h,
+    tenant,
+    status,
+    loading,
+    confirmKill,
+    setConfirmKill,
+    activeHelpKey,
+    onToggleHelp,
+    onSelectItem,
+    onRefresh,
+    onOpenBoard,
+    onOpenSettings,
+    onOpenVision,
+    onToggleDrain,
+    onToggleKillSwitch,
+    scorecardView,
+    setScorecardView,
+    scorecardDays,
+    setScorecardDays
+  } = props;
+  const stopped = status.killSwitch || status.globalKillSwitch || status.loopState === "stopped";
+  const loopTone = stopped ? "failed" : status.loopState === "paused" || status.loopState === "draining" ? "waiting" : status.loopState === "building" || status.loopState === "discovering" ? "running" : "idle";
+  const loopLabel = PT_BR.loopState[stopped ? "stopped" : status.loopState] || status.loopState;
+  const budgetUsd = ((_a = status.limits.dailyBudget) == null ? void 0 : _a.usd) ?? 50;
+  const readyCount = status.inProgress.filter((w) => w.step === "merge" && w.stage === "verifying").length;
+  const qualidade = ((_b = status.kpis) == null ? void 0 : _b.qualidade) || null;
+  const economia = ((_c = status.kpis) == null ? void 0 : _c.economia) || null;
+  const modelos = status.modelos || [];
+  const porModelo = Array.isArray(economia == null ? void 0 : economia.por_modelo) ? economia.por_modelo : [];
+  const renderColumn = (title, count, body) => h(
+    "div",
+    { className: "of-surface", style: { minWidth: 0, overflow: "hidden" } },
+    h(
+      "div",
+      {
+        style: {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "7px 12px",
+          borderBottom: "1px solid var(--border)",
+          fontSize: "11px",
+          fontWeight: 600,
+          color: "var(--muted-foreground)"
+        }
+      },
+      h("span", null, title),
+      h("span", { className: "of-mono of-num" }, String(count))
+    ),
+    h(
+      "div",
+      { style: { padding: "8px", display: "flex", flexDirection: "column", gap: "4px" } },
+      count === 0 ? h("div", { className: "of-muted", style: { textAlign: "center", padding: "14px 6px", fontSize: "11px" } }, "Nada ainda") : body
+    )
+  );
+  return h(
+    "section",
+    { className: "of-card" },
+    // 1. Header da Fábrica (factory-panel.tsx)
+    h(
+      "div",
+      { className: "of-panel-head" },
+      h("span", { className: "of-brand-icon", style: { width: "32px", height: "32px", fontSize: "14px" } }, "⚙"),
+      h(
+        "div",
+        { style: { minWidth: 0 } },
         h(
           "div",
-          { style: { display: "flex", alignItems: "center", gap: "4px" } },
-          h("span", { className: "of-node-badge" }, opts.badge),
+          { style: { display: "flex", alignItems: "center", gap: "7px", flexWrap: "wrap", fontSize: "14px", fontWeight: 600 } },
+          h("span", null, `${PT_BR.modes[status.mode] || status.mode} · ${tenant}`),
+          status.experimental && h("span", { className: "of-exp-badge" }, "experimental"),
+          h(
+            "span",
+            { className: "of-pill", "data-tone": status.coordenador === "ativo" ? "done" : "failed" },
+            status.coordenador === "ativo" ? PT_BR.labels.coordinatorActive : PT_BR.labels.coordinatorStopped
+          )
+        ),
+        h(
+          "div",
+          { className: "of-muted", style: { marginTop: "2px" } },
+          status.mode === "dark_factory" ? "O Oráculo e issues confiáveis alimentam as pipelines; " : "Issues NIP-34 confiáveis alimentam as pipelines; ",
+          status.limits.autoMerge ? "a OrgFy faz merge quando todos os checks passam." : "você e o Revisor L-01 aprovam os PRs."
+        )
+      ),
+      h(
+        "div",
+        { style: { marginLeft: "auto", display: "flex", flexWrap: "wrap", alignItems: "center", gap: "6px" } },
+        h("button", { type: "button", className: "of-btn", onClick: onOpenBoard }, "Abrir Visão da Fábrica"),
+        h(
+          "button",
+          { type: "button", className: "of-btn", onClick: onRefresh, disabled: loading },
+          loading ? "Verificando..." : PT_BR.actions.checkNow
+        ),
+        h(
+          "button",
+          { type: "button", className: "of-btn", "data-variant": "ghost", onClick: onOpenSettings },
+          "Configurações"
+        ),
+        h(
+          "button",
+          { type: "button", className: "of-btn", "data-variant": "ghost", onClick: onOpenVision },
+          "Visão"
+        ),
+        h(
+          "button",
+          { type: "button", className: "of-btn", onClick: onToggleDrain },
+          status.drain ? PT_BR.actions.drainOff : PT_BR.actions.drainOn
+        ),
+        !confirmKill ? h(
+          "button",
+          {
+            type: "button",
+            className: "of-btn",
+            "data-variant": "danger",
+            onClick: () => status.killSwitch ? onToggleKillSwitch(false) : setConfirmKill(true)
+          },
+          status.killSwitch ? PT_BR.actions.killSwitchOff : PT_BR.actions.killSwitchOn
+        ) : h(
+          "div",
+          { style: { display: "inline-flex", gap: "4px" } },
           h(
             "button",
             {
               type: "button",
-              className: "of-help-btn",
-              title: opts.help,
-              onClick: () => onToggleHelp(isHelpOpen ? null : opts.keyId)
+              className: "of-btn",
+              "data-variant": "danger",
+              onClick: () => {
+                setConfirmKill(false);
+                onToggleKillSwitch(true);
+              }
             },
-            "?"
-          )
+            "Confirmar Kill Switch"
+          ),
+          h("button", { type: "button", className: "of-btn", onClick: () => setConfirmKill(false) }, "Cancelar")
         )
-      ),
-      isHelpOpen && h(
-        "div",
-        {
-          style: {
-            fontSize: "11px",
-            color: "var(--muted-foreground)",
-            background: "rgba(0,0,0,0.28)",
-            padding: "6px 8px",
-            borderRadius: "6px",
-            lineHeight: 1.35
-          }
-        },
-        opts.help
-      ),
-      opts.items.length > 0 ? h(
-        "div",
-        { className: "of-chip-row" },
-        opts.items.slice(0, 8).map((item) => {
-          const itemAlert = item.stage === "failed" || item.stage === "escalated" || item.stage === "reverted";
-          return h(
-            "button",
-            {
-              key: `${opts.keyId}-${item.id}`,
-              type: "button",
-              className: "of-chip",
-              "data-alert": itemAlert ? "true" : "false",
-              title: `${item.title} (${item.stage})`,
-              onClick: () => onSelectItem(item)
-            },
-            itemAlert ? "⚠ " : "",
-            `#${item.id.slice(0, 8)}`
-          );
-        })
-      ) : h("span", { className: "of-muted", style: { fontSize: "10.5px" } }, "—")
-    );
-  };
-  return h(
-    "section",
-    { className: "of-card of-pipeline-flow" },
+      )
+    ),
+    // 2. Corpo do Painel
     h(
       "div",
-      { className: "of-header-bar" },
+      { className: "of-panel-body" },
+      // Banner de alerta condicional
+      (status.globalKillSwitch || status.pausedReason || !status.visionExists) && h(
+        "div",
+        { className: "of-alert-banner" },
+        h("span", { style: { color: "var(--status-waiting)", fontWeight: 700 } }, "⚠"),
+        h(
+          "span",
+          { style: { flex: 1 } },
+          status.globalKillSwitch ? "Kill switch global ativado: nenhuma fábrica da Holding está rodando." : status.pausedReason ? `Pausado: ${status.pausedReason}` : "Arquivo docs/VISION.md não encontrado no repositório do tenant."
+        )
+      ),
+      // Seção Pipelines ao vivo
       h(
         "div",
         null,
-        h("div", { style: { fontSize: "14px", fontWeight: 700 } }, PT_BR.pipelines.title),
-        h("div", { className: "of-muted", style: { marginTop: "2px" } }, PT_BR.pipelines.subtitle)
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "6px" } },
+          h("span", { style: { fontSize: "12px", fontWeight: 600, color: "var(--muted-foreground)" } }, PT_BR.pipelines.title),
+          h("span", { className: "of-muted", style: { fontSize: "11px" } }, "Clique em um #id para abrir o detalhe ou sessão"),
+          h(
+            "div",
+            { style: { marginLeft: "auto", display: "flex", alignItems: "center", gap: "6px" } },
+            status.wip.holding && h(
+              "span",
+              { className: "of-pill", "data-tone": "waiting" },
+              `Finalizando trabalho aberto (${status.wip.openPrs}/${status.wip.limit} PRs)`
+            ),
+            status.drain && !stopped ? h("span", { className: "of-pill", "data-tone": "waiting" }, `Drenando: ${status.drain.inFlight} em andamento`) : h("span", { className: "of-pill", "data-tone": loopTone }, `Loop ${loopLabel.toLowerCase()}`)
+          )
+        ),
+        renderPipelineDiagram({ h, status, activeHelpKey, onToggleHelp, onSelectItem })
+      ),
+      // 5 Meters com barras de progresso (factory-panel.tsx)
+      h(
+        "div",
+        { className: "of-meters-row" },
+        Meter(h, {
+          label: "Gasto hoje",
+          value: status.spendToday.usd,
+          max: budgetUsd,
+          display: `$${status.spendToday.usd.toFixed(2)} / $${budgetUsd.toFixed(0)}`,
+          warn: true
+        }),
+        Meter(h, {
+          label: "Agentes trabalhando",
+          value: status.activeSessions,
+          max: status.limits.maxConcurrentSessions,
+          display: `${status.activeSessions} / ${status.limits.maxConcurrentSessions}`,
+          warn: false
+        }),
+        Meter(h, {
+          label: "PRs em andamento",
+          value: status.wip.openPrs,
+          max: status.wip.limit,
+          display: `${status.wip.openPrs} / ${status.wip.limit}`,
+          warn: false
+        }),
+        status.limits.autoMerge ? Meter(h, {
+          label: "Merges hoje (7d: " + status.stats.merged7d + ")",
+          value: status.mergesToday,
+          max: status.limits.maxMergesPerDay,
+          display: `${status.mergesToday} / ${status.limits.maxMergesPerDay}`,
+          warn: false
+        }) : Meter(h, {
+          label: "FPY real (sem hist.: " + (typeof (qualidade == null ? void 0 : qualidade.pct_desconhecido) === "number" ? `${qualidade.pct_desconhecido.toFixed(0)}%` : "n/d") + ")",
+          value: typeof (qualidade == null ? void 0 : qualidade.fpy_real_pct) === "number" ? qualidade.fpy_real_pct : 0,
+          max: 100,
+          display: typeof (qualidade == null ? void 0 : qualidade.fpy_real_pct) === "number" ? `${qualidade.fpy_real_pct.toFixed(1)}%` : `${readyCount} PRs`,
+          warn: false
+        }),
+        Meter(h, {
+          label: "Falhas seguidas",
+          value: status.consecutiveFailures,
+          max: status.limits.pauseAfterConsecutiveFailures,
+          display: `${status.consecutiveFailures} / ${status.limits.pauseAfterConsecutiveFailures}`,
+          warn: true
+        })
+      ),
+      // 3 Colunas (Checks de Merge | Merges & Reversões Recentes | Ignoradas)
+      h(
+        "div",
+        { className: "of-grid-3" },
+        renderColumn(
+          "Checks de merge (CI + L-01 + L-22)",
+          status.mergeChecks.length,
+          status.mergeChecks.slice(0, 6).map(
+            (c, idx) => h(
+              "div",
+              { key: idx, style: { padding: "6px 8px", borderRadius: "6px", background: "var(--card)", fontSize: "11.5px" } },
+              h("span", { className: "of-mono", style: { color: "var(--primary)", marginRight: "6px" } }, `#${c.prNumber || idx}`),
+              h("span", null, c.title || "Check")
+            )
+          )
+        ),
+        renderColumn(
+          "Merges & reversões recentes",
+          status.recent.length,
+          status.recent.slice(0, 8).map(
+            (w) => h(
+              "button",
+              {
+                key: w.id,
+                type: "button",
+                onClick: () => onSelectItem(w),
+                style: {
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  width: "100%",
+                  textAlign: "left",
+                  padding: "6px 8px",
+                  borderRadius: "6px",
+                  border: "none",
+                  background: "transparent",
+                  color: "var(--foreground)",
+                  cursor: "pointer",
+                  fontSize: "11.5px"
+                }
+              },
+              h("span", { className: "of-dot", "data-tone": w.stage === "merged" ? "done" : w.stage === "failed" ? "failed" : "waiting" }),
+              h("span", { style: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, w.title),
+              h("span", { className: "of-mono of-muted", style: { fontSize: "10px" } }, w.stage)
+            )
+          )
+        ),
+        renderColumn(
+          "Ignoradas · autores não confiáveis",
+          status.ignored.length,
+          status.ignored.slice(0, 6).map(
+            (w) => h(
+              "div",
+              { key: w.id, style: { display: "flex", alignItems: "center", gap: "6px", padding: "6px 8px", fontSize: "11.5px" } },
+              h("span", { className: "of-mono of-muted" }, `#${w.id.slice(0, 8)}`),
+              h("span", { style: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, w.title)
+            )
+          )
+        )
+      ),
+      // Scorecard colapsável (scorecard-card.tsx)
+      h(
+        "details",
+        { className: "of-surface", open: true },
+        h(
+          "summary",
+          {
+            style: {
+              cursor: "pointer",
+              padding: "8px 12px",
+              fontSize: "11.5px",
+              fontWeight: 600,
+              color: "var(--muted-foreground)"
+            }
+          },
+          "Scorecard da Fábrica · FPY real, eval R5.1 de tool call e custo por modelo (kpis-esteira.json)"
+        ),
+        h(
+          "div",
+          { style: { borderTop: "1px solid var(--border)", padding: "10px 12px", display: "flex", flexDirection: "column", gap: "10px" } },
+          h(
+            "div",
+            { style: { display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center" } },
+            h(
+              "div",
+              { className: "of-segmented" },
+              ["builders", "reviewers", "pairs"].map(
+                (v) => h(
+                  "button",
+                  {
+                    key: v,
+                    type: "button",
+                    className: "of-seg-btn",
+                    "data-active": scorecardView === v ? "true" : "false",
+                    onClick: () => setScorecardView(v)
+                  },
+                  v === "builders" ? "Construtor" : v === "reviewers" ? "Revisor" : "Par"
+                )
+              )
+            ),
+            h(
+              "div",
+              { className: "of-segmented" },
+              [7, 30, 90].map(
+                (d) => h(
+                  "button",
+                  {
+                    key: d,
+                    type: "button",
+                    className: "of-seg-btn",
+                    "data-active": scorecardDays === d ? "true" : "false",
+                    onClick: () => setScorecardDays(d)
+                  },
+                  `${d} dias`
+                )
+              )
+            )
+          ),
+          modelos.length === 0 && porModelo.length === 0 ? h("div", { className: "of-muted" }, PT_BR.labels.unavailable) : h(
+            "table",
+            { className: "of-table" },
+            h(
+              "thead",
+              null,
+              h(
+                "tr",
+                null,
+                h("th", null, scorecardView === "reviewers" ? "Revisor / Agente" : "Agente / Modelo"),
+                h("th", null, "Papel"),
+                h("th", null, "Modelo"),
+                h("th", null, "Eval R5.1"),
+                h("th", null, "Status")
+              )
+            ),
+            h(
+              "tbody",
+              null,
+              modelos.slice(0, 10).map(
+                (m) => h(
+                  "tr",
+                  { key: m.agente },
+                  h("td", { style: { fontWeight: 600 } }, m.agente),
+                  h("td", { className: "of-muted" }, m.papel || "—"),
+                  h("td", { className: "of-mono" }, m.modelo || PT_BR.labels.unavailable),
+                  h(
+                    "td",
+                    null,
+                    h(
+                      "span",
+                      { className: "of-pill", "data-tone": m.abaixo_minimo ? "failed" : m.toolcall_eval ? "done" : "idle" },
+                      m.toolcall_eval || PT_BR.labels.unavailable
+                    )
+                  ),
+                  h(
+                    "td",
+                    null,
+                    m.abaixo_minimo ? h("span", { style: { color: "var(--status-failed)", fontWeight: 700, fontSize: "11px" } }, PT_BR.labels.evalBelowMin) : h("span", { className: "of-muted" }, "OK")
+                  )
+                )
+              )
+            )
+          )
+        )
+      ),
+      // Rodapé de telemetria honesta (factory-panel.tsx)
+      h(
+        "div",
+        { className: "of-muted", style: { fontSize: "10.5px", lineHeight: 1.5 } },
+        `${status.spendToday.tokens.toLocaleString("pt-BR")} tokens hoje · auto-merge ${status.limits.autoMerge ? "ligado" : "desligado"} · política ${status.limits.mergePolicy} · quarentena: ${status.quarentenaCount ?? 0}`,
+        status.indisponivel.length > 0 ? ` · indisponível: ${status.indisponivel.join(", ")}` : ""
+      )
+    )
+  );
+}
+const BOARD_STAGES = [
+  { id: "intake", label: "Entrada", hint: "Issues novas no relay NIP-34 e itens retidos." },
+  { id: "classify", label: "Identificar tipo", hint: "Classificação Bug / Feature / Docs via Decisions." },
+  { id: "building", label: "Executando", hint: "Agentes implementando em worktrees isoladas." },
+  { id: "reviewing", label: "Revisando (L-01)", hint: "Revisor independente validando diff, CI e aceite L-22." },
+  { id: "merge", label: "Fila de merge", hint: "PRs aprovados aguardando merge na main." },
+  { id: "merged", label: "Integrado", hint: "Entregas integradas recentemente na main." }
+];
+const LOOKOUT_AREAS = [
+  { id: "features", label: "Features" },
+  { id: "ux", label: "UI & UX" },
+  { id: "performance", label: "Performance" },
+  { id: "tech_debt", label: "Qualidade" },
+  { id: "test_gaps", label: "Testes" },
+  { id: "security", label: "Segurança" },
+  { id: "bugs", label: "Bugs" },
+  { id: "docs", label: "Docs" }
+];
+function stageOfItem(item) {
+  if (item.stage === "merged") return "merged";
+  if (item.step === "merge" || item.stage === "watching") return "merge";
+  if (item.stage === "verifying" || String(item.step).includes("review")) return "reviewing";
+  if (item.stage === "building") return "building";
+  if (item.stage === "candidate" || item.step === "intake") return "classify";
+  return "intake";
+}
+function cardStateOf(item) {
+  if (item.stage === "failed" || item.stage === "reverted") return "failed";
+  if (item.stage === "escalated") return "person";
+  if (item.stage === "building" || item.stage === "verifying" || item.stage === "watching") return "running";
+  return "idle";
+}
+function renderFactoryBoardAndFloor(props) {
+  var _a, _b;
+  const {
+    h,
+    tenant,
+    status,
+    liveCrew,
+    viewMode,
+    onChangeViewMode,
+    storeyFocus,
+    onChangeStoreyFocus,
+    selectedAgentKey,
+    onSelectAgentKey,
+    onSelectItem,
+    onRefresh,
+    loading
+  } = props;
+  const allItems = [...status.backlog, ...status.inProgress, ...status.recent];
+  const needsYou = allItems.filter((i) => i.stage === "escalated" || i.stage === "failed" || i.stage === "reverted");
+  const failedCount = allItems.filter((i) => i.stage === "failed" || i.stage === "reverted").length;
+  const qualidade = ((_a = status.kpis) == null ? void 0 : _a.qualidade) || null;
+  const budgetUsd = ((_b = status.limits.dailyBudget) == null ? void 0 : _b.usd) ?? 50;
+  const byStage = {
+    intake: [],
+    classify: [],
+    building: [],
+    reviewing: [],
+    merge: [],
+    merged: []
+  };
+  for (const item of allItems) {
+    const st = stageOfItem(item);
+    if (byStage[st]) byStage[st].push(item);
+  }
+  const statTiles = [
+    {
+      label: "Gasto hoje",
+      value: `$${status.spendToday.usd.toFixed(2)}`,
+      detail: `de $${budgetUsd}`,
+      pct: budgetUsd > 0 ? Math.min(100, status.spendToday.usd / budgetUsd * 100) : 0,
+      color: "var(--primary)"
+    },
+    {
+      label: "Merges (7d)",
+      value: String(status.stats.merged7d),
+      detail: `hoje: ${status.mergesToday}`,
+      pct: Math.min(100, status.mergesToday / Math.max(1, status.limits.maxMergesPerDay) * 100),
+      color: "var(--status-done)"
+    },
+    {
+      label: "FPY real",
+      value: typeof (qualidade == null ? void 0 : qualidade.fpy_real_pct) === "number" ? `${qualidade.fpy_real_pct.toFixed(1)}%` : PT_BR.labels.unavailable,
+      detail: typeof (qualidade == null ? void 0 : qualidade.pct_desconhecido) === "number" ? `${qualidade.pct_desconhecido.toFixed(0)}% sem hist.` : "",
+      pct: typeof (qualidade == null ? void 0 : qualidade.fpy_real_pct) === "number" ? qualidade.fpy_real_pct : 0,
+      color: "var(--status-done)"
+    },
+    {
+      label: "Agentes ativos",
+      value: `${liveCrew.filter((a) => a.running).length}/${status.limits.maxConcurrentSessions}`,
+      detail: `${liveCrew.length} no plantel`,
+      pct: Math.min(100, liveCrew.filter((a) => a.running).length / Math.max(1, status.limits.maxConcurrentSessions) * 100),
+      color: "var(--status-running)"
+    },
+    {
+      label: "PRs abertos",
+      value: `${status.wip.openPrs}/${status.wip.limit}`,
+      detail: status.wip.holding ? "segurando fila" : "livre",
+      pct: Math.min(100, status.wip.openPrs / Math.max(1, status.wip.limit) * 100),
+      color: "var(--status-running)"
+    },
+    {
+      label: "Quarentena / Falhas",
+      value: String((status.quarentenaCount ?? 0) + failedCount),
+      detail: `falhas seguidas: ${status.consecutiveFailures}`,
+      pct: Math.min(100, status.consecutiveFailures / Math.max(1, status.limits.pauseAfterConsecutiveFailures) * 100),
+      color: failedCount > 0 ? "var(--status-failed)" : "var(--status-idle)"
+    }
+  ];
+  const selectedAgent = liveCrew.find((a) => a.key === selectedAgentKey) || null;
+  return h(
+    "div",
+    { style: { display: "flex", flexDirection: "column", gap: "12px" } },
+    // 1. ViewHeader (view-header.tsx)
+    h(
+      "div",
+      { className: "of-card-pad", style: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: "10px" } },
+      h(
+        "div",
+        { style: { display: "flex", alignItems: "center", gap: "8px" } },
+        h("span", { className: "of-brand-icon" }, "⚙"),
+        h(
+          "div",
+          null,
+          h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Visão da Fábrica · ${tenant}`),
+          h("div", { className: "of-muted", style: { fontSize: "11px" } }, PT_BR.modes[status.mode] || status.mode)
+        )
+      ),
+      h(
+        "span",
+        { className: "of-pill", "data-tone": needsYou.length > 0 ? "waiting" : "idle" },
+        `${needsYou.length} precisam de você`
+      ),
+      h(
+        "span",
+        { className: "of-pill", "data-tone": failedCount > 0 ? "failed" : "idle" },
+        `${failedCount} falhas`
       ),
       h(
         "div",
-        { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
-        h("span", { className: "of-pill", "data-tone": loopTone }, loopLabel),
-        h(
-          "span",
-          { className: "of-pill", "data-tone": retryCount > 0 ? "warn" : "muted", title: PT_BR.pipelines.reviseHelp },
-          `↻ ${PT_BR.pipelines.reviseLabel}: ${retryCount}`
+        { style: { marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
+        viewMode === "floor" && h(
+          "div",
+          { className: "of-segmented", role: "radiogroup", "aria-label": "Andares da fábrica" },
+          [
+            { id: "workshop", label: "Oficina" },
+            { id: "lookout", label: "Mirante" },
+            { id: "both", label: "Ambos" }
+          ].map(
+            (st) => h(
+              "button",
+              {
+                key: st.id,
+                type: "button",
+                className: "of-seg-btn",
+                "data-active": storeyFocus === st.id ? "true" : "false",
+                onClick: () => onChangeStoreyFocus(st.id)
+              },
+              st.label
+            )
+          )
         ),
-        failedItems.length > 0 && h("span", { className: "of-pill", "data-tone": "danger" }, `⚠ ${failedItems.length} atenção`)
+        h(
+          "div",
+          { className: "of-segmented", role: "radiogroup", "aria-label": "Modo de visualização" },
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-seg-btn",
+              "data-active": viewMode === "board" ? "true" : "false",
+              onClick: () => onChangeViewMode("board")
+            },
+            "Board"
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-seg-btn",
+              "data-active": viewMode === "floor" ? "true" : "false",
+              onClick: () => onChangeViewMode("floor")
+            },
+            "Andar"
+          )
+        ),
+        h("button", { type: "button", className: "of-btn", onClick: onRefresh, disabled: loading }, loading ? "..." : "Atualizar")
       )
     ),
-    // Entrada: Oráculo ⇢ Issue ⇢ Identificar tipo
+    // 2. StatsStrip (stats-strip.tsx — 6 tiles)
     h(
       "div",
-      { className: "of-pipeline-entry" },
-      h("div", { style: { flex: "1 1 200px" } }, renderNode({
-        keyId: "scout",
-        title: PT_BR.pipelines.scoutLabel,
-        badge: PT_BR.pipelines.scoutBadge,
-        help: PT_BR.pipelines.scoutHelp,
-        items: []
-      })),
-      h("div", { style: { flex: "1 1 200px" } }, renderNode({
-        keyId: "issue",
-        title: PT_BR.pipelines.issueLabel,
-        badge: PT_BR.pipelines.issueBadge,
-        help: PT_BR.pipelines.issueHelp,
-        items: status.backlog
-      })),
-      h("div", { style: { flex: "1 1 200px" } }, renderNode({
-        keyId: "classify",
-        title: PT_BR.pipelines.classifyLabel,
-        badge: PT_BR.pipelines.classifyBadge,
-        help: PT_BR.pipelines.classifyHelp,
-        items: status.backlog.slice(0, 4)
-      }))
+      { className: "of-stats-6" },
+      statTiles.map(
+        (t) => h(
+          "div",
+          { key: t.label, className: "of-card-pad", style: { padding: "10px 12px" } },
+          h("div", { className: "of-meter-label" }, t.label),
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "baseline", gap: "6px", marginTop: "3px" } },
+            h("span", { className: "of-num", style: { fontSize: "17px", fontWeight: 700 } }, t.value),
+            t.detail && h("span", { className: "of-muted", style: { fontSize: "10.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, t.detail)
+          ),
+          h(
+            "div",
+            { className: "of-bar-track" },
+            h("div", { className: "of-bar-fill", style: { width: `${t.pct}%`, background: t.color } })
+          )
+        )
+      )
     ),
-    // 3 Raias: Bug, Feature, Documentação (L-01 mantido!) -> Merge
+    // 3. Conteúdo: Board 6 colunas OU Andar 2 pisos (Oficina + Mirante)
+    viewMode === "board" ? h(
+      "div",
+      { style: { display: "flex", flexDirection: "column", gap: "12px" } },
+      // Faixa "Precisa de você" (NeedsYou)
+      needsYou.length === 0 ? h("div", { className: "of-muted", style: { padding: "2px 4px" } }, "👤 Nada esperando por você agora.") : h(
+        "section",
+        { className: "of-needs-you" },
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", fontWeight: 700, color: "var(--status-waiting)" } },
+          h("span", null, `👤 Precisa de você (${needsYou.length})`),
+          h("span", { className: "of-muted", style: { fontWeight: 400 } }, "Itens parados, escalados ou aguardando decisão humana")
+        ),
+        h(
+          "div",
+          { className: "of-grid-3" },
+          needsYou.map(
+            (item) => h(
+              "button",
+              {
+                key: item.id,
+                type: "button",
+                className: "of-view-card",
+                "data-state": cardStateOf(item),
+                onClick: () => onSelectItem(item)
+              },
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", gap: "6px" } },
+                h("span", { className: "of-mono", style: { fontSize: "11px", color: "var(--status-waiting)" } }, `#${item.id.slice(0, 8)}`),
+                h("span", { className: "of-pill", "data-tone": "waiting" }, item.stage)
+              ),
+              h("div", { style: { fontSize: "12px", fontWeight: 600 } }, item.title),
+              item.reason && h("div", { className: "of-muted", style: { fontSize: "11px" } }, item.reason)
+            )
+          )
+        )
+      ),
+      // 6 Colunas (pipeline-board.tsx)
+      h(
+        "div",
+        { className: "of-board-6" },
+        BOARD_STAGES.map((stage) => {
+          const items = byStage[stage.id] || [];
+          return h(
+            "section",
+            { key: stage.id, className: "of-stage-col" },
+            h(
+              "header",
+              { className: "of-stage-head", title: stage.hint },
+              h("span", null, stage.label),
+              h("span", { className: "of-pill of-num" }, String(items.length))
+            ),
+            h(
+              "div",
+              { style: { padding: "8px", display: "flex", flexDirection: "column", gap: "6px", flex: 1 } },
+              items.length === 0 ? h("div", { className: "of-muted", style: { fontSize: "11px", padding: "6px 4px" } }, "Nada aqui") : items.slice(0, 20).map((item) => {
+                const st = cardStateOf(item);
+                return h(
+                  "button",
+                  {
+                    key: item.id,
+                    type: "button",
+                    className: "of-view-card",
+                    "data-state": st,
+                    onClick: () => onSelectItem(item)
+                  },
+                  h(
+                    "div",
+                    { style: { display: "flex", alignItems: "center", gap: "5px" } },
+                    h("span", { className: "of-dot", "data-tone": st === "person" ? "waiting" : st }),
+                    h("span", { className: "of-mono of-muted", style: { fontSize: "10.5px" } }, `#${item.id.slice(0, 8)}`),
+                    item.type && h("span", { className: "of-pill", style: { padding: "0 5px", fontSize: "9.5px" } }, item.type),
+                    item.attempts > 1 && h("span", { className: "of-pill", "data-tone": "waiting", style: { marginLeft: "auto", padding: "0 5px", fontSize: "9.5px" } }, `↻${item.attempts}`)
+                  ),
+                  h("div", { style: { fontSize: "12px", fontWeight: 600, lineHeight: 1.3 } }, item.title),
+                  h("div", { className: "of-muted", style: { fontSize: "10.5px" } }, item.note || item.step || item.stage)
+                );
+              })
+            )
+          );
+        })
+      )
+    ) : (
+      // Modo Andar (Floor): Roster lateral + Oficina (6 zonas + Baia de Reparo + Cabine PM) + Mirante (8 pods)
+      h(
+        "div",
+        { className: "of-floor-shell" },
+        // Roster lateral esquerdo (floor/roster.tsx)
+        h(
+          "aside",
+          { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "8px", overflowY: "auto" } },
+          h(
+            "div",
+            { style: { display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "12px", fontWeight: 700 } },
+            h("span", null, "Plantel ao vivo"),
+            h("span", { className: "of-mono of-muted" }, `${liveCrew.filter((c) => c.running).length}/${liveCrew.length}`)
+          ),
+          liveCrew.length === 0 ? h("div", { className: "of-muted" }, "Nenhum agente reportado por ctx.agents.snapshot().") : liveCrew.map(
+            (agent) => h(
+              "button",
+              {
+                key: agent.key,
+                type: "button",
+                className: "of-nav-btn",
+                "data-active": selectedAgentKey === agent.key ? "true" : "false",
+                onClick: () => onSelectAgentKey(selectedAgentKey === agent.key ? null : agent.key)
+              },
+              h(
+                "span",
+                { style: { display: "inline-flex", alignItems: "center", gap: "6px", overflow: "hidden" } },
+                h("span", { className: "of-dot", "data-tone": agent.running ? "running" : "idle" }),
+                h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, agent.name)
+              ),
+              h("span", { className: "of-mono", style: { fontSize: "9.5px", opacity: 0.7 } }, agent.running ? "ativo" : "livre")
+            )
+          )
+        ),
+        // Planta da Fábrica (Oficina + Mirante)
+        h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: "12px", minWidth: 0 } },
+          selectedAgent && h(
+            "div",
+            { className: "of-card-pad", style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", borderColor: "rgba(245,158,11,0.45)" } },
+            h(
+              "div",
+              null,
+              h("div", { style: { fontSize: "13px", fontWeight: 700 } }, selectedAgent.name),
+              h("div", { className: "of-mono of-muted" }, `${selectedAgent.provider ? `${selectedAgent.provider}/` : ""}${selectedAgent.model} · ${selectedAgent.running ? "Trabalhando agora" : "Ocioso na bancada"}`)
+            ),
+            h("button", { type: "button", className: "of-btn", onClick: () => onSelectAgentKey(null) }, "Fechar")
+          ),
+          (storeyFocus === "workshop" || storeyFocus === "both") && h(
+            "section",
+            { className: "of-floor-hall" },
+            h(
+              "div",
+              { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+              h("strong", { style: { fontSize: "12.5px", letterSpacing: "0.04em", textTransform: "uppercase" } }, "Piso 1 · Oficina (Workshop)"),
+              h("span", { className: "of-pill", "data-tone": status.coordenador === "ativo" ? "done" : "failed" }, `Coordenador: ${status.coordenador}`)
+            ),
+            h(
+              "div",
+              { className: "of-floor-zones" },
+              BOARD_STAGES.map((z) => {
+                const zoneItems = byStage[z.id] || [];
+                return h(
+                  "div",
+                  { key: z.id, className: "of-zone-bay" },
+                  h(
+                    "div",
+                    { style: { display: "flex", justifyContent: "space-between", fontSize: "10px", fontFamily: "var(--font-mono)", color: "var(--muted-foreground)", textTransform: "uppercase" } },
+                    h("span", null, z.label),
+                    h("span", null, String(zoneItems.length))
+                  ),
+                  zoneItems.length === 0 ? h("div", { className: "of-muted", style: { fontSize: "10.5px", marginTop: "auto" } }, "Bancadas livres") : zoneItems.slice(0, 4).map(
+                    (w) => h(
+                      "button",
+                      {
+                        key: w.id,
+                        type: "button",
+                        className: "of-chip",
+                        onClick: () => onSelectItem(w),
+                        style: { width: "100%", justifyContent: "flex-start" }
+                      },
+                      h("span", { className: "of-dot", "data-tone": cardStateOf(w) === "person" ? "waiting" : cardStateOf(w) }),
+                      h("span", { style: { overflow: "hidden", textOverflow: "ellipsis" } }, `#${w.id.slice(0, 6)}`)
+                    )
+                  )
+                );
+              })
+            ),
+            // Baia de Reparo (scene/repair-bay.ts) + Cabine do PM
+            h(
+              "div",
+              { className: "of-grid-2" },
+              h(
+                "div",
+                { className: "of-repair-bay" },
+                h("div", { style: { fontSize: "11px", fontWeight: 700, color: "var(--status-waiting)", textTransform: "uppercase", letterSpacing: "0.05em" } }, `Baia de Reparo · ${needsYou.length} caixas`),
+                h(
+                  "div",
+                  { className: "of-muted", style: { marginTop: "4px" } },
+                  needsYou.length === 0 ? "Nenhum item parado aguardando retry ou decisão humana." : needsYou.slice(0, 3).map((i) => `#${i.id.slice(0, 8)} (${i.stage})`).join(" · ")
+                )
+              ),
+              h(
+                "div",
+                { className: "of-surface", style: { padding: "10px 12px" } },
+                h("div", { style: { fontSize: "11px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" } }, "Cabine do PM / COO"),
+                h("div", { className: "of-muted", style: { marginTop: "4px" } }, "Triagem de cards, despacho L-01 e supervisão de quarentena.")
+              )
+            )
+          ),
+          (storeyFocus === "lookout" || storeyFocus === "both") && h(
+            "section",
+            { className: "of-floor-hall" },
+            h(
+              "div",
+              { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+              h("strong", { style: { fontSize: "12.5px", letterSpacing: "0.04em", textTransform: "uppercase" } }, "Piso 2 · Mirante (Lookout / Oráculo)"),
+              h("span", { className: "of-pill", "data-tone": status.mode === "dark_factory" ? "running" : "idle" }, status.mode === "dark_factory" ? "Dark Factory ativo" : "Sob demanda")
+            ),
+            h(
+              "div",
+              { className: "of-lookout-pods" },
+              LOOKOUT_AREAS.map(
+                (area) => h(
+                  "div",
+                  { key: area.id, className: "of-surface", style: { padding: "8px 10px", display: "flex", alignItems: "center", justifyContent: "space-between" } },
+                  h("span", { style: { fontSize: "11.5px", fontWeight: 600 } }, area.label),
+                  h("span", { className: "of-dot", "data-tone": status.mode === "dark_factory" ? "waiting" : "idle" })
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  );
+}
+function renderItemSheetDrawer(props) {
+  const { h, item, tenant, onClose } = props;
+  if (!item) return null;
+  const steps = ["Entrada", "Identificar tipo", "Execução (Worktree)", "Revisão L-01 + CI", "Merge na main"];
+  const activeIdx = item.stage === "merged" ? 4 : item.stage === "verifying" || item.stage === "watching" ? 3 : item.stage === "building" ? 2 : item.stage === "candidate" ? 1 : 0;
+  return h(
+    "div",
+    {
+      className: "of-sheet-backdrop",
+      onClick: (e) => {
+        if (e.target === e.currentTarget) onClose();
+      }
+    },
+    h(
+      "aside",
+      { className: "of-sheet-panel" },
+      h(
+        "div",
+        { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px" } },
+        h(
+          "div",
+          null,
+          h("div", { className: "of-mono", style: { fontSize: "11px", color: "var(--primary)" } }, `#${item.id.slice(0, 12)} · ${tenant}`),
+          h("div", { style: { fontSize: "15px", fontWeight: 700, marginTop: "2px" } }, item.title)
+        ),
+        h("button", { type: "button", className: "of-btn", onClick: onClose }, "Fechar")
+      ),
+      h(
+        "div",
+        { style: { display: "flex", gap: "6px", flexWrap: "wrap" } },
+        h("span", { className: "of-pill", "data-tone": cardStateOf(item) === "person" ? "waiting" : cardStateOf(item) }, item.stage),
+        item.type && h("span", { className: "of-pill" }, item.type),
+        item.attempts > 1 && h("span", { className: "of-pill", "data-tone": "waiting" }, `Refazer rodada ${item.attempts}`)
+      ),
+      h(
+        "section",
+        { className: "of-surface", style: { padding: "10px 12px" } },
+        h("div", { className: "of-meter-label", style: { marginBottom: "8px" } }, "Trilha da pipeline"),
+        steps.map(
+          (label, idx) => h(
+            "div",
+            {
+              key: label,
+              style: {
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                padding: "4px 6px",
+                borderRadius: "6px",
+                background: idx === activeIdx ? "rgba(245,158,11,0.12)" : "transparent",
+                fontSize: "12px",
+                fontWeight: idx === activeIdx ? 600 : 400
+              }
+            },
+            h("span", { className: "of-dot", "data-tone": idx < activeIdx ? "done" : idx === activeIdx ? "running" : "idle" }),
+            h("span", null, label)
+          )
+        )
+      ),
+      h(
+        "section",
+        { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px", fontSize: "12px" } },
+        h("div", { style: { display: "flex", justifyContent: "space-between" } }, h("span", { className: "of-muted" }, "Work key"), h("span", { className: "of-mono" }, item.workKey || "—")),
+        h("div", { style: { display: "flex", justifyContent: "space-between" } }, h("span", { className: "of-muted" }, "Etapa"), h("span", { className: "of-mono" }, item.step || item.stage)),
+        h("div", { style: { display: "flex", justifyContent: "space-between" } }, h("span", { className: "of-muted" }, "Sessão ativa"), h("span", { className: "of-mono" }, item.activeSessionId || "—")),
+        item.reason && h("div", { style: { marginTop: "4px", color: "var(--status-waiting)" } }, `Motivo: ${item.reason}`),
+        item.note && h("div", { className: "of-muted" }, `Nota: ${item.note}`)
+      )
+    )
+  );
+}
+const TENANTS = [
+  { id: "orgfy", name: "OrgFy Core (Engenharia & Método)", desc: "Esteira determinística principal, CI 7/7 e governança L-01/L-22." },
+  { id: "lumen-iptv", name: "Lumen IPTV", desc: "Operação multi-tenant ativa na Holding Cortexx." },
+  { id: "saas-tributario", name: "SaaS Tributário", desc: "Empresa planejada no portfólio da Holding." }
+];
+const AUTONOMY_MODES = [
+  {
+    id: "manual",
+    label: "Manual",
+    summary: "Você conduz cada sessão. Automações só rodam quando você dispara.",
+    finds: "Você",
+    merges: "Você",
+    experimental: false
+  },
+  {
+    id: "assisted",
+    label: "Assistido",
+    summary: "Você, o PM e automações encontram trabalho; você revisa e faz merge de cada PR.",
+    finds: "Você, PM e automações",
+    merges: "Você",
+    experimental: false
+  },
+  {
+    id: "software_factory",
+    label: "Fábrica de Software",
+    summary: "Issues confiáveis entram nas raias Bug/Feature/Docs com worktrees isoladas, CI e Revisor L-01.",
+    finds: "Você e autores confiáveis",
+    merges: "Você (ou auto-merge)",
+    experimental: true
+  },
+  {
+    id: "dark_factory",
+    label: "Dark Factory",
+    summary: "Fábrica de Software + Oráculo agendado revisando o app contra docs/VISION.md e abrindo issues.",
+    finds: "Oráculo, você e confiáveis",
+    merges: "Você (ou auto-merge)",
+    experimental: true
+  }
+];
+function renderFactorySecondaryPage(props) {
+  var _a, _b, _c;
+  const {
+    h,
+    tab,
+    tenant,
+    onSelectTenant,
+    status,
+    liveCrew,
+    onSelectItem,
+    inboxFilter,
+    setInboxFilter,
+    costRange,
+    setCostRange,
+    autoTab,
+    setAutoTab,
+    agentTab,
+    setAgentTab,
+    settingsForm,
+    setSettingsForm,
+    onSaveSettings,
+    onSelectModeQuick
+  } = props;
+  if (tab === "holding") {
+    return h(
+      "div",
+      { style: { display: "flex", flexDirection: "column", gap: "12px" } },
+      h(
+        "div",
+        { className: "of-card-pad" },
+        h("div", { style: { fontSize: "15px", fontWeight: 700 } }, "Holding Cortexx · Portfólio Multi-Tenant"),
+        h("div", { className: "of-muted", style: { marginTop: "2px" } }, "Selecione uma empresa para abrir sua Fábrica (dados vivos de fabrica_status.py --empresa <tenant>).")
+      ),
+      h(
+        "div",
+        { className: "of-grid-3" },
+        TENANTS.map(
+          (t) => h(
+            "button",
+            {
+              key: t.id,
+              type: "button",
+              className: "of-card-pad",
+              style: {
+                textAlign: "left",
+                cursor: "pointer",
+                color: "var(--foreground)",
+                borderColor: tenant === t.id ? "rgba(245,158,11,0.55)" : void 0
+              },
+              onClick: () => onSelectTenant(t.id)
+            },
+            h(
+              "div",
+              { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" } },
+              h("strong", { style: { fontSize: "13.5px" } }, t.name),
+              tenant === t.id && h("span", { className: "of-pill", "data-tone": "warn" }, "Ativo")
+            ),
+            h("div", { className: "of-muted", style: { marginTop: "6px", lineHeight: 1.4 } }, t.desc),
+            h("div", { className: "of-mono of-muted", style: { marginTop: "10px", fontSize: "10.5px" } }, `tenant: ${t.id}`)
+          )
+        )
+      )
+    );
+  }
+  if (tab === "inbox") {
+    const problems = [...status.inProgress, ...status.recent].filter((i) => i.stage === "failed" || i.stage === "reverted");
+    const asks = [...status.inProgress, ...status.recent].filter((i) => i.stage === "escalated");
+    const reviews = status.inProgress.filter((i) => i.stage === "verifying");
+    const allCount = problems.length + asks.length + reviews.length + status.held.length;
+    const shown = inboxFilter === "asks" ? asks : inboxFilter === "reviews" ? reviews : inboxFilter === "problems" ? problems : [...asks, ...reviews, ...problems];
+    return h(
+      "div",
+      { style: { display: "flex", flexDirection: "column", gap: "12px", maxWidth: "820px" } },
+      h(
+        "div",
+        { className: "of-segmented", style: { width: "fit-content" } },
+        [
+          { id: "all", label: `Todos (${allCount})` },
+          { id: "asks", label: `Precisa de resposta (${asks.length})` },
+          { id: "reviews", label: `Revisões (${reviews.length})` },
+          { id: "problems", label: `Problemas (${problems.length})` }
+        ].map(
+          (f) => h(
+            "button",
+            {
+              key: f.id,
+              type: "button",
+              className: "of-seg-btn",
+              "data-active": inboxFilter === f.id ? "true" : "false",
+              onClick: () => setInboxFilter(f.id)
+            },
+            f.label
+          )
+        )
+      ),
+      shown.length === 0 ? h(
+        "div",
+        { className: "of-card-pad", style: { textAlign: "center", padding: "36px 20px" } },
+        h("div", { style: { fontSize: "14px", fontWeight: 700 } }, "Você está em dia"),
+        h("div", { className: "of-muted", style: { marginTop: "4px" } }, "Perguntas de agentes, aprovações de spec, PRs aguardando revisão e falhas aparecem aqui.")
+      ) : shown.map(
+        (item) => h(
+          "button",
+          {
+            key: item.id,
+            type: "button",
+            className: "of-view-card",
+            "data-state": item.stage === "failed" ? "failed" : "person",
+            onClick: () => onSelectItem(item)
+          },
+          h(
+            "div",
+            { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+            h("span", { className: "of-mono", style: { color: "var(--primary)", fontSize: "11px" } }, `#${item.id.slice(0, 8)}`),
+            h("span", { className: "of-pill", "data-tone": item.stage === "failed" ? "failed" : "waiting" }, item.stage)
+          ),
+          h("div", { style: { fontSize: "13px", fontWeight: 600 } }, item.title),
+          item.reason && h("div", { className: "of-muted" }, item.reason)
+        )
+      )
+    );
+  }
+  if (tab === "costs") {
+    const economia = ((_a = status.kpis) == null ? void 0 : _a.economia) || null;
+    const qualidade = ((_b = status.kpis) == null ? void 0 : _b.qualidade) || null;
+    const porModelo = Array.isArray(economia == null ? void 0 : economia.por_modelo) ? economia.por_modelo : [];
+    const maxCost = Math.max(0.01, ...porModelo.map((r) => Number(r.custo_usd || 0)));
+    return h(
+      "div",
+      { style: { display: "flex", flexDirection: "column", gap: "14px" } },
+      h(
+        "div",
+        { style: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" } },
+        h(
+          "div",
+          { className: "of-segmented" },
+          ["7d", "30d", "90d"].map(
+            (r) => h(
+              "button",
+              {
+                key: r,
+                type: "button",
+                className: "of-seg-btn",
+                "data-active": costRange === r ? "true" : "false",
+                onClick: () => setCostRange(r)
+              },
+              r
+            )
+          )
+        ),
+        h("span", { className: "of-muted" }, `Fonte real: kpis-esteira.json (${((_c = status.kpis) == null ? void 0 : _c.gerado_em) || PT_BR.labels.unavailable})`)
+      ),
+      h(
+        "div",
+        { className: "of-surface", style: { padding: "8px 12px", fontSize: "11.5px", color: "var(--muted-foreground)" } },
+        "Valores equivalentes de API calculados diretamente do kpis-esteira.json (sem dados sintéticos; campos ausentes aparecem como indisponível)."
+      ),
+      // 5 KPIs principais (UsageTotals)
+      h(
+        "div",
+        { className: "of-stats-6" },
+        [
+          {
+            label: "Custo amostra (USD)",
+            val: typeof (economia == null ? void 0 : economia.custo_usd_total_amostra) === "number" ? `$${economia.custo_usd_total_amostra.toFixed(2)}` : PT_BR.labels.unavailable
+          },
+          {
+            label: "Tokens (7d)",
+            val: typeof (economia == null ? void 0 : economia.tokens_7d) === "number" ? economia.tokens_7d.toLocaleString("pt-BR") : PT_BR.labels.unavailable
+          },
+          {
+            label: "Cache hit",
+            val: typeof (economia == null ? void 0 : economia.cache_hit_ratio_pct) === "number" ? `${economia.cache_hit_ratio_pct.toFixed(1)}%` : PT_BR.labels.unavailable
+          },
+          {
+            label: "Gasto hoje",
+            val: `$${status.spendToday.usd.toFixed(2)}`
+          },
+          {
+            label: "FPY real",
+            val: typeof (qualidade == null ? void 0 : qualidade.fpy_real_pct) === "number" ? `${qualidade.fpy_real_pct.toFixed(1)}%` : PT_BR.labels.unavailable
+          }
+        ].map(
+          (k) => h(
+            "div",
+            { key: k.label, className: "of-card-pad", style: { padding: "10px 12px" } },
+            h("div", { className: "of-meter-label" }, k.label),
+            h("div", { className: "of-num", style: { fontSize: "19px", fontWeight: 700, marginTop: "4px" } }, k.val)
+          )
+        )
+      ),
+      // Tabela Breakdown por modelo com barras horizontais
+      h(
+        "div",
+        { className: "of-card-pad" },
+        h("div", { style: { fontSize: "13px", fontWeight: 700, marginBottom: "10px" } }, "Quebra por modelo (kpis-esteira.json)"),
+        porModelo.length === 0 ? h("div", { className: "of-muted" }, PT_BR.labels.unavailable) : h(
+          "table",
+          { className: "of-table" },
+          h(
+            "thead",
+            null,
+            h("tr", null, h("th", null, "Modelo"), h("th", null, "Chamadas"), h("th", null, "Custo USD"), h("th", null, "Participação"), h("th", null, "Cache"))
+          ),
+          h(
+            "tbody",
+            null,
+            porModelo.slice(0, 15).map((row, idx) => {
+              const usd = Number(row.custo_usd || 0);
+              const w = Math.min(100, usd / maxCost * 100);
+              return h(
+                "tr",
+                { key: `${row.modelo || idx}` },
+                h("td", { className: "of-mono" }, String(row.modelo || PT_BR.labels.unavailable)),
+                h("td", { className: "of-mono of-num" }, String(row.requisicoes ?? row.chamadas ?? PT_BR.labels.unavailable)),
+                h("td", { className: "of-mono of-num" }, typeof row.custo_usd === "number" ? `$${usd.toFixed(3)}` : PT_BR.labels.unavailable),
+                h(
+                  "td",
+                  { style: { width: "160px" } },
+                  h("div", { className: "of-bar-track", style: { marginTop: 0 } }, h("div", { className: "of-bar-fill", style: { width: `${w}%`, background: "var(--chart-1)" } }))
+                ),
+                h("td", { className: "of-mono of-num" }, typeof row.cache_hit_pct === "number" ? `${row.cache_hit_pct.toFixed(1)}%` : PT_BR.labels.unavailable)
+              );
+            })
+          )
+        )
+      )
+    );
+  }
+  if (tab === "automations") {
+    return h(
+      "div",
+      { style: { display: "flex", flexDirection: "column", gap: "12px" } },
+      h(
+        "div",
+        { className: "of-segmented", style: { width: "fit-content" } },
+        [
+          { id: "automations", label: "Automações" },
+          { id: "runs", label: "Execuções" },
+          { id: "templates", label: "Templates" }
+        ].map(
+          (t) => h(
+            "button",
+            {
+              key: t.id,
+              type: "button",
+              className: "of-seg-btn",
+              "data-active": autoTab === t.id ? "true" : "false",
+              onClick: () => setAutoTab(t.id)
+            },
+            t.label
+          )
+        )
+      ),
+      h(
+        "div",
+        { className: "of-grid-2" },
+        h(
+          "div",
+          { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+          h("div", { style: { fontSize: "13.5px", fontWeight: 700 } }, "Processos agendados (máx. 2 LaunchAgents)"),
+          h(
+            "div",
+            { className: "of-surface", style: { padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" } },
+            h(
+              "div",
+              null,
+              h("div", { style: { fontWeight: 600, fontSize: "12.5px" } }, status.launchAgent || "com.orgfy.esteira-minima"),
+              h("div", { className: "of-muted" }, "Coordenador da esteira (runner fixado em tag v13.0.0)")
+            ),
+            h("span", { className: "of-pill", "data-tone": status.coordenador === "ativo" ? "done" : "failed" }, status.coordenador)
+          ),
+          h(
+            "div",
+            { className: "of-surface", style: { padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" } },
+            h(
+              "div",
+              null,
+              h("div", { style: { fontWeight: 600, fontSize: "12.5px" } }, "Rotina CEO (Workflow Buzz Kind 30620)"),
+              h("div", { className: "of-muted" }, "YAML: .buzz/workflows/orgfy-rotina-ceo.yaml · Canal #esteira-orgfy")
+            ),
+            h("span", { className: "of-pill", "data-tone": "waiting" }, "Configurar no Buzz Desktop")
+          )
+        ),
+        h(
+          "div",
+          { className: "of-card-pad" },
+          h("div", { style: { fontSize: "13.5px", fontWeight: 700, marginBottom: "8px" } }, "Regras de operação"),
+          h("div", { className: "of-muted", style: { lineHeight: 1.55 } }, "Os processos respeitam imediatamente o Kill Switch e o modo Dreno definidos em controle-<tenant>.json (Fase 1).")
+        )
+      )
+    );
+  }
+  if (tab === "agents") {
+    const modelos = status.modelos || [];
+    return h(
+      "div",
+      { style: { display: "flex", flexDirection: "column", gap: "12px" } },
+      h(
+        "div",
+        { className: "of-segmented", style: { width: "fit-content" } },
+        [
+          { id: "eval", label: `Eval & Modelos (${modelos.length})` },
+          { id: "memory", label: "Plantel ao vivo" },
+          { id: "skills", label: "Skills" },
+          { id: "mcp", label: "MCP (21 tools)" },
+          { id: "hooks", label: "Hooks" }
+        ].map(
+          (t) => h(
+            "button",
+            {
+              key: t.id,
+              type: "button",
+              className: "of-seg-btn",
+              "data-active": agentTab === t.id ? "true" : "false",
+              onClick: () => setAgentTab(t.id)
+            },
+            t.label
+          )
+        )
+      ),
+      agentTab === "eval" ? h(
+        "div",
+        { className: "of-card-pad" },
+        h("div", { style: { fontSize: "14px", fontWeight: 700, marginBottom: "4px" } }, PT_BR.labels.modelsTitle),
+        h("div", { className: "of-muted", style: { marginBottom: "10px" } }, "Fonte: docs/eval-modelos-onda5.md. Qualquer agente com modelo abaixo de 8/10 em tool call aparece em vermelho."),
+        modelos.length === 0 ? h("div", { className: "of-muted" }, PT_BR.labels.unavailable) : h(
+          "table",
+          { className: "of-table" },
+          h(
+            "thead",
+            null,
+            h("tr", null, h("th", null, "Agente"), h("th", null, "Papel"), h("th", null, "Modelo"), h("th", null, "Tool call (R5.1)"))
+          ),
+          h(
+            "tbody",
+            null,
+            modelos.map(
+              (m) => h(
+                "tr",
+                { key: m.agente },
+                h("td", { style: { fontWeight: 600 } }, m.agente),
+                h("td", { className: "of-muted" }, m.papel || "—"),
+                h("td", { className: "of-mono" }, m.modelo || PT_BR.labels.unavailable),
+                h(
+                  "td",
+                  null,
+                  h(
+                    "span",
+                    { className: "of-pill", "data-tone": m.abaixo_minimo ? "failed" : m.toolcall_eval ? "done" : "idle" },
+                    m.toolcall_eval ? m.abaixo_minimo ? `${m.toolcall_eval} · ${PT_BR.labels.evalBelowMin}` : m.toolcall_eval : PT_BR.labels.unavailable
+                  )
+                )
+              )
+            )
+          )
+        )
+      ) : h(
+        "div",
+        { className: "of-card-pad" },
+        h("div", { style: { fontSize: "13.5px", fontWeight: 700, marginBottom: "8px" } }, `Plantel ao vivo (${liveCrew.length} agentes no Buzz)`),
+        liveCrew.length === 0 ? h("div", { className: "of-muted" }, "Nenhum agente retornado por ctx.agents.snapshot().") : h(
+          "table",
+          { className: "of-table" },
+          h("thead", null, h("tr", null, h("th", null, "Agente"), h("th", null, "Provider"), h("th", null, "Modelo"), h("th", null, "Estado"))),
+          h(
+            "tbody",
+            null,
+            liveCrew.map(
+              (a) => h(
+                "tr",
+                { key: a.key },
+                h("td", { style: { fontWeight: 600 } }, a.name),
+                h("td", { className: "of-mono of-muted" }, a.provider || "—"),
+                h("td", { className: "of-mono" }, a.model),
+                h("td", null, h("span", { className: "of-pill", "data-tone": a.running ? "running" : "idle" }, a.running ? "Ativo" : "Livre"))
+              )
+            )
+          )
+        )
+      )
+    );
+  }
+  if (tab === "vision") {
+    const sections = ["Objetivos (Goals)", "Usuários-alvo", "Princípios", "Fora de escopo", "Barra de qualidade"];
+    return h(
+      "div",
+      { className: "of-grid-2" },
+      h(
+        "div",
+        { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "8px" } },
+        h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Visão do produto · ${tenant}`),
+        h("div", { className: "of-mono of-muted" }, "docs/VISION.md"),
+        h(
+          "div",
+          { className: status.visionExists ? "of-surface" : "of-alert-banner", style: { padding: "12px" } },
+          status.visionExists ? "Arquivo docs/VISION.md presente no repositório do tenant e lido pelos revisores e pelo Oráculo." : "Arquivo docs/VISION.md ainda não existe neste tenant. Crie-o na raiz docs/VISION.md para habilitar o modo Dark Factory."
+        )
+      ),
+      h(
+        "div",
+        { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "8px" } },
+        h("div", { className: "of-meter-label" }, "Seções esperadas (VisionPreview)"),
+        sections.map(
+          (s) => h(
+            "div",
+            { key: s, style: { display: "flex", alignItems: "center", gap: "8px", fontSize: "12.5px" } },
+            h("span", { className: "of-dot", "data-tone": status.visionExists ? "done" : "waiting" }),
+            h("span", null, s)
+          )
+        ),
+        h("div", { className: "of-meter-label", style: { marginTop: "8px" } }, "Áreas protegidas"),
+        h("div", { className: "of-muted" }, "Mudanças em áreas protegidas nunca recebem auto-merge e sempre vão para sua decisão na Inbox.")
+      )
+    );
+  }
+  return h(
+    "div",
+    { style: { display: "flex", flexDirection: "column", gap: "14px", maxWidth: "880px" } },
     h(
       "div",
-      { className: "of-pipeline-lanes" },
-      // Raia Bug
+      { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+      h("div", { style: { fontSize: "14px", fontWeight: 700 } }, "Modo de autonomia (Escada CodeDen)"),
+      h("div", { className: "of-muted" }, "Suba um degrau por vez. Áreas protegidas e regra L-01 sempre permanecem ativas."),
       h(
         "div",
-        { className: "of-lane" },
-        h("div", { className: "of-lane-tag" }, PT_BR.pipelines.lanes.bug.title),
-        renderNode({
-          keyId: "bug-reproduce",
-          title: PT_BR.pipelines.lanes.bug.steps[0].label,
-          badge: PT_BR.pipelines.lanes.bug.steps[0].badge,
-          help: PT_BR.pipelines.lanes.bug.steps[0].help,
-          items: laneBuckets.reproduce
-        }),
-        renderNode({
-          keyId: "bug-fix",
-          title: PT_BR.pipelines.lanes.bug.steps[1].label,
-          badge: PT_BR.pipelines.lanes.bug.steps[1].badge,
-          help: PT_BR.pipelines.lanes.bug.steps[1].help,
-          items: laneBuckets.fix
-        }),
-        renderNode({
-          keyId: "bug-review",
-          title: PT_BR.pipelines.lanes.bug.steps[2].label,
-          badge: PT_BR.pipelines.lanes.bug.steps[2].badge,
-          help: PT_BR.pipelines.lanes.bug.steps[2].help,
-          items: laneBuckets.review_bug
-        }),
-        renderNode({
-          keyId: "merge-bug",
-          title: PT_BR.pipelines.mergeLabel,
-          badge: PT_BR.pipelines.mergeBadge,
-          help: PT_BR.pipelines.mergeHelp,
-          items: recentMerged.filter((i) => classifyLane(i) === "bug")
-        })
+        { className: "of-grid-2" },
+        AUTONOMY_MODES.map(
+          (m) => h(
+            "button",
+            {
+              key: m.id,
+              type: "button",
+              className: "of-surface",
+              style: {
+                padding: "12px",
+                textAlign: "left",
+                cursor: "pointer",
+                color: "var(--foreground)",
+                borderColor: settingsForm.mode === m.id ? "rgba(245,158,11,0.65)" : void 0,
+                background: settingsForm.mode === m.id ? "rgba(245,158,11,0.06)" : void 0
+              },
+              onClick: () => {
+                setSettingsForm({ mode: m.id });
+                onSelectModeQuick(m.id);
+              }
+            },
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", fontWeight: 600 } },
+              h("span", null, m.label),
+              m.experimental && h("span", { className: "of-exp-badge" }, "experimental"),
+              status.mode === m.id && h("span", { className: "of-muted", style: { marginLeft: "auto", fontSize: "10px" } }, "Atual")
+            ),
+            h("div", { className: "of-muted", style: { marginTop: "4px", lineHeight: 1.4 } }, m.summary),
+            h("div", { className: "of-muted", style: { marginTop: "6px", fontSize: "10.5px" } }, `Encontra: ${m.finds} · Merge: ${m.merges}`)
+          )
+        )
+      )
+    ),
+    // LimitsEditor completo gravando em controle-<tenant>.json
+    h(
+      "div",
+      { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "12px" } },
+      h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Limites operacionais · controle-${tenant}.json`),
+      h(
+        "div",
+        { className: "of-grid-3" },
+        h(
+          "label",
+          { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+          "Orçamento diário (USD)",
+          h("input", {
+            type: "number",
+            className: "of-input",
+            value: settingsForm.gastoDiaUsd,
+            onChange: (e) => setSettingsForm({ gastoDiaUsd: Number(e.target.value) })
+          })
+        ),
+        h(
+          "label",
+          { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+          "Merges por dia",
+          h("input", {
+            type: "number",
+            className: "of-input",
+            value: settingsForm.mergesDia,
+            onChange: (e) => setSettingsForm({ mergesDia: Number(e.target.value) })
+          })
+        ),
+        h(
+          "label",
+          { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+          "Agentes simultâneos",
+          h("input", {
+            type: "number",
+            className: "of-input",
+            value: settingsForm.agentesMax,
+            onChange: (e) => setSettingsForm({ agentesMax: Number(e.target.value) })
+          })
+        ),
+        h(
+          "label",
+          { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+          "PRs abertos no máximo (WIP)",
+          h("input", {
+            type: "number",
+            className: "of-input",
+            value: settingsForm.prsAbertos,
+            onChange: (e) => setSettingsForm({ prsAbertos: Number(e.target.value) })
+          })
+        ),
+        h(
+          "label",
+          { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+          "Pausar após falhas seguidas",
+          h("input", {
+            type: "number",
+            className: "of-input",
+            value: settingsForm.falhasSeguidas,
+            onChange: (e) => setSettingsForm({ falhasSeguidas: Number(e.target.value) })
+          })
+        ),
+        h(
+          "label",
+          { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+          "Política de merge",
+          h(
+            "select",
+            {
+              className: "of-tenant-select",
+              value: settingsForm.mergePolicy,
+              onChange: (e) => setSettingsForm({ mergePolicy: e.target.value })
+            },
+            h("option", { value: "strict" }, "Strict (re-testa na main)"),
+            h("option", { value: "fast" }, "Fast (CI próprio sem conflito)")
+          )
+        )
       ),
-      // Raia Feature
       h(
         "div",
-        { className: "of-lane" },
-        h("div", { className: "of-lane-tag" }, PT_BR.pipelines.lanes.feature.title),
-        renderNode({
-          keyId: "feat-analyze",
-          title: PT_BR.pipelines.lanes.feature.steps[0].label,
-          badge: PT_BR.pipelines.lanes.feature.steps[0].badge,
-          help: PT_BR.pipelines.lanes.feature.steps[0].help,
-          items: laneBuckets.analyze
-        }),
-        renderNode({
-          keyId: "feat-implement",
-          title: PT_BR.pipelines.lanes.feature.steps[1].label,
-          badge: PT_BR.pipelines.lanes.feature.steps[1].badge,
-          help: PT_BR.pipelines.lanes.feature.steps[1].help,
-          items: laneBuckets.implement
-        }),
-        renderNode({
-          keyId: "feat-review",
-          title: PT_BR.pipelines.lanes.feature.steps[2].label,
-          badge: PT_BR.pipelines.lanes.feature.steps[2].badge,
-          help: PT_BR.pipelines.lanes.feature.steps[2].help,
-          items: laneBuckets.review_feature
-        }),
-        renderNode({
-          keyId: "merge-feat",
-          title: PT_BR.pipelines.mergeLabel,
-          badge: PT_BR.pipelines.mergeBadge,
-          help: PT_BR.pipelines.mergeHelp,
-          items: recentMerged.filter((i) => classifyLane(i) === "feature")
-        })
-      ),
-      // Raia Docs (com Revisor L-01 mantido!)
-      h(
-        "div",
-        { className: "of-lane" },
-        h("div", { className: "of-lane-tag" }, PT_BR.pipelines.lanes.docs.title),
-        renderNode({
-          keyId: "docs-impl",
-          title: PT_BR.pipelines.lanes.docs.steps[0].label,
-          badge: PT_BR.pipelines.lanes.docs.steps[0].badge,
-          help: PT_BR.pipelines.lanes.docs.steps[0].help,
-          items: laneBuckets.implement_docs
-        }),
-        renderNode({
-          keyId: "docs-checks",
-          title: PT_BR.pipelines.lanes.docs.steps[1].label,
-          badge: PT_BR.pipelines.lanes.docs.steps[1].badge,
-          help: PT_BR.pipelines.lanes.docs.steps[1].help,
-          items: laneBuckets.checks
-        }),
-        renderNode({
-          keyId: "docs-review",
-          title: PT_BR.pipelines.lanes.docs.steps[2].label,
-          badge: PT_BR.pipelines.lanes.docs.steps[2].badge,
-          help: PT_BR.pipelines.lanes.docs.steps[2].help,
-          items: laneBuckets.review_docs
-        }),
-        renderNode({
-          keyId: "merge-docs",
-          title: PT_BR.pipelines.mergeLabel,
-          badge: PT_BR.pipelines.mergeBadge,
-          help: PT_BR.pipelines.mergeHelp,
-          items: recentMerged.filter((i) => classifyLane(i) === "docs")
-        })
+        { style: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px", paddingTop: "6px", borderTop: "1px solid var(--border)" } },
+        h("span", { className: "of-muted" }, `Persistido diretamente em estado/controle-${tenant}.json e lido pelo coordenador.`),
+        h("button", { type: "button", className: "of-btn", "data-variant": "primary", onClick: onSaveSettings }, "Salvar configurações")
       )
     )
   );
@@ -14293,7 +16375,6 @@ function createFactoryAppComponent(ctx, opts = {}) {
   const React = ctx.react;
   const h = React.createElement;
   return function OrgFyFactoryApp() {
-    var _a, _b, _c;
     const [tenant, setTenant] = React.useState("orgfy");
     const [tab, setTab] = React.useState("overview");
     const [status, setStatus] = React.useState(() => buildEmptyFactoryStatus("orgfy"));
@@ -14303,10 +16384,27 @@ function createFactoryAppComponent(ctx, opts = {}) {
     const [activeHelpKey, setActiveHelpKey] = React.useState(null);
     const [selectedItem, setSelectedItem] = React.useState(null);
     const [confirmKill, setConfirmKill] = React.useState(false);
-    const [gastoDiaUsd, setGastoDiaUsd] = React.useState(50);
-    const [mergesDia, setMergesDia] = React.useState(20);
-    const [agentesMax, setAgentesMax] = React.useState(4);
-    const [falhasSeguidas, setFalhasSeguidas] = React.useState(3);
+    const [scorecardView, setScorecardView] = React.useState("builders");
+    const [scorecardDays, setScorecardDays] = React.useState(30);
+    const [storeyFocus, setStoreyFocus] = React.useState("both");
+    const [selectedAgentKey, setSelectedAgentKey] = React.useState(null);
+    const [inboxFilter, setInboxFilter] = React.useState("all");
+    const [costRange, setCostRange] = React.useState("30d");
+    const [autoTab, setAutoTab] = React.useState("automations");
+    const [agentTab, setAgentTab] = React.useState("eval");
+    const [settingsForm, setSettingsFormState] = React.useState({
+      mode: "software_factory",
+      autoMerge: false,
+      mergePolicy: "strict",
+      gastoDiaUsd: 50,
+      mergesDia: 20,
+      agentesMax: 4,
+      prsAbertos: 6,
+      falhasSeguidas: 3
+    });
+    const setSettingsForm = React.useCallback((patch) => {
+      setSettingsFormState((prev) => ({ ...prev, ...patch }));
+    }, []);
     const hostRef = React.useRef(null);
     React.useEffect(() => {
       if (hostRef.current) {
@@ -14317,18 +16415,27 @@ function createFactoryAppComponent(ctx, opts = {}) {
       setToast(msg);
       setTimeout(() => setToast(null), 3500);
     }, []);
-    const refresh = React.useCallback(async (targetTenant = tenant) => {
-      var _a2;
-      setLoading(true);
-      const res = await fetchFactoryStatus(ctx, targetTenant);
-      setStatus(res.status);
-      setError(res.error);
-      setGastoDiaUsd(((_a2 = res.status.limits.dailyBudget) == null ? void 0 : _a2.usd) ?? 50);
-      setMergesDia(res.status.limits.maxMergesPerDay ?? 20);
-      setAgentesMax(res.status.limits.maxConcurrentSessions ?? 4);
-      setFalhasSeguidas(res.status.limits.pauseAfterConsecutiveFailures ?? 3);
-      setLoading(false);
-    }, [tenant]);
+    const refresh = React.useCallback(
+      async (targetTenant = tenant) => {
+        var _a, _b;
+        setLoading(true);
+        const res = await fetchFactoryStatus(ctx, targetTenant);
+        setStatus(res.status);
+        setError(res.error);
+        setSettingsFormState({
+          mode: res.status.mode,
+          autoMerge: res.status.limits.autoMerge,
+          mergePolicy: res.status.limits.mergePolicy,
+          gastoDiaUsd: ((_a = res.status.limits.dailyBudget) == null ? void 0 : _a.usd) ?? 50,
+          mergesDia: res.status.limits.maxMergesPerDay ?? 20,
+          agentesMax: res.status.limits.maxConcurrentSessions ?? 4,
+          prsAbertos: ((_b = res.status.wip) == null ? void 0 : _b.limit) ?? 6,
+          falhasSeguidas: res.status.limits.pauseAfterConsecutiveFailures ?? 3
+        });
+        setLoading(false);
+      },
+      [tenant]
+    );
     React.useEffect(() => {
       let disposed = false;
       const run = () => {
@@ -14365,521 +16472,38 @@ function createFactoryAppComponent(ctx, opts = {}) {
       [tenant]
     );
     const liveCrew = React.useMemo(() => {
-      var _a2, _b2;
+      var _a, _b;
       try {
-        const snap = ((_b2 = (_a2 = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _a2.snapshot) == null ? void 0 : _b2.call(_a2)) || {};
+        const snap = ((_b = (_a = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) || {};
         const runningSet = new Set((snap.running || []).map((a) => String((a == null ? void 0 : a.key) || (a == null ? void 0 : a.name))));
-        const list = (snap.agents || []).map((a) => {
-          var _a3, _b3;
+        return (snap.agents || []).map((a) => {
+          var _a2, _b2;
           return {
             key: String((a == null ? void 0 : a.key) || (a == null ? void 0 : a.name) || ""),
             name: String((a == null ? void 0 : a.name) || (a == null ? void 0 : a.key) || "Agente"),
-            model: ((_a3 = a == null ? void 0 : a.config) == null ? void 0 : _a3.model) || PT_BR.labels.unavailable,
-            provider: ((_b3 = a == null ? void 0 : a.config) == null ? void 0 : _b3.provider) || "",
+            model: ((_a2 = a == null ? void 0 : a.config) == null ? void 0 : _a2.model) || PT_BR.labels.unavailable,
+            provider: ((_b2 = a == null ? void 0 : a.config) == null ? void 0 : _b2.provider) || "",
             running: runningSet.has(String((a == null ? void 0 : a.key) || (a == null ? void 0 : a.name)))
           };
         });
-        return list;
       } catch {
         return [];
       }
     }, [status.lastTickAt]);
-    const qualidade = ((_a = status.kpis) == null ? void 0 : _a.qualidade) || null;
-    const economia = ((_b = status.kpis) == null ? void 0 : _b.economia) || null;
-    ((_c = status.kpis) == null ? void 0 : _c.fluxo) || null;
-    const modelos = status.modelos || [];
-    const abaixoMinimoCount = modelos.filter((m) => m.abaixo_minimo).length;
-    const navItems = [
-      { id: "holding", label: PT_BR.nav.holding },
-      { id: "inbox", label: PT_BR.nav.inbox, badge: status.held.length ? String(status.held.length) : void 0 },
-      { id: "overview", label: PT_BR.nav.overview },
-      { id: "board", label: PT_BR.nav.board, badge: String(status.backlog.length + status.inProgress.length) },
-      { id: "floor", label: PT_BR.nav.floor, badge: String(liveCrew.filter((c) => c.running).length) },
-      { id: "costs", label: PT_BR.nav.costs },
-      { id: "automations", label: PT_BR.nav.automations },
-      { id: "agents", label: PT_BR.nav.agents, badge: abaixoMinimoCount > 0 ? `⚠ ${abaixoMinimoCount}` : void 0 },
-      { id: "vision", label: PT_BR.nav.vision },
-      { id: "settings", label: PT_BR.nav.settings }
-    ];
-    const renderOverview = () => h(
-      "div",
-      { style: { display: "flex", flexDirection: "column", gap: "14px" } },
-      // Cabeçalho e barra de ações
-      h(
-        "div",
-        { className: "of-card of-header-bar" },
-        h(
-          "div",
-          null,
-          h(
-            "div",
-            { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
-            h("strong", { style: { fontSize: "16px" } }, `${PT_BR.appTitle} · ${tenant}`),
-            h(
-              "span",
-              { className: "of-pill", "data-tone": status.coordenador === "ativo" ? "ok" : "danger" },
-              status.coordenador === "ativo" ? PT_BR.labels.coordinatorActive : PT_BR.labels.coordinatorStopped
-            ),
-            h("span", { className: "of-pill", "data-tone": "warn" }, PT_BR.modes[status.mode] || status.mode),
-            status.killSwitch && h("span", { className: "of-pill", "data-tone": "danger" }, "KILL SWITCH ATIVO")
-          ),
-          status.pausedReason && h("div", { className: "of-muted", style: { marginTop: "4px" } }, `Motivo: ${status.pausedReason}`)
-        ),
-        h(
-          "div",
-          { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
-          h(
-            "button",
-            { type: "button", className: "of-btn", onClick: () => refresh(tenant), disabled: loading },
-            loading ? "Atualizando..." : PT_BR.actions.checkNow
-          ),
-          h(
-            "button",
-            {
-              type: "button",
-              className: "of-btn",
-              onClick: () => handleControlUpdate(
-                { drain: !status.drain },
-                status.drain ? "Dreno cancelado." : "Modo Dreno ativado (termina os itens em andamento)."
-              )
-            },
-            status.drain ? PT_BR.actions.drainOff : PT_BR.actions.drainOn
-          ),
-          !confirmKill ? h(
-            "button",
-            {
-              type: "button",
-              className: "of-btn",
-              "data-variant": "danger",
-              onClick: () => {
-                if (status.killSwitch) {
-                  handleControlUpdate({ killSwitch: false, pausedReason: null }, "Kill Switch liberado.");
-                } else {
-                  setConfirmKill(true);
-                }
-              }
-            },
-            status.killSwitch ? PT_BR.actions.killSwitchOff : PT_BR.actions.killSwitchOn
-          ) : h(
-            "div",
-            { style: { display: "flex", gap: "6px", alignItems: "center" } },
-            h(
-              "button",
-              {
-                type: "button",
-                className: "of-btn",
-                "data-variant": "danger",
-                onClick: async () => {
-                  setConfirmKill(false);
-                  await handleControlUpdate(
-                    { killSwitch: true, pausedReason: "Kill Switch acionado pelo operador" },
-                    "Kill Switch ativado imediatamente."
-                  );
-                }
-              },
-              "Confirmar Kill Switch"
-            ),
-            h(
-              "button",
-              { type: "button", className: "of-btn", onClick: () => setConfirmKill(false) },
-              "Cancelar"
-            )
-          )
-        )
-      ),
-      // KPIs reais (de kpis-esteira.json — zero números inventados)
-      h(
-        "div",
-        { className: "of-kpi-grid" },
-        h(
-          "div",
-          { className: "of-card" },
-          h("div", { className: "of-kpi-label" }, PT_BR.labels.fpyReal),
-          h(
-            "div",
-            { className: "of-kpi-value" },
-            typeof (qualidade == null ? void 0 : qualidade.fpy_real_pct) === "number" ? `${qualidade.fpy_real_pct.toFixed(1)}%` : PT_BR.labels.unavailable
-          ),
-          h(
-            "div",
-            { className: "of-kpi-sub" },
-            typeof (qualidade == null ? void 0 : qualidade.pct_desconhecido) === "number" ? `${PT_BR.labels.unknownHistory}: ${qualidade.pct_desconhecido.toFixed(1)}%` : PT_BR.labels.unavailable
-          )
-        ),
-        h(
-          "div",
-          { className: "of-card" },
-          h("div", { className: "of-kpi-label" }, PT_BR.labels.merges7d),
-          h("div", { className: "of-kpi-value" }, String(status.stats.merged7d)),
-          h("div", { className: "of-kpi-sub" }, `${PT_BR.labels.mergesToday}: ${status.mergesToday}`)
-        ),
-        h(
-          "div",
-          { className: "of-card" },
-          h("div", { className: "of-kpi-label" }, PT_BR.labels.spendToday),
-          h("div", { className: "of-kpi-value" }, `$${status.spendToday.usd.toFixed(2)}`),
-          h("div", { className: "of-kpi-sub" }, `${status.spendToday.tokens.toLocaleString("pt-BR")} tokens`)
-        ),
-        h(
-          "div",
-          { className: "of-card" },
-          h("div", { className: "of-kpi-label" }, PT_BR.labels.quarantine),
-          h("div", { className: "of-kpi-value" }, String(status.quarentenaCount ?? 0)),
-          h("div", { className: "of-kpi-sub" }, `WIP ativo: ${status.inProgress.length}`)
-        )
-      ),
-      // Diagrama de Pipelines ao vivo (prioridade #1)
-      renderPipelineDiagram({
-        h,
-        status,
-        activeHelpKey,
-        onToggleHelp: setActiveHelpKey,
-        onSelectItem: handleSelectItem
-      }),
-      // Transparência de fontes indisponíveis
-      status.indisponivel.length > 0 && h(
-        "div",
-        { className: "of-card", style: { fontSize: "11.5px", color: "var(--muted-foreground)" } },
-        `Fontes indisponíveis neste tenant (exibidas como "${PT_BR.labels.unavailable}"): ${status.indisponivel.join(", ")}`
-      )
+    const abaixoMinimoCount = (status.modelos || []).filter((m) => m.abaixo_minimo).length;
+    const inboxCount = status.held.length + [...status.inProgress, ...status.recent].filter((i) => i.stage === "escalated" || i.stage === "failed" || i.stage === "reverted").length;
+    const renderNavBtn = (id, label, badge, tone) => h(
+      "button",
+      {
+        key: id,
+        type: "button",
+        className: "of-nav-btn",
+        "data-active": tab === id ? "true" : "false",
+        onClick: () => setTab(id)
+      },
+      h("span", null, label),
+      badge && h("span", { className: "of-nav-badge", "data-tone": tone }, badge)
     );
-    const renderBoard = () => {
-      const cols = [
-        { title: "Triagem / Backlog", items: status.backlog },
-        { title: "Executando", items: status.inProgress.filter((i) => i.stage === "building") },
-        { title: "Revisando (Gate L-01)", items: status.inProgress.filter((i) => i.stage === "verifying" || i.stage === "watching") },
-        { title: "Integrado recente", items: status.recent.filter((i) => i.stage === "merged").slice(0, 12) }
-      ];
-      return h(
-        "div",
-        { className: "of-board-grid" },
-        cols.map(
-          (col) => h(
-            "div",
-            { key: col.title, className: "of-card", style: { display: "flex", flexDirection: "column", gap: "8px" } },
-            h(
-              "div",
-              { style: { display: "flex", justifyContent: "space-between", fontSize: "12px", fontWeight: 700 } },
-              h("span", null, col.title),
-              h("span", { className: "of-mono of-muted" }, String(col.items.length))
-            ),
-            col.items.length === 0 ? h("div", { className: "of-muted" }, PT_BR.labels.noItems) : col.items.map(
-              (item) => h(
-                "button",
-                {
-                  key: item.id,
-                  type: "button",
-                  onClick: () => handleSelectItem(item),
-                  style: {
-                    textAlign: "left",
-                    padding: "8px 10px",
-                    borderRadius: "8px",
-                    border: "1px solid var(--border)",
-                    background: "var(--card-elevated)",
-                    color: "var(--foreground)",
-                    cursor: "pointer"
-                  }
-                },
-                h("div", { className: "of-mono", style: { fontSize: "11px", color: "var(--primary)" } }, `#${item.id.slice(0, 8)}`),
-                h("div", { style: { fontSize: "12px", fontWeight: 600, marginTop: "2px" } }, item.title)
-              )
-            )
-          )
-        )
-      );
-    };
-    const renderFloor = () => h(
-      "div",
-      { className: "of-card", style: { display: "flex", flexDirection: "column", gap: "12px" } },
-      h("div", { style: { fontSize: "14px", fontWeight: 700 } }, "Andar da Fábrica · Equipe ao vivo"),
-      h(
-        "div",
-        { className: "of-floor-grid" },
-        liveCrew.length === 0 ? h("div", { className: "of-muted" }, "Nenhum agente reportado por ctx.agents.snapshot().") : liveCrew.map(
-          (agent) => h(
-            "div",
-            {
-              key: agent.key,
-              className: "of-node",
-              "data-empty": agent.running ? "false" : "true"
-            },
-            h(
-              "div",
-              { className: "of-node-head" },
-              h("span", { className: "of-node-title" }, agent.name),
-              h("span", { className: "of-pill", "data-tone": agent.running ? "ok" : "muted" }, agent.running ? "Ativo" : "Ocioso")
-            ),
-            h("div", { className: "of-mono of-muted", style: { fontSize: "11px" } }, `${agent.provider ? `${agent.provider}/` : ""}${agent.model}`)
-          )
-        )
-      )
-    );
-    const renderCosts = () => {
-      const porModelo = Array.isArray(economia == null ? void 0 : economia.por_modelo) ? economia.por_modelo : [];
-      return h(
-        "div",
-        { style: { display: "flex", flexDirection: "column", gap: "12px" } },
-        h(
-          "div",
-          { className: "of-kpi-grid" },
-          h(
-            "div",
-            { className: "of-card" },
-            h("div", { className: "of-kpi-label" }, "Custo amostra (USD)"),
-            h(
-              "div",
-              { className: "of-kpi-value" },
-              typeof (economia == null ? void 0 : economia.custo_usd_total_amostra) === "number" ? `$${economia.custo_usd_total_amostra.toFixed(2)}` : PT_BR.labels.unavailable
-            )
-          ),
-          h(
-            "div",
-            { className: "of-card" },
-            h("div", { className: "of-kpi-label" }, "Cache hit"),
-            h(
-              "div",
-              { className: "of-kpi-value" },
-              typeof (economia == null ? void 0 : economia.cache_hit_ratio_pct) === "number" ? `${economia.cache_hit_ratio_pct.toFixed(1)}%` : PT_BR.labels.unavailable
-            )
-          ),
-          h(
-            "div",
-            { className: "of-card" },
-            h("div", { className: "of-kpi-label" }, "Tokens (7d)"),
-            h(
-              "div",
-              { className: "of-kpi-value" },
-              typeof (economia == null ? void 0 : economia.tokens_7d) === "number" ? economia.tokens_7d.toLocaleString("pt-BR") : PT_BR.labels.unavailable
-            )
-          )
-        ),
-        h(
-          "div",
-          { className: "of-card" },
-          h("div", { style: { fontSize: "13px", fontWeight: 700, marginBottom: "8px" } }, "Quebra real por modelo (kpis-esteira.json)"),
-          porModelo.length === 0 ? h("div", { className: "of-muted" }, PT_BR.labels.unavailable) : h(
-            "table",
-            { className: "of-table" },
-            h(
-              "thead",
-              null,
-              h("tr", null, h("th", null, "Modelo"), h("th", null, "Chamadas"), h("th", null, "Custo USD"), h("th", null, "Cache"))
-            ),
-            h(
-              "tbody",
-              null,
-              porModelo.slice(0, 15).map(
-                (row, idx) => h(
-                  "tr",
-                  { key: `${row.modelo || idx}` },
-                  h("td", { className: "of-mono" }, String(row.modelo || PT_BR.labels.unavailable)),
-                  h("td", { className: "of-mono" }, String(row.requisicoes ?? row.chamadas ?? PT_BR.labels.unavailable)),
-                  h("td", { className: "of-mono" }, typeof row.custo_usd === "number" ? `$${row.custo_usd.toFixed(3)}` : PT_BR.labels.unavailable),
-                  h("td", { className: "of-mono" }, typeof row.cache_hit_pct === "number" ? `${row.cache_hit_pct.toFixed(1)}%` : PT_BR.labels.unavailable)
-                )
-              )
-            )
-          )
-        )
-      );
-    };
-    const renderAgents = () => h(
-      "div",
-      { className: "of-card" },
-      h("div", { style: { fontSize: "14px", fontWeight: 700, marginBottom: "8px" } }, PT_BR.labels.modelsTitle),
-      h(
-        "div",
-        { className: "of-muted", style: { marginBottom: "10px" } },
-        "Agentes com nota de tool call abaixo de 8/10 no eval R5.1 ficam destacados em vermelho."
-      ),
-      modelos.length === 0 ? h("div", { className: "of-muted" }, PT_BR.labels.unavailable) : h(
-        "table",
-        { className: "of-table" },
-        h(
-          "thead",
-          null,
-          h("tr", null, h("th", null, "Agente"), h("th", null, "Papel"), h("th", null, "Modelo"), h("th", null, "Eval Tool Call"))
-        ),
-        h(
-          "tbody",
-          null,
-          modelos.map(
-            (m) => h(
-              "tr",
-              { key: m.agente },
-              h("td", { style: { fontWeight: 600 } }, m.agente),
-              h("td", null, m.papel || "—"),
-              h("td", { className: "of-mono" }, m.modelo || PT_BR.labels.unavailable),
-              h(
-                "td",
-                null,
-                h(
-                  "span",
-                  {
-                    className: "of-pill",
-                    "data-tone": m.abaixo_minimo ? "danger" : m.toolcall_eval ? "ok" : "muted"
-                  },
-                  m.toolcall_eval ? m.abaixo_minimo ? `${m.toolcall_eval} · ${PT_BR.labels.evalBelowMin}` : m.toolcall_eval : PT_BR.labels.unavailable
-                )
-              )
-            )
-          )
-        )
-      )
-    );
-    const renderSettings = () => h(
-      "div",
-      { style: { display: "flex", flexDirection: "column", gap: "12px" } },
-      h(
-        "div",
-        { className: "of-card" },
-        h("div", { style: { fontSize: "14px", fontWeight: 700, marginBottom: "8px" } }, "Modo de autonomia"),
-        h(
-          "div",
-          { style: { display: "flex", gap: "8px", flexWrap: "wrap" } },
-          ["manual", "assisted", "software_factory", "dark_factory"].map(
-            (mode) => h(
-              "button",
-              {
-                key: mode,
-                type: "button",
-                className: "of-btn",
-                "data-variant": status.mode === mode ? "primary" : void 0,
-                onClick: () => handleControlUpdate({ mode }, `Modo alterado para ${PT_BR.modes[mode]}.`)
-              },
-              PT_BR.modes[mode]
-            )
-          )
-        )
-      ),
-      h(
-        "div",
-        { className: "of-card", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-        h("div", { style: { fontSize: "14px", fontWeight: 700 } }, PT_BR.labels.limitsTitle),
-        h(
-          "div",
-          { className: "of-kpi-grid" },
-          h(
-            "label",
-            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "12px" } },
-            "Gasto/dia (USD)",
-            h("input", {
-              type: "number",
-              value: gastoDiaUsd,
-              onChange: (e) => setGastoDiaUsd(Number(e.target.value)),
-              className: "of-tenant-select"
-            })
-          ),
-          h(
-            "label",
-            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "12px" } },
-            "Merges/dia",
-            h("input", {
-              type: "number",
-              value: mergesDia,
-              onChange: (e) => setMergesDia(Number(e.target.value)),
-              className: "of-tenant-select"
-            })
-          ),
-          h(
-            "label",
-            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "12px" } },
-            "Agentes simultâneos",
-            h("input", {
-              type: "number",
-              value: agentesMax,
-              onChange: (e) => setAgentesMax(Number(e.target.value)),
-              className: "of-tenant-select"
-            })
-          ),
-          h(
-            "label",
-            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "12px" } },
-            "Pausar após falhas seguidas",
-            h("input", {
-              type: "number",
-              value: falhasSeguidas,
-              onChange: (e) => setFalhasSeguidas(Number(e.target.value)),
-              className: "of-tenant-select"
-            })
-          )
-        ),
-        h(
-          "div",
-          null,
-          h(
-            "button",
-            {
-              type: "button",
-              className: "of-btn",
-              "data-variant": "primary",
-              onClick: () => handleControlUpdate(
-                { limits: { gastoDiaUsd, mergesDia, agentes: agentesMax, falhasSeguidas } },
-                `Limites salvos em controle-${tenant}.json.`
-              )
-            },
-            "Salvar limites"
-          )
-        )
-      )
-    );
-    const renderSimpleTab = () => {
-      if (tab === "holding") {
-        return h(
-          "div",
-          { className: "of-card" },
-          h("div", { style: { fontSize: "14px", fontWeight: 700, marginBottom: "8px" } }, "Holding Cortexx · Empresas"),
-          h(
-            "div",
-            { className: "of-kpi-grid" },
-            TENANT_OPTIONS.map(
-              (t) => h(
-                "button",
-                {
-                  key: t.id,
-                  type: "button",
-                  className: "of-card",
-                  style: { textAlign: "left", cursor: "pointer", color: "var(--foreground)" },
-                  onClick: () => {
-                    setTenant(t.id);
-                    setTab("overview");
-                  }
-                },
-                h("div", { style: { fontWeight: 700, fontSize: "13px" } }, t.label),
-                h("div", { className: "of-mono of-muted", style: { marginTop: "4px" } }, t.id)
-              )
-            )
-          )
-        );
-      }
-      if (tab === "inbox") {
-        return h(
-          "div",
-          { className: "of-card" },
-          h("div", { style: { fontSize: "14px", fontWeight: 700, marginBottom: "8px" } }, "Inbox · Aguardando sua decisão"),
-          status.held.length === 0 ? h("div", { className: "of-muted" }, "Nenhuma pendência bloqueando a fábrica agora.") : h("pre", { className: "of-mono", style: { fontSize: "11px" } }, JSON.stringify(status.held, null, 2))
-        );
-      }
-      if (tab === "automations") {
-        return h(
-          "div",
-          { className: "of-card", style: { display: "flex", flexDirection: "column", gap: "8px" } },
-          h("div", { style: { fontSize: "14px", fontWeight: 700 } }, "Automações & LaunchAgents"),
-          h("div", { className: "of-mono", style: { fontSize: "12px" } }, `Coordenador (${status.launchAgent || "com.orgfy.esteira-minima"}): ${status.coordenador}`),
-          h("div", { className: "of-muted" }, "Rotina CEO: configurar/verificar no Buzz Desktop (canal #esteira-orgfy).")
-        );
-      }
-      return h(
-        "div",
-        { className: "of-card" },
-        h("div", { style: { fontSize: "14px", fontWeight: 700, marginBottom: "6px" } }, "Visão do produto (docs/VISION.md)"),
-        h(
-          "div",
-          { className: "of-muted" },
-          status.visionExists ? "docs/VISION.md encontrado no repositório do tenant." : "docs/VISION.md não encontrado ainda (indisponível)."
-        )
-      );
-    };
     return h(
       "div",
       {
@@ -14891,45 +16515,54 @@ function createFactoryAppComponent(ctx, opts = {}) {
       h(
         "div",
         { className: "of-shell" },
+        // Sidebar oficial estilo CodeDen
         h(
           "aside",
           { className: "of-sidebar" },
           h(
             "div",
             { className: "of-brand" },
-            h("span", { className: "of-brand-title" }, PT_BR.appTitle),
-            h("span", { className: "of-pill", "data-tone": status.coordenador === "ativo" ? "ok" : "danger" }, status.coordenador)
+            h(
+              "span",
+              { className: "of-brand-mark" },
+              h("span", { className: "of-brand-icon" }, "<>"),
+              PT_BR.appTitle
+            ),
+            h("span", { className: "of-dot", "data-tone": status.coordenador === "ativo" ? "done" : "failed", title: `Coordenador: ${status.coordenador}` })
           ),
           h(
-            "div",
-            { className: "of-tenant-picker" },
-            h(
-              "select",
-              {
-                className: "of-tenant-select",
-                value: tenant,
-                onChange: (e) => setTenant(e.target.value)
-              },
-              TENANT_OPTIONS.map((t) => h("option", { key: t.id, value: t.id }, t.label))
-            )
+            "select",
+            {
+              className: "of-tenant-select",
+              value: tenant,
+              onChange: (e) => setTenant(e.target.value)
+            },
+            TENANT_OPTIONS.map((t) => h("option", { key: t.id, value: t.id }, t.label))
           ),
+          h("div", { className: "of-nav-group-label" }, "Holding"),
           h(
             "nav",
             { className: "of-nav" },
-            navItems.map(
-              (item) => h(
-                "button",
-                {
-                  key: item.id,
-                  type: "button",
-                  className: "of-nav-btn",
-                  "data-active": tab === item.id ? "true" : "false",
-                  onClick: () => setTab(item.id)
-                },
-                h("span", null, item.label),
-                item.badge && h("span", { className: "of-mono", style: { fontSize: "10.5px" } }, item.badge)
-              )
-            )
+            renderNavBtn("holding", PT_BR.nav.holding),
+            renderNavBtn("inbox", PT_BR.nav.inbox, inboxCount > 0 ? String(inboxCount) : void 0, inboxCount > 0 ? "warn" : void 0)
+          ),
+          h("div", { className: "of-nav-group-label" }, "Fábrica"),
+          h(
+            "nav",
+            { className: "of-nav" },
+            renderNavBtn("overview", PT_BR.nav.overview),
+            renderNavBtn("board", PT_BR.nav.board, String(status.backlog.length + status.inProgress.length)),
+            renderNavBtn("floor", PT_BR.nav.floor, String(liveCrew.filter((a) => a.running).length))
+          ),
+          h("div", { className: "of-nav-group-label" }, "Operação"),
+          h(
+            "nav",
+            { className: "of-nav" },
+            renderNavBtn("costs", PT_BR.nav.costs),
+            renderNavBtn("automations", PT_BR.nav.automations),
+            renderNavBtn("agents", PT_BR.nav.agents, abaixoMinimoCount > 0 ? `⚠ ${abaixoMinimoCount}` : void 0, abaixoMinimoCount > 0 ? "danger" : void 0),
+            renderNavBtn("vision", PT_BR.nav.vision),
+            renderNavBtn("settings", PT_BR.nav.settings)
           ),
           opts.onOpenClassicCockpit && h(
             "button",
@@ -14942,26 +16575,101 @@ function createFactoryAppComponent(ctx, opts = {}) {
             "Control Room clássico"
           )
         ),
+        // Área principal com PageHeader + conteúdo da página ativa
         h(
-          "main",
-          { className: "of-main" },
-          toast && h("div", { className: "of-pill", "data-tone": "ok", style: { alignSelf: "flex-end" } }, toast),
-          error && h("div", { className: "of-pill", "data-tone": "danger" }, `Aviso: ${error}`),
-          selectedItem && h(
-            "div",
-            { className: "of-card of-header-bar" },
-            h(
-              "div",
-              null,
-              h("span", { className: "of-mono", style: { color: "var(--primary)", marginRight: "8px" } }, `#${selectedItem.id.slice(0, 8)}`),
-              h("strong", null, selectedItem.title),
-              h("span", { className: "of-muted", style: { marginLeft: "8px" } }, `(${selectedItem.stage})`)
-            ),
-            h("button", { type: "button", className: "of-btn", onClick: () => setSelectedItem(null) }, "Fechar")
+          "div",
+          { className: "of-workspace" },
+          h(
+            "header",
+            { className: "of-page-header" },
+            h("strong", { style: { fontSize: "13.5px" } }, PT_BR.nav[tab] || PT_BR.appTitle),
+            h("span", { className: "of-mono of-muted" }, `/ ${tenant}`),
+            toast && h("span", { className: "of-pill", "data-tone": "done", style: { marginLeft: "auto" } }, toast),
+            error && !toast && h("span", { className: "of-pill", "data-tone": "failed", style: { marginLeft: "auto" } }, `Aviso: ${error}`)
           ),
-          tab === "overview" ? renderOverview() : tab === "board" ? renderBoard() : tab === "floor" ? renderFloor() : tab === "costs" ? renderCosts() : tab === "agents" ? renderAgents() : tab === "settings" ? renderSettings() : renderSimpleTab()
+          h(
+            "main",
+            { className: "of-main" },
+            tab === "overview" ? renderFactoryOverviewPanel({
+              h,
+              tenant,
+              status,
+              loading,
+              confirmKill,
+              setConfirmKill,
+              activeHelpKey,
+              onToggleHelp: setActiveHelpKey,
+              onSelectItem: handleSelectItem,
+              onRefresh: () => refresh(tenant),
+              onOpenBoard: () => setTab("board"),
+              onOpenSettings: () => setTab("settings"),
+              onOpenVision: () => setTab("vision"),
+              onToggleDrain: () => handleControlUpdate(
+                { drain: !status.drain },
+                status.drain ? "Dreno cancelado." : "Modo Dreno ativado (finaliza os itens em andamento)."
+              ),
+              onToggleKillSwitch: (next) => handleControlUpdate(
+                { killSwitch: next, pausedReason: next ? "Kill Switch acionado pelo operador" : null },
+                next ? "Kill Switch ativado imediatamente." : "Kill Switch liberado."
+              ),
+              scorecardView,
+              setScorecardView,
+              scorecardDays,
+              setScorecardDays
+            }) : tab === "board" || tab === "floor" ? renderFactoryBoardAndFloor({
+              h,
+              tenant,
+              status,
+              liveCrew,
+              viewMode: tab,
+              onChangeViewMode: (m) => setTab(m),
+              storeyFocus,
+              onChangeStoreyFocus: setStoreyFocus,
+              selectedAgentKey,
+              onSelectAgentKey: setSelectedAgentKey,
+              onSelectItem: handleSelectItem,
+              onRefresh: () => refresh(tenant),
+              loading
+            }) : renderFactorySecondaryPage({
+              h,
+              tab,
+              tenant,
+              onSelectTenant: (t) => {
+                setTenant(t);
+                setTab("overview");
+              },
+              status,
+              liveCrew,
+              onSelectItem: handleSelectItem,
+              inboxFilter,
+              setInboxFilter,
+              costRange,
+              setCostRange,
+              autoTab,
+              setAutoTab,
+              agentTab,
+              setAgentTab,
+              settingsForm,
+              setSettingsForm,
+              onSaveSettings: () => handleControlUpdate(
+                {
+                  mode: settingsForm.mode,
+                  limits: {
+                    gastoDiaUsd: settingsForm.gastoDiaUsd,
+                    mergesDia: settingsForm.mergesDia,
+                    agentes: settingsForm.agentesMax,
+                    prsAbertos: settingsForm.prsAbertos,
+                    falhasSeguidas: settingsForm.falhasSeguidas
+                  }
+                },
+                `Configurações salvas em controle-${tenant}.json.`
+              ),
+              onSelectModeQuick: (mode) => handleControlUpdate({ mode }, `Modo alterado para ${PT_BR.modes[mode]}.`)
+            })
+          )
         )
-      )
+      ),
+      renderItemSheetDrawer({ h, item: selectedItem, tenant, onClose: () => setSelectedItem(null) })
     );
   };
 }
@@ -16895,7 +18603,7 @@ export {
   ORGFY_FAILOVER_REQUEST_EVENT,
   PT_BR,
   SVG,
-  TENANTS,
+  TENANTS$1 as TENANTS,
   THEME,
   VERIFIED_TOOLCALL_FAILOVER_CHAIN,
   apply,
