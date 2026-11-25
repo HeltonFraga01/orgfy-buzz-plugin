@@ -6,6 +6,7 @@ import { PT_BR } from "../i18n/pt-BR";
 
 export interface LiveCrewAgent {
   key: string;
+  pubkey?: string;
   name: string;
   model: string;
   provider: string;
