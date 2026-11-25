@@ -14,6 +14,7 @@ import {
 import { attachFactoryShadowStyles, FACTORY_SHADOW_CSS } from "./shadow-shell";
 import { renderFactoryOverviewPanel } from "./FactoryOverviewPanel";
 import { renderFactoryBoardAndFloor, renderItemSheetDrawer, type LiveCrewAgent } from "./FactoryBoardAndFloor";
+import { createFloor3DComponent } from "./codeden-floor/Floor3DCanvas";
 import { renderFactorySecondaryPage } from "./FactoryPages";
 import { subscribeRelayUpdates } from "../services/buzz-native";
 import { openIssueInBuzz } from "../services/orgfy-bridge";
@@ -43,6 +44,7 @@ export interface CreateFactoryAppOptions {
 export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOptions = {}) {
   const React = ctx.react;
   const h = React.createElement;
+  const Floor3D = createFloor3DComponent(ctx);
 
   return function OrgFyFactoryApp() {
     const [tenant, setTenant] = React.useState<string>("orgfy");
@@ -330,6 +332,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                   onSelectItem: handleSelectItem,
                   onRefresh: () => refresh(tenant),
                   loading,
+                  Floor3D,
                 })
               : renderFactorySecondaryPage({
                   h,
