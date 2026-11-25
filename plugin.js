@@ -39,7 +39,7 @@ const GOOSE_LOOP_RADAR_SCRIPT_PATH = joinHome(".buzz", "REPOS", "orgfy-buzz-plug
 const GOOSE_LOOP_RADAR_SNAPSHOT_PATH = joinHome(".buzz", ".scratch", "goose-loop-radar.json");
 const FABRICA_STATUS_SCRIPT_PATH = joinHome(".buzz", "REPOS", "orgfy", "ferramentas", "esteira", "fabrica_status.py");
 function getControlePath(tenant) {
-  const slug = tenant.trim().toLowerCase() || "orgfy";
+  const slug = (tenant || "orgfy").trim().toLowerCase() || "orgfy";
   return joinHome(".buzz", "REPOS", "orgfy", ".esteira", "estado", `controle-${slug}.json`);
 }
 const ORGFY_ABS_PATH = ORGFY_REPO_ROOT;
@@ -13474,14 +13474,14 @@ function buildEmptyFactoryStatus(tenant, reason) {
     mode: "software_factory",
     experimental: true,
     loopState: "stopped",
-    pausedReason: reason || "Coordenador parado ou indisponível",
+    pausedReason: reason || null,
     killSwitch: false,
     globalKillSwitch: false,
     drain: null,
     limits: {
-      maxConcurrentSessions: 2,
-      maxMergesPerDay: 5,
-      dailyBudget: {},
+      maxConcurrentSessions: 4,
+      maxMergesPerDay: 20,
+      dailyBudget: { usd: 50 },
       pauseAfterConsecutiveFailures: 3,
       autoMerge: false,
       mergePolicy: "strict"
@@ -13491,7 +13491,7 @@ function buildEmptyFactoryStatus(tenant, reason) {
     stats: { mergedToday: 0, failedToday: 0, revertedToday: 0, medianMergeMs7d: null, merged7d: 0 },
     consecutiveFailures: 0,
     activeSessions: 0,
-    wip: { openPrs: 0, limit: 2, holding: false, waitingOnProvider: 0, note: null },
+    wip: { openPrs: 0, limit: 6, holding: false, waitingOnProvider: 0, note: null },
     backlog: [],
     inProgress: [],
     mergeChecks: [],
@@ -13507,7 +13507,148 @@ function buildEmptyFactoryStatus(tenant, reason) {
     tenant,
     coordenador: "parado",
     modelos: [],
-    indisponivel: ["kpis-esteira.json", "lastDigest", "lessons", "mergeChecks", "pullRequests", "scout", "spotChecks"]
+    indisponivel: ["lastDigest", "lessons", "mergeChecks", "pullRequests", "scout", "spotChecks"]
+  };
+}
+function parseEvalTable(md) {
+  const map = /* @__PURE__ */ new Map();
+  if (!md) return map;
+  for (const line of md.split("\n")) {
+    if (!line.trim().startsWith("|")) continue;
+    const cols = line.split("|").map((c) => c.trim()).filter(Boolean);
+    if (cols.length < 3) continue;
+    const model = cols[0].replace(/`/g, "").trim();
+    const m = line.match(/(\d+)\s*\/\s*10/g);
+    if (model && m && m.length >= 1) {
+      const toolStr = m.length >= 2 ? m[1] : m[0];
+      const num = parseInt(toolStr.split("/")[0], 10);
+      if (!Number.isNaN(num)) {
+        const shortName = model.includes("/") ? model.split("/").pop() : model;
+        map.set(model.toLowerCase(), { score: `${num}/10`, abaixo: num < 8 });
+        map.set(shortName.toLowerCase(), { score: `${num}/10`, abaixo: num < 8 });
+      }
+    }
+  }
+  return map;
+}
+async function hydrateFactoryStatusFromFiles(ctx, slug) {
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o;
+  const base = buildEmptyFactoryStatus(slug);
+  const host = ctx == null ? void 0 : ctx.host;
+  const [kpiRes, cards, empresaJson, evalMd, visionMd] = await Promise.all([
+    fetchKpisEsteira(ctx).catch(() => ({ kpis: null, history: [], error: null })),
+    fetchLiveKanbanCards(ctx, { empresa: slug }).catch(() => []),
+    readOrgfyJson(ctx, `empresas/${slug}.json`, null).catch(() => null),
+    readOrgfyText(ctx, "docs/eval-modelos-onda5.md").catch(() => null),
+    readOrgfyText(ctx, "docs/VISION.md").catch(() => null)
+  ]);
+  let controle = null;
+  try {
+    if (host == null ? void 0 : host.readFile) {
+      const raw = await host.readFile(getControlePath(slug));
+      const txt = raw instanceof Uint8Array ? new TextDecoder().decode(raw) : String(raw || "");
+      controle = JSON.parse(txt);
+    }
+  } catch {
+    controle = null;
+  }
+  const snap = ((_b = (_a = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) || {};
+  const runningList = Array.isArray(snap.running) ? snap.running : [];
+  const allAgents = Array.isArray(snap.agents) ? snap.agents : [];
+  const liveByName = /* @__PURE__ */ new Map();
+  for (const a of allAgents) {
+    if (a == null ? void 0 : a.name) liveByName.set(String(a.name).toLowerCase(), a);
+  }
+  const evalMap = parseEvalTable(evalMd);
+  const modelos = [];
+  const agentesObj = (empresaJson == null ? void 0 : empresaJson.agentes) && typeof empresaJson.agentes === "object" ? empresaJson.agentes : {};
+  for (const [agName, info] of Object.entries(agentesObj)) {
+    const live = liveByName.get(agName.toLowerCase());
+    const modelo = String(((_c = live == null ? void 0 : live.config) == null ? void 0 : _c.model) || (info == null ? void 0 : info.model) || "").trim() || null;
+    const provider = String(((_d = live == null ? void 0 : live.config) == null ? void 0 : _d.provider) || (info == null ? void 0 : info.provider) || "").trim() || null;
+    const ev = modelo ? evalMap.get(modelo.toLowerCase()) || evalMap.get((modelo.split("/").pop() || "").toLowerCase()) : void 0;
+    modelos.push({
+      agente: agName,
+      papel: (info == null ? void 0 : info.papel) || null,
+      modelo,
+      provider,
+      toolcall_eval: (ev == null ? void 0 : ev.score) || null,
+      abaixo_minimo: Boolean(ev == null ? void 0 : ev.abaixo)
+    });
+  }
+  const toWorkItem = (c) => ({
+    id: String(c.fullIssueId || c.issueId || c.id),
+    title: String(c.title || "Card"),
+    workKey: String(c.issueId || c.id),
+    stage: c.stage === "feito" ? "merged" : c.stage === "revisao" ? "verifying" : c.stage === "execucao" || c.stage === "despachado" ? "building" : "backlog",
+    step: c.stage === "feito" ? "done" : c.stage === "revisao" ? "review" : c.stage === "execucao" ? "implement" : "intake",
+    type: /fix|bug|hotfix/i.test(String(c.title || "")) ? "bug" : /doc|readme|prd/i.test(String(c.title || "")) ? "docs" : "feature",
+    attempts: Array.isArray(c.rejectionHistory) ? c.rejectionHistory.length + 1 : 1,
+    sessionId: null,
+    activeSessionId: null,
+    reason: null,
+    note: c.executor ? `Executor: ${c.executor}${c.revisor ? ` · Revisor: ${c.revisor}` : ""}` : null,
+    updatedAt: Date.now()
+  });
+  const backlog = cards.filter((c) => c.stage === "triagem").map(toWorkItem);
+  const inProgress = cards.filter((c) => c.stage === "despachado" || c.stage === "execucao" || c.stage === "revisao").map(toWorkItem);
+  const recent = cards.filter((c) => c.stage === "feito").slice(0, 20).map(toWorkItem);
+  const kpis = kpiRes.kpis;
+  const killSwitch = Boolean(controle == null ? void 0 : controle.killSwitch);
+  const drainOn = Boolean(controle == null ? void 0 : controle.drain);
+  const mode = VALID_MODES.has(String(controle == null ? void 0 : controle.mode)) ? controle.mode : "software_factory";
+  return {
+    ...base,
+    mode,
+    killSwitch,
+    drain: drainOn ? { since: Date.now(), inFlight: inProgress.length, total: inProgress.length, deadline: null } : null,
+    loopState: killSwitch ? "stopped" : drainOn ? "draining" : inProgress.length > 0 || runningList.length > 0 ? "building" : "idle",
+    pausedReason: (controle == null ? void 0 : controle.pausedReason) || null,
+    limits: {
+      maxConcurrentSessions: Number(((_e = controle == null ? void 0 : controle.limits) == null ? void 0 : _e.agentes) ?? 4),
+      maxMergesPerDay: Number(((_f = controle == null ? void 0 : controle.limits) == null ? void 0 : _f.mergesDia) ?? 20),
+      dailyBudget: { usd: Number(((_g = controle == null ? void 0 : controle.limits) == null ? void 0 : _g.gastoDiaUsd) ?? 50) },
+      pauseAfterConsecutiveFailures: Number(((_h = controle == null ? void 0 : controle.limits) == null ? void 0 : _h.falhasSeguidas) ?? 3),
+      autoMerge: Boolean((controle == null ? void 0 : controle.autoMerge) ?? false),
+      mergePolicy: (controle == null ? void 0 : controle.mergePolicy) === "fast" ? "fast" : "strict"
+    },
+    spendToday: {
+      tokens: Number(((_i = kpis == null ? void 0 : kpis.economia) == null ? void 0 : _i.tokens_hoje) ?? 0),
+      usd: Number(((_j = kpis == null ? void 0 : kpis.economia) == null ? void 0 : _j.custo_hoje_usd) ?? 0)
+    },
+    mergesToday: Number(((_k = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _k.vazao_hoje) ?? 0),
+    stats: {
+      mergedToday: Number(((_l = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _l.vazao_hoje) ?? 0),
+      failedToday: 0,
+      revertedToday: 0,
+      medianMergeMs7d: null,
+      merged7d: Number(((_m2 = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _m2.vazao_7d) ?? recent.length)
+    },
+    activeSessions: runningList.length,
+    wip: {
+      openPrs: inProgress.length,
+      limit: Number(((_n = controle == null ? void 0 : controle.limits) == null ? void 0 : _n.prsAbertos) ?? 6),
+      holding: inProgress.length >= Number(((_o = controle == null ? void 0 : controle.limits) == null ? void 0 : _o.prsAbertos) ?? 6),
+      waitingOnProvider: 0,
+      note: null
+    },
+    backlog,
+    inProgress,
+    recent,
+    viewRecent: recent,
+    visionExists: Boolean(visionMd && visionMd.trim().length > 0),
+    lastTickAt: Date.now(),
+    coordenador: killSwitch ? "parado" : "ativo",
+    kpis: kpis ? {
+      disponivel: true,
+      gerado_em: kpis.gerado_em || null,
+      fluxo: kpis.fluxo || null,
+      qualidade: kpis.qualidade || null,
+      economia: kpis.economia || null,
+      higiene: kpis.higiene || null
+    } : { disponivel: false },
+    modelos,
+    indisponivel: kpis ? ["lastDigest", "lessons", "mergeChecks", "pullRequests", "scout", "spotChecks"] : ["kpis-esteira.json", "lastDigest", "lessons"]
   };
 }
 async function fetchFactoryStatus(ctx, tenant = "orgfy") {
@@ -13538,18 +13679,18 @@ async function fetchFactoryStatus(ctx, tenant = "orgfy") {
         return { ok: true, status: parsed, error: null };
       }
     }
+  } catch {
+  }
+  try {
+    const hydrated = await hydrateFactoryStatusFromFiles(ctx, slug);
+    return { ok: true, status: hydrated, error: null };
   } catch (err) {
     return {
       ok: false,
-      status: buildEmptyFactoryStatus(slug, (err == null ? void 0 : err.message) || "Falha ao consultar fabrica_status.py"),
+      status: buildEmptyFactoryStatus(slug, (err == null ? void 0 : err.message) || "Falha ao ler dados do tenant"),
       error: (err == null ? void 0 : err.message) || String(err)
     };
   }
-  return {
-    ok: false,
-    status: buildEmptyFactoryStatus(slug, "host.spawn indisponível"),
-    error: "host.spawn indisponível"
-  };
 }
 async function writeTenantControl(ctx, tenant, patch) {
   const slug = (tenant || "orgfy").trim().toLowerCase() || "orgfy";
@@ -15379,7 +15520,7 @@ function renderFactoryBoardAndFloor(props) {
   liveCrew.find((a) => a.key === selectedAgentKey) || null;
   return h(
     "div",
-    { style: { display: "flex", flexDirection: "column", gap: "12px" } },
+    { style: { display: "flex", flexDirection: "column", gap: "10px", flex: 1, minHeight: 0, height: viewMode === "floor" ? "100%" : void 0 } },
     // 1. ViewHeader (view-header.tsx)
     h(
       "div",
@@ -15456,8 +15597,8 @@ function renderFactoryBoardAndFloor(props) {
         h("button", { type: "button", className: "of-btn", onClick: onRefresh, disabled: loading }, loading ? "..." : "Atualizar")
       )
     ),
-    // 2. StatsStrip (stats-strip.tsx — 6 tiles)
-    h(
+    // 2. StatsStrip (exibido no Board; oculto no Andar 3D para o 3D preencher 100% da tela, igual ao CodeDen)
+    viewMode === "board" && h(
       "div",
       { className: "of-stats-6" },
       statTiles.map(
@@ -16425,12 +16566,12 @@ function token(style, name, fallback) {
   return value && cssToSrgb(value) || fallback;
 }
 function readPalette(root = ((_a) => (_a = globalThis.document) == null ? void 0 : _a.documentElement)()) {
-  const dark = (root == null ? void 0 : root.classList.contains("dark")) ?? false;
   const style = root ? getComputedStyle(root) : null;
-  const primary = token(style, "--primary", ok(0.66, 0.165, 58));
-  const chart2 = token(style, "--chart-2", ok(0.6, 0.13, 230));
-  const chart3 = token(style, "--chart-3", ok(0.62, 0.14, 155));
-  const chart4 = token(style, "--chart-4", ok(0.6, 0.17, 300));
+  const dark = !((root == null ? void 0 : root.classList.contains("light")) || (style == null ? void 0 : style.colorScheme) === "light");
+  const primary = token(style, "--accent-primary", null) || token(style, "--brand-primary", null) || token(style, "--green-11", null) || token(style, "--primary", ok(0.76, 0.14, 155));
+  const chart2 = token(style, "--chart-2", ok(0.68, 0.13, 230));
+  const chart3 = token(style, "--chart-3", ok(0.72, 0.14, 155));
+  const chart4 = token(style, "--chart-4", ok(0.68, 0.16, 300));
   return {
     dark,
     floor: dark ? ok(0.3, 8e-3, 264) : ok(0.93, 6e-3, 80),
@@ -47572,6 +47713,271 @@ function createFloor3DComponent(ctx) {
     );
   };
 }
+function createAgentQuickChatComponent(ctx) {
+  const React = ctx.react;
+  const h = React.createElement;
+  return function AgentQuickChat({ tenant, liveCrew, onCollapse, onNotify }) {
+    const defaultAgentKey = React.useMemo(() => {
+      var _a;
+      const coo = liveCrew.find((a) => /bento/i.test(a.name) && !/arquiteto/i.test(a.name));
+      if (coo) return coo.key;
+      const anyCoo = liveCrew.find((a) => /coo|bento/i.test(a.name));
+      if (anyCoo) return anyCoo.key;
+      return ((_a = liveCrew[0]) == null ? void 0 : _a.key) || "local:orgfy-bento";
+    }, [liveCrew]);
+    const [selectedKey, setSelectedKey] = React.useState(defaultAgentKey);
+    const [draft, setDraft] = React.useState("");
+    const [sending, setSending] = React.useState(false);
+    const [messages, setMessages] = React.useState([]);
+    React.useEffect(() => {
+      if (liveCrew.length > 0 && !liveCrew.some((a) => a.key === selectedKey)) {
+        setSelectedKey(defaultAgentKey);
+      }
+    }, [liveCrew, selectedKey, defaultAgentKey]);
+    const activeAgent = liveCrew.find((a) => a.key === selectedKey) || {
+      key: selectedKey,
+      name: "OrgFy Bento (COO)",
+      model: "claude-sonnet-5-5",
+      provider: "nexusmind_anthropic",
+      running: false
+    };
+    const handleSend = React.useCallback(async () => {
+      var _a;
+      const text = draft.trim();
+      if (!text || sending) return;
+      setSending(true);
+      const nowStr = (/* @__PURE__ */ new Date()).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+      setMessages((prev) => [
+        ...prev,
+        { id: `u-${Date.now()}`, sender: "user", agentName: activeAgent.name, text, at: nowStr }
+      ]);
+      setDraft("");
+      try {
+        if ((_a = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _a.wake) {
+          await ctx.agents.wake(activeAgent.key, {
+            text: `[OrgFy Factory · ${tenant}] ${text}`
+          });
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `s-${Date.now()}`,
+              sender: "system",
+              agentName: activeAgent.name,
+              text: `Mensagem enviada para ${activeAgent.name} via Buzz Agents. Clique em "Chat completo ↗" para acompanhar a resposta ao vivo.`,
+              at: (/* @__PURE__ */ new Date()).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })
+            }
+          ]);
+          onNotify == null ? void 0 : onNotify(`Mensagem enviada para ${activeAgent.name}.`);
+        } else {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `s-${Date.now()}`,
+              sender: "system",
+              agentName: activeAgent.name,
+              text: "ctx.agents.wake não está disponível nesta sessão.",
+              at: nowStr
+            }
+          ]);
+        }
+      } catch (err) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `e-${Date.now()}`,
+            sender: "system",
+            agentName: activeAgent.name,
+            text: `Erro ao acionar ${activeAgent.name}: ${(err == null ? void 0 : err.message) || err}`,
+            at: nowStr
+          }
+        ]);
+      } finally {
+        setSending(false);
+      }
+    }, [draft, sending, activeAgent, tenant, onNotify]);
+    const handleOpenFullChat = React.useCallback(async () => {
+      var _a;
+      try {
+        if ((_a = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a.open) {
+          await ctx.navigation.open({ kind: "agent", agentKey: activeAgent.key });
+          return;
+        }
+      } catch {
+      }
+      onNotify == null ? void 0 : onNotify(`Abrindo conversa completa de ${activeAgent.name} no Buzz.`);
+    }, [activeAgent, onNotify]);
+    return h(
+      "aside",
+      {
+        style: {
+          width: "320px",
+          flexShrink: 0,
+          display: "flex",
+          flexDirection: "column",
+          borderLeft: "1px solid var(--border)",
+          background: "var(--panel)",
+          minHeight: 0,
+          overflow: "hidden"
+        }
+      },
+      // Cabeçalho do Chat Lateral (COO / Seletor de Agente + Chat completo ↗ + Recolher)
+      h(
+        "div",
+        {
+          style: {
+            display: "flex",
+            flexDirection: "column",
+            gap: "6px",
+            padding: "10px 12px",
+            borderBottom: "1px solid var(--border)"
+          }
+        },
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px" } },
+          h(
+            "span",
+            { style: { display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", fontWeight: 700 } },
+            h("span", { className: "of-dot", "data-tone": activeAgent.running ? "running" : "done" }),
+            "Chat · COO & Agentes"
+          ),
+          h(
+            "div",
+            { style: { display: "inline-flex", alignItems: "center", gap: "4px" } },
+            h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                "data-variant": "ghost",
+                style: { padding: "2px 6px", fontSize: "11px", color: "var(--primary)" },
+                onClick: handleOpenFullChat
+              },
+              "Chat completo ↗"
+            ),
+            h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                "data-variant": "ghost",
+                style: { padding: "2px 6px" },
+                title: "Recolher chat lateral",
+                onClick: onCollapse
+              },
+              "›"
+            )
+          )
+        ),
+        // Seletor de qualquer agente do Buzz
+        h(
+          "select",
+          {
+            className: "of-tenant-select",
+            value: selectedKey,
+            onChange: (e) => setSelectedKey(e.target.value)
+          },
+          liveCrew.length > 0 ? liveCrew.map(
+            (a) => h(
+              "option",
+              { key: a.key, value: a.key },
+              `${a.name}${a.running ? " (ativo)" : ""} · ${a.model}`
+            )
+          ) : h("option", { value: "local:orgfy-bento" }, "OrgFy Bento (COO)")
+        )
+      ),
+      // Histórico / Estado do agente selecionado
+      h(
+        "div",
+        {
+          style: {
+            flex: 1,
+            minHeight: 0,
+            overflowY: "auto",
+            padding: "12px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "8px"
+          }
+        },
+        messages.length === 0 ? h(
+          "div",
+          { className: "of-surface", style: { padding: "10px 12px", fontSize: "11.5px", lineHeight: 1.45 } },
+          h("div", { style: { fontWeight: 600, marginBottom: "4px" } }, activeAgent.name),
+          h(
+            "div",
+            { className: "of-muted" },
+            `Pronto para receber ordens no workspace ${tenant}. Envie uma mensagem abaixo para acionar diretamente pelo Buzz (ctx.agents.wake) ou abra o Chat completo.`
+          )
+        ) : messages.map(
+          (m) => h(
+            "div",
+            {
+              key: m.id,
+              className: "of-surface",
+              style: {
+                padding: "8px 10px",
+                fontSize: "11.5px",
+                borderColor: m.sender === "user" ? "var(--primary)" : "var(--border)",
+                alignSelf: m.sender === "user" ? "flex-end" : "stretch",
+                maxWidth: m.sender === "user" ? "90%" : "100%"
+              }
+            },
+            h(
+              "div",
+              { style: { display: "flex", justifyContent: "space-between", fontSize: "10px", color: "var(--muted-foreground)", marginBottom: "3px" } },
+              h("span", null, m.sender === "user" ? "Você" : m.agentName),
+              h("span", null, m.at)
+            ),
+            h("div", { style: { whiteSpace: "pre-wrap", lineHeight: 1.4 } }, m.text)
+          )
+        )
+      ),
+      // Composer inferior (igual ao CodeDen PM chat)
+      h(
+        "div",
+        {
+          style: {
+            padding: "10px 12px",
+            borderTop: "1px solid var(--border)",
+            display: "flex",
+            flexDirection: "column",
+            gap: "6px"
+          }
+        },
+        h("textarea", {
+          className: "of-textarea",
+          style: { minHeight: "56px", fontFamily: "inherit", fontSize: "12px" },
+          placeholder: `Mensagem para ${activeAgent.name}... (Cmd/Ctrl+Enter para enviar)`,
+          value: draft,
+          onChange: (e) => setDraft(e.target.value),
+          onKeyDown: (e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+              e.preventDefault();
+              handleSend();
+            }
+          }
+        }),
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px" } },
+          h("span", { className: "of-mono of-muted", style: { fontSize: "10px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, activeAgent.model),
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-variant": "primary",
+              disabled: sending || !draft.trim(),
+              onClick: handleSend
+            },
+            sending ? "Enviando..." : "Enviar ↑"
+          )
+        )
+      )
+    );
+  };
+}
 const TENANTS = [
   { id: "orgfy", name: "OrgFy Core (Engenharia & Método)", desc: "Esteira determinística principal, CI 7/7 e governança L-01/L-22." },
   { id: "lumen-iptv", name: "Lumen IPTV", desc: "Operação multi-tenant ativa na Holding Cortexx." },
@@ -48168,10 +48574,12 @@ function createFactoryAppComponent(ctx, opts = {}) {
   const React = ctx.react;
   const h = React.createElement;
   const Floor3D = createFloor3DComponent(ctx);
+  const AgentQuickChat = createAgentQuickChatComponent(ctx);
   return function OrgFyFactoryApp() {
     var _a;
     const [tenant, setTenant] = React.useState("orgfy");
     const [tab, setTab] = React.useState("overview");
+    const [chatOpen, setChatOpen] = React.useState(true);
     const [status, setStatus] = React.useState(() => buildEmptyFactoryStatus("orgfy"));
     const [holding, setHolding] = React.useState(null);
     const [loading, setLoading] = React.useState(true);
@@ -48340,7 +48748,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
       h(
         "div",
         { className: "of-shell" },
-        // Sidebar com a estrutura oficial OrgFy: CEO Master -> Conselho/Board & Inbox -> Workspaces (Empresas) -> Fábrica & Operação
+        // Sidebar OrgFy: CEO Master -> Holding/Conselho & Inbox -> Workspaces -> Fábrica -> Operação
         h(
           "aside",
           { className: "of-sidebar" },
@@ -48355,13 +48763,9 @@ function createFactoryAppComponent(ctx, opts = {}) {
             ),
             h("span", { className: "of-dot", "data-tone": status.coordenador === "ativo" ? "done" : "failed", title: `Coordenador: ${status.coordenador}` })
           ),
-          // 1. Orquestrador Principal / CEO Master (definido no Buzz/Holding, padrão Iris)
           h(
             "div",
-            {
-              className: "of-surface",
-              style: { padding: "8px 10px", display: "flex", flexDirection: "column", gap: "3px" }
-            },
+            { className: "of-surface", style: { padding: "8px 10px", display: "flex", flexDirection: "column", gap: "3px" } },
             h(
               "div",
               { style: { display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "10px", color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.06em" } },
@@ -48371,7 +48775,6 @@ function createFactoryAppComponent(ctx, opts = {}) {
             h("div", { style: { fontSize: "12.5px", fontWeight: 700, color: "var(--foreground)" } }, masterAgentName),
             h("div", { className: "of-mono of-muted", style: { fontSize: "10px" } }, masterLive ? masterLive.model : "Ativa no Buzz")
           ),
-          // 2. Conselho da Holding (Board) & Inbox
           h("div", { className: "of-nav-group-label" }, "Holding & Conselho"),
           h(
             "nav",
@@ -48379,7 +48782,6 @@ function createFactoryAppComponent(ctx, opts = {}) {
             renderNavBtn("holding", "Conselho (Board)", pendingApprovals > 0 ? String(pendingApprovals) : void 0, pendingApprovals > 0 ? "warn" : void 0),
             renderNavBtn("inbox", PT_BR.nav.inbox, inboxCount > 0 ? String(inboxCount) : void 0, inboxCount > 0 ? "warn" : void 0)
           ),
-          // 3. Empresas / Workspaces (carregadas de empresas/*.json)
           h("div", { className: "of-nav-group-label" }, "Empresas · Workspaces"),
           h(
             "nav",
@@ -48407,7 +48809,6 @@ function createFactoryAppComponent(ctx, opts = {}) {
               )
             )
           ),
-          // 4. Fábrica do Workspace Ativo
           h("div", { className: "of-nav-group-label" }, `Fábrica · ${tenant}`),
           h(
             "nav",
@@ -48416,7 +48817,6 @@ function createFactoryAppComponent(ctx, opts = {}) {
             renderNavBtn("board", PT_BR.nav.board, String(status.backlog.length + status.inProgress.length)),
             renderNavBtn("floor", "Andar 3D", String(liveCrew.filter((a) => a.running).length))
           ),
-          // 5. Operação & Governança
           h("div", { className: "of-nav-group-label" }, "Operação"),
           h(
             "nav",
@@ -48438,7 +48838,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
             "Control Room clássico"
           )
         ),
-        // Área principal com PageHeader nativo + atalho de deep link para o canal do workspace
+        // Área principal + Painel Lateral de Chat com COO & Agentes
         h(
           "div",
           { className: "of-workspace" },
@@ -48448,98 +48848,124 @@ function createFactoryAppComponent(ctx, opts = {}) {
             h("strong", { style: { fontSize: "13.5px" } }, tab === "vision" ? "Canvas / Visão" : tab === "floor" ? "Andar 3D" : PT_BR.nav[tab] || PT_BR.appTitle),
             h("span", { className: "of-mono of-muted" }, `/ ${tenant}`),
             h(
-              "button",
-              {
-                type: "button",
-                className: "of-btn",
-                "data-variant": "ghost",
-                style: { marginLeft: "auto" },
-                onClick: handleOpenChannelInBuzz
-              },
-              "Canal no Buzz ↗"
+              "div",
+              { style: { marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: "6px" } },
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "of-btn",
+                  "data-variant": "ghost",
+                  onClick: handleOpenChannelInBuzz
+                },
+                "Canal no Buzz ↗"
+              ),
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "of-btn",
+                  "data-variant": chatOpen ? "primary" : void 0,
+                  onClick: () => setChatOpen(!chatOpen)
+                },
+                chatOpen ? "Ocultar Chat COO" : "Chat COO & Agentes"
+              )
             ),
             toast && h("span", { className: "of-pill", "data-tone": "done" }, toast),
             error2 && !toast && h("span", { className: "of-pill", "data-tone": "failed" }, `Aviso: ${error2}`)
           ),
           h(
-            "main",
-            { className: "of-main" },
-            tab === "overview" ? renderFactoryOverviewPanel({
-              h,
-              tenant,
-              status,
-              loading,
-              confirmKill,
-              setConfirmKill,
-              activeHelpKey,
-              onToggleHelp: setActiveHelpKey,
-              onSelectItem: setSelectedItem,
-              onRefresh: () => refresh(tenant),
-              onOpenBoard: () => setTab("floor"),
-              onOpenSettings: () => setTab("settings"),
-              onOpenVision: () => setTab("vision"),
-              onToggleDrain: () => handleControlUpdate(
-                { drain: !status.drain },
-                status.drain ? "Dreno cancelado." : "Modo Dreno ativado (finaliza os itens em andamento)."
-              ),
-              onToggleKillSwitch: (next) => handleControlUpdate(
-                { killSwitch: next, pausedReason: next ? "Kill Switch acionado pelo operador" : null },
-                next ? "Kill Switch ativado imediatamente." : "Kill Switch liberado."
-              ),
-              scorecardView,
-              setScorecardView,
-              scorecardDays,
-              setScorecardDays
-            }) : tab === "board" || tab === "floor" ? renderFactoryBoardAndFloor({
-              h,
-              tenant,
-              status,
-              liveCrew,
-              viewMode: tab,
-              onChangeViewMode: (m) => setTab(m),
-              storeyFocus,
-              onChangeStoreyFocus: setStoreyFocus,
-              selectedAgentKey,
-              onSelectAgentKey: setSelectedAgentKey,
-              onSelectItem: setSelectedItem,
-              onRefresh: () => refresh(tenant),
-              loading,
-              Floor3D
-            }) : renderFactorySecondaryPage({
-              h,
-              tab,
-              tenant,
-              onSelectTenant: (t) => {
-                setTenant(t);
-                setTab("overview");
+            "div",
+            { style: { display: "flex", flex: 1, minHeight: 0, overflow: "hidden" } },
+            h(
+              "main",
+              {
+                className: "of-main",
+                style: tab === "floor" ? { padding: "10px 12px", overflow: "hidden" } : void 0
               },
-              status,
-              liveCrew,
-              onSelectItem: setSelectedItem,
-              inboxFilter,
-              setInboxFilter,
-              costRange,
-              setCostRange,
-              autoTab,
-              setAutoTab,
-              agentTab,
-              setAgentTab,
-              settingsForm,
-              setSettingsForm,
-              onSaveSettings: () => handleControlUpdate(
-                {
-                  mode: settingsForm.mode,
-                  limits: {
-                    gastoDiaUsd: settingsForm.gastoDiaUsd,
-                    mergesDia: settingsForm.mergesDia,
-                    agentes: settingsForm.agentesMax,
-                    prsAbertos: settingsForm.prsAbertos,
-                    falhasSeguidas: settingsForm.falhasSeguidas
-                  }
+              tab === "overview" ? renderFactoryOverviewPanel({
+                h,
+                tenant,
+                status,
+                loading,
+                confirmKill,
+                setConfirmKill,
+                activeHelpKey,
+                onToggleHelp: setActiveHelpKey,
+                onSelectItem: setSelectedItem,
+                onRefresh: () => refresh(tenant),
+                onOpenBoard: () => setTab("floor"),
+                onOpenSettings: () => setTab("settings"),
+                onOpenVision: () => setTab("vision"),
+                onToggleDrain: () => handleControlUpdate(
+                  { drain: !status.drain },
+                  status.drain ? "Dreno cancelado." : "Modo Dreno ativado (finaliza os itens em andamento)."
+                ),
+                onToggleKillSwitch: (next) => handleControlUpdate(
+                  { killSwitch: next, pausedReason: next ? "Kill Switch acionado pelo operador" : null },
+                  next ? "Kill Switch ativado imediatamente." : "Kill Switch liberado."
+                ),
+                scorecardView,
+                setScorecardView,
+                scorecardDays,
+                setScorecardDays
+              }) : tab === "board" || tab === "floor" ? renderFactoryBoardAndFloor({
+                h,
+                tenant,
+                status,
+                liveCrew,
+                viewMode: tab,
+                onChangeViewMode: (m) => setTab(m),
+                storeyFocus,
+                onChangeStoreyFocus: setStoreyFocus,
+                selectedAgentKey,
+                onSelectAgentKey: setSelectedAgentKey,
+                onSelectItem: setSelectedItem,
+                onRefresh: () => refresh(tenant),
+                loading,
+                Floor3D
+              }) : renderFactorySecondaryPage({
+                h,
+                tab,
+                tenant,
+                onSelectTenant: (t) => {
+                  setTenant(t);
+                  setTab("overview");
                 },
-                `Configurações salvas em controle-${tenant}.json.`
-              ),
-              onSelectModeQuick: (mode) => handleControlUpdate({ mode }, `Modo alterado para ${PT_BR.modes[mode]}.`)
+                status,
+                liveCrew,
+                onSelectItem: setSelectedItem,
+                inboxFilter,
+                setInboxFilter,
+                costRange,
+                setCostRange,
+                autoTab,
+                setAutoTab,
+                agentTab,
+                setAgentTab,
+                settingsForm,
+                setSettingsForm,
+                onSaveSettings: () => handleControlUpdate(
+                  {
+                    mode: settingsForm.mode,
+                    limits: {
+                      gastoDiaUsd: settingsForm.gastoDiaUsd,
+                      mergesDia: settingsForm.mergesDia,
+                      agentes: settingsForm.agentesMax,
+                      prsAbertos: settingsForm.prsAbertos,
+                      falhasSeguidas: settingsForm.falhasSeguidas
+                    }
+                  },
+                  `Configurações salvas em controle-${tenant}.json.`
+                ),
+                onSelectModeQuick: (mode) => handleControlUpdate({ mode }, `Modo alterado para ${PT_BR.modes[mode]}.`)
+              })
+            ),
+            chatOpen && h(AgentQuickChat, {
+              tenant,
+              liveCrew,
+              onCollapse: () => setChatOpen(false),
+              onNotify: notify2
             })
           )
         )

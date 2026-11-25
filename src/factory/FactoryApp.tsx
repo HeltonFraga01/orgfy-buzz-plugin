@@ -1,5 +1,5 @@
 // Adaptado de CodeDen (MIT) commit b0b2a5a: apps/web/src/components/shell/app-shell.tsx e routes/project.tsx
-// Shell nativo do Buzz para a OrgFy Factory: cores dinâmicas do Buzz, CEO Master (orquestrador), Conselho (Board), Workspaces das empresas e motor real OrgFy.
+// Shell nativo do Buzz para a OrgFy Factory: cores dinâmicas do Buzz, CEO Master, Conselho (Board), Workspaces, Andar 3D em tela cheia e Chat lateral do COO/Agentes.
 
 import type { Context } from "@buzz/author";
 import { PT_BR } from "../i18n/pt-BR";
@@ -15,6 +15,7 @@ import { attachFactoryShadowStyles, FACTORY_SHADOW_CSS } from "./shadow-shell";
 import { renderFactoryOverviewPanel } from "./FactoryOverviewPanel";
 import { renderFactoryBoardAndFloor, renderItemSheetDrawer, type LiveCrewAgent } from "./FactoryBoardAndFloor";
 import { createFloor3DComponent } from "./codeden-floor/Floor3DCanvas";
+import { createAgentQuickChatComponent } from "./AgentQuickChat";
 import { renderFactorySecondaryPage } from "./FactoryPages";
 import { subscribeRelayUpdates } from "../services/buzz-native";
 import { openIssueInBuzz } from "../services/orgfy-bridge";
@@ -46,10 +47,12 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
   const React = ctx.react;
   const h = React.createElement;
   const Floor3D = createFloor3DComponent(ctx);
+  const AgentQuickChat = createAgentQuickChatComponent(ctx);
 
   return function OrgFyFactoryApp() {
     const [tenant, setTenant] = React.useState<string>("orgfy");
     const [tab, setTab] = React.useState<FactoryTab>("overview");
+    const [chatOpen, setChatOpen] = React.useState<boolean>(true);
     const [status, setStatus] = React.useState<FactoryStatusPayload>(() => buildEmptyFactoryStatus("orgfy"));
     const [holding, setHolding] = React.useState<HoldingControlPlaneSnapshot | null>(null);
     const [loading, setLoading] = React.useState<boolean>(true);
@@ -201,7 +204,6 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       }
     }, [status.lastTickAt]);
 
-    // Agente principal / CEO Master (Iris ou agente principal configurado no Buzz/Holding)
     const masterAgentName = holding?.ceoHolding?.nome || "OrgFy Iris";
     const masterLive = liveCrew.find((a) => a.name.toLowerCase().includes("iris")) || liveCrew[0] || null;
     const workspaces =
@@ -245,7 +247,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       h(
         "div",
         { className: "of-shell" },
-        // Sidebar com a estrutura oficial OrgFy: CEO Master -> Conselho/Board & Inbox -> Workspaces (Empresas) -> Fábrica & Operação
+        // Sidebar OrgFy: CEO Master -> Holding/Conselho & Inbox -> Workspaces -> Fábrica -> Operação
         h(
           "aside",
           { className: "of-sidebar" },
@@ -261,13 +263,9 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
             h("span", { className: "of-dot", "data-tone": status.coordenador === "ativo" ? "done" : "failed", title: `Coordenador: ${status.coordenador}` })
           ),
 
-          // 1. Orquestrador Principal / CEO Master (definido no Buzz/Holding, padrão Iris)
           h(
             "div",
-            {
-              className: "of-surface",
-              style: { padding: "8px 10px", display: "flex", flexDirection: "column", gap: "3px" },
-            },
+            { className: "of-surface", style: { padding: "8px 10px", display: "flex", flexDirection: "column", gap: "3px" } },
             h(
               "div",
               { style: { display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "10px", color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.06em" } },
@@ -278,7 +276,6 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
             h("div", { className: "of-mono of-muted", style: { fontSize: "10px" } }, masterLive ? masterLive.model : "Ativa no Buzz")
           ),
 
-          // 2. Conselho da Holding (Board) & Inbox
           h("div", { className: "of-nav-group-label" }, "Holding & Conselho"),
           h(
             "nav",
@@ -287,7 +284,6 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
             renderNavBtn("inbox", PT_BR.nav.inbox, inboxCount > 0 ? String(inboxCount) : undefined, inboxCount > 0 ? "warn" : undefined)
           ),
 
-          // 3. Empresas / Workspaces (carregadas de empresas/*.json)
           h("div", { className: "of-nav-group-label" }, "Empresas · Workspaces"),
           h(
             "nav",
@@ -316,7 +312,6 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
             )
           ),
 
-          // 4. Fábrica do Workspace Ativo
           h("div", { className: "of-nav-group-label" }, `Fábrica · ${tenant}`),
           h(
             "nav",
@@ -326,7 +321,6 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
             renderNavBtn("floor", "Andar 3D", String(liveCrew.filter((a) => a.running).length))
           ),
 
-          // 5. Operação & Governança
           h("div", { className: "of-nav-group-label" }, "Operação"),
           h(
             "nav",
@@ -351,7 +345,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
             )
         ),
 
-        // Área principal com PageHeader nativo + atalho de deep link para o canal do workspace
+        // Área principal + Painel Lateral de Chat com COO & Agentes
         h(
           "div",
           { className: "of-workspace" },
@@ -361,107 +355,134 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
             h("strong", { style: { fontSize: "13.5px" } }, tab === "vision" ? "Canvas / Visão" : tab === "floor" ? "Andar 3D" : PT_BR.nav[tab] || PT_BR.appTitle),
             h("span", { className: "of-mono of-muted" }, `/ ${tenant}`),
             h(
-              "button",
-              {
-                type: "button",
-                className: "of-btn",
-                "data-variant": "ghost",
-                style: { marginLeft: "auto" },
-                onClick: handleOpenChannelInBuzz,
-              },
-              "Canal no Buzz ↗"
+              "div",
+              { style: { marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: "6px" } },
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "of-btn",
+                  "data-variant": "ghost",
+                  onClick: handleOpenChannelInBuzz,
+                },
+                "Canal no Buzz ↗"
+              ),
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "of-btn",
+                  "data-variant": chatOpen ? "primary" : undefined,
+                  onClick: () => setChatOpen(!chatOpen),
+                },
+                chatOpen ? "Ocultar Chat COO" : "Chat COO & Agentes"
+              )
             ),
             toast && h("span", { className: "of-pill", "data-tone": "done" }, toast),
             error && !toast && h("span", { className: "of-pill", "data-tone": "failed" }, `Aviso: ${error}`)
           ),
           h(
-            "main",
-            { className: "of-main" },
-            tab === "overview"
-              ? renderFactoryOverviewPanel({
-                  h,
-                  tenant,
-                  status,
-                  loading,
-                  confirmKill,
-                  setConfirmKill,
-                  activeHelpKey,
-                  onToggleHelp: setActiveHelpKey,
-                  onSelectItem: setSelectedItem,
-                  onRefresh: () => refresh(tenant),
-                  onOpenBoard: () => setTab("floor"),
-                  onOpenSettings: () => setTab("settings"),
-                  onOpenVision: () => setTab("vision"),
-                  onToggleDrain: () =>
-                    handleControlUpdate(
-                      { drain: !status.drain },
-                      status.drain ? "Dreno cancelado." : "Modo Dreno ativado (finaliza os itens em andamento)."
-                    ),
-                  onToggleKillSwitch: (next) =>
-                    handleControlUpdate(
-                      { killSwitch: next, pausedReason: next ? "Kill Switch acionado pelo operador" : null },
-                      next ? "Kill Switch ativado imediatamente." : "Kill Switch liberado."
-                    ),
-                  scorecardView,
-                  setScorecardView,
-                  scorecardDays,
-                  setScorecardDays,
-                })
-              : tab === "board" || tab === "floor"
-              ? renderFactoryBoardAndFloor({
-                  h,
-                  tenant,
-                  status,
-                  liveCrew,
-                  viewMode: tab,
-                  onChangeViewMode: (m) => setTab(m),
-                  storeyFocus,
-                  onChangeStoreyFocus: setStoreyFocus,
-                  selectedAgentKey,
-                  onSelectAgentKey: setSelectedAgentKey,
-                  onSelectItem: setSelectedItem,
-                  onRefresh: () => refresh(tenant),
-                  loading,
-                  Floor3D,
-                })
-              : renderFactorySecondaryPage({
-                  h,
-                  tab,
-                  tenant,
-                  onSelectTenant: (t) => {
-                    setTenant(t);
-                    setTab("overview");
-                  },
-                  status,
-                  liveCrew,
-                  onSelectItem: setSelectedItem,
-                  inboxFilter,
-                  setInboxFilter,
-                  costRange,
-                  setCostRange,
-                  autoTab,
-                  setAutoTab,
-                  agentTab,
-                  setAgentTab,
-                  settingsForm,
-                  setSettingsForm,
-                  onSaveSettings: () =>
-                    handleControlUpdate(
-                      {
-                        mode: settingsForm.mode,
-                        limits: {
-                          gastoDiaUsd: settingsForm.gastoDiaUsd,
-                          mergesDia: settingsForm.mergesDia,
-                          agentes: settingsForm.agentesMax,
-                          prsAbertos: settingsForm.prsAbertos,
-                          falhasSeguidas: settingsForm.falhasSeguidas,
+            "div",
+            { style: { display: "flex", flex: 1, minHeight: 0, overflow: "hidden" } },
+            h(
+              "main",
+              {
+                className: "of-main",
+                style: tab === "floor" ? { padding: "10px 12px", overflow: "hidden" } : undefined,
+              },
+              tab === "overview"
+                ? renderFactoryOverviewPanel({
+                    h,
+                    tenant,
+                    status,
+                    loading,
+                    confirmKill,
+                    setConfirmKill,
+                    activeHelpKey,
+                    onToggleHelp: setActiveHelpKey,
+                    onSelectItem: setSelectedItem,
+                    onRefresh: () => refresh(tenant),
+                    onOpenBoard: () => setTab("floor"),
+                    onOpenSettings: () => setTab("settings"),
+                    onOpenVision: () => setTab("vision"),
+                    onToggleDrain: () =>
+                      handleControlUpdate(
+                        { drain: !status.drain },
+                        status.drain ? "Dreno cancelado." : "Modo Dreno ativado (finaliza os itens em andamento)."
+                      ),
+                    onToggleKillSwitch: (next) =>
+                      handleControlUpdate(
+                        { killSwitch: next, pausedReason: next ? "Kill Switch acionado pelo operador" : null },
+                        next ? "Kill Switch ativado imediatamente." : "Kill Switch liberado."
+                      ),
+                    scorecardView,
+                    setScorecardView,
+                    scorecardDays,
+                    setScorecardDays,
+                  })
+                : tab === "board" || tab === "floor"
+                ? renderFactoryBoardAndFloor({
+                    h,
+                    tenant,
+                    status,
+                    liveCrew,
+                    viewMode: tab,
+                    onChangeViewMode: (m) => setTab(m),
+                    storeyFocus,
+                    onChangeStoreyFocus: setStoreyFocus,
+                    selectedAgentKey,
+                    onSelectAgentKey: setSelectedAgentKey,
+                    onSelectItem: setSelectedItem,
+                    onRefresh: () => refresh(tenant),
+                    loading,
+                    Floor3D,
+                  })
+                : renderFactorySecondaryPage({
+                    h,
+                    tab,
+                    tenant,
+                    onSelectTenant: (t) => {
+                      setTenant(t);
+                      setTab("overview");
+                    },
+                    status,
+                    liveCrew,
+                    onSelectItem: setSelectedItem,
+                    inboxFilter,
+                    setInboxFilter,
+                    costRange,
+                    setCostRange,
+                    autoTab,
+                    setAutoTab,
+                    agentTab,
+                    setAgentTab,
+                    settingsForm,
+                    setSettingsForm,
+                    onSaveSettings: () =>
+                      handleControlUpdate(
+                        {
+                          mode: settingsForm.mode,
+                          limits: {
+                            gastoDiaUsd: settingsForm.gastoDiaUsd,
+                            mergesDia: settingsForm.mergesDia,
+                            agentes: settingsForm.agentesMax,
+                            prsAbertos: settingsForm.prsAbertos,
+                            falhasSeguidas: settingsForm.falhasSeguidas,
+                          },
                         },
-                      },
-                      `Configurações salvas em controle-${tenant}.json.`
-                    ),
-                  onSelectModeQuick: (mode) =>
-                    handleControlUpdate({ mode }, `Modo alterado para ${PT_BR.modes[mode]}.`),
-                })
+                        `Configurações salvas em controle-${tenant}.json.`
+                      ),
+                    onSelectModeQuick: (mode) =>
+                      handleControlUpdate({ mode }, `Modo alterado para ${PT_BR.modes[mode]}.`),
+                  })
+            ),
+            chatOpen &&
+              h(AgentQuickChat, {
+                tenant,
+                liveCrew,
+                onCollapse: () => setChatOpen(false),
+                onNotify: notify,
+              })
           )
         )
       ),
