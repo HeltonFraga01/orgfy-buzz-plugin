@@ -52098,7 +52098,7 @@ function fmtTokens(n) {
   return String(n);
 }
 function renderFactorySecondaryPage(props) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x2, _y2, _z2, _A, _B, _C, _D;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x2, _y2, _z2, _A, _B, _C, _D, _E, _F, _G, _H;
   const {
     h,
     tab,
@@ -52161,18 +52161,128 @@ function renderFactorySecondaryPage(props) {
             `Fundador: ${((_e = holding == null ? void 0 : holding.fundador) == null ? void 0 : _e.nome) || "Helton Fraga"} · CEO Holding: ${((_f = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _f.nome) || "OrgFy Iris"} · ${empresas.length} empresas no portfólio · ${approvals.filter((a) => a.status === "pendente").length} aprovação(ões) pendente(s)`
           )
         ),
-        onOpenAgentDm && h(
-          "button",
-          {
-            type: "button",
-            className: "of-btn",
-            "data-variant": "primary",
-            onClick: () => {
-              var _a2, _b2;
-              return onOpenAgentDm({ name: ((_a2 = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _a2.nome) || "OrgFy Iris", pubkey: ((_b2 = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _b2.pubkey) || "" });
-            }
-          },
-          `Falar com ${((_g = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _g.nome) || "OrgFy Iris"} ↗`
+        h(
+          "div",
+          { style: { display: "inline-flex", gap: "8px", flexWrap: "wrap" } },
+          props.setSubsidiaryDraft && h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-open-holding-wizard": "true",
+              onClick: () => {
+                var _a2;
+                return props.setSubsidiaryDraft({ open: !((_a2 = props.subsidiaryDraft) == null ? void 0 : _a2.open) });
+              }
+            },
+            ((_g = props.subsidiaryDraft) == null ? void 0 : _g.open) ? "Fechar Wizard" : "+ Nova Subsidiária (1-clique)"
+          ),
+          onOpenAgentDm && h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-variant": "primary",
+              onClick: () => {
+                var _a2, _b2;
+                return onOpenAgentDm({ name: ((_a2 = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _a2.nome) || "OrgFy Iris", pubkey: ((_b2 = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _b2.pubkey) || "" });
+              }
+            },
+            `Falar com ${((_h = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _h.nome) || "OrgFy Iris"} ↗`
+          )
+        )
+      ),
+      ((_i = props.subsidiaryDraft) == null ? void 0 : _i.open) && props.setSubsidiaryDraft && props.onScaffoldSubsidiary && h(
+        "div",
+        { className: "of-card-pad", "data-holding-as-code-wizard": "true", style: { display: "flex", flexDirection: "column", gap: "10px", borderColor: "var(--primary)" } },
+        h(
+          "div",
+          null,
+          h("div", { style: { fontSize: "14px", fontWeight: 700 } }, "Holding-as-Code · Provisionar Nova Subsidiária em 1 Clique (v18)"),
+          h("div", { className: "of-muted", style: { fontSize: "11.5px", marginTop: "2px" } }, "Cria automaticamente empresas/<slug>.json (Eval R5.1 + L-01), controle-<slug>.json (Assistido), Motor de Confiança, Holdout Scenarios fora do repo e registra em board.json.")
+        ),
+        h(
+          "div",
+          { className: "of-grid-3" },
+          h(
+            "label",
+            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+            "Nome da Subsidiária",
+            h("input", {
+              className: "of-input",
+              placeholder: "Ex: Cortexx Pay",
+              value: props.subsidiaryDraft.nome,
+              onChange: (e) => {
+                const nome = e.target.value;
+                const autoSlug = nome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 32);
+                props.setSubsidiaryDraft({ nome, slug: props.subsidiaryDraft.slug ? props.subsidiaryDraft.slug : autoSlug });
+              }
+            })
+          ),
+          h(
+            "label",
+            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+            "Slug (repo & manifesto)",
+            h("input", {
+              className: "of-input of-mono",
+              placeholder: "cortexx-pay",
+              value: props.subsidiaryDraft.slug,
+              onChange: (e) => props.setSubsidiaryDraft({ slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "") })
+            })
+          ),
+          h(
+            "label",
+            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+            "Orçamento diário (USD)",
+            h("input", {
+              type: "number",
+              className: "of-input",
+              value: props.subsidiaryDraft.gastoDiaUsd,
+              onChange: (e) => props.setSubsidiaryDraft({ gastoDiaUsd: Number(e.target.value) })
+            })
+          )
+        ),
+        h(
+          "div",
+          { className: "of-grid-2" },
+          h(
+            "label",
+            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+            "Descrição / Visão",
+            h("input", {
+              className: "of-input",
+              placeholder: "Missão e produto da subsidiária",
+              value: props.subsidiaryDraft.descricao,
+              onChange: (e) => props.setSubsidiaryDraft({ descricao: e.target.value })
+            })
+          ),
+          h(
+            "label",
+            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+            "Teto diário de tokens",
+            h("input", {
+              type: "number",
+              className: "of-input",
+              value: props.subsidiaryDraft.budgetTokensDiario,
+              onChange: (e) => props.setSubsidiaryDraft({ budgetTokensDiario: Number(e.target.value) })
+            })
+          )
+        ),
+        h(
+          "div",
+          { style: { display: "flex", justifyContent: "flex-end", gap: "8px" } },
+          h("button", { type: "button", className: "of-btn", onClick: () => props.setSubsidiaryDraft({ open: false }) }, "Cancelar"),
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-variant": "primary",
+              disabled: props.scaffoldingSubsidiary || !props.subsidiaryDraft.slug.trim() || !props.subsidiaryDraft.nome.trim(),
+              onClick: () => props.onScaffoldSubsidiary(props.subsidiaryDraft)
+            },
+            props.scaffoldingSubsidiary ? "Provisionando..." : "Provisionar Subsidiária em 1 clique"
+          )
         )
       ),
       props.Boardroom3D && h(props.Boardroom3D, { seats: boardroomSeats, title: "Sala de Reunião do Conselho · Tema Boardroom 3D" }),
@@ -52318,7 +52428,7 @@ function renderFactorySecondaryPage(props) {
             "div",
             { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" } },
             h("div", { className: "of-meter-label" }, "Locks Distribuídos Ativos (CRDT Sync)"),
-            h("span", { className: "of-pill", "data-tone": ((_h = props.crdtBackendInfo) == null ? void 0 : _h.mode) === "buzz_artifact_collection" ? "done" : "idle" }, ((_i = props.crdtBackendInfo) == null ? void 0 : _i.mode) === "buzz_artifact_collection" ? "Relay CRDT" : "Cache local")
+            h("span", { className: "of-pill", "data-tone": ((_j = props.crdtBackendInfo) == null ? void 0 : _j.mode) === "buzz_artifact_collection" ? "done" : "idle" }, ((_k = props.crdtBackendInfo) == null ? void 0 : _k.mode) === "buzz_artifact_collection" ? "Relay CRDT" : "Cache local")
           ),
           (props.distributedLocks || []).length === 0 ? h("div", { className: "of-muted", style: { fontSize: "11.5px" } }, "Nenhum lock distribuído ativo no momento.") : (props.distributedLocks || []).map(
             (lk) => h(
@@ -52408,8 +52518,8 @@ function renderFactorySecondaryPage(props) {
     );
   }
   if (tab === "costs") {
-    const economia = ((_j = status.kpis) == null ? void 0 : _j.economia) || null;
-    const qualidade = ((_k = status.kpis) == null ? void 0 : _k.qualidade) || null;
+    const economia = ((_l = status.kpis) == null ? void 0 : _l.economia) || null;
+    const qualidade = ((_m2 = status.kpis) == null ? void 0 : _m2.qualidade) || null;
     const porModelo = Array.isArray(economia == null ? void 0 : economia.por_modelo) ? economia.por_modelo : [];
     const totalCost = porModelo.reduce((acc, r) => acc + Number(r.custo_usd || 0), 0);
     const maxCost = Math.max(0.01, ...porModelo.map((r) => Number(r.custo_usd || 0)));
@@ -52440,9 +52550,9 @@ function renderFactorySecondaryPage(props) {
               )
             )
           ),
-          h("span", { className: "of-pill", "data-tone": "done" }, `Empresa em foco: ${((_l = status.tenantManifest) == null ? void 0 : _l.nome) || tenant}`)
+          h("span", { className: "of-pill", "data-tone": "done" }, `Empresa em foco: ${((_n = status.tenantManifest) == null ? void 0 : _n.nome) || tenant}`)
         ),
-        h("span", { className: "of-muted" }, `Fonte real: kpis-esteira.json (${((_m2 = status.kpis) == null ? void 0 : _m2.gerado_em) || PT_BR.labels.unavailable})`)
+        h("span", { className: "of-muted" }, `Fonte real: kpis-esteira.json (${((_o = status.kpis) == null ? void 0 : _o.gerado_em) || PT_BR.labels.unavailable})`)
       ),
       h(
         "div",
@@ -52462,7 +52572,7 @@ function renderFactorySecondaryPage(props) {
           {
             label: "Tokens (7d)",
             val: fmtTokens(economia == null ? void 0 : economia.tokens_7d),
-            sub: `orçamento/dia: ${fmtTokens((_n = status.tenantManifest) == null ? void 0 : _n.budgetTokensDiario)}`
+            sub: `orçamento/dia: ${fmtTokens((_p = status.tenantManifest) == null ? void 0 : _p.budgetTokensDiario)}`
           },
           {
             label: "Cache hit rate",
@@ -52477,7 +52587,7 @@ function renderFactorySecondaryPage(props) {
           {
             label: "FPY real",
             val: typeof (qualidade == null ? void 0 : qualidade.fpy_real_pct) === "number" ? `${qualidade.fpy_real_pct.toFixed(1)}%` : PT_BR.labels.unavailable,
-            sub: `CPI mín: ${((_o = status.tenantManifest) == null ? void 0 : _o.cpiMinimo) ?? 0.85}`
+            sub: `CPI mín: ${((_q = status.tenantManifest) == null ? void 0 : _q.cpiMinimo) ?? 0.85}`
           }
         ].map(
           (k) => h(
@@ -52500,11 +52610,11 @@ function renderFactorySecondaryPage(props) {
             "div",
             null,
             h("div", { style: { fontSize: "13.5px", fontWeight: 700 } }, "Telemetria Nativa do Buzz (bundled/usage · tempo real)"),
-            h("div", { className: "of-muted", style: { fontSize: "11px" } }, ((_p = props.nativeUsage) == null ? void 0 : _p.available) ? `${props.nativeUsage.sessionsCount} sessões em ${props.nativeUsage.agentsCount} agentes locais · hoje: ${fmtTokens(props.nativeUsage.tokensToday)} tok · ${costRange}: ${fmtTokens(props.nativeUsage.tokensPeriod)} tok${props.nativeUsage.cacheHitPct !== null ? ` · cache ${props.nativeUsage.cacheHitPct}%` : ""}` : "Aguardando leitura de sessões locais via ctx.agents.types().usage...")
+            h("div", { className: "of-muted", style: { fontSize: "11px" } }, ((_r = props.nativeUsage) == null ? void 0 : _r.available) ? `${props.nativeUsage.sessionsCount} sessões em ${props.nativeUsage.agentsCount} agentes locais · hoje: ${fmtTokens(props.nativeUsage.tokensToday)} tok · ${costRange}: ${fmtTokens(props.nativeUsage.tokensPeriod)} tok${props.nativeUsage.cacheHitPct !== null ? ` · cache ${props.nativeUsage.cacheHitPct}%` : ""}` : "Aguardando leitura de sessões locais via ctx.agents.types().usage...")
           ),
           props.onRefreshNativeUsage && h("button", { type: "button", className: "of-btn", style: { fontSize: "11px", padding: "4px 9px" }, onClick: props.onRefreshNativeUsage }, "Atualizar uso Buzz")
         ),
-        ((_q = props.nativeUsage) == null ? void 0 : _q.available) && props.nativeUsage.byAgent.length > 0 && h(
+        ((_s = props.nativeUsage) == null ? void 0 : _s.available) && props.nativeUsage.byAgent.length > 0 && h(
           "table",
           { className: "of-table" },
           h("thead", null, h("tr", null, h("th", null, "Agente (Buzz)"), h("th", null, "Harness"), h("th", null, "Sessões"), h("th", null, "Hoje"), h("th", null, `Período (${props.nativeUsage.days}d)`), h("th", null, "Cache"))),
@@ -52664,7 +52774,7 @@ function renderFactorySecondaryPage(props) {
         tenant,
         companyName: (tm == null ? void 0 : tm.nome) || tenant,
         automations: props.automations,
-        selectedId: props.selectedAutomationId || ((_r = props.automations[0]) == null ? void 0 : _r.id) || "",
+        selectedId: props.selectedAutomationId || ((_t = props.automations[0]) == null ? void 0 : _t.id) || "",
         onSelectId: props.onSelectAutomationId,
         onUpdateAutomation: props.onUpdateAutomation,
         onCreateAutomation: props.onCreateAutomation,
@@ -52686,10 +52796,10 @@ function renderFactorySecondaryPage(props) {
     );
   }
   if (tab === "agents") {
-    const tenantAgents = ((_s = status.tenantManifest) == null ? void 0 : _s.agentes) || [];
+    const tenantAgents = ((_u = status.tenantManifest) == null ? void 0 : _u.agentes) || [];
     const modelos = status.modelos || [];
-    const revisoresSurf = Object.entries(((_t = status.tenantManifest) == null ? void 0 : _t.revisoresPorSuperficie) || {});
-    const empresaNome = ((_u = status.tenantManifest) == null ? void 0 : _u.nome) || tenant;
+    const revisoresSurf = Object.entries(((_v = status.tenantManifest) == null ? void 0 : _v.revisoresPorSuperficie) || {});
+    const empresaNome = ((_w = status.tenantManifest) == null ? void 0 : _w.nome) || tenant;
     return h(
       "div",
       { style: { display: "flex", flexDirection: "column", gap: "12px" } },
@@ -52994,8 +53104,8 @@ function renderFactorySecondaryPage(props) {
       renderBuzzCanvasViewer({
         h,
         tenant,
-        channelName: (ch == null ? void 0 : ch.name) || ((_v = status.tenantManifest) == null ? void 0 : _v.nome) || tenant,
-        channelId: (ch == null ? void 0 : ch.channelId) || ((_w = status.tenantManifest) == null ? void 0 : _w.canal) || null,
+        channelName: (ch == null ? void 0 : ch.name) || ((_x2 = status.tenantManifest) == null ? void 0 : _x2.nome) || tenant,
+        channelId: (ch == null ? void 0 : ch.channelId) || ((_y2 = status.tenantManifest) == null ? void 0 : _y2.canal) || null,
         content: props.channelCanvas ?? null,
         draft: props.canvasDraft ?? props.channelCanvas ?? "",
         onChangeDraft: (v2) => {
@@ -53058,7 +53168,7 @@ function renderFactorySecondaryPage(props) {
         h(
           "section",
           { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-          h("div", { className: "of-meter-label" }, `2. Workspace & Arquivos de Contexto (${((_x2 = status.tenantManifest) == null ? void 0 : _x2.nome) || tenant})`),
+          h("div", { className: "of-meter-label" }, `2. Workspace & Arquivos de Contexto (${((_z2 = status.tenantManifest) == null ? void 0 : _z2.nome) || tenant})`),
           papeis.length > 0 && h(
             "div",
             { style: { display: "flex", flexWrap: "wrap", gap: "6px" } },
@@ -53133,7 +53243,7 @@ function renderFactorySecondaryPage(props) {
         h(
           "div",
           null,
-          h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Canal da Empresa no Buzz · #${(chInfo == null ? void 0 : chInfo.name) || ((_y2 = status.tenantManifest) == null ? void 0 : _y2.nome) || tenant}`),
+          h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Canal da Empresa no Buzz · #${(chInfo == null ? void 0 : chInfo.name) || ((_A = status.tenantManifest) == null ? void 0 : _A.nome) || tenant}`),
           h(
             "div",
             { className: "of-muted", style: { marginTop: "2px" } },
@@ -53273,7 +53383,7 @@ function renderFactorySecondaryPage(props) {
     h(
       "div",
       { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-      h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Modo de autonomia · ${((_z2 = status.tenantManifest) == null ? void 0 : _z2.nome) || tenant}`),
+      h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Modo de autonomia · ${((_B = status.tenantManifest) == null ? void 0 : _B.nome) || tenant}`),
       h("div", { className: "of-muted" }, "Suba um degrau por vez. Áreas protegidas e regra L-01 sempre permanecem ativas."),
       h(
         "div",
@@ -53411,8 +53521,8 @@ function renderFactorySecondaryPage(props) {
           h(
             "div",
             { style: { display: "flex", alignItems: "center", gap: "6px" } },
-            h("span", { className: "of-pill", "data-tone": ((_A = status.holdoutStatus) == null ? void 0 : _A.status) === "pass" ? "done" : ((_B = status.holdoutStatus) == null ? void 0 : _B.status) === "fail" ? "failed" : "idle" }, status.holdoutStatus ? `${status.holdoutStatus.passed ?? 0}/${status.holdoutStatus.total ?? 0} ${status.holdoutStatus.status.toUpperCase()}` : "Não executado"),
-            ((_C = status.holdoutStatus) == null ? void 0 : _C.external_verified) && h("span", { className: "of-muted", style: { fontSize: "10.5px" } }, `sha:${status.holdoutStatus.suite_sha256 || "ok"}`)
+            h("span", { className: "of-pill", "data-tone": ((_C = status.holdoutStatus) == null ? void 0 : _C.status) === "pass" ? "done" : ((_D = status.holdoutStatus) == null ? void 0 : _D.status) === "fail" ? "failed" : "idle" }, status.holdoutStatus ? `${status.holdoutStatus.passed ?? 0}/${status.holdoutStatus.total ?? 0} ${status.holdoutStatus.status.toUpperCase()}` : "Não executado"),
+            ((_E = status.holdoutStatus) == null ? void 0 : _E.external_verified) && h("span", { className: "of-muted", style: { fontSize: "10.5px" } }, `sha:${status.holdoutStatus.suite_sha256 || "ok"}`)
           ),
           props.onRunHoldoutNow && h("button", { type: "button", className: "of-btn", disabled: props.runningHoldout, style: { alignSelf: "flex-start", padding: "3px 9px", fontSize: "11px" }, onClick: props.onRunHoldoutNow }, props.runningHoldout ? "Rodando..." : "▶ Rodar Holdout")
         ),
@@ -53438,9 +53548,70 @@ function renderFactorySecondaryPage(props) {
           h(
             "div",
             { style: { fontSize: "12px", fontWeight: 600 } },
-            ((_D = props.focusState) == null ? void 0 : _D.active) ? `🔭 Focus ativo até ${props.focusState.untilFormatted}` : "Focus inativo"
+            ((_F = props.focusState) == null ? void 0 : _F.active) ? `🔭 Focus ativo até ${props.focusState.untilFormatted}` : "Focus inativo"
           ),
           h("div", { className: "of-muted", style: { fontSize: "10.5px" } }, "Notificações não críticas são silenciadas durante o modo Focus; apenas alertas P0/Kill Switch atravessam.")
+        )
+      )
+    ),
+    // ── MOTOR DE CONFIANÇA & ESCAPE RATE (Autonomia Graduada · Onda 4 / v18) ──
+    h(
+      "div",
+      { className: "of-card-pad", "data-orgfy-trust-engine": "true", style: { display: "flex", flexDirection: "column", gap: "12px" } },
+      h(
+        "div",
+        { style: { display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" } },
+        h(
+          "div",
+          null,
+          h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Motor de Confiança & Escape Rate (Autonomia Graduada · v18)`),
+          h(
+            "div",
+            { className: "of-muted", style: { fontSize: "11.5px", marginTop: "2px" } },
+            status.trustEngine ? `Amostra: ${status.trustEngine.sampleSize} entregas · Escape Rate global: ${status.trustEngine.globalEscapeRatePct.toFixed(1)}% · ${status.trustEngine.darkCategoriesCount}/${status.trustEngine.totalCategoriesCount} categorias em Dark Auto-Merge` : "Clique em Recalcular para medir a Escape Rate real e habilitar auto-promoção por categoria."
+          )
+        ),
+        props.onEvaluateTrustEngine && h(
+          "button",
+          { type: "button", className: "of-btn", disabled: props.evaluatingTrust, style: { fontSize: "11px", padding: "4px 10px" }, onClick: () => props.onEvaluateTrustEngine() },
+          props.evaluatingTrust ? "Calculando..." : "↻ Recalcular Escape Rate"
+        )
+      ),
+      ((_H = (_G = status.trustEngine) == null ? void 0 : _G.categories) == null ? void 0 : _H.length) && h(
+        "div",
+        { style: { display: "flex", flexDirection: "column", gap: "8px" } },
+        status.trustEngine.categories.map(
+          (cat) => h(
+            "div",
+            { key: cat.id, className: "of-surface", style: { padding: "9px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" } },
+              h(
+                "div",
+                { style: { display: "inline-flex", alignItems: "center", gap: "8px" } },
+                h("strong", { style: { fontSize: "12.5px" } }, cat.label),
+                h(
+                  "span",
+                  { className: "of-pill", "data-tone": cat.mode === "dark_auto_merge" ? "done" : cat.locked ? "failed" : "waiting" },
+                  cat.mode === "dark_auto_merge" ? "DARK AUTO-MERGE" : cat.locked ? "GATE HUMANO 🔒" : "ASSISTIDO"
+                ),
+                h("span", { className: "of-mono of-muted", style: { fontSize: "11px" } }, `Escape: ${cat.escapeRatePct.toFixed(1)}% (máx ${cat.maxEscapeRatePct}%) · Limpas seguidas: ${cat.consecutiveClean}${cat.locked ? "" : `/${cat.targetConsecutiveClean}`}`)
+              ),
+              !cat.locked && props.onEvaluateTrustEngine && h(
+                "div",
+                { style: { display: "inline-flex", gap: "5px" } },
+                cat.mode !== "dark_auto_merge" ? h("button", { type: "button", className: "of-btn", style: { padding: "2px 8px", fontSize: "10.5px" }, onClick: () => props.onEvaluateTrustEngine({ category: cat.id, mode: "dark_auto_merge" }) }, "Promover Dark") : h("button", { type: "button", className: "of-btn", style: { padding: "2px 8px", fontSize: "10.5px" }, onClick: () => props.onEvaluateTrustEngine({ category: cat.id, mode: "assisted" }) }, "Rebaixar Assistido"),
+                cat.manualOverride && h("button", { type: "button", className: "of-btn", "data-variant": "ghost", style: { padding: "2px 7px", fontSize: "10.5px" }, onClick: () => props.onEvaluateTrustEngine({ category: cat.id, mode: "auto" }) }, "Auto")
+              )
+            ),
+            !cat.locked && h(
+              "div",
+              { className: "of-bar-track", style: { marginTop: 0, height: "5px" } },
+              h("div", { className: "of-bar-fill", style: { width: `${cat.progressPct}%`, background: cat.mode === "dark_auto_merge" ? "var(--status-done)" : "var(--primary)" } })
+            ),
+            h("div", { className: "of-muted", style: { fontSize: "11px" } }, cat.reason)
+          )
         )
       )
     )
@@ -54883,7 +55054,7 @@ const PINNED_HOST_COMMANDS = Object.freeze([
   {
     id: "fabrica-status",
     scriptPath: "ferramentas/esteira/fabrica_status.py",
-    sha256: "9e6dca21e5aa57dd89e771d23fa33f2b691752968f27fd61a4eb140c30fa4ccf"
+    sha256: "6e86c825d3518406b63fcba8d7f9cd96415286a00b2c6f41ae2f6329691e6c53"
   },
   {
     id: "orgfy-kpis",
@@ -54899,6 +55070,16 @@ const PINNED_HOST_COMMANDS = Object.freeze([
     id: "orgfy-holdout",
     scriptPath: "ferramentas/esteira/holdout_runner.py",
     sha256: "730070cb98c5ed6d148f78e806e1a1856841cdca9f9347d73ff50b1954d852a2"
+  },
+  {
+    id: "orgfy-trust-engine",
+    scriptPath: "ferramentas/esteira/trust_engine.py",
+    sha256: "682ae81a842589336e91c12ff4f6dc23333ea47677fd363e17ab7662b6c9cb3e"
+  },
+  {
+    id: "orgfy-holding-scaffold",
+    scriptPath: "ferramentas/esteira/holding_scaffold.py",
+    sha256: "d3ccfc264be3a9e0457f79d7b61d8aba2971ee9d60d76a3b397c8d3b83a0ab7c"
   }
 ]);
 async function computeUtf8Sha256(content) {
@@ -55056,6 +55237,19 @@ function createFactoryAppComponent(ctx, opts = {}) {
     const [focusState, setFocusState] = React.useState(() => readBuzzFocusState());
     const [commandIntegrity, setCommandIntegrity] = React.useState(null);
     const [runningHoldout, setRunningHoldout] = React.useState(false);
+    const [evaluatingTrust, setEvaluatingTrust] = React.useState(false);
+    const [scaffoldingSubsidiary, setScaffoldingSubsidiary] = React.useState(false);
+    const [subsidiaryDraft, setSubsidiaryDraftState] = React.useState({
+      open: false,
+      slug: "",
+      nome: "",
+      descricao: "",
+      budgetTokensDiario: 1e6,
+      gastoDiaUsd: 30
+    });
+    const setSubsidiaryDraft = React.useCallback((patch) => {
+      setSubsidiaryDraftState((prev) => ({ ...prev, ...patch }));
+    }, []);
     const [compactDensity, setCompactDensity] = React.useState(false);
     const [expandedProjects, setExpandedProjects] = React.useState({ orgfy: true });
     const [showAllByProject, setShowAllByProject] = React.useState({});
@@ -56096,6 +56290,51 @@ ${body}`
       },
       [tenant, (_d = status.tenantManifest) == null ? void 0 : _d.nome, handleCreateAutomation, notify2]
     );
+    const handleEvaluateTrustEngine = React.useCallback(
+      async (override) => {
+        const host = ctx == null ? void 0 : ctx.host;
+        if (typeof (host == null ? void 0 : host.runCommand) !== "function") {
+          notify2("ctx.host.runCommand indisponível para o Motor de Confiança.");
+          return;
+        }
+        setEvaluatingTrust(true);
+        try {
+          const payload = override ? { action: "override", tenant, category: override.category, mode: override.mode } : { action: "evaluate", tenant };
+          await host.runCommand("orgfy-trust-engine", JSON.stringify(payload));
+          notify2(override ? `Categoria ${override.category} atualizada para ${override.mode}.` : `Motor de Confiança & Escape Rate recalculado para ${tenant}.`);
+          await refresh(tenant, false, true);
+        } catch (err) {
+          notify2(`Falha no Motor de Confiança: ${(err == null ? void 0 : err.message) || err}`);
+        } finally {
+          setEvaluatingTrust(false);
+        }
+      },
+      [tenant, notify2, refresh]
+    );
+    const handleScaffoldSubsidiary = React.useCallback(
+      async (input) => {
+        const host = ctx == null ? void 0 : ctx.host;
+        if (typeof (host == null ? void 0 : host.runCommand) !== "function") {
+          notify2("ctx.host.runCommand indisponível para Holding-as-Code.");
+          return;
+        }
+        setScaffoldingSubsidiary(true);
+        try {
+          const rawOut = await host.runCommand("orgfy-holding-scaffold", JSON.stringify(input));
+          const parsed = typeof rawOut === "string" ? JSON.parse(rawOut) : rawOut;
+          if (!(parsed == null ? void 0 : parsed.ok)) throw new Error((parsed == null ? void 0 : parsed.error) || "Falha ao provisionar subsidiária");
+          setSubsidiaryDraftState({ open: false, slug: "", nome: "", descricao: "", budgetTokensDiario: 1e6, gastoDiaUsd: 30 });
+          notify2(`Subsidiária ${parsed.nome} (${parsed.slug}) criada em 1 clique ✓`);
+          await refresh(parsed.slug, true, false);
+          setTenant(parsed.slug);
+        } catch (err) {
+          notify2(`Erro Holding-as-Code: ${(err == null ? void 0 : err.message) || err}`);
+        } finally {
+          setScaffoldingSubsidiary(false);
+        }
+      },
+      [notify2, refresh]
+    );
     const handleAnswerQuestionCard = React.useCallback(
       async (card, answer) => {
         const updated = await crdtStore.answerQuestionCard(card.id, answer);
@@ -56621,7 +56860,13 @@ Nota: ${evidence.note}`
                 onCreateCouncilDeliberation: handleCreateCouncilDeliberation,
                 onVoteCouncilDeliberation: handleVoteCouncilDeliberation,
                 onReleaseDistributedLock: handleReleaseDistributedLock,
-                onAutomateFromSession: handleAutomateFromSession
+                onAutomateFromSession: handleAutomateFromSession,
+                onEvaluateTrustEngine: handleEvaluateTrustEngine,
+                evaluatingTrust,
+                onScaffoldSubsidiary: handleScaffoldSubsidiary,
+                scaffoldingSubsidiary,
+                subsidiaryDraft,
+                setSubsidiaryDraft
               })
             )
           )

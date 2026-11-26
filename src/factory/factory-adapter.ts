@@ -134,6 +134,32 @@ export interface FactoryStatusPayload {
     executed_at?: string;
     results?: Array<{ id: string; status: string; duration_ms?: number; detail?: string }>;
   } | null;
+  trustEngine?: {
+    schema_version?: string;
+    tenant: string;
+    evaluatedAt: string;
+    sampleSize: number;
+    totalEscapes: number;
+    globalEscapeRatePct: number;
+    darkCategoriesCount: number;
+    totalCategoriesCount: number;
+    categories: Array<{
+      id: string;
+      label: string;
+      mode: "assisted" | "dark_auto_merge" | "gate_humano";
+      locked: boolean;
+      manualOverride?: string | null;
+      deliveries: number;
+      escapes: number;
+      escapeRatePct: number;
+      consecutiveClean: number;
+      targetConsecutiveClean: number;
+      maxEscapeRatePct: number;
+      eligibleForDark: boolean;
+      progressPct: number;
+      reason: string;
+    }>;
+  } | null;
   kpis?: {
     disponivel: boolean;
     gerado_em?: string | null;

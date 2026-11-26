@@ -37,7 +37,7 @@ export const PINNED_HOST_COMMANDS: readonly PinnedHostCommandSpec[] = Object.fre
   {
     id: "fabrica-status",
     scriptPath: "ferramentas/esteira/fabrica_status.py",
-    sha256: "9e6dca21e5aa57dd89e771d23fa33f2b691752968f27fd61a4eb140c30fa4ccf",
+    sha256: "6e86c825d3518406b63fcba8d7f9cd96415286a00b2c6f41ae2f6329691e6c53",
   },
   {
     id: "orgfy-kpis",
@@ -53,6 +53,16 @@ export const PINNED_HOST_COMMANDS: readonly PinnedHostCommandSpec[] = Object.fre
     id: "orgfy-holdout",
     scriptPath: "ferramentas/esteira/holdout_runner.py",
     sha256: "730070cb98c5ed6d148f78e806e1a1856841cdca9f9347d73ff50b1954d852a2",
+  },
+  {
+    id: "orgfy-trust-engine",
+    scriptPath: "ferramentas/esteira/trust_engine.py",
+    sha256: "682ae81a842589336e91c12ff4f6dc23333ea47677fd363e17ab7662b6c9cb3e",
+  },
+  {
+    id: "orgfy-holding-scaffold",
+    scriptPath: "ferramentas/esteira/holding_scaffold.py",
+    sha256: "d3ccfc264be3a9e0457f79d7b61d8aba2971ee9d60d76a3b397c8d3b83a0ab7c",
   },
 ]);
 

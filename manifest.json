@@ -86,6 +86,20 @@
         "program": "python3",
         "args": ["ferramentas/esteira/holdout_runner.py", "--write-state", "--json"],
         "maxOutputBytes": 65536
+      },
+      {
+        "id": "orgfy-trust-engine",
+        "program": "python3",
+        "args": ["ferramentas/esteira/trust_engine.py", "--write-state", "--json"],
+        "maxInputBytes": 65536,
+        "maxOutputBytes": 65536
+      },
+      {
+        "id": "orgfy-holding-scaffold",
+        "program": "python3",
+        "args": ["ferramentas/esteira/holding_scaffold.py"],
+        "maxInputBytes": 65536,
+        "maxOutputBytes": 65536
       }
     ]
   }

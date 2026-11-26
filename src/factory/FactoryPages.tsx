@@ -118,6 +118,12 @@ export interface FactorySecondaryPagesProps {
   onVoteCouncilDeliberation?: (id: string, decision: "aprovada" | "recusada") => Promise<void> | void;
   onReleaseDistributedLock?: (id: string) => Promise<void> | void;
   onAutomateFromSession?: (input: { agentName: string; stepLabel?: string; sessionTitle?: string }) => void;
+  onEvaluateTrustEngine?: (override?: { category: string; mode: "assisted" | "dark_auto_merge" | "auto" }) => Promise<void> | void;
+  evaluatingTrust?: boolean;
+  onScaffoldSubsidiary?: (input: { slug: string; nome: string; descricao: string; budgetTokensDiario: number; gastoDiaUsd: number }) => Promise<void> | void;
+  scaffoldingSubsidiary?: boolean;
+  subsidiaryDraft?: { open: boolean; slug: string; nome: string; descricao: string; budgetTokensDiario: number; gastoDiaUsd: number };
+  setSubsidiaryDraft?: (patch: Partial<{ open: boolean; slug: string; nome: string; descricao: string; budgetTokensDiario: number; gastoDiaUsd: number }>) => void;
 }
 
 const CHART_COLORS = ["var(--chart-2)", "var(--chart-1)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"];
@@ -234,18 +240,127 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
             `Fundador: ${holding?.fundador?.nome || "Helton Fraga"} · CEO Holding: ${holding?.ceoHolding?.nome || "OrgFy Iris"} · ${empresas.length} empresas no portfólio · ${approvals.filter((a) => a.status === "pendente").length} aprovação(ões) pendente(s)`
           )
         ),
-        onOpenAgentDm &&
-          h(
-            "button",
-            {
-              type: "button",
-              className: "of-btn",
-              "data-variant": "primary",
-              onClick: () => onOpenAgentDm({ name: holding?.ceoHolding?.nome || "OrgFy Iris", pubkey: holding?.ceoHolding?.pubkey || "" }),
-            },
-            `Falar com ${holding?.ceoHolding?.nome || "OrgFy Iris"} ↗`
-          )
+        h(
+          "div",
+          { style: { display: "inline-flex", gap: "8px", flexWrap: "wrap" } },
+          props.setSubsidiaryDraft &&
+            h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                "data-open-holding-wizard": "true",
+                onClick: () => props.setSubsidiaryDraft!({ open: !props.subsidiaryDraft?.open }),
+              },
+              props.subsidiaryDraft?.open ? "Fechar Wizard" : "+ Nova Subsidiária (1-clique)"
+            ),
+          onOpenAgentDm &&
+            h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                "data-variant": "primary",
+                onClick: () => onOpenAgentDm({ name: holding?.ceoHolding?.nome || "OrgFy Iris", pubkey: holding?.ceoHolding?.pubkey || "" }),
+              },
+              `Falar com ${holding?.ceoHolding?.nome || "OrgFy Iris"} ↗`
+            )
+        )
       ),
+      props.subsidiaryDraft?.open && props.setSubsidiaryDraft && props.onScaffoldSubsidiary &&
+        h(
+          "div",
+          { className: "of-card-pad", "data-holding-as-code-wizard": "true", style: { display: "flex", flexDirection: "column", gap: "10px", borderColor: "var(--primary)" } },
+          h(
+            "div",
+            null,
+            h("div", { style: { fontSize: "14px", fontWeight: 700 } }, "Holding-as-Code · Provisionar Nova Subsidiária em 1 Clique (v18)"),
+            h("div", { className: "of-muted", style: { fontSize: "11.5px", marginTop: "2px" } }, "Cria automaticamente empresas/<slug>.json (Eval R5.1 + L-01), controle-<slug>.json (Assistido), Motor de Confiança, Holdout Scenarios fora do repo e registra em board.json.")
+          ),
+          h(
+            "div",
+            { className: "of-grid-3" },
+            h(
+              "label",
+              { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+              "Nome da Subsidiária",
+              h("input", {
+                className: "of-input",
+                placeholder: "Ex: Cortexx Pay",
+                value: props.subsidiaryDraft.nome,
+                onChange: (e: any) => {
+                  const nome = e.target.value;
+                  const autoSlug = nome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 32);
+                  props.setSubsidiaryDraft!({ nome, slug: props.subsidiaryDraft!.slug ? props.subsidiaryDraft!.slug : autoSlug });
+                },
+              })
+            ),
+            h(
+              "label",
+              { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+              "Slug (repo & manifesto)",
+              h("input", {
+                className: "of-input of-mono",
+                placeholder: "cortexx-pay",
+                value: props.subsidiaryDraft.slug,
+                onChange: (e: any) => props.setSubsidiaryDraft!({ slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "") }),
+              })
+            ),
+            h(
+              "label",
+              { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+              "Orçamento diário (USD)",
+              h("input", {
+                type: "number",
+                className: "of-input",
+                value: props.subsidiaryDraft.gastoDiaUsd,
+                onChange: (e: any) => props.setSubsidiaryDraft!({ gastoDiaUsd: Number(e.target.value) }),
+              })
+            )
+          ),
+          h(
+            "div",
+            { className: "of-grid-2" },
+            h(
+              "label",
+              { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+              "Descrição / Visão",
+              h("input", {
+                className: "of-input",
+                placeholder: "Missão e produto da subsidiária",
+                value: props.subsidiaryDraft.descricao,
+                onChange: (e: any) => props.setSubsidiaryDraft!({ descricao: e.target.value }),
+              })
+            ),
+            h(
+              "label",
+              { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+              "Teto diário de tokens",
+              h("input", {
+                type: "number",
+                className: "of-input",
+                value: props.subsidiaryDraft.budgetTokensDiario,
+                onChange: (e: any) => props.setSubsidiaryDraft!({ budgetTokensDiario: Number(e.target.value) }),
+              })
+            )
+          ),
+          h(
+            "div",
+            { style: { display: "flex", justifyContent: "flex-end", gap: "8px" } },
+            h("button", { type: "button", className: "of-btn", onClick: () => props.setSubsidiaryDraft!({ open: false }) }, "Cancelar"),
+            h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                "data-variant": "primary",
+                disabled: props.scaffoldingSubsidiary || !props.subsidiaryDraft.slug.trim() || !props.subsidiaryDraft.nome.trim(),
+                onClick: () => props.onScaffoldSubsidiary!(props.subsidiaryDraft!),
+              },
+              props.scaffoldingSubsidiary ? "Provisionando..." : "Provisionar Subsidiária em 1 clique"
+            )
+          )
+        ),
       props.Boardroom3D && h(props.Boardroom3D, { seats: boardroomSeats, title: "Sala de Reunião do Conselho · Tema Boardroom 3D" }),
       h(
         "div",
@@ -1570,6 +1685,76 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
           h("div", { className: "of-muted", style: { fontSize: "10.5px" } }, "Notificações não críticas são silenciadas durante o modo Focus; apenas alertas P0/Kill Switch atravessam.")
         )
       )
+    ),
+    // ── MOTOR DE CONFIANÇA & ESCAPE RATE (Autonomia Graduada · Onda 4 / v18) ──
+    h(
+      "div",
+      { className: "of-card-pad", "data-orgfy-trust-engine": "true", style: { display: "flex", flexDirection: "column", gap: "12px" } },
+      h(
+        "div",
+        { style: { display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" } },
+        h(
+          "div",
+          null,
+          h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Motor de Confiança & Escape Rate (Autonomia Graduada · v18)`),
+          h(
+            "div",
+            { className: "of-muted", style: { fontSize: "11.5px", marginTop: "2px" } },
+            status.trustEngine
+              ? `Amostra: ${status.trustEngine.sampleSize} entregas · Escape Rate global: ${status.trustEngine.globalEscapeRatePct.toFixed(1)}% · ${status.trustEngine.darkCategoriesCount}/${status.trustEngine.totalCategoriesCount} categorias em Dark Auto-Merge`
+              : "Clique em Recalcular para medir a Escape Rate real e habilitar auto-promoção por categoria."
+          )
+        ),
+        props.onEvaluateTrustEngine &&
+          h(
+            "button",
+            { type: "button", className: "of-btn", disabled: props.evaluatingTrust, style: { fontSize: "11px", padding: "4px 10px" }, onClick: () => props.onEvaluateTrustEngine!() },
+            props.evaluatingTrust ? "Calculando..." : "↻ Recalcular Escape Rate"
+          )
+      ),
+      status.trustEngine?.categories?.length &&
+        h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: "8px" } },
+          status.trustEngine.categories.map((cat) =>
+            h(
+              "div",
+              { key: cat.id, className: "of-surface", style: { padding: "9px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" } },
+                h(
+                  "div",
+                  { style: { display: "inline-flex", alignItems: "center", gap: "8px" } },
+                  h("strong", { style: { fontSize: "12.5px" } }, cat.label),
+                  h(
+                    "span",
+                    { className: "of-pill", "data-tone": cat.mode === "dark_auto_merge" ? "done" : cat.locked ? "failed" : "waiting" },
+                    cat.mode === "dark_auto_merge" ? "DARK AUTO-MERGE" : cat.locked ? "GATE HUMANO 🔒" : "ASSISTIDO"
+                  ),
+                  h("span", { className: "of-mono of-muted", style: { fontSize: "11px" } }, `Escape: ${cat.escapeRatePct.toFixed(1)}% (máx ${cat.maxEscapeRatePct}%) · Limpas seguidas: ${cat.consecutiveClean}${cat.locked ? "" : `/${cat.targetConsecutiveClean}`}`)
+                ),
+                !cat.locked && props.onEvaluateTrustEngine &&
+                  h(
+                    "div",
+                    { style: { display: "inline-flex", gap: "5px" } },
+                    cat.mode !== "dark_auto_merge"
+                      ? h("button", { type: "button", className: "of-btn", style: { padding: "2px 8px", fontSize: "10.5px" }, onClick: () => props.onEvaluateTrustEngine!({ category: cat.id, mode: "dark_auto_merge" }) }, "Promover Dark")
+                      : h("button", { type: "button", className: "of-btn", style: { padding: "2px 8px", fontSize: "10.5px" }, onClick: () => props.onEvaluateTrustEngine!({ category: cat.id, mode: "assisted" }) }, "Rebaixar Assistido"),
+                    cat.manualOverride &&
+                      h("button", { type: "button", className: "of-btn", "data-variant": "ghost", style: { padding: "2px 7px", fontSize: "10.5px" }, onClick: () => props.onEvaluateTrustEngine!({ category: cat.id, mode: "auto" }) }, "Auto")
+                  )
+              ),
+              !cat.locked &&
+                h(
+                  "div",
+                  { className: "of-bar-track", style: { marginTop: 0, height: "5px" } },
+                  h("div", { className: "of-bar-fill", style: { width: `${cat.progressPct}%`, background: cat.mode === "dark_auto_merge" ? "var(--status-done)" : "var(--primary)" } })
+                ),
+              h("div", { className: "of-muted", style: { fontSize: "11px" } }, cat.reason)
+            )
+          )
+        )
     )
   );
 }

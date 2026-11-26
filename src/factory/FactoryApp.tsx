@@ -158,6 +158,19 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     const [focusState, setFocusState] = React.useState<BuzzFocusState>(() => readBuzzFocusState());
     const [commandIntegrity, setCommandIntegrity] = React.useState<CommandIntegrityAuditSummary | null>(null);
     const [runningHoldout, setRunningHoldout] = React.useState<boolean>(false);
+    const [evaluatingTrust, setEvaluatingTrust] = React.useState<boolean>(false);
+    const [scaffoldingSubsidiary, setScaffoldingSubsidiary] = React.useState<boolean>(false);
+    const [subsidiaryDraft, setSubsidiaryDraftState] = React.useState<{ open: boolean; slug: string; nome: string; descricao: string; budgetTokensDiario: number; gastoDiaUsd: number }>({
+      open: false,
+      slug: "",
+      nome: "",
+      descricao: "",
+      budgetTokensDiario: 1000000,
+      gastoDiaUsd: 30,
+    });
+    const setSubsidiaryDraft = React.useCallback((patch: Partial<typeof subsidiaryDraft>) => {
+      setSubsidiaryDraftState((prev) => ({ ...prev, ...patch }));
+    }, []);
     const [compactDensity, setCompactDensity] = React.useState<boolean>(false);
     const [expandedProjects, setExpandedProjects] = React.useState<Record<string, boolean>>({ orgfy: true });
     const [showAllByProject, setShowAllByProject] = React.useState<Record<string, boolean>>({});
@@ -1285,6 +1298,55 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       [tenant, status.tenantManifest?.nome, handleCreateAutomation, notify]
     );
 
+    const handleEvaluateTrustEngine = React.useCallback(
+      async (override?: { category: string; mode: "assisted" | "dark_auto_merge" | "auto" }) => {
+        const host = (ctx as any)?.host;
+        if (typeof host?.runCommand !== "function") {
+          notify("ctx.host.runCommand indisponível para o Motor de Confiança.");
+          return;
+        }
+        setEvaluatingTrust(true);
+        try {
+          const payload = override
+            ? { action: "override", tenant, category: override.category, mode: override.mode }
+            : { action: "evaluate", tenant };
+          await host.runCommand("orgfy-trust-engine", JSON.stringify(payload));
+          notify(override ? `Categoria ${override.category} atualizada para ${override.mode}.` : `Motor de Confiança & Escape Rate recalculado para ${tenant}.`);
+          await refresh(tenant, false, true);
+        } catch (err: any) {
+          notify(`Falha no Motor de Confiança: ${err?.message || err}`);
+        } finally {
+          setEvaluatingTrust(false);
+        }
+      },
+      [tenant, notify, refresh]
+    );
+
+    const handleScaffoldSubsidiary = React.useCallback(
+      async (input: { slug: string; nome: string; descricao: string; budgetTokensDiario: number; gastoDiaUsd: number }) => {
+        const host = (ctx as any)?.host;
+        if (typeof host?.runCommand !== "function") {
+          notify("ctx.host.runCommand indisponível para Holding-as-Code.");
+          return;
+        }
+        setScaffoldingSubsidiary(true);
+        try {
+          const rawOut = await host.runCommand("orgfy-holding-scaffold", JSON.stringify(input));
+          const parsed = typeof rawOut === "string" ? JSON.parse(rawOut) : rawOut;
+          if (!parsed?.ok) throw new Error(parsed?.error || "Falha ao provisionar subsidiária");
+          setSubsidiaryDraftState({ open: false, slug: "", nome: "", descricao: "", budgetTokensDiario: 1000000, gastoDiaUsd: 30 });
+          notify(`Subsidiária ${parsed.nome} (${parsed.slug}) criada em 1 clique ✓`);
+          await refresh(parsed.slug, true, false);
+          setTenant(parsed.slug);
+        } catch (err: any) {
+          notify(`Erro Holding-as-Code: ${err?.message || err}`);
+        } finally {
+          setScaffoldingSubsidiary(false);
+        }
+      },
+      [notify, refresh]
+    );
+
     const handleAnswerQuestionCard = React.useCallback(
       async (card: OrgfyQuestionCard, answer: QuestionCardAnswer) => {
         const updated = await crdtStore.answerQuestionCard(card.id, answer);
@@ -1866,6 +1928,12 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                     onVoteCouncilDeliberation: handleVoteCouncilDeliberation,
                     onReleaseDistributedLock: handleReleaseDistributedLock,
                     onAutomateFromSession: handleAutomateFromSession,
+                    onEvaluateTrustEngine: handleEvaluateTrustEngine,
+                    evaluatingTrust,
+                    onScaffoldSubsidiary: handleScaffoldSubsidiary,
+                    scaffoldingSubsidiary,
+                    subsidiaryDraft,
+                    setSubsidiaryDraft,
                   })
             )
           )
