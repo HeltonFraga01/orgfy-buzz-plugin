@@ -13048,6 +13048,14 @@ async function writeTenantControl(ctx, tenant, patch) {
         }
         return { ok: false, path, control: next, error: (parsed == null ? void 0 : parsed.error) || "Falha em orgfy-controle-write" };
       }
+      if (!(host == null ? void 0 : host.writeFile)) {
+        return {
+          ok: false,
+          path,
+          control: next,
+          error: "orgfy-controle-write retornou vazio no Buzz Desktop (reinstale/recarregue o plugin para aplicar o manifest.json)."
+        };
+      }
     } catch (err) {
       if (!(host == null ? void 0 : host.writeFile)) {
         return { ok: false, path, control: next, error: (err == null ? void 0 : err.message) || String(err) };
@@ -55962,6 +55970,14 @@ function createFactoryAppComponent(ctx, opts = {}) {
         const res = await writeTenantControl(ctx, tenant, patch);
         if (res.ok) {
           settingsDirtyRef.current = false;
+          setStatus((prev) => {
+            var _a2, _b2;
+            return {
+              ...prev,
+              ...((_a2 = res.control) == null ? void 0 : _a2.mode) ? { mode: res.control.mode } : {},
+              ...typeof ((_b2 = res.control) == null ? void 0 : _b2.killSwitch) === "boolean" ? { killSwitch: res.control.killSwitch } : {}
+            };
+          });
           notify2(message);
           await refresh(tenant, true);
         } else {

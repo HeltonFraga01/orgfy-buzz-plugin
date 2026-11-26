@@ -53,51 +53,51 @@
       {
         "id": "orgfy-status",
         "program": "python3",
-        "args": ["ferramentas/esteira/quadro.py", "--json"],
+        "args": ["-c", "import os,runpy,sys; r=os.path.expanduser('~/.buzz/REPOS/orgfy'); sys.path.insert(0,r); sys.argv=[r+'/ferramentas/esteira/quadro.py','--json']; runpy.run_path(sys.argv[0],run_name='__main__')"],
         "maxOutputBytes": 131072
       },
       {
         "id": "fabrica-status",
         "program": "python3",
-        "args": ["ferramentas/esteira/fabrica_status.py", "--json"],
+        "args": ["-c", "import os,runpy,sys; r=os.path.expanduser('~/.buzz/REPOS/orgfy'); sys.path.insert(0,r); sys.argv=[r+'/ferramentas/esteira/fabrica_status.py','--json']; runpy.run_path(sys.argv[0],run_name='__main__')"],
         "maxOutputBytes": 262144
       },
       {
         "id": "orgfy-kpis",
         "program": "python3",
-        "args": ["ferramentas/esteira/gerar_kpis_esteira.py"],
+        "args": ["-c", "import os,runpy,sys; r=os.path.expanduser('~/.buzz/REPOS/orgfy'); sys.path.insert(0,r); sys.argv=[r+'/ferramentas/esteira/gerar_kpis_esteira.py']; runpy.run_path(sys.argv[0],run_name='__main__')"],
         "maxOutputBytes": 131072
       },
       {
         "id": "orgfy-loop-radar",
         "program": "python3",
-        "args": ["ferramentas/esteira/goose_loop_radar.py"],
+        "args": ["-c", "import os,runpy,sys; r=os.path.expanduser('~/.buzz/REPOS/orgfy'); sys.path.insert(0,r); sys.argv=[r+'/ferramentas/esteira/goose_loop_radar.py']; runpy.run_path(sys.argv[0],run_name='__main__')"],
         "maxOutputBytes": 131072
       },
       {
         "id": "orgfy-controle-write",
         "program": "python3",
-        "args": ["ferramentas/esteira/controle_fabrica_write.py"],
+        "args": ["-c", "import os,runpy,sys; r=os.path.expanduser('~/.buzz/REPOS/orgfy'); sys.path.insert(0,r); sys.argv=[r+'/ferramentas/esteira/controle_fabrica_write.py']; runpy.run_path(sys.argv[0],run_name='__main__')"],
         "maxInputBytes": 65536,
         "maxOutputBytes": 16384
       },
       {
         "id": "orgfy-holdout",
         "program": "python3",
-        "args": ["ferramentas/esteira/holdout_runner.py", "--write-state", "--json"],
+        "args": ["-c", "import os,runpy,sys; r=os.path.expanduser('~/.buzz/REPOS/orgfy'); sys.path.insert(0,r); sys.argv=[r+'/ferramentas/esteira/holdout_runner.py','--write-state','--json']; runpy.run_path(sys.argv[0],run_name='__main__')"],
         "maxOutputBytes": 65536
       },
       {
         "id": "orgfy-trust-engine",
         "program": "python3",
-        "args": ["ferramentas/esteira/trust_engine.py", "--write-state", "--json"],
+        "args": ["-c", "import os,runpy,sys; r=os.path.expanduser('~/.buzz/REPOS/orgfy'); sys.path.insert(0,r); sys.argv=[r+'/ferramentas/esteira/trust_engine.py','--write-state','--json']; runpy.run_path(sys.argv[0],run_name='__main__')"],
         "maxInputBytes": 65536,
         "maxOutputBytes": 65536
       },
       {
         "id": "orgfy-holding-scaffold",
         "program": "python3",
-        "args": ["ferramentas/esteira/holding_scaffold.py"],
+        "args": ["-c", "import os,runpy,sys; r=os.path.expanduser('~/.buzz/REPOS/orgfy'); sys.path.insert(0,r); sys.argv=[r+'/ferramentas/esteira/holding_scaffold.py']; runpy.run_path(sys.argv[0],run_name='__main__')"],
         "maxInputBytes": 65536,
         "maxOutputBytes": 65536
       }
