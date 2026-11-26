@@ -880,11 +880,52 @@ export const FACTORY_SHADOW_CSS = `
   margin-top: 10px;
 }
 
+.of-header-icon-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--surface) 75%, transparent);
+  border: 1px solid var(--border);
+  margin-left: 6px;
+}
+
+.of-header-icon-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 28px;
+  min-width: 30px;
+  padding: 0 7px !important;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  line-height: 1;
+  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.of-header-icon-tab:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--foreground);
+}
+
+.of-header-icon-tab[data-active="true"] {
+  background: var(--accent);
+  border-color: var(--border-strong);
+  color: var(--primary);
+}
+
 .of-apple-chat-bar {
   margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
 }
 
 .of-apple-select {
@@ -914,12 +955,22 @@ export const FACTORY_SHADOW_CSS = `
   justify-content: center;
   width: 30px;
   height: 30px;
+  padding: 0 !important;
+  line-height: 1;
+  flex-shrink: 0;
   border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--foreground);
   cursor: pointer;
   transition: border-color 0.12s ease, background-color 0.12s ease, color 0.12s ease;
+}
+
+.of-apple-icon-btn svg {
+  width: 15px;
+  height: 15px;
+  display: block;
+  flex-shrink: 0;
 }
 
 .of-apple-icon-btn:hover:not(:disabled) {

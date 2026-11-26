@@ -744,14 +744,93 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                       `⚡ ${telemetry.activeTurns.length} respondendo`
                     )
                 ),
+            !isGlobalView &&
+              h(
+                "div",
+                { className: "of-header-icon-tabs", role: "tablist", "aria-label": `Navegação de ${empresaNome}` },
+                projectTabs.map((pt) => {
+                  const tabIconPaths: Record<string, string[]> = {
+                    overview: ["M3 10.5 12 3l9 7.5", "M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5"],
+                    board: ["M3 4h5v16H3z", "M10 4h5v10h-5z", "M17 4h4v13h-4z"],
+                    floor: ["M12 2 3 7l9 5 9-5-9-5z", "M3 12l9 5 9-5", "M3 17l9 5 9-5"],
+                    agents: ["M12 8V4H8", "M4 8h16v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z", "M9 13h.01", "M15 13h.01"],
+                    vision: ["M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z", "M14 2v6h6", "M8 13h8", "M8 17h5"],
+                    settings: ["M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z", "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.08a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.08a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"],
+                  };
+                  const paths = tabIconPaths[pt.id] || tabIconPaths.overview;
+                  return h(
+                    "button",
+                    {
+                      key: pt.id,
+                      type: "button",
+                      role: "tab",
+                      className: "of-header-icon-tab",
+                      "data-active": tab === pt.id ? "true" : "false",
+                      title: pt.badge ? `${pt.label} (${pt.badge})` : pt.label,
+                      "aria-label": pt.label,
+                      onClick: () => setTab(pt.id),
+                    },
+                    h(
+                      "svg",
+                      {
+                        width: 15,
+                        height: 15,
+                        viewBox: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        strokeWidth: 1.8,
+                        strokeLinecap: "round",
+                        strokeLinejoin: "round",
+                        style: { width: "15px", height: "15px", display: "block", flexShrink: 0 },
+                        "aria-hidden": "true",
+                      },
+                      paths.map((d, i) => h("path", { key: i, d }))
+                    ),
+                    pt.badge && h("span", { className: "of-nav-badge", "data-tone": pt.tone, style: { padding: "0 5px", fontSize: "9.5px" } }, pt.badge)
+                  );
+                })
+              ),
             h(
               "div",
               { className: "of-apple-chat-bar", "data-apple-header-chat": "true" },
+              !isGlobalView &&
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "of-apple-icon-btn",
+                    "data-open-company-channel": "true",
+                    title: `Abrir canal de ${empresaNome} no chat lateral`,
+                    "aria-label": `Abrir canal de ${empresaNome}`,
+                    onClick: () => handleOpenChannelInBuzz(tenant),
+                  },
+                  h(
+                    "svg",
+                    {
+                      width: 15,
+                      height: 15,
+                      viewBox: "0 0 24 24",
+                      fill: "none",
+                      stroke: "currentColor",
+                      strokeWidth: 1.9,
+                      strokeLinecap: "round",
+                      strokeLinejoin: "round",
+                      style: { width: "15px", height: "15px", display: "block", flexShrink: 0 },
+                      "aria-hidden": "true",
+                    },
+                    h("line", { x1: 4, y1: 9, x2: 20, y2: 9 }),
+                    h("line", { x1: 4, y1: 15, x2: 20, y2: 15 }),
+                    h("line", { x1: 10, y1: 3, x2: 8, y2: 21 }),
+                    h("line", { x1: 16, y1: 3, x2: 14, y2: 21 })
+                  )
+                ),
               h(
                 "select",
                 {
                   className: "of-apple-select",
                   "aria-label": "Selecionar agente e abrir chat lateral",
+                  title: "Selecionar agente para abrir chat lateral",
+                  disabled: openingDm,
                   value: dmAgentKey,
                   onChange: (e: any) => {
                     const nextKey = e.target.value;
@@ -763,58 +842,11 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                 dmPool.length > 0
                   ? dmPool.map((a) => h("option", { key: a.key, value: a.key }, a.label))
                   : h("option", { value: "" }, status.tenantManifest?.coo || "OrgFy Bento (COO)")
-              ),
-              h(
-                "button",
-                {
-                  type: "button",
-                  className: "of-apple-icon-btn",
-                  disabled: openingDm,
-                  title: selectedDmAgent ? `Abrir chat lateral com ${selectedDmAgent.name}` : "Abrir chat lateral",
-                  "aria-label": "Abrir chat lateral",
-                  onClick: () => handleOpenAgentDmInBuzz(selectedDmAgent),
-                },
-                h(
-                  "svg",
-                  {
-                    width: 15,
-                    height: 15,
-                    viewBox: "0 0 24 24",
-                    fill: "none",
-                    stroke: "currentColor",
-                    strokeWidth: 1.8,
-                    strokeLinecap: "round",
-                    strokeLinejoin: "round",
-                    "aria-hidden": "true",
-                  },
-                  h("path", { d: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" })
-                )
               )
             ),
             toast && h("span", { className: "of-pill", "data-tone": "done" }, toast),
             error && !toast && h("span", { className: "of-pill", "data-tone": "failed" }, `Aviso: ${error}`)
           ),
-
-          !isGlobalView &&
-            h(
-              "div",
-              { className: "of-project-tabs", role: "tablist", "aria-label": `Navegação de ${empresaNome}` },
-              projectTabs.map((pt) =>
-                h(
-                  "button",
-                  {
-                    key: pt.id,
-                    type: "button",
-                    role: "tab",
-                    className: "of-project-tab",
-                    "data-active": tab === pt.id ? "true" : "false",
-                    onClick: () => setTab(pt.id),
-                  },
-                  h("span", null, pt.label),
-                  pt.badge && h("span", { className: "of-nav-badge", "data-tone": pt.tone }, pt.badge)
-                )
-              )
-            ),
 
           h(
             "div",
