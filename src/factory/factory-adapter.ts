@@ -368,7 +368,7 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
   const host = (ctx as any)?.host;
 
   const stateRelPath = slug === "orgfy" ? ".esteira/estado/esteira-minima-state.json" : `.esteira/estado/esteira-minima-${slug}-state.json`;
-  const [kpiRes, cards, empresaJson, boardJson, evalMd, projectMd, agentsMd, regrasJson, esteiraState, alcadasJson] = await Promise.all([
+  const [kpiRes, cards, empresaJson, boardJson, evalMd, projectMd, agentsMd, regrasJson, esteiraState, alcadasJson, spotChecksJson, lessonsJson, digestJson] = await Promise.all([
     fetchKpisEsteira(ctx).catch(() => ({ kpis: null, history: [], error: null })),
     fetchLiveKanbanCards(ctx, { empresa: slug }).catch(() => []),
     readOrgfyJson<any>(ctx, `empresas/${slug}.json`, null).catch(() => null),
@@ -379,6 +379,9 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
     readOrgfyJson<any>(ctx, ".esteira/estado/regras-probatorias.json", null).catch(() => null),
     readOrgfyJson<any>(ctx, stateRelPath, null).catch(() => null),
     readOrgfyJson<any>(ctx, "contratos/alcadas_politica.json", null).catch(() => null),
+    readOrgfyJson<any>(ctx, `.esteira/estado/spot-checks-${slug}.json`, null).catch(() => null),
+    readOrgfyJson<any>(ctx, `.esteira/estado/licoes-dinamicas-${slug}.json`, null).catch(() => null),
+    readOrgfyJson<any>(ctx, `.esteira/estado/digest-${slug}.json`, null).catch(() => null),
   ]);
 
   let controle: Record<string, any> | null = null;
@@ -756,8 +759,15 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
           higiene: kpis.higiene || null,
         }
       : { disponivel: false },
+    lessons: Array.isArray(lessonsJson?.lessons) ? lessonsJson.lessons.filter((l: any) => !l?.forgotten) : [],
+    lastDigest: digestJson || null,
+    ...(spotChecksJson ? { spotChecks: spotChecksJson } : {}),
     modelos,
-    indisponivel: kpis ? ["lastDigest", "lessons", "mergeChecks", "pullRequests", "scout", "spotChecks"] : ["kpis-esteira.json", "lastDigest", "lessons"],
+    indisponivel: [
+      ...(!kpis ? ["kpis-esteira.json"] : []),
+      ...(!digestJson ? ["lastDigest"] : []),
+      ...(!esteiraState?.dark_factory ? ["scout"] : []),
+    ],
   };
 }
 

@@ -2082,8 +2082,9 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                       setAutonomyModal({
                         open: true,
                         targetMode: mode,
-                        autoMerge: isFactory ? Boolean(settingsForm.autoMerge) : false,
-                        enableStarterSet: mode === "dark_factory" && hasMissingStarter,
+                        // Dark Factory (100% autônomo): já vem com Auto-merge + Starter Set pré-marcados
+                        autoMerge: mode === "dark_factory" ? true : isFactory ? Boolean(settingsForm.autoMerge) : false,
+                        enableStarterSet: isFactory && hasMissingStarter,
                       });
                     },
                     onOpenChannelInBuzz: handleOpenChannelInBuzz,

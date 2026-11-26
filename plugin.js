@@ -13216,7 +13216,7 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
   const base = buildEmptyFactoryStatus(slug);
   const host = ctx == null ? void 0 : ctx.host;
   const stateRelPath = slug === "orgfy" ? ".esteira/estado/esteira-minima-state.json" : `.esteira/estado/esteira-minima-${slug}-state.json`;
-  const [kpiRes, cards, empresaJson, boardJson, evalMd, projectMd, agentsMd, regrasJson, esteiraState, alcadasJson] = await Promise.all([
+  const [kpiRes, cards, empresaJson, boardJson, evalMd, projectMd, agentsMd, regrasJson, esteiraState, alcadasJson, spotChecksJson, lessonsJson, digestJson] = await Promise.all([
     fetchKpisEsteira(ctx).catch(() => ({ kpis: null, history: [], error: null })),
     fetchLiveKanbanCards(ctx, { empresa: slug }).catch(() => []),
     readOrgfyJson(ctx, `empresas/${slug}.json`, null).catch(() => null),
@@ -13226,7 +13226,10 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
     readOrgfyText(ctx, "AGENTS.md").catch(() => null),
     readOrgfyJson(ctx, ".esteira/estado/regras-probatorias.json", null).catch(() => null),
     readOrgfyJson(ctx, stateRelPath, null).catch(() => null),
-    readOrgfyJson(ctx, "contratos/alcadas_politica.json", null).catch(() => null)
+    readOrgfyJson(ctx, "contratos/alcadas_politica.json", null).catch(() => null),
+    readOrgfyJson(ctx, `.esteira/estado/spot-checks-${slug}.json`, null).catch(() => null),
+    readOrgfyJson(ctx, `.esteira/estado/licoes-dinamicas-${slug}.json`, null).catch(() => null),
+    readOrgfyJson(ctx, `.esteira/estado/digest-${slug}.json`, null).catch(() => null)
   ]);
   let controle = null;
   try {
@@ -13525,8 +13528,15 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
       economia: kpis.economia || null,
       higiene: kpis.higiene || null
     } : { disponivel: false },
+    lessons: Array.isArray(lessonsJson == null ? void 0 : lessonsJson.lessons) ? lessonsJson.lessons.filter((l) => !(l == null ? void 0 : l.forgotten)) : [],
+    lastDigest: digestJson || null,
+    ...spotChecksJson ? { spotChecks: spotChecksJson } : {},
     modelos,
-    indisponivel: kpis ? ["lastDigest", "lessons", "mergeChecks", "pullRequests", "scout", "spotChecks"] : ["kpis-esteira.json", "lastDigest", "lessons"]
+    indisponivel: [
+      ...!kpis ? ["kpis-esteira.json"] : [],
+      ...!digestJson ? ["lastDigest"] : [],
+      ...!(esteiraState == null ? void 0 : esteiraState.dark_factory) ? ["scout"] : []
+    ]
   };
 }
 async function fetchFactoryStatus(ctx, tenant = "orgfy") {
@@ -59944,7 +59954,7 @@ const PINNED_HOST_COMMANDS = Object.freeze([
   {
     id: "fabrica-status",
     scriptPath: "ferramentas/esteira/fabrica_status.py",
-    sha256: "6e86c825d3518406b63fcba8d7f9cd96415286a00b2c6f41ae2f6329691e6c53"
+    sha256: "3e720b87982d8633566d40638bb386e95f2077085cee37c13d89d022d12912aa"
   },
   {
     id: "orgfy-kpis",
@@ -61875,8 +61885,9 @@ Nota: ${evidence.note}`
                   setAutonomyModal({
                     open: true,
                     targetMode: mode,
-                    autoMerge: isFactory ? Boolean(settingsForm.autoMerge) : false,
-                    enableStarterSet: mode === "dark_factory" && hasMissingStarter
+                    // Dark Factory (100% autônomo): já vem com Auto-merge + Starter Set pré-marcados
+                    autoMerge: mode === "dark_factory" ? true : isFactory ? Boolean(settingsForm.autoMerge) : false,
+                    enableStarterSet: isFactory && hasMissingStarter
                   });
                 },
                 onOpenChannelInBuzz: handleOpenChannelInBuzz,
