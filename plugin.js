@@ -990,7 +990,7 @@ async function openIssueInBuzz(ctx, issue) {
   return openSystemUri(ctx, uri);
 }
 const ARTIFACT_COLLECTION = "orgfy_kpi_history_v1";
-const LOCAL_STORAGE_KEY = "orgfy_kpi_history_v1";
+const LOCAL_STORAGE_KEY$1 = "orgfy_kpi_history_v1";
 const MAX_HISTORY_POINTS = 60;
 async function readHistory(ctx) {
   try {
@@ -1005,7 +1005,7 @@ async function readHistory(ctx) {
   }
   try {
     if (typeof localStorage !== "undefined") {
-      const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+      const raw = localStorage.getItem(LOCAL_STORAGE_KEY$1);
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) return parsed.slice(-MAX_HISTORY_POINTS);
@@ -1037,7 +1037,7 @@ async function recordKpiSnapshotHistory(ctx, kpis) {
   const next = [...filtered, point].slice(-MAX_HISTORY_POINTS);
   try {
     if (typeof localStorage !== "undefined") {
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(next));
+      localStorage.setItem(LOCAL_STORAGE_KEY$1, JSON.stringify(next));
     }
   } catch {
   }
@@ -4844,6 +4844,332 @@ async function searchResolvedArchive(ctx, options = {}) {
     resultados: matched.slice(0, limit)
   };
 }
+const COLLECTION_NAME = "orgfy_factory_state_v1";
+const COLLECTION_TYPE = "orgfy.factory.state";
+const LOCAL_STORAGE_KEY = "orgfy_crdt_state_v17_7";
+function extractRecordFromEntry(entry) {
+  var _a, _b, _c;
+  if (!entry) return null;
+  const pref = entry.preference;
+  const local = (_a = entry.record) == null ? void 0 : _a.local;
+  const candidate = pref && typeof pref === "object" && pref.id ? pref : local && typeof local === "object" && local.id ? local : null;
+  if (!candidate) {
+    const revContent = (_c = (_b = entry.record) == null ? void 0 : _b.current) == null ? void 0 : _c.content;
+    if (typeof revContent === "string" && revContent.trim().startsWith("{")) {
+      try {
+        const parsed = JSON.parse(revContent);
+        if (parsed && typeof parsed === "object" && parsed.id && parsed.kind) return parsed;
+      } catch {
+      }
+    }
+    return null;
+  }
+  return candidate;
+}
+function readLocalFallbackMap() {
+  const map = /* @__PURE__ */ new Map();
+  try {
+    if (typeof localStorage !== "undefined") {
+      const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") {
+          for (const [k, v2] of Object.entries(parsed)) {
+            if (v2 && typeof v2 === "object" && v2.id) {
+              map.set(k, v2);
+            }
+          }
+        }
+      }
+    }
+  } catch {
+  }
+  return map;
+}
+function writeLocalFallbackMap(map) {
+  try {
+    if (typeof localStorage !== "undefined") {
+      const obj = {};
+      for (const [k, v2] of map.entries()) obj[k] = v2;
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(obj));
+    }
+  } catch {
+  }
+}
+class OrgfyCrdtStore {
+  constructor(ctx) {
+    __publicField(this, "collection", null);
+    __publicField(this, "mode", "local_fallback");
+    __publicField(this, "memoryMap");
+    __publicField(this, "listeners", /* @__PURE__ */ new Set());
+    __publicField(this, "unsubCollection", null);
+    __publicField(this, "unsubChanges", null);
+    this.ctx = ctx;
+    this.memoryMap = readLocalFallbackMap();
+    this.tryOpenCollection();
+  }
+  tryOpenCollection() {
+    var _a, _b, _c, _d;
+    if (this.collection) return;
+    const storage = ((_a = this.ctx) == null ? void 0 : _a.artifactStorage) || ((_d = (_c = (_b = this.ctx) == null ? void 0 : _b.reflect) == null ? void 0 : _c.get) == null ? void 0 : _d.call(_c, "artifactStorage"));
+    if (!storage || typeof storage.open !== "function") {
+      this.mode = "local_fallback";
+      return;
+    }
+    try {
+      const col = storage.open({
+        name: COLLECTION_NAME,
+        type: COLLECTION_TYPE,
+        version: 1,
+        project: (entry) => {
+          const rec = extractRecordFromEntry(entry);
+          if (!rec) return [];
+          const order = String(rec.updatedAt || "1970-01-01T00:00:00.000Z");
+          return [
+            { index: "all", value: "1", order },
+            { index: "kind", value: rec.kind, order },
+            { index: "tenant", value: rec.tenant || "orgfy", order }
+          ];
+        }
+      });
+      this.collection = col;
+      this.mode = "buzz_artifact_collection";
+      if (typeof col.subscribe === "function") {
+        this.unsubCollection = col.subscribe(() => this.notify());
+      }
+      if (typeof col.subscribeChanges === "function") {
+        this.unsubChanges = col.subscribeChanges(() => this.notify());
+      }
+    } catch {
+      this.collection = null;
+      this.mode = "local_fallback";
+    }
+  }
+  notify() {
+    for (const fn of this.listeners) {
+      try {
+        fn();
+      } catch {
+      }
+    }
+  }
+  getBackendInfo() {
+    var _a;
+    this.tryOpenCollection();
+    return {
+      mode: this.mode,
+      collectionName: COLLECTION_NAME,
+      scope: (_a = this.collection) == null ? void 0 : _a.scope
+    };
+  }
+  subscribe(listener) {
+    this.tryOpenCollection();
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+  async putRecord(record) {
+    var _a;
+    this.tryOpenCollection();
+    this.memoryMap.set(record.id, record);
+    writeLocalFallbackMap(this.memoryMap);
+    if (this.collection) {
+      try {
+        const existing = await this.collection.get(record.id);
+        if (!existing && typeof this.collection.importBatch === "function") {
+          await this.collection.importBatch({
+            records: [{ id: record.id, local: record }],
+            preferences: [{ id: record.id, value: record }]
+          });
+        } else if ((_a = this.collection.preferences) == null ? void 0 : _a.update) {
+          await this.collection.preferences.update(record.id, () => record);
+        }
+      } catch {
+        this.collection = null;
+        this.mode = "local_fallback";
+      }
+    }
+    this.notify();
+    return record;
+  }
+  async getRecord(id) {
+    this.tryOpenCollection();
+    if (this.collection) {
+      try {
+        const entry = await this.collection.get(id);
+        const extracted = extractRecordFromEntry(entry);
+        if (extracted) {
+          this.memoryMap.set(id, extracted);
+          return extracted;
+        }
+      } catch {
+      }
+    }
+    return this.memoryMap.get(id) || null;
+  }
+  async listByKind(kind, tenant) {
+    this.tryOpenCollection();
+    const merged2 = /* @__PURE__ */ new Map();
+    for (const [id, rec] of this.memoryMap.entries()) {
+      if (rec.kind === kind) merged2.set(id, rec);
+    }
+    if (this.collection && typeof this.collection.page === "function") {
+      try {
+        const page = await this.collection.page({ index: "kind", value: kind, limit: 200 });
+        for (const entry of (page == null ? void 0 : page.entries) || []) {
+          const rec = extractRecordFromEntry(entry);
+          if (rec && rec.kind === kind) {
+            const cur = merged2.get(rec.id);
+            if (!cur || String(rec.updatedAt || "") >= String(cur.updatedAt || "")) {
+              merged2.set(rec.id, rec);
+              this.memoryMap.set(rec.id, rec);
+            }
+          }
+        }
+      } catch {
+      }
+    }
+    const list = Array.from(merged2.values()).filter((r) => !tenant || tenant === "all" || r.tenant === tenant);
+    list.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+    return list;
+  }
+  async createQuestionCard(input) {
+    const now = /* @__PURE__ */ new Date();
+    const nowIso = now.toISOString();
+    const id = input.id || `qcard-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+    const normalizedOptions = (input.options || []).map((opt, idx) => ({
+      id: String(opt.id || `opt_${idx + 1}`).trim(),
+      label: String(opt.label || "").trim(),
+      description: opt.description ? String(opt.description).trim() : void 0
+    })).filter((o) => o.label.length > 0);
+    const expiresAt = typeof input.timeoutMinutes === "number" && input.timeoutMinutes > 0 ? new Date(now.getTime() + input.timeoutMinutes * 6e4).toISOString() : void 0;
+    const card = {
+      id,
+      kind: "question_card",
+      tenant: String(input.tenant || "orgfy").trim() || "orgfy",
+      title: String(input.title || "Decisão solicitada pelo agente").trim(),
+      question: String(input.question || "").trim(),
+      requestedBy: String(input.requestedBy || "OrgFy Bento").trim(),
+      requestedByPubkey: input.requestedByPubkey ? String(input.requestedByPubkey).trim() : void 0,
+      channelId: input.channelId ? String(input.channelId).trim() : void 0,
+      threadRoot: input.threadRoot ? String(input.threadRoot).trim() : void 0,
+      options: normalizedOptions,
+      selectionMode: input.selectionMode === "multi" ? "multi" : "single",
+      allowFreeText: input.allowFreeText !== false,
+      status: "pending",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      expiresAt
+    };
+    await this.putRecord(card);
+    return card;
+  }
+  async listQuestionCards(tenant) {
+    const cards = await this.listByKind("question_card", tenant);
+    const nowMs = Date.now();
+    return cards.map((c) => {
+      if (c.status === "pending" && c.expiresAt) {
+        const expMs = Date.parse(c.expiresAt);
+        if (Number.isFinite(expMs) && expMs < nowMs) {
+          return { ...c, status: "expired" };
+        }
+      }
+      return c;
+    });
+  }
+  async answerQuestionCard(id, answer) {
+    const existing = await this.getRecord(id);
+    if (!existing || existing.kind !== "question_card") return null;
+    const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+    const updated = {
+      ...existing,
+      status: "answered",
+      answeredAt: nowIso,
+      updatedAt: nowIso,
+      answer: {
+        selectedIds: Array.isArray(answer.selectedIds) ? answer.selectedIds : [],
+        freeText: answer.freeText ? String(answer.freeText).trim() : void 0,
+        answeredBy: answer.answeredBy || "Fundador"
+      }
+    };
+    await this.putRecord(updated);
+    return updated;
+  }
+  async dismissQuestionCard(id) {
+    const existing = await this.getRecord(id);
+    if (!existing || existing.kind !== "question_card") return null;
+    const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+    const updated = {
+      ...existing,
+      status: "dismissed",
+      updatedAt: nowIso
+    };
+    await this.putRecord(updated);
+    return updated;
+  }
+  async recordVisualEvidence(input) {
+    const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+    const rec = {
+      id: `vev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+      kind: "visual_evidence",
+      tenant: input.tenant || "orgfy",
+      itemId: input.itemId,
+      url: input.url.trim(),
+      note: input.note.trim(),
+      verdict: input.verdict,
+      createdAt: nowIso,
+      updatedAt: nowIso
+    };
+    await this.putRecord(rec);
+    return rec;
+  }
+  async listVisualEvidence(tenant, itemId) {
+    const list = await this.listByKind("visual_evidence", tenant);
+    return itemId ? list.filter((v2) => v2.itemId === itemId) : list;
+  }
+  async syncDocument(kind, id, tenant, payload) {
+    const rec = {
+      id,
+      kind,
+      tenant: tenant || "orgfy",
+      payload,
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    await this.putRecord(rec);
+    return rec;
+  }
+  async listDocuments(kind, tenant) {
+    return this.listByKind(kind, tenant);
+  }
+  close() {
+    var _a, _b, _c, _d;
+    try {
+      (_a = this.unsubCollection) == null ? void 0 : _a.call(this);
+      (_b = this.unsubChanges) == null ? void 0 : _b.call(this);
+      (_d = (_c = this.collection) == null ? void 0 : _c.close) == null ? void 0 : _d.call(_c);
+    } catch {
+    }
+    this.unsubCollection = null;
+    this.unsubChanges = null;
+    this.collection = null;
+    this.listeners.clear();
+  }
+}
+const storeCache = /* @__PURE__ */ new WeakMap();
+let fallbackSingleton = null;
+function getOrgfyCrdtStore(ctx) {
+  if (ctx && typeof ctx === "object") {
+    let store = storeCache.get(ctx);
+    if (!store) {
+      store = new OrgfyCrdtStore(ctx);
+      storeCache.set(ctx, store);
+    }
+    return store;
+  }
+  if (!fallbackSingleton) fallbackSingleton = new OrgfyCrdtStore(null);
+  return fallbackSingleton;
+}
 function buildUnifiedOrgfyTools(ctx) {
   const rawTools = [
     {
@@ -5546,6 +5872,82 @@ function buildUnifiedOrgfyTools(ctx) {
         const dryRun = (args == null ? void 0 : args.dry_run) !== false;
         const res = await reconcileAgentsViaBuzzApi(ctx, { dryRun });
         return { text: JSON.stringify({ ok: true, dryRun, ...res }, null, 2) };
+      }
+    },
+    {
+      name: "orgfy_question_card",
+      description: "Envia um Question Card estruturado para o Inbox do Fundador ('Aguardando você') sincronizado via ctx.artifactStorage.open(), substituindo blocos de texto longos por opções clicáveis (single/multi) + comentário livre + timeout. Quando respondido, acorda automaticamente o agente solicitante via ctx.agents.wake.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Título curto da decisão solicitada" },
+          question: { type: "string", description: "Contexto objetivo da pergunta" },
+          requested_by: { type: "string", description: "Nome do agente solicitante (ex: 'OrgFy Bento')" },
+          requested_by_pubkey: { type: "string", description: "Pubkey opcional do agente solicitante" },
+          tenant: { type: "string", description: "Empresa/tenant (default: 'orgfy')" },
+          channel_id: { type: "string", description: "Canal onde o agente será acordado ao receber resposta" },
+          thread_root: { type: "string", description: "Thread root opcional" },
+          selection_mode: { type: "string", enum: ["single", "multi"], description: "'single' (radio) ou 'multi' (checkbox)" },
+          allow_free_text: { type: "boolean", description: "Permite observação em texto livre (default: true)" },
+          timeout_minutes: { type: "number", description: "Prazo opcional em minutos para expiração" },
+          options: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string" },
+                label: { type: "string" },
+                description: { type: "string" }
+              },
+              required: ["label"]
+            },
+            description: "Opções estruturadas para escolha rápida"
+          }
+        },
+        required: ["title", "question"]
+      },
+      execute: async (args) => {
+        const title = String((args == null ? void 0 : args.title) || "").trim();
+        const question = String((args == null ? void 0 : args.question) || "").trim();
+        if (!title || !question) {
+          return { text: JSON.stringify({ ok: false, error: "title e question são obrigatórios." }), isError: true };
+        }
+        const store = getOrgfyCrdtStore(ctx);
+        const card = await store.createQuestionCard({
+          tenant: (args == null ? void 0 : args.tenant) || "orgfy",
+          title,
+          question,
+          requestedBy: (args == null ? void 0 : args.requested_by) || (args == null ? void 0 : args.requestedBy) || "OrgFy Bento",
+          requestedByPubkey: (args == null ? void 0 : args.requested_by_pubkey) || (args == null ? void 0 : args.requestedByPubkey),
+          channelId: (args == null ? void 0 : args.channel_id) || (args == null ? void 0 : args.channelId),
+          threadRoot: (args == null ? void 0 : args.thread_root) || (args == null ? void 0 : args.threadRoot),
+          selectionMode: (args == null ? void 0 : args.selection_mode) === "multi" ? "multi" : "single",
+          allowFreeText: (args == null ? void 0 : args.allow_free_text) !== false,
+          timeoutMinutes: typeof (args == null ? void 0 : args.timeout_minutes) === "number" ? args.timeout_minutes : void 0,
+          options: Array.isArray(args == null ? void 0 : args.options) ? args.options : []
+        });
+        emitOrgfyPipelineEvent({
+          type: "question_card.created",
+          issueId: card.id,
+          empresa: card.tenant,
+          agent: card.requestedBy,
+          summary: `Question Card: ${card.title} (${card.options.length} opções aguardando Fundador)`
+        });
+        try {
+          sendDesktopNotification(ctx, `OrgFy Inbox · ${card.requestedBy}`, card.title);
+        } catch {
+        }
+        return {
+          text: JSON.stringify(
+            {
+              ok: true,
+              card,
+              sync: store.getBackendInfo()
+            },
+            null,
+            2
+          )
+        };
       }
     }
   ];
@@ -8062,6 +8464,8 @@ function Icon({ h, name, size = 14, color }) {
       return h("svg", base, h("path", { d: "m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z" }));
     case "bot":
       return h("svg", base, h("path", { d: "M12 8V4H8" }), h("rect", { width: 16, height: 12, x: 4, y: 8, rx: 2 }), h("path", { d: "M2 14h2" }), h("path", { d: "M20 14h2" }), h("path", { d: "M15 13v2" }), h("path", { d: "M9 13v2" }));
+    case "globe":
+      return h("svg", base, h("circle", { cx: 12, cy: 12, r: 10 }), h("line", { x1: 2, y1: 12, x2: 22, y2: 12 }), h("path", { d: "M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" }));
     default:
       return null;
   }
@@ -8522,7 +8926,7 @@ function renderUnifiedFileDiff(h, file, isOpen, onToggle, anchorOpts) {
 function createCodeDenInspectorDrawer(React) {
   const h = React.createElement;
   return function CodeDenInspectorDrawer(props) {
-    var _a, _b, _c;
+    var _a, _b, _c, _d, _e;
     const {
       ctx,
       item,
@@ -8547,9 +8951,14 @@ function createCodeDenInspectorDrawer(React) {
       onSessionAction,
       onToggleChecklistStep,
       onSendDiffReview,
+      onRecordVisualEvidence,
       onClose
     } = props;
     const [activeTab, setActiveTab] = React.useState("pr");
+    const [previewUrlInput, setPreviewUrlInput] = React.useState("");
+    const [previewLiveUrl, setPreviewLiveUrl] = React.useState("");
+    const [visualEvidenceNote, setVisualEvidenceNote] = React.useState("");
+    const [submittingEvidence, setSubmittingEvidence] = React.useState(false);
     const [localChecklistOverrides, setLocalChecklistOverrides] = React.useState({});
     const [activeAnchor, setActiveAnchor] = React.useState(null);
     const [anchorDraft, setAnchorDraft] = React.useState("");
@@ -8711,8 +9120,12 @@ function createCodeDenInspectorDrawer(React) {
       { id: "diff", label: "Diff", icon: "diff", count: parsedDiffFiles.length || void 0 },
       { id: "files", label: "Arquivos", icon: "files", count: ((_b = gitSnap == null ? void 0 : gitSnap.files) == null ? void 0 : _b.length) || void 0 },
       { id: "pr", label: "Issue / PR", icon: "pr" },
+      { id: "preview", label: "Preview", icon: "globe" },
       { id: "details", label: "Detalhes", icon: "info" }
     ];
+    const browserApi = (ctx == null ? void 0 : ctx.browser) || ((_d = (_c = ctx == null ? void 0 : ctx.reflect) == null ? void 0 : _c.get) == null ? void 0 : _d.call(_c, "browser"));
+    const BrowserView = (browserApi == null ? void 0 : browserApi.View) || null;
+    const browserAvailable = Boolean(BrowserView && (browserApi == null ? void 0 : browserApi.available) !== false);
     const renderTreeNode = (node, depth) => {
       var _a2;
       const isDir = node.kind === "dir";
@@ -9360,7 +9773,7 @@ function createCodeDenInspectorDrawer(React) {
               "section",
               null,
               renderSectionHeader(
-                `Revisões & Comentários NIP-34 · ${((_c = repoDetail == null ? void 0 : repoDetail.comments) == null ? void 0 : _c.length) || 0}`,
+                `Revisões & Comentários NIP-34 · ${((_e = repoDetail == null ? void 0 : repoDetail.comments) == null ? void 0 : _e.length) || 0}`,
                 h(
                   "div",
                   { style: { display: "inline-flex", alignItems: "center", gap: "10px" } },
@@ -9608,7 +10021,181 @@ function createCodeDenInspectorDrawer(React) {
               );
             })()
           ),
-          // ── ABA 4: DETALHES (1:1 CodeDen DetailsPanel) ──
+          // ── ABA 4: PREVIEW VISUAL AO VIVO (ctx.browser.View · Onda 3) ──
+          activeTab === "preview" && h(
+            "div",
+            { "data-orgfy-browser-preview": "true", style: { display: "flex", flexDirection: "column", flex: 1, minHeight: 0 } },
+            h(
+              "div",
+              {
+                style: {
+                  padding: "10px 14px",
+                  borderBottom: "1px solid var(--border)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "8px",
+                  background: "var(--card)"
+                }
+              },
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", gap: "6px" } },
+                h("input", {
+                  className: "of-input",
+                  style: { flex: 1, fontSize: "11.5px", fontFamily: "var(--font-mono)" },
+                  placeholder: "https://preview-ou-dev-server...",
+                  value: previewUrlInput,
+                  onChange: (e) => setPreviewUrlInput(e.target.value),
+                  onKeyDown: (e) => {
+                    if (e.key === "Enter" && previewUrlInput.trim()) setPreviewLiveUrl(previewUrlInput.trim());
+                  }
+                }),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "of-btn",
+                    "data-variant": "primary",
+                    style: { fontSize: "11px", padding: "5px 10px" },
+                    onClick: () => {
+                      if (previewUrlInput.trim()) setPreviewLiveUrl(previewUrlInput.trim());
+                    }
+                  },
+                  "Abrir"
+                )
+              ),
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" } },
+                [
+                  { label: "Vite :5173", port: "5173" },
+                  { label: "Web :3000", port: "3000" },
+                  { label: "API :8000", port: "8000" }
+                ].map((preset) => {
+                  const url = `http://localhost:${preset.port}`;
+                  return h(
+                    "button",
+                    {
+                      key: preset.port,
+                      type: "button",
+                      className: "of-btn",
+                      style: { fontSize: "10.5px", padding: "2px 7px" },
+                      onClick: () => {
+                        setPreviewUrlInput(url);
+                        setPreviewLiveUrl(url);
+                      }
+                    },
+                    preset.label
+                  );
+                }),
+                h(
+                  "span",
+                  { className: "of-pill", "data-tone": browserAvailable ? "done" : "waiting", style: { marginLeft: "auto" } },
+                  browserAvailable ? "ctx.browser.View ativo" : "Browser nativo indisponível"
+                )
+              )
+            ),
+            h(
+              "div",
+              { style: { flex: 1, minHeight: "320px", position: "relative", background: "rgba(0,0,0,0.22)" } },
+              browserAvailable && BrowserView && previewLiveUrl ? h(BrowserView, {
+                url: previewLiveUrl,
+                storage: `orgfy-preview-${tenant.replace(/[^a-z0-9._-]/gi, "-")}`,
+                label: `${tenant} · ${item.title.slice(0, 28)}`
+              }) : h(
+                "div",
+                { style: { padding: "28px 18px", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" } },
+                Icon({ h, name: "globe", size: 24, color: "var(--muted-foreground)" }),
+                h("div", { style: { fontSize: "13px", fontWeight: 600 } }, "Preview visual embarcado (ctx.browser.View)"),
+                h(
+                  "div",
+                  { className: "of-muted", style: { fontSize: "12px", maxWidth: "420px", lineHeight: 1.5 } },
+                  previewLiveUrl ? `URL configurada: ${previewLiveUrl}. No Buzz Desktop com webview habilitado, a aplicação ao vivo renderiza diretamente aqui dentro do Inspector.` : "Escolha um preset acima (Vite :5173, Web :3000, API :8000) ou cole a URL de preview do PR para validar a interface ao vivo."
+                )
+              )
+            ),
+            onRecordVisualEvidence && h(
+              "div",
+              {
+                "data-visual-evidence-bar": "true",
+                style: {
+                  padding: "10px 14px",
+                  borderTop: "1px solid var(--border)",
+                  background: "var(--card)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "8px"
+                }
+              },
+              h("input", {
+                className: "of-input",
+                style: { fontSize: "11.5px" },
+                placeholder: "Nota de validação visual para o Gate (ex.: layout validado em 1440px, sem overflow)...",
+                value: visualEvidenceNote,
+                onChange: (e) => setVisualEvidenceNote(e.target.value)
+              }),
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "8px" } },
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "of-btn",
+                    disabled: submittingEvidence,
+                    style: { fontSize: "11px" },
+                    onClick: async () => {
+                      setSubmittingEvidence(true);
+                      try {
+                        await onRecordVisualEvidence(
+                          {
+                            url: previewLiveUrl || previewUrlInput.trim() || "preview://local",
+                            note: visualEvidenceNote.trim() || "Ajuste visual solicitado no preview.",
+                            verdict: "changes_requested"
+                          },
+                          item,
+                          executorName || void 0
+                        );
+                        setVisualEvidenceNote("");
+                      } finally {
+                        setSubmittingEvidence(false);
+                      }
+                    }
+                  },
+                  "Solicitar ajuste visual"
+                ),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "of-btn",
+                    "data-variant": "primary",
+                    disabled: submittingEvidence,
+                    style: { fontSize: "11px" },
+                    onClick: async () => {
+                      setSubmittingEvidence(true);
+                      try {
+                        await onRecordVisualEvidence(
+                          {
+                            url: previewLiveUrl || previewUrlInput.trim() || "preview://local",
+                            note: visualEvidenceNote.trim() || "Preview visual validado pelo operador.",
+                            verdict: "approved"
+                          },
+                          item,
+                          executorName || void 0
+                        );
+                        setVisualEvidenceNote("");
+                      } finally {
+                        setSubmittingEvidence(false);
+                      }
+                    }
+                  },
+                  submittingEvidence ? "Salvando..." : "Aprovar evidência visual ✓"
+                )
+              )
+            )
+          ),
+          // ── ABA 5: DETALHES (1:1 CodeDen DetailsPanel) ──
           activeTab === "details" && h(
             "div",
             { style: { padding: "14px 16px", display: "flex", flexDirection: "column", gap: "18px" } },
@@ -49417,7 +50004,11 @@ function renderFactorySecondaryPage(props) {
     const problems = [...status.inProgress, ...status.recent].filter((i) => i.stage === "failed" || i.stage === "reverted");
     const asks = [...status.inProgress, ...status.recent].filter((i) => i.stage === "escalated");
     const reviews = status.inProgress.filter((i) => i.stage === "verifying");
-    const allCount = problems.length + asks.length + reviews.length + status.held.length;
+    const qCards = props.questionCards || [];
+    const pendingQuestionCards = qCards.filter((c) => c.status === "pending");
+    const asksTotal = asks.length + pendingQuestionCards.length;
+    const allCount = problems.length + asksTotal + reviews.length + status.held.length;
+    const showQuestionCards = Boolean(props.QuestionCardsPanel && qCards.length > 0 && (inboxFilter === "all" || inboxFilter === "asks"));
     const shown = inboxFilter === "asks" ? asks : inboxFilter === "reviews" ? reviews : inboxFilter === "problems" ? problems : [...asks, ...reviews, ...problems];
     return h(
       "div",
@@ -49427,7 +50018,7 @@ function renderFactorySecondaryPage(props) {
         { className: "of-segmented", style: { width: "fit-content" } },
         [
           { id: "all", label: `Todos (${allCount})` },
-          { id: "asks", label: `Precisa de resposta (${asks.length})` },
+          { id: "asks", label: `Precisa de resposta (${asksTotal})` },
           { id: "reviews", label: `Revisões (${reviews.length})` },
           { id: "problems", label: `Problemas (${problems.length})` }
         ].map(
@@ -49444,11 +50035,19 @@ function renderFactorySecondaryPage(props) {
           )
         )
       ),
-      shown.length === 0 ? h(
+      showQuestionCards && h(props.QuestionCardsPanel, {
+        cards: qCards,
+        backendInfo: props.crdtBackendInfo,
+        onAnswer: props.onAnswerQuestionCard || (() => {
+        }),
+        onDismiss: props.onDismissQuestionCard || (() => {
+        })
+      }),
+      shown.length === 0 && !showQuestionCards ? h(
         "div",
         { className: "of-card-pad", style: { textAlign: "center", padding: "36px 20px" } },
         h("div", { style: { fontSize: "14px", fontWeight: 700 } }, "Você está em dia"),
-        h("div", { className: "of-muted", style: { marginTop: "4px" } }, "Perguntas de agentes, aprovações de spec, PRs aguardando revisão e falhas aparecem aqui.")
+        h("div", { className: "of-muted", style: { marginTop: "4px" } }, "Perguntas de agentes (Question Cards), aprovações de spec, PRs aguardando revisão e falhas aparecem aqui.")
       ) : shown.map(
         (item) => h(
           "button",
@@ -51304,6 +51903,237 @@ function renderCommandPalette(props, query, onQueryChange) {
     )
   );
 }
+function formatExpiryLabel(expiresAt) {
+  if (!expiresAt) return null;
+  const ms = Date.parse(expiresAt) - Date.now();
+  if (!Number.isFinite(ms)) return null;
+  if (ms <= 0) return "Expirado";
+  const mins = Math.round(ms / 6e4);
+  if (mins < 60) return `Expira em ${mins}m`;
+  const hrs = Math.round(mins / 60);
+  return `Expira em ${hrs}h`;
+}
+function createQuestionCardsPanel(React) {
+  const h = React.createElement;
+  return function QuestionCardsPanel(props) {
+    const { cards, backendInfo, onAnswer, onDismiss } = props;
+    const [selectedByCard, setSelectedByCard] = React.useState({});
+    const [noteByCard, setNoteByCard] = React.useState({});
+    const [submittingId, setSubmittingId] = React.useState(null);
+    const pendingCards = cards.filter((c) => c.status === "pending");
+    const resolvedCards = cards.filter((c) => c.status !== "pending").slice(0, 6);
+    const toggleOption = (card, optionId) => {
+      setSelectedByCard((prev) => {
+        const cur = prev[card.id] || [];
+        if (card.selectionMode === "single") {
+          return { ...prev, [card.id]: [optionId] };
+        }
+        const exists = cur.includes(optionId);
+        return {
+          ...prev,
+          [card.id]: exists ? cur.filter((x) => x !== optionId) : [...cur, optionId]
+        };
+      });
+    };
+    const handleSubmit = async (card) => {
+      const selectedIds = selectedByCard[card.id] || [];
+      const freeText = (noteByCard[card.id] || "").trim();
+      if (selectedIds.length === 0 && !freeText) return;
+      setSubmittingId(card.id);
+      try {
+        await onAnswer(card, {
+          selectedIds,
+          freeText: freeText || void 0,
+          answeredBy: "Fundador"
+        });
+      } finally {
+        setSubmittingId(null);
+      }
+    };
+    if (cards.length === 0) return null;
+    return h(
+      "div",
+      {
+        "data-orgfy-question-cards": "true",
+        style: { display: "flex", flexDirection: "column", gap: "10px" }
+      },
+      h(
+        "div",
+        { style: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" } },
+        h(
+          "div",
+          { style: { display: "inline-flex", alignItems: "center", gap: "8px" } },
+          h("span", { style: { fontSize: "12.5px", fontWeight: 700 } }, `Question Cards (${pendingCards.length} pendente${pendingCards.length === 1 ? "" : "s"})`),
+          backendInfo && h(
+            "span",
+            {
+              className: "of-pill",
+              "data-tone": backendInfo.mode === "buzz_artifact_collection" ? "done" : "idle",
+              title: backendInfo.scope ? `Relay sync ativo: ${backendInfo.scope.relay}` : "Sincronização local ativa (aguardando relay do Buzz)"
+            },
+            backendInfo.mode === "buzz_artifact_collection" ? "CRDT Sync · Buzz" : "Sync Local"
+          )
+        )
+      ),
+      pendingCards.map((card) => {
+        const selected = selectedByCard[card.id] || [];
+        const freeText = noteByCard[card.id] || "";
+        const canSubmit = selected.length > 0 || freeText.trim().length > 0;
+        const expiry = formatExpiryLabel(card.expiresAt);
+        const busy = submittingId === card.id;
+        return h(
+          "div",
+          {
+            key: card.id,
+            className: "of-card-pad",
+            "data-question-card-id": card.id,
+            style: {
+              display: "flex",
+              flexDirection: "column",
+              gap: "10px",
+              borderColor: "rgba(245, 158, 11, 0.45)"
+            }
+          },
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px" } },
+            h(
+              "div",
+              null,
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap", marginBottom: "3px" } },
+                h("span", { className: "of-pill", "data-tone": "waiting" }, card.requestedBy),
+                h("span", { className: "of-mono of-muted", style: { fontSize: "10.5px" } }, card.tenant),
+                expiry && h("span", { className: "of-pill", "data-tone": expiry === "Expirado" ? "failed" : "idle" }, expiry)
+              ),
+              h("div", { style: { fontSize: "13.5px", fontWeight: 700, color: "var(--foreground)" } }, card.title)
+            ),
+            h(
+              "span",
+              { className: "of-mono of-muted", style: { fontSize: "10.5px", flexShrink: 0 } },
+              card.selectionMode === "multi" ? "Múltipla escolha" : "Escolha única"
+            )
+          ),
+          card.question && h("div", { style: { fontSize: "12.5px", lineHeight: 1.5, color: "var(--muted-foreground)", whiteSpace: "pre-wrap" } }, card.question),
+          card.options.length > 0 && h(
+            "div",
+            { style: { display: "flex", flexDirection: "column", gap: "6px" } },
+            card.options.map((opt) => {
+              const isSelected = selected.includes(opt.id);
+              return h(
+                "button",
+                {
+                  key: opt.id,
+                  type: "button",
+                  onClick: () => toggleOption(card, opt.id),
+                  style: {
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: "9px",
+                    padding: "8px 10px",
+                    borderRadius: "8px",
+                    border: isSelected ? "1px solid var(--primary)" : "1px solid var(--border)",
+                    background: isSelected ? "var(--primary-soft, rgba(16, 185, 129, 0.12))" : "var(--surface)",
+                    color: "var(--foreground)",
+                    textAlign: "left",
+                    cursor: "pointer"
+                  }
+                },
+                h(
+                  "span",
+                  {
+                    style: {
+                      width: "15px",
+                      height: "15px",
+                      marginTop: "1px",
+                      borderRadius: card.selectionMode === "single" ? "9999px" : "4px",
+                      border: isSelected ? "2px solid var(--primary)" : "1.5px solid var(--muted-foreground)",
+                      background: isSelected ? "var(--primary)" : "transparent",
+                      flexShrink: 0,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: "10px",
+                      color: "#000",
+                      fontWeight: 800
+                    }
+                  },
+                  isSelected ? "✓" : ""
+                ),
+                h(
+                  "div",
+                  { style: { minWidth: 0, flex: 1 } },
+                  h("div", { style: { fontSize: "12.5px", fontWeight: 600 } }, opt.label),
+                  opt.description && h("div", { className: "of-muted", style: { fontSize: "11px", marginTop: "2px" } }, opt.description)
+                )
+              );
+            })
+          ),
+          card.allowFreeText && h("textarea", {
+            className: "of-textarea",
+            style: { minHeight: "52px", fontSize: "12px" },
+            placeholder: "Observação ou diretriz adicional para o agente (opcional)...",
+            value: freeText,
+            onChange: (e) => setNoteByCard((prev) => ({ ...prev, [card.id]: e.target.value }))
+          }),
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "8px" } },
+            h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                disabled: busy,
+                onClick: () => void onDismiss(card)
+              },
+              "Adiar"
+            ),
+            h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                "data-variant": "primary",
+                disabled: !canSubmit || busy,
+                onClick: () => void handleSubmit(card)
+              },
+              busy ? "Enviando..." : `Responder e acordar ${card.requestedBy} ↗`
+            )
+          )
+        );
+      }),
+      resolvedCards.length > 0 && h(
+        "details",
+        { style: { fontSize: "11.5px", color: "var(--muted-foreground)" } },
+        h("summary", { style: { cursor: "pointer", userSelect: "none", padding: "4px 2px" } }, `Decisões recentes (${resolvedCards.length})`),
+        h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: "6px", marginTop: "6px" } },
+          resolvedCards.map((c) => {
+            var _a, _b, _c;
+            const chosenLabels = (((_a = c.answer) == null ? void 0 : _a.selectedIds) || []).map((id) => {
+              var _a2;
+              return ((_a2 = c.options.find((o) => o.id === id)) == null ? void 0 : _a2.label) || id;
+            }).join(", ");
+            return h(
+              "div",
+              { key: c.id, className: "of-surface", style: { padding: "8px 10px", display: "flex", flexDirection: "column", gap: "3px" } },
+              h(
+                "div",
+                { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" } },
+                h("strong", { style: { fontSize: "12px", color: "var(--foreground)" } }, c.title),
+                h("span", { className: "of-pill", "data-tone": c.status === "answered" ? "done" : "idle" }, c.status === "answered" ? "Respondido" : c.status)
+              ),
+              (chosenLabels || ((_b = c.answer) == null ? void 0 : _b.freeText)) && h("div", { className: "of-muted", style: { fontSize: "11.5px" } }, [chosenLabels, (_c = c.answer) == null ? void 0 : _c.freeText].filter(Boolean).join(" · "))
+            );
+          })
+        )
+      )
+    );
+  };
+}
 const GLOBAL_TABS = /* @__PURE__ */ new Set(["holding", "inbox", "costs", "automations"]);
 const DEFAULT_WORKSPACES = [
   { slug: "orgfy", nome: "OrgFy Core", estagio: "operacional", canal: "" },
@@ -51316,6 +52146,8 @@ function createFactoryAppComponent(ctx, opts = {}) {
   const Floor3D = createFloor3DComponent(ctx);
   const Boardroom3D = createBoardroom3DComponent(ctx);
   const CodeDenInspectorDrawer = createCodeDenInspectorDrawer(React);
+  const QuestionCardsPanel = createQuestionCardsPanel(React);
+  const crdtStore = getOrgfyCrdtStore(ctx);
   return function OrgFyFactoryApp() {
     var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u;
     const [tenant, setTenant] = React.useState("orgfy");
@@ -51372,6 +52204,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
     const [runningAutomationId, setRunningAutomationId] = React.useState(null);
     const [cooUpdatesExpanded, setCooUpdatesExpanded] = React.useState(true);
     const [sendingCooUpdates, setSendingCooUpdates] = React.useState(false);
+    const [questionCards, setQuestionCards] = React.useState([]);
     const [compactDensity, setCompactDensity] = React.useState(false);
     const [expandedProjects, setExpandedProjects] = React.useState({ orgfy: true });
     const [showAllByProject, setShowAllByProject] = React.useState({});
@@ -52255,6 +53088,101 @@ ${body}`
       },
       [tenant, status.tenantManifest, holding, tenantAgents, liveCrew, notify2]
     );
+    const refreshQuestionCards = React.useCallback(async () => {
+      try {
+        const list = await crdtStore.listQuestionCards();
+        setQuestionCards(list);
+      } catch {
+      }
+    }, []);
+    React.useEffect(() => {
+      void refreshQuestionCards();
+      return crdtStore.subscribe(() => {
+        void refreshQuestionCards();
+      });
+    }, [refreshQuestionCards]);
+    const handleAnswerQuestionCard = React.useCallback(
+      async (card, answer) => {
+        var _a2, _b2;
+        const updated = await crdtStore.answerQuestionCard(card.id, answer);
+        await refreshQuestionCards();
+        if (!updated) {
+          notify2("Não foi possível atualizar o Question Card.");
+          return;
+        }
+        const selectedLabels = (answer.selectedIds || []).map((id) => {
+          var _a3;
+          return ((_a3 = card.options.find((o) => o.id === id)) == null ? void 0 : _a3.label) || id;
+        }).join(", ");
+        const agentsApi = ctx == null ? void 0 : ctx.agents;
+        const targetAg = card.requestedByPubkey && (tenantAgents.find((a) => {
+          var _a3, _b3;
+          return ((_a3 = a.pubkey) == null ? void 0 : _a3.toLowerCase()) === ((_b3 = card.requestedByPubkey) == null ? void 0 : _b3.toLowerCase());
+        }) || liveCrew.find((a) => {
+          var _a3, _b3;
+          return ((_a3 = a.pubkey) == null ? void 0 : _a3.toLowerCase()) === ((_b3 = card.requestedByPubkey) == null ? void 0 : _b3.toLowerCase());
+        })) || tenantAgents.find((a) => a.name.toLowerCase().includes(card.requestedBy.toLowerCase())) || liveCrew.find((a) => a.name.toLowerCase().includes(card.requestedBy.toLowerCase()));
+        const agentKey = (targetAg && "agentKey" in targetAg ? targetAg.agentKey : targetAg == null ? void 0 : targetAg.key) || "";
+        const canal = card.channelId || ((_a2 = status.tenantManifest) == null ? void 0 : _a2.canal) || ((_b2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === card.tenant)) == null ? void 0 : _b2.canal) || void 0;
+        if (typeof (agentsApi == null ? void 0 : agentsApi.wake) === "function" && agentKey) {
+          try {
+            await agentsApi.wake(agentKey, {
+              ...canal ? { channelId: canal } : {},
+              ...card.threadRoot ? { threadRoot: card.threadRoot } : {},
+              text: `[ORGFY QUESTION CARD RESPONDIDO · ${card.id}]
+Decisão: ${card.title}
+Opções selecionadas: ${selectedLabels || "(texto livre)"}${answer.freeText ? `
+Observação do Fundador: ${answer.freeText}` : ""}`
+            });
+            notify2(`Resposta salva no CRDT e enviada para ${card.requestedBy} via ctx.agents.wake.`);
+            return;
+          } catch {
+          }
+        }
+        notify2(`Resposta registrada para "${card.title}" (CRDT sincronizado).`);
+      },
+      [refreshQuestionCards, tenantAgents, liveCrew, status.tenantManifest, holding, notify2]
+    );
+    const handleDismissQuestionCard = React.useCallback(
+      async (card) => {
+        await crdtStore.dismissQuestionCard(card.id);
+        await refreshQuestionCards();
+        notify2(`Question Card "${card.title}" adiado.`);
+      },
+      [refreshQuestionCards, notify2]
+    );
+    const handleRecordVisualEvidence = React.useCallback(
+      async (evidence, item, executorName) => {
+        var _a2, _b2, _c2;
+        await crdtStore.recordVisualEvidence({
+          tenant,
+          itemId: item.id,
+          url: evidence.url,
+          note: evidence.note,
+          verdict: evidence.verdict
+        });
+        const agentsApi = ctx == null ? void 0 : ctx.agents;
+        const targetName = executorName || ((_a2 = status.tenantManifest) == null ? void 0 : _a2.coo) || "OrgFy Bento";
+        const targetAg = tenantAgents.find((a) => a.name.toLowerCase().includes(targetName.toLowerCase())) || liveCrew.find((a) => a.name.toLowerCase().includes(targetName.toLowerCase()));
+        const agentKey = (targetAg && "agentKey" in targetAg ? targetAg.agentKey : targetAg == null ? void 0 : targetAg.key) || "";
+        const canal = ((_b2 = status.tenantManifest) == null ? void 0 : _b2.canal) || ((_c2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _c2.canal) || void 0;
+        if (typeof (agentsApi == null ? void 0 : agentsApi.wake) === "function" && agentKey) {
+          try {
+            await agentsApi.wake(agentKey, {
+              ...canal ? { channelId: canal } : {},
+              text: `[ORGFY VISUAL PREVIEW · ${evidence.verdict === "approved" ? "APROVADO ✓" : "AJUSTE SOLICITADO"} · #${item.id.slice(0, 8)} ${item.title}]
+URL: ${evidence.url}
+Nota: ${evidence.note}`
+            });
+          } catch {
+          }
+        }
+        notify2(
+          evidence.verdict === "approved" ? `Evidência visual aprovada e sincronizada (CRDT) para #${item.id.slice(0, 8)}.` : `Ajuste visual enviado para ${targetName}.`
+        );
+      },
+      [tenant, status.tenantManifest, holding, tenantAgents, liveCrew, notify2]
+    );
     const masterLive = mainAgentPubkey && liveCrew.find((a) => {
       var _a2;
       return ((_a2 = a.pubkey) == null ? void 0 : _a2.toLowerCase()) === mainAgentPubkey;
@@ -52273,8 +53201,9 @@ ${body}`
     const empresaRepo = ((_f = status.tenantManifest) == null ? void 0 : _f.repoId) || tenant;
     const isGlobalView = GLOBAL_TABS.has(tab);
     const pendingApprovals = ((holding == null ? void 0 : holding.approvals) || []).filter((a) => a.status === "pendente").length;
+    const pendingQuestionCardsCount = questionCards.filter((c) => c.status === "pending").length;
     const abaixoMinimoCount = (status.modelos || []).filter((m) => m.abaixo_minimo).length;
-    const inboxCount = status.held.length + [...status.inProgress, ...status.recent].filter((i) => i.stage === "escalated" || i.stage === "failed" || i.stage === "reverted").length;
+    const inboxCount = pendingQuestionCardsCount + status.held.length + [...status.inProgress, ...status.recent].filter((i) => i.stage === "escalated" || i.stage === "failed" || i.stage === "reverted").length;
     const tenantWorkingNowCount = tenantAgents.filter((a) => Boolean(a.pubkey && telemetry.byPubkey[a.pubkey.toLowerCase()])).length;
     const tenantTotalAgentsCount = tenantAgents.length;
     const boardCount = status.backlog.length + status.inProgress.length;
@@ -52662,7 +53591,12 @@ ${body}`
                 onSaveAutomations: () => void persistAutomations(automations, true),
                 onRunAutomationNow: handleRunAutomationNow,
                 onExportAutomationYaml: handleExportAutomationYaml,
-                runningAutomationId
+                runningAutomationId,
+                QuestionCardsPanel,
+                questionCards,
+                crdtBackendInfo: crdtStore.getBackendInfo(),
+                onAnswerQuestionCard: handleAnswerQuestionCard,
+                onDismissQuestionCard: handleDismissQuestionCard
               })
             )
           )
@@ -52694,6 +53628,7 @@ ${body}`
         onSessionAction: handleAgentSessionAction,
         onToggleChecklistStep: handleToggleChecklistStep,
         onSendDiffReview: handleSendDiffReview,
+        onRecordVisualEvidence: handleRecordVisualEvidence,
         onClose: () => setSelectedItem(null)
       }),
       renderAgentProfileDrawer({
@@ -53176,6 +54111,7 @@ export {
   INITIAL_REGRAS_PROBATORIAS,
   ORGFY_FAILOVER_REQUEST_EVENT,
   ORGFY_GATE_SNIPPETS,
+  OrgfyCrdtStore,
   PT_BR,
   SVG,
   TENANTS,
@@ -53198,12 +54134,14 @@ export {
   computeNextAutomationRuns,
   createCanonicalCard,
   createOrgfyPipelineAttentionSource,
+  createQuestionCardsPanel,
   emitOrgfyPipelineEvent,
   executeCardProgress,
   exportAutomationToBuzzWorkflowYaml,
   fetchFactoryStatus,
   formatOrgfyAttentionText,
   getBuzzNativeState,
+  getOrgfyCrdtStore,
   getOrgfyPipelineEvents,
   getTelemetrySnapshot,
   hydrateIssueDetail,

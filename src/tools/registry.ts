@@ -44,7 +44,10 @@ import {
   buildHandoffPack,
   runOneShotDecisionDispatch,
   cleanupAttentionOnStageChange,
+  emitOrgfyPipelineEvent,
 } from "../services/presence-dispatcher";
+import { getOrgfyCrdtStore } from "../services/orgfy-crdt-store";
+import { sendDesktopNotification } from "../services/mcp-server";
 import { recordGenAISpan } from "../services/telemetry-otel";
 
 export interface UnifiedOrgfyTool {
@@ -781,6 +784,82 @@ export function buildUnifiedOrgfyTools(ctx: Context | any): UnifiedOrgfyTool[] {
         const dryRun = args?.dry_run !== false;
         const res = await reconcileAgentsViaBuzzApi(ctx, { dryRun });
         return { text: JSON.stringify({ ok: true, dryRun, ...res }, null, 2) };
+      },
+    },
+    {
+      name: "orgfy_question_card",
+      description:
+        "Envia um Question Card estruturado para o Inbox do Fundador ('Aguardando você') sincronizado via ctx.artifactStorage.open(), substituindo blocos de texto longos por opções clicáveis (single/multi) + comentário livre + timeout. Quando respondido, acorda automaticamente o agente solicitante via ctx.agents.wake.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Título curto da decisão solicitada" },
+          question: { type: "string", description: "Contexto objetivo da pergunta" },
+          requested_by: { type: "string", description: "Nome do agente solicitante (ex: 'OrgFy Bento')" },
+          requested_by_pubkey: { type: "string", description: "Pubkey opcional do agente solicitante" },
+          tenant: { type: "string", description: "Empresa/tenant (default: 'orgfy')" },
+          channel_id: { type: "string", description: "Canal onde o agente será acordado ao receber resposta" },
+          thread_root: { type: "string", description: "Thread root opcional" },
+          selection_mode: { type: "string", enum: ["single", "multi"], description: "'single' (radio) ou 'multi' (checkbox)" },
+          allow_free_text: { type: "boolean", description: "Permite observação em texto livre (default: true)" },
+          timeout_minutes: { type: "number", description: "Prazo opcional em minutos para expiração" },
+          options: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "string" },
+                label: { type: "string" },
+                description: { type: "string" },
+              },
+              required: ["label"],
+            },
+            description: "Opções estruturadas para escolha rápida",
+          },
+        },
+        required: ["title", "question"],
+      },
+      execute: async (args: any) => {
+        const title = String(args?.title || "").trim();
+        const question = String(args?.question || "").trim();
+        if (!title || !question) {
+          return { text: JSON.stringify({ ok: false, error: "title e question são obrigatórios." }), isError: true };
+        }
+        const store = getOrgfyCrdtStore(ctx);
+        const card = await store.createQuestionCard({
+          tenant: args?.tenant || "orgfy",
+          title,
+          question,
+          requestedBy: args?.requested_by || args?.requestedBy || "OrgFy Bento",
+          requestedByPubkey: args?.requested_by_pubkey || args?.requestedByPubkey,
+          channelId: args?.channel_id || args?.channelId,
+          threadRoot: args?.thread_root || args?.threadRoot,
+          selectionMode: args?.selection_mode === "multi" ? "multi" : "single",
+          allowFreeText: args?.allow_free_text !== false,
+          timeoutMinutes: typeof args?.timeout_minutes === "number" ? args.timeout_minutes : undefined,
+          options: Array.isArray(args?.options) ? args.options : [],
+        });
+        emitOrgfyPipelineEvent({
+          type: "question_card.created",
+          issueId: card.id,
+          empresa: card.tenant,
+          agent: card.requestedBy,
+          summary: `Question Card: ${card.title} (${card.options.length} opções aguardando Fundador)`,
+        });
+        try {
+          sendDesktopNotification(ctx, `OrgFy Inbox · ${card.requestedBy}`, card.title);
+        } catch {}
+        return {
+          text: JSON.stringify(
+            {
+              ok: true,
+              card,
+              sync: store.getBackendInfo(),
+            },
+            null,
+            2
+          ),
+        };
       },
     },
   ];

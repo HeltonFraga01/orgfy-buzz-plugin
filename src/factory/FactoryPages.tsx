@@ -8,6 +8,7 @@ import type { HoldingControlPlaneSnapshot } from "../services/holding-service";
 import type { BuzzChannelLiveInfo } from "../services/buzz-channel-live";
 import { renderBuzzCanvasViewer } from "../components/BuzzCanvasViewer";
 import { renderAutomationEditor, type OrgfyAutomation } from "./AutomationEditor";
+import type { CrdtBackendInfo, OrgfyQuestionCard, QuestionCardAnswer } from "../services/orgfy-crdt-store";
 import { PT_BR } from "../i18n/pt-BR";
 
 export interface FactorySecondaryPagesProps {
@@ -84,6 +85,11 @@ export interface FactorySecondaryPagesProps {
   onRunAutomationNow?: (auto: OrgfyAutomation) => void;
   onExportAutomationYaml?: (auto: OrgfyAutomation) => void;
   runningAutomationId?: string | null;
+  QuestionCardsPanel?: any;
+  questionCards?: OrgfyQuestionCard[];
+  crdtBackendInfo?: CrdtBackendInfo;
+  onAnswerQuestionCard?: (card: OrgfyQuestionCard, answer: QuestionCardAnswer) => Promise<void> | void;
+  onDismissQuestionCard?: (card: OrgfyQuestionCard) => Promise<void> | void;
 }
 
 const CHART_COLORS = ["var(--chart-2)", "var(--chart-1)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"];
@@ -310,12 +316,16 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
     );
   }
 
-  // ── 2. INBOX (routes/inbox.tsx) ──
+  // ── 2. INBOX (routes/inbox.tsx + Question Cards CRDT · Onda 3) ──
   if (tab === "inbox") {
     const problems = [...status.inProgress, ...status.recent].filter((i) => i.stage === "failed" || i.stage === "reverted");
     const asks = [...status.inProgress, ...status.recent].filter((i) => i.stage === "escalated");
     const reviews = status.inProgress.filter((i) => i.stage === "verifying");
-    const allCount = problems.length + asks.length + reviews.length + status.held.length;
+    const qCards = props.questionCards || [];
+    const pendingQuestionCards = qCards.filter((c) => c.status === "pending");
+    const asksTotal = asks.length + pendingQuestionCards.length;
+    const allCount = problems.length + asksTotal + reviews.length + status.held.length;
+    const showQuestionCards = Boolean(props.QuestionCardsPanel && qCards.length > 0 && (inboxFilter === "all" || inboxFilter === "asks"));
 
     const shown =
       inboxFilter === "asks"
@@ -334,7 +344,7 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
         { className: "of-segmented", style: { width: "fit-content" } },
         ([
           { id: "all", label: `Todos (${allCount})` },
-          { id: "asks", label: `Precisa de resposta (${asks.length})` },
+          { id: "asks", label: `Precisa de resposta (${asksTotal})` },
           { id: "reviews", label: `Revisões (${reviews.length})` },
           { id: "problems", label: `Problemas (${problems.length})` },
         ] as const).map((f) =>
@@ -351,12 +361,19 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
           )
         )
       ),
-      shown.length === 0
+      showQuestionCards &&
+        h(props.QuestionCardsPanel, {
+          cards: qCards,
+          backendInfo: props.crdtBackendInfo,
+          onAnswer: props.onAnswerQuestionCard || (() => {}),
+          onDismiss: props.onDismissQuestionCard || (() => {}),
+        }),
+      shown.length === 0 && !showQuestionCards
         ? h(
             "div",
             { className: "of-card-pad", style: { textAlign: "center", padding: "36px 20px" } },
             h("div", { style: { fontSize: "14px", fontWeight: 700 } }, "Você está em dia"),
-            h("div", { className: "of-muted", style: { marginTop: "4px" } }, "Perguntas de agentes, aprovações de spec, PRs aguardando revisão e falhas aparecem aqui.")
+            h("div", { className: "of-muted", style: { marginTop: "4px" } }, "Perguntas de agentes (Question Cards), aprovações de spec, PRs aguardando revisão e falhas aparecem aqui.")
           )
         : shown.map((item) =>
             h(
