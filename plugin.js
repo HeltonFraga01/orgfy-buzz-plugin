@@ -57565,25 +57565,12 @@ function renderFactorySecondaryPage(props) {
             { className: "of-muted" },
             `Fonte: empresas/${tenant}.json × Buzz Desktop (${tenantAgents.filter((a) => a.inBuzz).length}/${tenantAgents.length} provisionados)`
           ),
-          tenant === "board" && props.onSyncCouncilPrompts && h(
-            "button",
-            {
-              type: "button",
-              className: "of-btn",
-              "data-variant": "primary",
-              "data-sync-council-prompts": "true",
-              disabled: Boolean(props.syncingCouncilPrompts),
-              title: "Lê REPOS/holding/agentes/01..05 e publica via ctx.agents.save() preservando seus modelos e providers",
-              onClick: props.onSyncCouncilPrompts
-            },
-            props.syncingCouncilPrompts ? "Sincronizando..." : "Sincronizar prompts do Conselho (Buzz)"
-          ),
           props.onReconcileAgents && h(
             "button",
             {
               type: "button",
               className: "of-btn",
-              "data-variant": tenant === "board" ? void 0 : "primary",
+              "data-variant": "primary",
               "data-reconcile-r51": "true",
               onClick: props.onReconcileAgents
             },
@@ -57591,190 +57578,310 @@ function renderFactorySecondaryPage(props) {
           )
         )
       ),
-      agentTab === "memory" ? h(
-        "div",
-        { className: "of-card-pad" },
-        h("div", { style: { fontSize: "14px", fontWeight: 700, marginBottom: "4px" } }, `Agentes de ${empresaNome}`),
-        h("div", { className: "of-muted", style: { marginBottom: "10px" } }, "Cada agente abaixo vem do manifesto oficial desta empresa cruzado com o estado ao vivo no Buzz Desktop. Use DM ↗ para conversar na barra lateral ou os controles nativos de sessão (Parar / Compactar / Nova)."),
-        tenantAgents.length === 0 ? h("div", { className: "of-muted" }, `Nenhum agente encontrado em empresas/${tenant}.json.`) : h(
-          "table",
-          { className: "of-table" },
-          h(
-            "thead",
-            null,
-            h("tr", null, h("th", null, "Agente"), h("th", null, "Função & Papel"), h("th", null, "Modelo (Buzz)"), h("th", null, "Status"), h("th", null, "Ações (Buzz API)"))
-          ),
-          h(
-            "tbody",
-            null,
-            tenantAgents.map((a) => {
-              var _a2, _b2;
-              const pkLower = (a.pubkey || "").toLowerCase();
-              const liveTurn = pkLower && ((_a2 = props.telemetry) == null ? void 0 : _a2.byPubkey) ? props.telemetry.byPubkey[pkLower] : null;
-              const presence = pkLower && ((_b2 = props.telemetry) == null ? void 0 : _b2.presenceByPubkey) ? props.telemetry.presenceByPubkey[pkLower] : void 0;
-              const liveMatch = liveCrew.find((c) => {
-                var _a3;
-                return c.key === a.agentKey || pkLower && ((_a3 = c.pubkey) == null ? void 0 : _a3.toLowerCase()) === pkLower;
-              });
-              const isEditing = Boolean(props.editingAgentKey && props.editingAgentKey === a.agentKey);
-              return h(
+      agentTab === "memory" ? (() => {
+        const promptMap = props.agentPromptSyncMap || {};
+        const outdatedCount = tenantAgents.filter((a) => {
+          var _a2;
+          return ((_a2 = promptMap[a.name]) == null ? void 0 : _a2.status) === "outdated";
+        }).length;
+        const renderIcon = (paths, size = 14) => h(
+          "svg",
+          {
+            width: size,
+            height: size,
+            viewBox: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            strokeWidth: 1.85,
+            strokeLinecap: "round",
+            strokeLinejoin: "round",
+            style: { width: `${size}px`, height: `${size}px`, display: "block", flexShrink: 0 },
+            "aria-hidden": "true"
+          },
+          paths.map((d, idx) => h("path", { key: idx, d }))
+        );
+        const iconBtnStyle = { width: "26px", height: "26px", padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: "6px" };
+        return h(
+          "div",
+          { className: "of-card-pad" },
+          h("div", { style: { fontSize: "14px", fontWeight: 700, marginBottom: "4px" } }, `Agentes de ${empresaNome}`),
+          h("div", { className: "of-muted", style: { marginBottom: "10px" } }, "Manifesto oficial cruzado ao vivo com o Buzz Desktop. Prompts versionados no repositório exibem sua versão e ícone de atualização quando desatualizados."),
+          tenantAgents.length === 0 ? h("div", { className: "of-muted" }, `Nenhum agente encontrado em empresas/${tenant}.json.`) : h(
+            "table",
+            { className: "of-table" },
+            h(
+              "thead",
+              null,
+              h(
                 "tr",
-                { key: a.name },
+                null,
+                h("th", null, "Agente"),
+                h("th", null, "Função & Papel"),
+                h("th", null, "Modelo (Buzz)"),
                 h(
-                  "td",
-                  { style: { fontWeight: 600 } },
+                  "th",
+                  null,
                   h(
                     "span",
-                    { style: { display: "inline-flex", alignItems: "center", gap: "7px" } },
-                    (liveMatch == null ? void 0 : liveMatch.picture) ? h("img", { src: liveMatch.picture, alt: a.name, style: { width: "22px", height: "22px", borderRadius: "6px", objectFit: "cover", border: liveTurn ? "1.5px solid var(--status-running)" : "1px solid var(--border)", flexShrink: 0 } }) : h("span", { className: "of-dot", "data-tone": liveTurn ? liveTurn.state === "error" ? "failed" : "running" : a.inBuzz ? "done" : "idle" }),
-                    a.name
-                  )
-                ),
-                h(
-                  "td",
-                  null,
-                  h("div", { style: { fontSize: "12px" } }, a.funcao),
-                  liveTurn ? h("div", { className: "of-mono", style: { fontSize: "10px", color: liveTurn.state === "error" ? "var(--status-failed)" : "var(--status-running)" } }, `⚡ ${liveTurn.stepLabel}`) : h("div", { className: "of-mono of-muted", style: { fontSize: "10px" } }, `papel: ${a.papel} · paralelismo: ${a.parallelism}x`),
-                  isEditing && props.agentEditDraft && props.setAgentEditDraft && h(
-                    "div",
-                    { className: "of-surface", style: { marginTop: "8px", padding: "8px", display: "flex", flexDirection: "column", gap: "6px" }, "data-agent-nip-ap-editor": "true" },
-                    h(
-                      "div",
-                      { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" } },
-                      h("input", { className: "of-input", placeholder: "Provider (ex: nexusmind_anthropic)", value: props.agentEditDraft.provider, onChange: (e) => props.setAgentEditDraft({ provider: e.target.value }) }),
-                      h("input", { className: "of-input", placeholder: "Model (ex: claude-sonnet-5-5)", value: props.agentEditDraft.model, onChange: (e) => props.setAgentEditDraft({ model: e.target.value }) })
-                    ),
-                    h("textarea", { className: "of-textarea", placeholder: "Instructions NIP-AP (opcional)", value: props.agentEditDraft.instructions, onChange: (e) => props.setAgentEditDraft({ instructions: e.target.value }) }),
-                    h(
-                      "div",
-                      { style: { display: "flex", gap: "6px" } },
-                      h("button", { type: "button", className: "of-btn", "data-variant": "primary", onClick: () => {
-                        var _a3;
-                        return (_a3 = props.onSaveAgentProfile) == null ? void 0 : _a3.call(props, a.agentKey, props.agentEditDraft);
-                      } }, "Salvar no Buzz (ctx.agents.save)"),
-                      h("button", { type: "button", className: "of-btn", onClick: () => {
-                        var _a3;
-                        return (_a3 = props.setEditingAgentKey) == null ? void 0 : _a3.call(props, null);
-                      } }, "Cancelar")
+                    { style: { display: "inline-flex", alignItems: "center", gap: "5px" } },
+                    "Prompt",
+                    outdatedCount > 0 && props.onSyncAllOutdatedPrompts && h(
+                      "button",
+                      {
+                        type: "button",
+                        className: "of-btn",
+                        "data-variant": "ghost",
+                        "data-sync-all-prompts": "true",
+                        disabled: props.syncingPromptKey === "__ALL__",
+                        title: `Sincronizar ${outdatedCount} prompt(s) desatualizado(s) no Buzz (preserva modelos e providers)`,
+                        "aria-label": `Sincronizar ${outdatedCount} prompts desatualizados`,
+                        style: { height: "20px", padding: "0 5px", fontSize: "10px", color: "var(--status-waiting)", display: "inline-flex", alignItems: "center", gap: "3px" },
+                        onClick: props.onSyncAllOutdatedPrompts
+                      },
+                      renderIcon(["M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8", "M3 3v5h5", "M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16", "M16 16h5v5"], 11),
+                      String(outdatedCount)
                     )
                   )
                 ),
-                h("td", { className: "of-mono" }, a.model),
-                h(
-                  "td",
-                  null,
+                h("th", null, "Status"),
+                h("th", null, "Ações")
+              )
+            ),
+            h(
+              "tbody",
+              null,
+              tenantAgents.map((a) => {
+                var _a2, _b2;
+                const pkLower = (a.pubkey || "").toLowerCase();
+                const liveTurn = pkLower && ((_a2 = props.telemetry) == null ? void 0 : _a2.byPubkey) ? props.telemetry.byPubkey[pkLower] : null;
+                const presence = pkLower && ((_b2 = props.telemetry) == null ? void 0 : _b2.presenceByPubkey) ? props.telemetry.presenceByPubkey[pkLower] : void 0;
+                const liveMatch = liveCrew.find((c) => {
+                  var _a3;
+                  return c.key === a.agentKey || pkLower && ((_a3 = c.pubkey) == null ? void 0 : _a3.toLowerCase()) === pkLower;
+                });
+                const isEditing = Boolean(props.editingAgentKey && props.editingAgentKey === a.agentKey);
+                const pInfo = promptMap[a.name];
+                const isSyncingThis = props.syncingPromptKey === a.name || props.syncingPromptKey === "__ALL__" && (pInfo == null ? void 0 : pInfo.status) === "outdated";
+                return h(
+                  "tr",
+                  { key: a.name },
                   h(
-                    "span",
-                    { className: "of-pill", "data-tone": liveTurn ? liveTurn.state === "error" ? "failed" : "running" : a.inBuzz ? "done" : "waiting" },
-                    liveTurn ? "Respondendo agora" : presence === "online" ? "Online" : a.inBuzz ? "Disponível" : "A provisionar"
-                  )
-                ),
-                h(
-                  "td",
-                  null,
+                    "td",
+                    { style: { fontWeight: 600, whiteSpace: "nowrap" } },
+                    h(
+                      "span",
+                      { style: { display: "inline-flex", alignItems: "center", gap: "7px" } },
+                      (liveMatch == null ? void 0 : liveMatch.picture) ? h("img", { src: liveMatch.picture, alt: a.name, style: { width: "22px", height: "22px", borderRadius: "6px", objectFit: "cover", border: liveTurn ? "1.5px solid var(--status-running)" : "1px solid var(--border)", flexShrink: 0 } }) : h("span", { className: "of-dot", "data-tone": liveTurn ? liveTurn.state === "error" ? "failed" : "running" : a.inBuzz ? "done" : "idle" }),
+                      a.name
+                    )
+                  ),
                   h(
-                    "div",
-                    { style: { display: "inline-flex", alignItems: "center", gap: "4px", flexWrap: "wrap" } },
-                    onOpenAgentDm && a.pubkey && h(
-                      "button",
+                    "td",
+                    null,
+                    h("div", { style: { fontSize: "12px" } }, a.funcao),
+                    liveTurn ? h("div", { className: "of-mono", style: { fontSize: "10px", color: liveTurn.state === "error" ? "var(--status-failed)" : "var(--status-running)" } }, `⚡ ${liveTurn.stepLabel}`) : h("div", { className: "of-mono of-muted", style: { fontSize: "10px" } }, `papel: ${a.papel} · paralelismo: ${a.parallelism}x`),
+                    isEditing && props.agentEditDraft && props.setAgentEditDraft && h(
+                      "div",
+                      { className: "of-surface", style: { marginTop: "8px", padding: "8px", display: "flex", flexDirection: "column", gap: "6px" }, "data-agent-nip-ap-editor": "true" },
+                      h(
+                        "div",
+                        { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" } },
+                        h("input", { className: "of-input", placeholder: "Provider (ex: nexusmind_anthropic)", value: props.agentEditDraft.provider, onChange: (e) => props.setAgentEditDraft({ provider: e.target.value }) }),
+                        h("input", { className: "of-input", placeholder: "Model (ex: claude-sonnet-5-5)", value: props.agentEditDraft.model, onChange: (e) => props.setAgentEditDraft({ model: e.target.value }) })
+                      ),
+                      h("textarea", { className: "of-textarea", placeholder: "Instructions NIP-AP (opcional)", value: props.agentEditDraft.instructions, onChange: (e) => props.setAgentEditDraft({ instructions: e.target.value }) }),
+                      h(
+                        "div",
+                        { style: { display: "flex", gap: "6px" } },
+                        h("button", { type: "button", className: "of-btn", "data-variant": "primary", onClick: () => {
+                          var _a3;
+                          return (_a3 = props.onSaveAgentProfile) == null ? void 0 : _a3.call(props, a.agentKey, props.agentEditDraft);
+                        } }, "Salvar no Buzz"),
+                        h("button", { type: "button", className: "of-btn", onClick: () => {
+                          var _a3;
+                          return (_a3 = props.setEditingAgentKey) == null ? void 0 : _a3.call(props, null);
+                        } }, "Cancelar")
+                      )
+                    )
+                  ),
+                  h("td", { className: "of-mono", style: { fontSize: "11.5px" } }, a.model),
+                  h(
+                    "td",
+                    { style: { whiteSpace: "nowrap" } },
+                    (pInfo == null ? void 0 : pInfo.status) === "outdated" ? h(
+                      "span",
+                      { style: { display: "inline-flex", alignItems: "center", gap: "4px" }, "data-agent-prompt-cell": a.name },
+                      h(
+                        "span",
+                        {
+                          className: "of-pill of-mono",
+                          "data-tone": "waiting",
+                          style: { fontSize: "10px", padding: "1px 6px" },
+                          title: `Desatualizado no Buzz (${pInfo.liveVersion || "sem versão"}) · Repo: ${pInfo.sourcePath} (${pInfo.version})`
+                        },
+                        pInfo.version
+                      ),
+                      props.onSyncAgentPrompt && a.inBuzz && h(
+                        "button",
+                        {
+                          type: "button",
+                          className: "of-btn",
+                          "data-variant": "ghost",
+                          "data-sync-agent-prompt": a.name,
+                          disabled: isSyncingThis,
+                          title: `Sincronizar prompt ${pInfo.version} de ${pInfo.sourcePath} no Buzz (preserva modelo/provider)`,
+                          "aria-label": `Sincronizar prompt de ${a.name}`,
+                          style: { ...iconBtnStyle, width: "22px", height: "22px", color: "var(--status-waiting)" },
+                          onClick: () => props.onSyncAgentPrompt({ name: a.name, agentKey: a.agentKey, pubkey: a.pubkey })
+                        },
+                        renderIcon(["M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8", "M3 3v5h5", "M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16", "M16 16h5v5"], 12)
+                      )
+                    ) : (pInfo == null ? void 0 : pInfo.status) === "synced" ? h(
+                      "span",
                       {
-                        type: "button",
-                        className: "of-btn",
-                        "data-variant": "ghost",
-                        style: { color: "var(--primary)", padding: "3px 7px" },
-                        onClick: () => onOpenAgentDm({ key: a.agentKey, pubkey: a.pubkey, name: a.name })
+                        className: "of-pill of-mono",
+                        "data-tone": "done",
+                        "data-agent-prompt-cell": a.name,
+                        style: { fontSize: "10px", padding: "1px 6px" },
+                        title: `Sincronizado com ${pInfo.sourcePath}`
                       },
-                      "DM ↗"
-                    ),
-                    props.onOpenAgentDrawer && a.inBuzz && a.agentKey && h(
-                      "button",
+                      `✓ ${pInfo.version}`
+                    ) : h(
+                      "span",
                       {
-                        type: "button",
-                        className: "of-btn",
-                        "data-variant": "ghost",
-                        style: { padding: "3px 6px", fontSize: "10.5px" },
-                        onClick: () => props.onOpenAgentDrawer(a.agentKey)
+                        className: "of-mono of-muted",
+                        style: { fontSize: "10.5px" },
+                        title: "Prompt gerenciado diretamente no Buzz (sem arquivo versionado no repo)"
                       },
-                      "Transcript"
-                    ),
-                    props.setEditingAgentKey && props.setAgentEditDraft && a.inBuzz && a.agentKey && h(
-                      "button",
-                      {
-                        type: "button",
-                        className: "of-btn",
-                        "data-variant": "ghost",
-                        style: { padding: "3px 6px", fontSize: "10.5px" },
-                        onClick: () => {
-                          if (isEditing) {
-                            props.setEditingAgentKey(null);
-                          } else {
-                            props.setEditingAgentKey(a.agentKey);
-                            props.setAgentEditDraft({
-                              provider: (liveMatch == null ? void 0 : liveMatch.provider) || "",
-                              model: (liveMatch == null ? void 0 : liveMatch.model) || a.model || "",
-                              instructions: (liveMatch == null ? void 0 : liveMatch.instructions) || ""
-                            });
+                      (pInfo == null ? void 0 : pInfo.liveVersion) || "Buzz"
+                    )
+                  ),
+                  h(
+                    "td",
+                    { style: { whiteSpace: "nowrap" } },
+                    h(
+                      "span",
+                      { className: "of-pill", "data-tone": liveTurn ? liveTurn.state === "error" ? "failed" : "running" : a.inBuzz ? "done" : "waiting" },
+                      liveTurn ? "Respondendo" : presence === "online" ? "Online" : a.inBuzz ? "Disponível" : "A provisionar"
+                    )
+                  ),
+                  h(
+                    "td",
+                    { style: { whiteSpace: "nowrap" } },
+                    h(
+                      "div",
+                      { style: { display: "inline-flex", alignItems: "center", gap: "2px", flexWrap: "nowrap" }, "data-agent-icon-actions": "true" },
+                      onOpenAgentDm && a.pubkey && h(
+                        "button",
+                        {
+                          type: "button",
+                          className: "of-btn",
+                          "data-variant": "ghost",
+                          title: `Abrir DM lateral com ${a.name}`,
+                          "aria-label": `Abrir DM com ${a.name}`,
+                          style: { ...iconBtnStyle, color: "var(--primary)" },
+                          onClick: () => onOpenAgentDm({ key: a.agentKey, pubkey: a.pubkey, name: a.name })
+                        },
+                        renderIcon(["M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"])
+                      ),
+                      props.onOpenAgentDrawer && a.inBuzz && a.agentKey && h(
+                        "button",
+                        {
+                          type: "button",
+                          className: "of-btn",
+                          "data-variant": "ghost",
+                          title: `Transcript e perfil de ${a.name}`,
+                          "aria-label": `Transcript de ${a.name}`,
+                          style: iconBtnStyle,
+                          onClick: () => props.onOpenAgentDrawer(a.agentKey)
+                        },
+                        renderIcon(["M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z", "M14 2v6h6", "M16 13H8", "M16 17H8"])
+                      ),
+                      props.setEditingAgentKey && props.setAgentEditDraft && a.inBuzz && a.agentKey && h(
+                        "button",
+                        {
+                          type: "button",
+                          className: "of-btn",
+                          "data-variant": "ghost",
+                          title: isEditing ? "Fechar editor" : `Editar modelo e prompt de ${a.name}`,
+                          "aria-label": `Editar ${a.name}`,
+                          style: { ...iconBtnStyle, color: isEditing ? "var(--primary)" : void 0 },
+                          onClick: () => {
+                            if (isEditing) {
+                              props.setEditingAgentKey(null);
+                            } else {
+                              props.setEditingAgentKey(a.agentKey);
+                              props.setAgentEditDraft({
+                                provider: (liveMatch == null ? void 0 : liveMatch.provider) || "",
+                                model: (liveMatch == null ? void 0 : liveMatch.model) || a.model || "",
+                                instructions: (liveMatch == null ? void 0 : liveMatch.instructions) || ""
+                              });
+                            }
                           }
-                        }
-                      },
-                      isEditing ? "Fechar" : "Editar"
-                    ),
-                    props.onAgentSessionAction && a.inBuzz && a.agentKey && h(
-                      "button",
-                      {
-                        type: "button",
-                        className: "of-btn",
-                        "data-variant": "ghost",
-                        style: { padding: "3px 6px", fontSize: "10.5px" },
-                        title: "Compactar contexto da sessão",
-                        onClick: () => props.onAgentSessionAction(a.agentKey, "compact")
-                      },
-                      "Compactar"
-                    ),
-                    props.onAgentSessionAction && a.inBuzz && a.agentKey && h(
-                      "button",
-                      {
-                        type: "button",
-                        className: "of-btn",
-                        "data-variant": "ghost",
-                        style: { padding: "3px 6px", fontSize: "10.5px" },
-                        title: "Iniciar nova sessão limpa",
-                        onClick: () => props.onAgentSessionAction(a.agentKey, "new")
-                      },
-                      "Nova"
-                    ),
-                    props.onAutomateFromSession && h(
-                      "button",
-                      {
-                        type: "button",
-                        className: "of-btn",
-                        "data-variant": "ghost",
-                        "data-automate-from-session": a.name,
-                        style: { padding: "3px 6px", fontSize: "10.5px" },
-                        title: "Converter sessão deste agente em Automação recorrente (1 clique)",
-                        onClick: () => props.onAutomateFromSession({ agentName: a.name, stepLabel: liveTurn == null ? void 0 : liveTurn.stepLabel })
-                      },
-                      "⚡ Automatizar"
-                    ),
-                    props.onAgentSessionAction && liveTurn && a.agentKey && h(
-                      "button",
-                      {
-                        type: "button",
-                        className: "of-btn",
-                        "data-variant": "danger",
-                        style: { padding: "3px 6px", fontSize: "10.5px" },
-                        title: "Interromper turno em andamento",
-                        onClick: () => props.onAgentSessionAction(a.agentKey, "interrupt")
-                      },
-                      "Parar"
+                        },
+                        renderIcon(["M12 20h9", "M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"])
+                      ),
+                      props.onAgentSessionAction && a.inBuzz && a.agentKey && h(
+                        "button",
+                        {
+                          type: "button",
+                          className: "of-btn",
+                          "data-variant": "ghost",
+                          title: "Compactar contexto da sessão",
+                          "aria-label": `Compactar sessão de ${a.name}`,
+                          style: iconBtnStyle,
+                          onClick: () => props.onAgentSessionAction(a.agentKey, "compact")
+                        },
+                        renderIcon(["M4 14h6v6", "M20 10h-6V4", "M14 10l7-7", "M3 21l7-7"])
+                      ),
+                      props.onAgentSessionAction && a.inBuzz && a.agentKey && h(
+                        "button",
+                        {
+                          type: "button",
+                          className: "of-btn",
+                          "data-variant": "ghost",
+                          title: "Iniciar nova sessão limpa",
+                          "aria-label": `Nova sessão de ${a.name}`,
+                          style: iconBtnStyle,
+                          onClick: () => props.onAgentSessionAction(a.agentKey, "new")
+                        },
+                        renderIcon(["M12 5v14", "M5 12h14"])
+                      ),
+                      props.onAutomateFromSession && h(
+                        "button",
+                        {
+                          type: "button",
+                          className: "of-btn",
+                          "data-variant": "ghost",
+                          "data-automate-from-session": a.name,
+                          title: "Converter sessão em automação recorrente (1 clique)",
+                          "aria-label": `Automatizar ${a.name}`,
+                          style: iconBtnStyle,
+                          onClick: () => props.onAutomateFromSession({ agentName: a.name, stepLabel: liveTurn == null ? void 0 : liveTurn.stepLabel })
+                        },
+                        renderIcon(["M13 2 3 14h9l-1 8 10-12h-9l1-8z"])
+                      ),
+                      props.onAgentSessionAction && liveTurn && a.agentKey && h(
+                        "button",
+                        {
+                          type: "button",
+                          className: "of-btn",
+                          "data-variant": "danger",
+                          title: "Interromper turno em andamento",
+                          "aria-label": `Parar ${a.name}`,
+                          style: iconBtnStyle,
+                          onClick: () => props.onAgentSessionAction(a.agentKey, "interrupt")
+                        },
+                        renderIcon(["M6 6h12v12H6z"])
+                      )
                     )
                   )
-                )
-              );
-            })
+                );
+              })
+            )
           )
-        )
-      ) : agentTab === "eval" ? (() => {
+        );
+      })() : agentTab === "eval" ? (() => {
         const evalFilter = props.evalFilter || "all";
         const approvedCount = modelos.filter((m) => m.evalStatus === "approved").length;
         const belowCount = modelos.filter((m) => m.evalStatus === "below_min").length;
@@ -60113,7 +60220,8 @@ function createFactoryAppComponent(ctx, opts = {}) {
     const [selectedItemDetail, setSelectedItemDetail] = React.useState(null);
     const [selectedItemDetailLoading, setSelectedItemDetailLoading] = React.useState(false);
     const [editingAgentKey, setEditingAgentKey] = React.useState(null);
-    const [syncingCouncilPrompts, setSyncingCouncilPrompts] = React.useState(false);
+    const [syncingPromptKey, setSyncingPromptKey] = React.useState(null);
+    const [agentPromptSyncMap, setAgentPromptSyncMap] = React.useState({});
     const [agentEditDraft, setAgentEditDraftState] = React.useState({ provider: "", model: "", instructions: "" });
     const setAgentEditDraft = React.useCallback((patch) => {
       setAgentEditDraftState((prev) => ({ ...prev, ...patch }));
@@ -60766,25 +60874,44 @@ function createFactoryAppComponent(ctx, opts = {}) {
       },
       [liveCrew, tenant, notify2, refresh]
     );
-    const handleSyncCouncilPrompts = React.useCallback(async () => {
-      var _a2, _b2, _c2;
-      const agentsApi = ctx == null ? void 0 : ctx.agents;
+    const normalizePrompt = React.useCallback((txt) => txt.replace(/\r\n/g, "\n").trim(), []);
+    const shortPromptHash = React.useCallback((txt) => {
+      let hVal = 2166136261;
+      for (let i = 0; i < txt.length; i += 1) {
+        hVal ^= txt.charCodeAt(i);
+        hVal = Math.imul(hVal, 16777619);
+      }
+      return `v·${(hVal >>> 0).toString(16).padStart(8, "0").slice(0, 4)}`;
+    }, []);
+    const resolvePromptCandidates = React.useCallback((targetTenant, agentName) => {
+      const low = agentName.trim().toLowerCase();
+      const boardFiles = {
+        "conselho cto": "01-conselho-cto.md",
+        "conselho cro": "02-conselho-cro.md",
+        "conselho cpo": "03-conselho-cpo.md",
+        "conselho coo": "04-conselho-coo.md",
+        "conselho cgo": "05-conselho-cgo.md"
+      };
+      const out = [];
+      if (boardFiles[low]) {
+        const fn = boardFiles[low];
+        out.push({ abs: `/Users/heltonfraga/.buzz/REPOS/holding/agentes/${fn}`, label: `holding/agentes/${fn}` });
+        out.push({ abs: `/Users/heltonfraga/.buzz/REPOS/orgfy/empresas/conselho/agentes/${fn}`, label: `orgfy/empresas/conselho/agentes/${fn}` });
+      }
+      const slug = low.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+      if (slug) {
+        out.push({ abs: `/Users/heltonfraga/.buzz/REPOS/holding/subsidiarias/${targetTenant}/agentes/${slug}.md`, label: `holding/subsidiarias/${targetTenant}/agentes/${slug}.md` });
+        out.push({ abs: `/Users/heltonfraga/.buzz/REPOS/holding/agentes/${slug}.md`, label: `holding/agentes/${slug}.md` });
+        out.push({ abs: `/Users/heltonfraga/.buzz/REPOS/orgfy/empresas/${targetTenant}/agentes/${slug}.md`, label: `orgfy/empresas/${targetTenant}/agentes/${slug}.md` });
+      }
+      return out;
+    }, []);
+    React.useEffect(() => {
+      var _a2;
+      if (tab !== "agents") return;
       const readFile = (_a2 = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a2.readFile;
-      if (typeof (agentsApi == null ? void 0 : agentsApi.save) !== "function") {
-        notify2("API ctx.agents.save indisponível nesta versão do Buzz.");
-        return;
-      }
-      if (typeof readFile !== "function") {
-        notify2("API ctx.host.readFile indisponível para ler os prompts do Conselho.");
-        return;
-      }
-      const targets = [
-        { name: "Conselho CTO", pubkey: "23afe6952365da1ac539f3c9e372ce533e541249e1fb6f2f0e1f0776cab879a6", file: "01-conselho-cto.md" },
-        { name: "Conselho CRO", pubkey: "6988361a3ab2427ed1a45a4ae3aeb8160cf3cb950e0d71609096b9b4717fa276", file: "02-conselho-cro.md" },
-        { name: "Conselho CPO", pubkey: "f5b4f41290119e35e2c689f5542b9fdcda3bd5ed134f3b555adae2beb42470e2", file: "03-conselho-cpo.md" },
-        { name: "Conselho COO", pubkey: "6a55606c488c86781013f9f9d9d26f63f9f809af5f67bcdf44784bc2a0946f12", file: "04-conselho-coo.md" },
-        { name: "Conselho CGO", pubkey: "3c120707546229742e5517f12baf59b75afbc3aa3690ce6ad5a6b07931232e57", file: "05-conselho-cgo.md" }
-      ];
+      if (typeof readFile !== "function" || tenantAgents.length === 0) return;
+      let cancelled = false;
       const decodeText2 = (raw) => {
         if (typeof raw === "string") return raw;
         if (raw instanceof Uint8Array) return new TextDecoder().decode(raw);
@@ -60792,56 +60919,149 @@ function createFactoryAppComponent(ctx, opts = {}) {
         if (typeof (raw == null ? void 0 : raw.content) === "string") return raw.content;
         return "";
       };
-      setSyncingCouncilPrompts(true);
+      (async () => {
+        const nextMap = {};
+        await Promise.all(
+          tenantAgents.map(async (ag) => {
+            const pkLower = (ag.pubkey || "").toLowerCase();
+            const liveMatch = liveCrew.find((c) => {
+              var _a3;
+              return c.key === ag.agentKey || pkLower && ((_a3 = c.pubkey) == null ? void 0 : _a3.toLowerCase()) === pkLower;
+            });
+            const liveNorm = normalizePrompt((liveMatch == null ? void 0 : liveMatch.instructions) || "");
+            const liveVer = liveNorm ? shortPromptHash(liveNorm) : void 0;
+            const candidates = resolvePromptCandidates(tenant, ag.name);
+            let foundText = "";
+            let foundLabel = "";
+            for (const c of candidates) {
+              try {
+                const txt = normalizePrompt(decodeText2(await readFile(c.abs)));
+                if (txt) {
+                  foundText = txt;
+                  foundLabel = c.label;
+                  break;
+                }
+              } catch {
+              }
+            }
+            if (!foundText) {
+              nextMap[ag.name] = { status: "unversioned", version: liveVer || "Buzz", liveVersion: liveVer };
+              return;
+            }
+            const repoVer = shortPromptHash(foundText);
+            const isSynced = liveNorm === foundText;
+            nextMap[ag.name] = {
+              status: isSynced ? "synced" : "outdated",
+              version: repoVer,
+              liveVersion: liveVer,
+              sourcePath: foundLabel,
+              content: foundText
+            };
+          })
+        );
+        if (!cancelled) setAgentPromptSyncMap(nextMap);
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, [tab, tenant, tenantAgents, liveCrew, normalizePrompt, shortPromptHash, resolvePromptCandidates]);
+    const handleSyncAgentPrompt = React.useCallback(
+      async (target) => {
+        var _a2, _b2;
+        const agentsApi = ctx == null ? void 0 : ctx.agents;
+        if (typeof (agentsApi == null ? void 0 : agentsApi.save) !== "function") {
+          notify2("API ctx.agents.save indisponível nesta versão do Buzz.");
+          return;
+        }
+        const info = agentPromptSyncMap[target.name];
+        if (!(info == null ? void 0 : info.content)) {
+          notify2(`Nenhum prompt versionado encontrado para ${target.name}.`);
+          return;
+        }
+        setSyncingPromptKey(target.name);
+        try {
+          const freshAgents = ((_b2 = (_a2 = agentsApi.snapshot) == null ? void 0 : _a2.call(agentsApi)) == null ? void 0 : _b2.agents) || [];
+          const pkLower = (target.pubkey || "").toLowerCase();
+          const match = freshAgents.find((a) => (a == null ? void 0 : a.key) === target.agentKey) || (pkLower ? freshAgents.find((a) => String((a == null ? void 0 : a.pubkey) || "").toLowerCase() === pkLower) : null) || freshAgents.find((a) => String((a == null ? void 0 : a.name) || "").toLowerCase() === target.name.toLowerCase());
+          if (!(match == null ? void 0 : match.key)) {
+            notify2(`${target.name} não encontrado no Buzz Desktop.`);
+            return;
+          }
+          const baseCfg = (match == null ? void 0 : match.config) && typeof match.config === "object" ? match.config : {};
+          await agentsApi.save(match.key, {
+            config: {
+              ...baseCfg,
+              instructions: info.content
+            }
+          });
+          setAgentPromptSyncMap((prev) => ({
+            ...prev,
+            [target.name]: { ...info, status: "synced", liveVersion: info.version }
+          }));
+          notify2(`Prompt de ${target.name} atualizado (${info.version} · modelo preservado) ✓`);
+          await refresh(tenant, false, true);
+        } catch (err) {
+          notify2(`Falha ao sincronizar ${target.name}: ${(err == null ? void 0 : err.message) || err}`);
+        } finally {
+          setSyncingPromptKey(null);
+        }
+      },
+      [agentPromptSyncMap, tenant, notify2, refresh]
+    );
+    const handleSyncAllOutdatedPrompts = React.useCallback(async () => {
+      var _a2, _b2;
+      const agentsApi = ctx == null ? void 0 : ctx.agents;
+      if (typeof (agentsApi == null ? void 0 : agentsApi.save) !== "function") {
+        notify2("API ctx.agents.save indisponível nesta versão do Buzz.");
+        return;
+      }
+      const outdated = tenantAgents.filter((a) => {
+        var _a3, _b3;
+        return ((_a3 = agentPromptSyncMap[a.name]) == null ? void 0 : _a3.status) === "outdated" && ((_b3 = agentPromptSyncMap[a.name]) == null ? void 0 : _b3.content);
+      });
+      if (outdated.length === 0) {
+        notify2("Todos os prompts versionados já estão sincronizados ✓");
+        return;
+      }
+      setSyncingPromptKey("__ALL__");
       try {
-        const freshAgents = ((_c2 = (_b2 = agentsApi.snapshot) == null ? void 0 : _b2.call(agentsApi)) == null ? void 0 : _c2.agents) || [];
+        const freshAgents = ((_b2 = (_a2 = agentsApi.snapshot) == null ? void 0 : _a2.call(agentsApi)) == null ? void 0 : _b2.agents) || [];
         let updated = 0;
         let firstError = "";
-        for (const t of targets) {
-          let instructions = "";
-          for (const candidatePath of [
-            `/Users/heltonfraga/.buzz/REPOS/holding/agentes/${t.file}`,
-            `/Users/heltonfraga/.buzz/REPOS/orgfy/empresas/conselho/agentes/${t.file}`
-          ]) {
-            try {
-              const txt = decodeText2(await readFile(candidatePath)).trim();
-              if (txt) {
-                instructions = txt;
-                break;
-              }
-            } catch {
-            }
-          }
-          if (!instructions) {
-            if (!firstError) firstError = `Arquivo ${t.file} não encontrado`;
-            continue;
-          }
-          const match = freshAgents.find((a) => String((a == null ? void 0 : a.pubkey) || "").toLowerCase() === t.pubkey.toLowerCase()) || freshAgents.find((a) => String((a == null ? void 0 : a.name) || "").toLowerCase() === t.name.toLowerCase());
-          if (!(match == null ? void 0 : match.key)) {
-            if (!firstError) firstError = `${t.name} não encontrado no Buzz`;
-            continue;
-          }
+        const syncedNames = [];
+        for (const ag of outdated) {
+          const info = agentPromptSyncMap[ag.name];
+          const pkLower = (ag.pubkey || "").toLowerCase();
+          const match = freshAgents.find((a) => (a == null ? void 0 : a.key) === ag.agentKey) || (pkLower ? freshAgents.find((a) => String((a == null ? void 0 : a.pubkey) || "").toLowerCase() === pkLower) : null) || freshAgents.find((a) => String((a == null ? void 0 : a.name) || "").toLowerCase() === ag.name.toLowerCase());
+          if (!(match == null ? void 0 : match.key) || !(info == null ? void 0 : info.content)) continue;
           const baseCfg = (match == null ? void 0 : match.config) && typeof match.config === "object" ? match.config : {};
           try {
             await agentsApi.save(match.key, {
-              config: {
-                ...baseCfg,
-                instructions
-              }
+              config: { ...baseCfg, instructions: info.content }
             });
             updated += 1;
+            syncedNames.push(ag.name);
           } catch (err) {
-            if (!firstError) firstError = `${t.name}: ${(err == null ? void 0 : err.message) || err}`;
+            if (!firstError) firstError = `${ag.name}: ${(err == null ? void 0 : err.message) || err}`;
           }
         }
+        if (syncedNames.length > 0) {
+          setAgentPromptSyncMap((prev) => {
+            const copy = { ...prev };
+            for (const n of syncedNames) {
+              if (copy[n]) copy[n] = { ...copy[n], status: "synced", liveVersion: copy[n].version };
+            }
+            return copy;
+          });
+        }
         notify2(
-          updated > 0 ? `${updated}/${targets.length} prompt(s) do Conselho publicados no Buzz (modelos preservados) ✓` : `Falha ao sincronizar prompts do Conselho${firstError ? `: ${firstError}` : ""}.`
+          updated > 0 ? `${updated}/${outdated.length} prompt(s) sincronizado(s) no Buzz (modelos preservados) ✓` : `Falha ao sincronizar prompts${firstError ? `: ${firstError}` : ""}.`
         );
-        await refresh(tenant);
+        await refresh(tenant, false, true);
       } finally {
-        setSyncingCouncilPrompts(false);
+        setSyncingPromptKey(null);
       }
-    }, [tenant, notify2, refresh]);
+    }, [tenantAgents, agentPromptSyncMap, tenant, notify2, refresh]);
     const handleAgentSessionAction = React.useCallback(
       async (agentKey, action) => {
         var _a2, _b2;
@@ -61988,8 +62208,10 @@ Nota: ${evidence.note}`
                 onOpenBuzzLink: handleOpenBuzzLink,
                 Boardroom3D,
                 onReconcileAgents: handleReconcileAgentsR51,
-                onSyncCouncilPrompts: handleSyncCouncilPrompts,
-                syncingCouncilPrompts,
+                agentPromptSyncMap,
+                syncingPromptKey,
+                onSyncAgentPrompt: handleSyncAgentPrompt,
+                onSyncAllOutdatedPrompts: handleSyncAllOutdatedPrompts,
                 onAgentSessionAction: handleAgentSessionAction,
                 onOpenAgentDrawer: (k) => void handleOpenNativeAgentProfile(k),
                 onSaveAgentProfile: handleSaveAgentProfile,

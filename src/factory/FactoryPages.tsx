@@ -60,8 +60,10 @@ export interface FactorySecondaryPagesProps {
   onOpenBuzzLink?: (href: string) => void;
   Boardroom3D?: any;
   onReconcileAgents?: () => void;
-  onSyncCouncilPrompts?: () => void;
-  syncingCouncilPrompts?: boolean;
+  agentPromptSyncMap?: Record<string, { status: "synced" | "outdated" | "unversioned"; version: string; liveVersion?: string; sourcePath?: string; content?: string }>;
+  syncingPromptKey?: string | null;
+  onSyncAgentPrompt?: (target: { name: string; agentKey: string; pubkey?: string }) => Promise<void> | void;
+  onSyncAllOutdatedPrompts?: () => Promise<void> | void;
   onAgentSessionAction?: (agentKey: string, action: "interrupt" | "compact" | "new") => void;
   onOpenAgentDrawer?: (agentKey: string) => void;
   onSaveAgentProfile?: (agentKey: string, patch: { provider: string; model: string; instructions?: string }) => Promise<void> | void;
@@ -834,27 +836,13 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
             { className: "of-muted" },
             `Fonte: empresas/${tenant}.json × Buzz Desktop (${tenantAgents.filter((a) => a.inBuzz).length}/${tenantAgents.length} provisionados)`
           ),
-          tenant === "board" && props.onSyncCouncilPrompts &&
-            h(
-              "button",
-              {
-                type: "button",
-                className: "of-btn",
-                "data-variant": "primary",
-                "data-sync-council-prompts": "true",
-                disabled: Boolean(props.syncingCouncilPrompts),
-                title: "Lê REPOS/holding/agentes/01..05 e publica via ctx.agents.save() preservando seus modelos e providers",
-                onClick: props.onSyncCouncilPrompts,
-              },
-              props.syncingCouncilPrompts ? "Sincronizando..." : "Sincronizar prompts do Conselho (Buzz)"
-            ),
           props.onReconcileAgents &&
             h(
               "button",
               {
                 type: "button",
                 className: "of-btn",
-                "data-variant": tenant === "board" ? undefined : "primary",
+                "data-variant": "primary",
                 "data-reconcile-r51": "true",
                 onClick: props.onReconcileAgents,
               },
@@ -863,190 +851,314 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
         )
       ),
       agentTab === "memory"
-        ? h(
-            "div",
-            { className: "of-card-pad" },
-            h("div", { style: { fontSize: "14px", fontWeight: 700, marginBottom: "4px" } }, `Agentes de ${empresaNome}`),
-            h("div", { className: "of-muted", style: { marginBottom: "10px" } }, "Cada agente abaixo vem do manifesto oficial desta empresa cruzado com o estado ao vivo no Buzz Desktop. Use DM ↗ para conversar na barra lateral ou os controles nativos de sessão (Parar / Compactar / Nova)."),
-            tenantAgents.length === 0
-              ? h("div", { className: "of-muted" }, `Nenhum agente encontrado em empresas/${tenant}.json.`)
-              : h(
-                  "table",
-                  { className: "of-table" },
-                  h(
-                    "thead",
-                    null,
-                    h("tr", null, h("th", null, "Agente"), h("th", null, "Função & Papel"), h("th", null, "Modelo (Buzz)"), h("th", null, "Status"), h("th", null, "Ações (Buzz API)"))
-                  ),
-                  h(
-                    "tbody",
-                    null,
-                    tenantAgents.map((a) => {
-                      const pkLower = (a.pubkey || "").toLowerCase();
-                      const liveTurn = pkLower && props.telemetry?.byPubkey ? props.telemetry.byPubkey[pkLower] : null;
-                      const presence = pkLower && props.telemetry?.presenceByPubkey ? props.telemetry.presenceByPubkey[pkLower] : undefined;
-                      const liveMatch = liveCrew.find((c) => c.key === a.agentKey || (pkLower && c.pubkey?.toLowerCase() === pkLower));
-                      const isEditing = Boolean(props.editingAgentKey && props.editingAgentKey === a.agentKey);
-                      return h(
+        ? (() => {
+            const promptMap = props.agentPromptSyncMap || {};
+            const outdatedCount = tenantAgents.filter((a) => promptMap[a.name]?.status === "outdated").length;
+            const renderIcon = (paths: string[], size = 14) =>
+              h(
+                "svg",
+                {
+                  width: size,
+                  height: size,
+                  viewBox: "0 0 24 24",
+                  fill: "none",
+                  stroke: "currentColor",
+                  strokeWidth: 1.85,
+                  strokeLinecap: "round",
+                  strokeLinejoin: "round",
+                  style: { width: `${size}px`, height: `${size}px`, display: "block", flexShrink: 0 },
+                  "aria-hidden": "true",
+                },
+                paths.map((d, idx) => h("path", { key: idx, d }))
+              );
+            const iconBtnStyle = { width: "26px", height: "26px", padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: "6px" };
+            return h(
+              "div",
+              { className: "of-card-pad" },
+              h("div", { style: { fontSize: "14px", fontWeight: 700, marginBottom: "4px" } }, `Agentes de ${empresaNome}`),
+              h("div", { className: "of-muted", style: { marginBottom: "10px" } }, "Manifesto oficial cruzado ao vivo com o Buzz Desktop. Prompts versionados no repositório exibem sua versão e ícone de atualização quando desatualizados."),
+              tenantAgents.length === 0
+                ? h("div", { className: "of-muted" }, `Nenhum agente encontrado em empresas/${tenant}.json.`)
+                : h(
+                    "table",
+                    { className: "of-table" },
+                    h(
+                      "thead",
+                      null,
+                      h(
                         "tr",
-                        { key: a.name },
+                        null,
+                        h("th", null, "Agente"),
+                        h("th", null, "Função & Papel"),
+                        h("th", null, "Modelo (Buzz)"),
                         h(
-                          "td",
-                          { style: { fontWeight: 600 } },
+                          "th",
+                          null,
                           h(
                             "span",
-                            { style: { display: "inline-flex", alignItems: "center", gap: "7px" } },
-                            liveMatch?.picture
-                              ? h("img", { src: liveMatch.picture, alt: a.name, style: { width: "22px", height: "22px", borderRadius: "6px", objectFit: "cover", border: liveTurn ? "1.5px solid var(--status-running)" : "1px solid var(--border)", flexShrink: 0 } })
-                              : h("span", { className: "of-dot", "data-tone": liveTurn ? (liveTurn.state === "error" ? "failed" : "running") : a.inBuzz ? "done" : "idle" }),
-                            a.name
+                            { style: { display: "inline-flex", alignItems: "center", gap: "5px" } },
+                            "Prompt",
+                            outdatedCount > 0 && props.onSyncAllOutdatedPrompts &&
+                              h(
+                                "button",
+                                {
+                                  type: "button",
+                                  className: "of-btn",
+                                  "data-variant": "ghost",
+                                  "data-sync-all-prompts": "true",
+                                  disabled: props.syncingPromptKey === "__ALL__",
+                                  title: `Sincronizar ${outdatedCount} prompt(s) desatualizado(s) no Buzz (preserva modelos e providers)`,
+                                  "aria-label": `Sincronizar ${outdatedCount} prompts desatualizados`,
+                                  style: { height: "20px", padding: "0 5px", fontSize: "10px", color: "var(--status-waiting)", display: "inline-flex", alignItems: "center", gap: "3px" },
+                                  onClick: props.onSyncAllOutdatedPrompts,
+                                },
+                                renderIcon(["M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8", "M3 3v5h5", "M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16", "M16 16h5v5"], 11),
+                                String(outdatedCount)
+                              )
                           )
                         ),
-                        h(
-                          "td",
-                          null,
-                          h("div", { style: { fontSize: "12px" } }, a.funcao),
-                          liveTurn
-                            ? h("div", { className: "of-mono", style: { fontSize: "10px", color: liveTurn.state === "error" ? "var(--status-failed)" : "var(--status-running)" } }, `⚡ ${liveTurn.stepLabel}`)
-                            : h("div", { className: "of-mono of-muted", style: { fontSize: "10px" } }, `papel: ${a.papel} · paralelismo: ${a.parallelism}x`),
-                          isEditing && props.agentEditDraft && props.setAgentEditDraft &&
+                        h("th", null, "Status"),
+                        h("th", null, "Ações")
+                      )
+                    ),
+                    h(
+                      "tbody",
+                      null,
+                      tenantAgents.map((a) => {
+                        const pkLower = (a.pubkey || "").toLowerCase();
+                        const liveTurn = pkLower && props.telemetry?.byPubkey ? props.telemetry.byPubkey[pkLower] : null;
+                        const presence = pkLower && props.telemetry?.presenceByPubkey ? props.telemetry.presenceByPubkey[pkLower] : undefined;
+                        const liveMatch = liveCrew.find((c) => c.key === a.agentKey || (pkLower && c.pubkey?.toLowerCase() === pkLower));
+                        const isEditing = Boolean(props.editingAgentKey && props.editingAgentKey === a.agentKey);
+                        const pInfo = promptMap[a.name];
+                        const isSyncingThis = props.syncingPromptKey === a.name || (props.syncingPromptKey === "__ALL__" && pInfo?.status === "outdated");
+                        return h(
+                          "tr",
+                          { key: a.name },
+                          h(
+                            "td",
+                            { style: { fontWeight: 600, whiteSpace: "nowrap" } },
+                            h(
+                              "span",
+                              { style: { display: "inline-flex", alignItems: "center", gap: "7px" } },
+                              liveMatch?.picture
+                                ? h("img", { src: liveMatch.picture, alt: a.name, style: { width: "22px", height: "22px", borderRadius: "6px", objectFit: "cover", border: liveTurn ? "1.5px solid var(--status-running)" : "1px solid var(--border)", flexShrink: 0 } })
+                                : h("span", { className: "of-dot", "data-tone": liveTurn ? (liveTurn.state === "error" ? "failed" : "running") : a.inBuzz ? "done" : "idle" }),
+                              a.name
+                            )
+                          ),
+                          h(
+                            "td",
+                            null,
+                            h("div", { style: { fontSize: "12px" } }, a.funcao),
+                            liveTurn
+                              ? h("div", { className: "of-mono", style: { fontSize: "10px", color: liveTurn.state === "error" ? "var(--status-failed)" : "var(--status-running)" } }, `⚡ ${liveTurn.stepLabel}`)
+                              : h("div", { className: "of-mono of-muted", style: { fontSize: "10px" } }, `papel: ${a.papel} · paralelismo: ${a.parallelism}x`),
+                            isEditing && props.agentEditDraft && props.setAgentEditDraft &&
+                              h(
+                                "div",
+                                { className: "of-surface", style: { marginTop: "8px", padding: "8px", display: "flex", flexDirection: "column", gap: "6px" }, "data-agent-nip-ap-editor": "true" },
+                                h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" } },
+                                  h("input", { className: "of-input", placeholder: "Provider (ex: nexusmind_anthropic)", value: props.agentEditDraft.provider, onChange: (e: any) => props.setAgentEditDraft!({ provider: e.target.value }) }),
+                                  h("input", { className: "of-input", placeholder: "Model (ex: claude-sonnet-5-5)", value: props.agentEditDraft.model, onChange: (e: any) => props.setAgentEditDraft!({ model: e.target.value }) })
+                                ),
+                                h("textarea", { className: "of-textarea", placeholder: "Instructions NIP-AP (opcional)", value: props.agentEditDraft.instructions, onChange: (e: any) => props.setAgentEditDraft!({ instructions: e.target.value }) }),
+                                h("div", { style: { display: "flex", gap: "6px" } },
+                                  h("button", { type: "button", className: "of-btn", "data-variant": "primary", onClick: () => props.onSaveAgentProfile?.(a.agentKey, props.agentEditDraft!) }, "Salvar no Buzz"),
+                                  h("button", { type: "button", className: "of-btn", onClick: () => props.setEditingAgentKey?.(null) }, "Cancelar")
+                                )
+                              )
+                          ),
+                          h("td", { className: "of-mono", style: { fontSize: "11.5px" } }, a.model),
+                          h(
+                            "td",
+                            { style: { whiteSpace: "nowrap" } },
+                            pInfo?.status === "outdated"
+                              ? h(
+                                  "span",
+                                  { style: { display: "inline-flex", alignItems: "center", gap: "4px" }, "data-agent-prompt-cell": a.name },
+                                  h(
+                                    "span",
+                                    {
+                                      className: "of-pill of-mono",
+                                      "data-tone": "waiting",
+                                      style: { fontSize: "10px", padding: "1px 6px" },
+                                      title: `Desatualizado no Buzz (${pInfo.liveVersion || "sem versão"}) · Repo: ${pInfo.sourcePath} (${pInfo.version})`,
+                                    },
+                                    pInfo.version
+                                  ),
+                                  props.onSyncAgentPrompt && a.inBuzz &&
+                                    h(
+                                      "button",
+                                      {
+                                        type: "button",
+                                        className: "of-btn",
+                                        "data-variant": "ghost",
+                                        "data-sync-agent-prompt": a.name,
+                                        disabled: isSyncingThis,
+                                        title: `Sincronizar prompt ${pInfo.version} de ${pInfo.sourcePath} no Buzz (preserva modelo/provider)`,
+                                        "aria-label": `Sincronizar prompt de ${a.name}`,
+                                        style: { ...iconBtnStyle, width: "22px", height: "22px", color: "var(--status-waiting)" },
+                                        onClick: () => props.onSyncAgentPrompt!({ name: a.name, agentKey: a.agentKey, pubkey: a.pubkey }),
+                                      },
+                                      renderIcon(["M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8", "M3 3v5h5", "M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16", "M16 16h5v5"], 12)
+                                    )
+                                )
+                              : pInfo?.status === "synced"
+                              ? h(
+                                  "span",
+                                  {
+                                    className: "of-pill of-mono",
+                                    "data-tone": "done",
+                                    "data-agent-prompt-cell": a.name,
+                                    style: { fontSize: "10px", padding: "1px 6px" },
+                                    title: `Sincronizado com ${pInfo.sourcePath}`,
+                                  },
+                                  `✓ ${pInfo.version}`
+                                )
+                              : h(
+                                  "span",
+                                  {
+                                    className: "of-mono of-muted",
+                                    style: { fontSize: "10.5px" },
+                                    title: "Prompt gerenciado diretamente no Buzz (sem arquivo versionado no repo)",
+                                  },
+                                  pInfo?.liveVersion || "Buzz"
+                                )
+                          ),
+                          h(
+                            "td",
+                            { style: { whiteSpace: "nowrap" } },
+                            h(
+                              "span",
+                              { className: "of-pill", "data-tone": liveTurn ? (liveTurn.state === "error" ? "failed" : "running") : a.inBuzz ? "done" : "waiting" },
+                              liveTurn ? "Respondendo" : presence === "online" ? "Online" : a.inBuzz ? "Disponível" : "A provisionar"
+                            )
+                          ),
+                          h(
+                            "td",
+                            { style: { whiteSpace: "nowrap" } },
                             h(
                               "div",
-                              { className: "of-surface", style: { marginTop: "8px", padding: "8px", display: "flex", flexDirection: "column", gap: "6px" }, "data-agent-nip-ap-editor": "true" },
-                              h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" } },
-                                h("input", { className: "of-input", placeholder: "Provider (ex: nexusmind_anthropic)", value: props.agentEditDraft.provider, onChange: (e: any) => props.setAgentEditDraft!({ provider: e.target.value }) }),
-                                h("input", { className: "of-input", placeholder: "Model (ex: claude-sonnet-5-5)", value: props.agentEditDraft.model, onChange: (e: any) => props.setAgentEditDraft!({ model: e.target.value }) })
-                              ),
-                              h("textarea", { className: "of-textarea", placeholder: "Instructions NIP-AP (opcional)", value: props.agentEditDraft.instructions, onChange: (e: any) => props.setAgentEditDraft!({ instructions: e.target.value }) }),
-                              h("div", { style: { display: "flex", gap: "6px" } },
-                                h("button", { type: "button", className: "of-btn", "data-variant": "primary", onClick: () => props.onSaveAgentProfile?.(a.agentKey, props.agentEditDraft!) }, "Salvar no Buzz (ctx.agents.save)"),
-                                h("button", { type: "button", className: "of-btn", onClick: () => props.setEditingAgentKey?.(null) }, "Cancelar")
-                              )
-                            )
-                        ),
-                        h("td", { className: "of-mono" }, a.model),
-                        h(
-                          "td",
-                          null,
-                          h(
-                            "span",
-                            { className: "of-pill", "data-tone": liveTurn ? (liveTurn.state === "error" ? "failed" : "running") : a.inBuzz ? "done" : "waiting" },
-                            liveTurn ? "Respondendo agora" : presence === "online" ? "Online" : a.inBuzz ? "Disponível" : "A provisionar"
-                          )
-                        ),
-                        h(
-                          "td",
-                          null,
-                          h(
-                            "div",
-                            { style: { display: "inline-flex", alignItems: "center", gap: "4px", flexWrap: "wrap" } },
-                            onOpenAgentDm && a.pubkey &&
-                              h(
-                                "button",
-                                {
-                                  type: "button",
-                                  className: "of-btn",
-                                  "data-variant": "ghost",
-                                  style: { color: "var(--primary)", padding: "3px 7px" },
-                                  onClick: () => onOpenAgentDm({ key: a.agentKey, pubkey: a.pubkey, name: a.name }),
-                                },
-                                "DM ↗"
-                              ),
-                            props.onOpenAgentDrawer && a.inBuzz && a.agentKey &&
-                              h(
-                                "button",
-                                {
-                                  type: "button",
-                                  className: "of-btn",
-                                  "data-variant": "ghost",
-                                  style: { padding: "3px 6px", fontSize: "10.5px" },
-                                  onClick: () => props.onOpenAgentDrawer!(a.agentKey),
-                                },
-                                "Transcript"
-                              ),
-                            props.setEditingAgentKey && props.setAgentEditDraft && a.inBuzz && a.agentKey &&
-                              h(
-                                "button",
-                                {
-                                  type: "button",
-                                  className: "of-btn",
-                                  "data-variant": "ghost",
-                                  style: { padding: "3px 6px", fontSize: "10.5px" },
-                                  onClick: () => {
-                                    if (isEditing) {
-                                      props.setEditingAgentKey!(null);
-                                    } else {
-                                      props.setEditingAgentKey!(a.agentKey);
-                                      props.setAgentEditDraft!({
-                                        provider: liveMatch?.provider || "",
-                                        model: liveMatch?.model || a.model || "",
-                                        instructions: liveMatch?.instructions || "",
-                                      });
-                                    }
+                              { style: { display: "inline-flex", alignItems: "center", gap: "2px", flexWrap: "nowrap" }, "data-agent-icon-actions": "true" },
+                              onOpenAgentDm && a.pubkey &&
+                                h(
+                                  "button",
+                                  {
+                                    type: "button",
+                                    className: "of-btn",
+                                    "data-variant": "ghost",
+                                    title: `Abrir DM lateral com ${a.name}`,
+                                    "aria-label": `Abrir DM com ${a.name}`,
+                                    style: { ...iconBtnStyle, color: "var(--primary)" },
+                                    onClick: () => onOpenAgentDm({ key: a.agentKey, pubkey: a.pubkey, name: a.name }),
                                   },
-                                },
-                                isEditing ? "Fechar" : "Editar"
-                              ),
-                            props.onAgentSessionAction && a.inBuzz && a.agentKey &&
-                              h(
-                                "button",
-                                {
-                                  type: "button",
-                                  className: "of-btn",
-                                  "data-variant": "ghost",
-                                  style: { padding: "3px 6px", fontSize: "10.5px" },
-                                  title: "Compactar contexto da sessão",
-                                  onClick: () => props.onAgentSessionAction!(a.agentKey, "compact"),
-                                },
-                                "Compactar"
-                              ),
-                            props.onAgentSessionAction && a.inBuzz && a.agentKey &&
-                              h(
-                                "button",
-                                {
-                                  type: "button",
-                                  className: "of-btn",
-                                  "data-variant": "ghost",
-                                  style: { padding: "3px 6px", fontSize: "10.5px" },
-                                  title: "Iniciar nova sessão limpa",
-                                  onClick: () => props.onAgentSessionAction!(a.agentKey, "new"),
-                                },
-                                "Nova"
-                              ),
-                            props.onAutomateFromSession &&
-                              h(
-                                "button",
-                                {
-                                  type: "button",
-                                  className: "of-btn",
-                                  "data-variant": "ghost",
-                                  "data-automate-from-session": a.name,
-                                  style: { padding: "3px 6px", fontSize: "10.5px" },
-                                  title: "Converter sessão deste agente em Automação recorrente (1 clique)",
-                                  onClick: () => props.onAutomateFromSession!({ agentName: a.name, stepLabel: liveTurn?.stepLabel }),
-                                },
-                                "⚡ Automatizar"
-                              ),
-                            props.onAgentSessionAction && liveTurn && a.agentKey &&
-                              h(
-                                "button",
-                                {
-                                  type: "button",
-                                  className: "of-btn",
-                                  "data-variant": "danger",
-                                  style: { padding: "3px 6px", fontSize: "10.5px" },
-                                  title: "Interromper turno em andamento",
-                                  onClick: () => props.onAgentSessionAction!(a.agentKey, "interrupt"),
-                                },
-                                "Parar"
-                              )
+                                  renderIcon(["M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"])
+                                ),
+                              props.onOpenAgentDrawer && a.inBuzz && a.agentKey &&
+                                h(
+                                  "button",
+                                  {
+                                    type: "button",
+                                    className: "of-btn",
+                                    "data-variant": "ghost",
+                                    title: `Transcript e perfil de ${a.name}`,
+                                    "aria-label": `Transcript de ${a.name}`,
+                                    style: iconBtnStyle,
+                                    onClick: () => props.onOpenAgentDrawer!(a.agentKey),
+                                  },
+                                  renderIcon(["M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z", "M14 2v6h6", "M16 13H8", "M16 17H8"])
+                                ),
+                              props.setEditingAgentKey && props.setAgentEditDraft && a.inBuzz && a.agentKey &&
+                                h(
+                                  "button",
+                                  {
+                                    type: "button",
+                                    className: "of-btn",
+                                    "data-variant": "ghost",
+                                    title: isEditing ? "Fechar editor" : `Editar modelo e prompt de ${a.name}`,
+                                    "aria-label": `Editar ${a.name}`,
+                                    style: { ...iconBtnStyle, color: isEditing ? "var(--primary)" : undefined },
+                                    onClick: () => {
+                                      if (isEditing) {
+                                        props.setEditingAgentKey!(null);
+                                      } else {
+                                        props.setEditingAgentKey!(a.agentKey);
+                                        props.setAgentEditDraft!({
+                                          provider: liveMatch?.provider || "",
+                                          model: liveMatch?.model || a.model || "",
+                                          instructions: liveMatch?.instructions || "",
+                                        });
+                                      }
+                                    },
+                                  },
+                                  renderIcon(["M12 20h9", "M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"])
+                                ),
+                              props.onAgentSessionAction && a.inBuzz && a.agentKey &&
+                                h(
+                                  "button",
+                                  {
+                                    type: "button",
+                                    className: "of-btn",
+                                    "data-variant": "ghost",
+                                    title: "Compactar contexto da sessão",
+                                    "aria-label": `Compactar sessão de ${a.name}`,
+                                    style: iconBtnStyle,
+                                    onClick: () => props.onAgentSessionAction!(a.agentKey, "compact"),
+                                  },
+                                  renderIcon(["M4 14h6v6", "M20 10h-6V4", "M14 10l7-7", "M3 21l7-7"])
+                                ),
+                              props.onAgentSessionAction && a.inBuzz && a.agentKey &&
+                                h(
+                                  "button",
+                                  {
+                                    type: "button",
+                                    className: "of-btn",
+                                    "data-variant": "ghost",
+                                    title: "Iniciar nova sessão limpa",
+                                    "aria-label": `Nova sessão de ${a.name}`,
+                                    style: iconBtnStyle,
+                                    onClick: () => props.onAgentSessionAction!(a.agentKey, "new"),
+                                  },
+                                  renderIcon(["M12 5v14", "M5 12h14"])
+                                ),
+                              props.onAutomateFromSession &&
+                                h(
+                                  "button",
+                                  {
+                                    type: "button",
+                                    className: "of-btn",
+                                    "data-variant": "ghost",
+                                    "data-automate-from-session": a.name,
+                                    title: "Converter sessão em automação recorrente (1 clique)",
+                                    "aria-label": `Automatizar ${a.name}`,
+                                    style: iconBtnStyle,
+                                    onClick: () => props.onAutomateFromSession!({ agentName: a.name, stepLabel: liveTurn?.stepLabel }),
+                                  },
+                                  renderIcon(["M13 2 3 14h9l-1 8 10-12h-9l1-8z"])
+                                ),
+                              props.onAgentSessionAction && liveTurn && a.agentKey &&
+                                h(
+                                  "button",
+                                  {
+                                    type: "button",
+                                    className: "of-btn",
+                                    "data-variant": "danger",
+                                    title: "Interromper turno em andamento",
+                                    "aria-label": `Parar ${a.name}`,
+                                    style: iconBtnStyle,
+                                    onClick: () => props.onAgentSessionAction!(a.agentKey, "interrupt"),
+                                  },
+                                  renderIcon(["M6 6h12v12H6z"])
+                                )
+                            )
                           )
-                        )
-                      );
-                    })
+                        );
+                      })
+                    )
                   )
-                )
-          )
+            );
+          })()
         : agentTab === "eval"
         ? (() => {
             const evalFilter = props.evalFilter || "all";
