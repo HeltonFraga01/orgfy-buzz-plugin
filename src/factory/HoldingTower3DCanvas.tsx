@@ -1,10 +1,10 @@
-// Adaptado de CodeDen (MIT) commit b0b2a5a — Torre da Holding Cortexx / OrgFy (Maquete Arquitetônica 3D Multi-Andares)
-// - Pódio arquitetônico + fachadas de vidro temperado com montantes de aço e marcadores externos 1F..4F
-// - Cobertura 4F: Sala do Conselho completa (tapete, mesa executiva com notebooks/mapa, cadeiras, telão KPI ao vivo,
-//   holograma giratório com feixes de comunicação para conselheiros ativos e plantas biófilas)
-// - Andares das Subsidiárias: estações completas (mesa, cadeira, monitor aceso, caneca), rack de servidores,
-//   telão de telemetria por andar e esteira ligada 100% a PRs/cards/turnos reais (zero cubos decorativos)
-// - Elevador panorâmico de dados: cápsulas representam turnos reais ativos no Buzz trafegando até o Conselho (clicáveis)
+// Adaptado de CodeDen (MIT) commit b0b2a5a — Torre da Holding Cortexx / OrgFy (Maquete LEGO / Voxel 3D Multi-Andares)
+// - Estética LEGO Architecture / Voxel: pódio com pinos LEGO, plantas em blocos voxel, personagens LEGO/Voxel,
+//   fachadas de vidro temperado, iluminação interna quente em cada andar e marcadores externos 1F..4F
+// - Navegação livre 3D: Orbit 360° até nível do piso (phi 0.18..1.50), Pan (botão direito ou Shift+arrastar),
+//   Zoom profundo até close-up (frustum 2.0..26) no ponto do cursor e teclas W/A/S/D + Q/E
+// - Janela flutuante Picture-in-Picture (PiP) nativa estilo YouTube (captureStream + requestPictureInPicture)
+// - Telemetria 100% real clicável: pacotes na esteira e cápsulas no elevador ligados a PRs/cards/turnos reais
 
 import * as THREE from "three";
 import type { Context } from "@buzz/author";
@@ -93,7 +93,6 @@ function stageColorRgb(stage: TowerLivePacket["stage"], p: FloorPalette): Rgb {
   }
 }
 
-/** Cria telão 3D na parede de fundo de cada andar com métricas reais da empresa/Conselho. */
 function makeFloorWallScreenTexture(
   kit: Kit,
   floorNum: number,
@@ -108,7 +107,6 @@ function makeFloorWallScreenTexture(
   g.fillStyle = "#0e121a";
   g.fillRect(0, 0, c.width, c.height);
 
-  // Grid sutil
   g.strokeStyle = "rgba(255,255,255,0.04)";
   g.lineWidth = 1;
   for (let x = 24; x < c.width; x += 48) {
@@ -118,7 +116,6 @@ function makeFloorWallScreenTexture(
     g.stroke();
   }
 
-  // Barra lateral + topo
   g.fillStyle = accCss;
   g.fillRect(0, 0, 10, c.height);
   g.fillStyle = "rgba(255,255,255,0.04)";
@@ -130,7 +127,6 @@ function makeFloorWallScreenTexture(
   g.font = "700 26px -apple-system, BlinkMacSystemFont, sans-serif";
   g.fillText(`${floorNum}F · ${floor.nome.toUpperCase().slice(0, 26)}`, 26, 37);
 
-  // Pill de estado
   const pillText = floor.errorCount > 0 ? `${floor.errorCount} ALERTA` : floor.workingCount > 0 ? `${floor.workingCount} AO VIVO` : floor.estagio.toUpperCase();
   g.fillStyle = rgbToCss(accent, 0.18);
   g.fillRect(c.width - 168, 12, 148, 30);
@@ -143,7 +139,6 @@ function makeFloorWallScreenTexture(
   g.fillText(pillText.slice(0, 14), c.width - 94, 32);
   g.textAlign = "left";
 
-  // 3 KPIs reais no painel do andar
   const cards = floor.isBoard
     ? [
         { k: "CONSELHEIROS", v: String(floor.agentesCount), sub: `${floor.workingCount} em turno` },
@@ -183,7 +178,6 @@ function makeFloorWallScreenTexture(
   return kit.canvasTexture(c);
 }
 
-/** Cria plaquinha externa 1F / 2F / 3F / 4F montada na coluna frontal direita da Torre. */
 function makeFloorBadgeTexture(kit: Kit, label: string, accent: Rgb): THREE.CanvasTexture {
   const c = canvasOf(128, 72);
   const g = c.getContext("2d")!;
@@ -200,7 +194,6 @@ function makeFloorBadgeTexture(kit: Kit, label: string, accent: Rgb): THREE.Canv
   return kit.canvasTexture(c);
 }
 
-/** Cria textura de tela acesa de monitor nas estações de trabalho. */
 function makeDeskScreenTexture(kit: Kit, accent: Rgb, seed: number): THREE.CanvasTexture {
   const c = canvasOf(128, 80);
   const g = c.getContext("2d")!;
@@ -216,30 +209,35 @@ function makeDeskScreenTexture(kit: Kit, accent: Rgb, seed: number): THREE.Canva
   return kit.canvasTexture(c);
 }
 
-/** Cria planta arquitetônica biófila no estilo CodeDen. */
-function buildPlantProp(kit: Kit, p: FloorPalette, matSteel: THREE.Material): THREE.Group {
+/** Planta estilo LEGO / Voxel em blocos empilhados. */
+function buildVoxelPlantProp(kit: Kit, p: FloorPalette, matSteel: THREE.Material): THREE.Group {
   const g = new THREE.Group();
-  const pot = new THREE.Mesh(kit.own(new THREE.CylinderGeometry(0.22, 0.16, 0.36, 12)), matSteel);
+  const pot = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.42, 0.36, 0.42)), matSteel);
   pot.position.y = 0.18;
   pot.castShadow = true;
   g.add(pot);
-  const leafA = kit.matte(p.lamp.green, { roughness: 0.72 });
-  const leafB = kit.matte([p.lamp.green[0] * 0.76, p.lamp.green[1] * 0.76, p.lamp.green[2] * 0.76], { roughness: 0.76 });
-  [
-    [0, 0.64, 0, 0.21],
-    [-0.12, 0.5, 0.09, 0.16],
-    [0.12, 0.52, -0.08, 0.17],
-    [0.08, 0.48, 0.11, 0.15],
-  ].forEach(([x, y, z, r], i) => {
-    const f = new THREE.Mesh(kit.own(new THREE.DodecahedronGeometry(r, 0)), i % 2 === 0 ? leafA : leafB);
-    f.position.set(x, y, z);
-    f.castShadow = true;
-    g.add(f);
+
+  const trunk = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.12, 0.24, 0.12)), kit.matte([0.36, 0.24, 0.15], { roughness: 0.8 }));
+  trunk.position.y = 0.44;
+  g.add(trunk);
+
+  const leafA = kit.matte(p.lamp.green, { roughness: 0.7 });
+  const leafB = kit.matte([p.lamp.green[0] * 0.76, p.lamp.green[1] * 0.76, p.lamp.green[2] * 0.76], { roughness: 0.74 });
+  const tiers: Array<[number, number, number, number]> = [
+    [0.48, 0.2, 0.48, 0.62],
+    [0.34, 0.18, 0.34, 0.8],
+    [0.18, 0.14, 0.18, 0.94],
+  ];
+  tiers.forEach(([w, h, d, y], i) => {
+    const blk = new THREE.Mesh(kit.own(new THREE.BoxGeometry(w, h, d)), i % 2 === 0 ? leafA : leafB);
+    blk.position.y = y;
+    blk.castShadow = true;
+    g.add(blk);
   });
   return g;
 }
 
-/** Constrói estação de trabalho completa (mesa de madeira, pernas de aço, monitor aceso, teclado, caneca e cadeira). */
+/** Estação de trabalho em blocos LEGO/Voxel (mesa, cadeira, monitor aceso, teclado e caneca). */
 function buildWorkstationUnit(
   kit: Kit,
   matWood: THREE.Material,
@@ -251,56 +249,53 @@ function buildWorkstationUnit(
 ): THREE.Group {
   const g = new THREE.Group();
 
-  // Tampo + pernas
-  const top = new THREE.Mesh(kit.own(new THREE.BoxGeometry(1.06, 0.06, 0.62)), matWood);
+  const top = new THREE.Mesh(kit.own(new THREE.BoxGeometry(1.06, 0.08, 0.62)), matWood);
   top.position.set(0, 0.62, 0.38);
   top.castShadow = true;
   top.receiveShadow = true;
   g.add(top);
 
   for (const lx of [-0.46, 0.46]) {
-    const leg = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.05, 0.6, 0.54)), matSteel);
-    leg.position.set(lx, 0.3, 0.38);
+    const leg = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.08, 0.58, 0.54)), matSteel);
+    leg.position.set(lx, 0.29, 0.38);
     leg.castShadow = true;
     g.add(leg);
   }
 
-  // Monitor inclinado voltado para o agente (em -z)
-  const stand = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.08, 0.15, 0.06)), matChrome);
+  const stand = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.1, 0.14, 0.08)), matChrome);
   stand.position.set(0, 0.72, 0.52);
   g.add(stand);
 
-  const bezel = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.54, 0.32, 0.04)), matSteel);
+  const bezel = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.54, 0.32, 0.06)), matSteel);
   bezel.position.set(0, 0.88, 0.52);
   bezel.castShadow = true;
   g.add(bezel);
 
-  const display = new THREE.Mesh(kit.own(new THREE.PlaneGeometry(0.48, 0.26)), screenMat);
-  display.position.set(0, 0.88, 0.498);
+  const display = new THREE.Mesh(kit.own(new THREE.PlaneGeometry(0.46, 0.24)), screenMat);
+  display.position.set(0, 0.88, 0.488);
   display.rotation.y = Math.PI;
   g.add(display);
 
-  // Teclado + caneca
-  const kb = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.34, 0.018, 0.11)), matSteel);
-  kb.position.set(-0.04, 0.66, 0.28);
+  const kb = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.34, 0.025, 0.12)), matSteel);
+  kb.position.set(-0.04, 0.67, 0.28);
   g.add(kb);
 
-  const mug = new THREE.Mesh(kit.own(new THREE.CylinderGeometry(0.036, 0.032, 0.075, 10)), matPaper);
-  mug.position.set(0.36, 0.69, 0.28);
+  const mug = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.075, 0.08, 0.075)), matPaper);
+  mug.position.set(0.36, 0.7, 0.28);
   g.add(mug);
 
-  // Cadeira ergonômica atrás da mesa (em z = -0.14)
-  const base = new THREE.Mesh(kit.own(new THREE.CylinderGeometry(0.2, 0.22, 0.035, 12)), matChrome);
-  base.position.set(0, 0.018, -0.14);
+  // Cadeira em blocos LEGO
+  const base = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.38, 0.05, 0.38)), matChrome);
+  base.position.set(0, 0.025, -0.14);
   g.add(base);
-  const stem = new THREE.Mesh(kit.own(new THREE.CylinderGeometry(0.032, 0.038, 0.3, 10)), matSteel);
+  const stem = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.08, 0.28, 0.08)), matSteel);
   stem.position.set(0, 0.18, -0.14);
   g.add(stem);
-  const seat = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.44, 0.07, 0.42)), matLeather);
-  seat.position.set(0, 0.35, -0.14);
+  const seat = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.44, 0.08, 0.42)), matLeather);
+  seat.position.set(0, 0.34, -0.14);
   seat.castShadow = true;
   g.add(seat);
-  const back = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.42, 0.46, 0.07)), matLeather);
+  const back = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.44, 0.46, 0.08)), matLeather);
   back.position.set(0, 0.58, -0.32);
   back.castShadow = true;
   g.add(back);
@@ -308,7 +303,6 @@ function buildWorkstationUnit(
   return g;
 }
 
-/** Constrói cadeira executiva para a Cobertura do Conselho. */
 function buildBoardChair(
   kit: Kit,
   matLeather: THREE.Material,
@@ -316,17 +310,17 @@ function buildBoardChair(
   matChrome: THREE.Material
 ): THREE.Group {
   const chair = new THREE.Group();
-  const base = new THREE.Mesh(kit.own(new THREE.CylinderGeometry(0.21, 0.24, 0.035, 14)), matChrome);
-  base.position.y = 0.018;
+  const base = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.4, 0.05, 0.4)), matChrome);
+  base.position.y = 0.025;
   chair.add(base);
-  const stem = new THREE.Mesh(kit.own(new THREE.CylinderGeometry(0.035, 0.04, 0.32, 10)), matSteel);
+  const stem = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.08, 0.3, 0.08)), matSteel);
   stem.position.y = 0.18;
   chair.add(stem);
-  const seat = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.48, 0.08, 0.46)), matLeather);
-  seat.position.y = 0.37;
+  const seat = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.48, 0.09, 0.46)), matLeather);
+  seat.position.y = 0.36;
   seat.castShadow = true;
   chair.add(seat);
-  const back = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.46, 0.54, 0.08)), matLeather);
+  const back = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.46, 0.54, 0.09)), matLeather);
   back.position.set(0, 0.64, -0.2);
   back.castShadow = true;
   chair.add(back);
@@ -340,13 +334,21 @@ export function createHoldingTower3DComponent(ctx: Context) {
   return function HoldingTower3DCanvas(props: HoldingTower3DProps) {
     const hostRef = React.useRef<HTMLDivElement | null>(null);
     const mountRef = React.useRef<HTMLDivElement | null>(null);
+    const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
+    const pipVideoRef = React.useRef<HTMLVideoElement | null>(null);
+
     const [selection, setSelection] = React.useState<TowerSelection | null>(null);
     const [hoveredSlug, setHoveredSlug] = React.useState<string | null>(null);
     const [fitTick, setFitTick] = React.useState(0);
     const [darkFactoryMode, setDarkFactoryMode] = React.useState(true);
     const [isFullscreen, setIsFullscreen] = React.useState(false);
+    const [isPipActive, setIsPipActive] = React.useState(false);
 
-    // ── DADOS REAIS POR ANDAR (ZERO PACOTES DECORATIVOS) ──
+    // Refs de controle de câmera suave (target 3D completo + ângulo phi + frustum)
+    const desiredTargetRef = React.useRef<THREE.Vector3>(new THREE.Vector3(0, 6.2, 0));
+    const desiredFrustumRef = React.useRef<number>(15.8);
+    const desiredPhiRef = React.useRef<number | null>(null);
+
     const floors = React.useMemo<HoldingTowerFloorInfo[]>(() => {
       const byPk = props.telemetry?.byPubkey || {};
       const crew = props.liveCrew || [];
@@ -392,7 +394,6 @@ export function createHoldingTower3DComponent(ctx: Context) {
           };
         });
 
-        // Monta pacotes REAIS na esteira deste andar
         const packets: TowerLivePacket[] = [];
         if (slugLower === String(props.activeTenant || "").toLowerCase()) {
           for (const it of activeItems.slice(0, 6)) {
@@ -416,7 +417,6 @@ export function createHoldingTower3DComponent(ctx: Context) {
             });
           }
         }
-        // Também adiciona turnos ativos ao vivo deste andar se não estiverem cobertos
         for (const ag of agents) {
           if (ag.turn && packets.length < 6) {
             packets.push({
@@ -458,7 +458,6 @@ export function createHoldingTower3DComponent(ctx: Context) {
         };
       });
 
-      // Cobertura 4F: Conselho da Holding + OrgFy Iris
       const boardCrew = crew.filter((a) => /iris|conselho/i.test(a.name));
       let boardWork = 0;
       let boardErr = 0;
@@ -510,8 +509,55 @@ export function createHoldingTower3DComponent(ctx: Context) {
     const floorsSignature = floors
       .map((f) => `${f.slug}:${f.workingCount}:${f.errorCount}:${f.agentesCount}:${f.packets.map((p) => `${p.id}:${p.stage}`).join(",")}`)
       .join("|");
-    const targetFloorYRef = React.useRef<number | null>(null);
-    const targetFrustumRef = React.useRef<number | null>(null);
+
+    // ── PICTURE-IN-PICTURE (TELINHA FLUTUANTE ESTILO YOUTUBE FORA DO BUZZ) ──
+    const handleTogglePiP = async () => {
+      try {
+        if ((document as any).pictureInPictureElement) {
+          await (document as any).exitPictureInPicture();
+          setIsPipActive(false);
+          return;
+        }
+        const canvas = canvasRef.current;
+        if (!canvas || typeof (canvas as any).captureStream !== "function") return;
+
+        let video = pipVideoRef.current;
+        if (!video) {
+          video = document.createElement("video");
+          video.muted = true;
+          video.playsInline = true;
+          video.style.position = "fixed";
+          video.style.width = "1px";
+          video.style.height = "1px";
+          video.style.opacity = "0";
+          video.style.pointerEvents = "none";
+          document.body.appendChild(video);
+          pipVideoRef.current = video;
+          video.addEventListener("leavepictureinpicture", () => setIsPipActive(false));
+        }
+
+        const stream = (canvas as any).captureStream(30);
+        video.srcObject = stream;
+        await video.play();
+        if (typeof (video as any).requestPictureInPicture === "function") {
+          await (video as any).requestPictureInPicture();
+          setIsPipActive(true);
+        }
+      } catch {
+        setIsPipActive(false);
+      }
+    };
+
+    React.useEffect(() => {
+      return () => {
+        if (pipVideoRef.current) {
+          try {
+            pipVideoRef.current.remove();
+          } catch {}
+          pipVideoRef.current = null;
+        }
+      };
+    }, []);
 
     React.useEffect(() => {
       const container = mountRef.current;
@@ -534,8 +580,9 @@ export function createHoldingTower3DComponent(ctx: Context) {
       let phi = 1.02;
       let frustum = defaultFrustum;
       const target = new THREE.Vector3(0, defaultCenterY, 0);
-      targetFloorYRef.current = defaultCenterY;
-      targetFrustumRef.current = defaultFrustum;
+      desiredTargetRef.current.set(0, defaultCenterY, 0);
+      desiredFrustumRef.current = defaultFrustum;
+      desiredPhiRef.current = null;
 
       const aspect = width / height;
       const camera = new THREE.OrthographicCamera(
@@ -555,7 +602,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
         camera.right = (frustum * asp) / 2;
         camera.top = frustum / 2;
         camera.bottom = -frustum / 2;
-        const dist = 40;
+        const dist = 42;
         camera.position.set(
           target.x + dist * Math.sin(phi) * Math.sin(theta),
           target.y + dist * Math.cos(phi),
@@ -568,7 +615,12 @@ export function createHoldingTower3DComponent(ctx: Context) {
 
       let renderer: THREE.WebGLRenderer;
       try {
-        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
+        renderer = new THREE.WebGLRenderer({
+          antialias: true,
+          alpha: false,
+          preserveDrawingBuffer: true, // garante captura fluida no Picture-in-Picture (PiP)
+          powerPreference: "high-performance",
+        });
       } catch {
         kit.dispose();
         return;
@@ -578,35 +630,37 @@ export function createHoldingTower3DComponent(ctx: Context) {
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = darkFactoryMode ? 1.16 : 1.02;
+      renderer.toneMappingExposure = darkFactoryMode ? 1.22 : 1.04;
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       container.innerHTML = "";
       container.appendChild(renderer.domElement);
+      canvasRef.current = renderer.domElement;
 
       const lights = new Lights();
       scene.add(lights.hemi, lights.sun, lights.sun.target);
       lights.set([{ x0: -7.5, x1: 7.5, y0: 0, y1: totalH + 2, z0: -5, z1: 5 }], palette, false);
+      lights.hemi.intensity = darkFactoryMode ? 0.95 : 1.1;
 
       if (!darkFactoryMode) {
         const dayFill = new THREE.DirectionalLight(0xffffff, 0.85);
         dayFill.position.set(-10, 20, 12);
         scene.add(dayFill);
       } else {
-        const warmFill = new THREE.PointLight(colour(palette.lane), 0.55, 24);
-        warmFill.position.set(4, totalH * 0.65, 6);
-        scene.add(warmFill);
+        // Luz frontal suave para que 1F/2F/3F tenham ótima leitura em close-up
+        const frontFill = new THREE.DirectionalLight(0xdbeafe, 0.52);
+        frontFill.position.set(12, totalH * 0.55, 16);
+        scene.add(frontFill);
       }
 
-      // ── MATERIAIS ARQUITETÔNICOS COMPARTILHADOS ──
-      const matPodium = kit.matte(darkFactoryMode ? [0.09, 0.11, 0.15] : [0.72, 0.75, 0.8], { roughness: 0.9 });
-      const matSlab = kit.matte(darkFactoryMode ? [0.14, 0.16, 0.21] : [0.83, 0.85, 0.89], { roughness: 0.82 });
-      const matFloorWood = kit.matte(darkFactoryMode ? [0.24, 0.2, 0.16] : [0.68, 0.57, 0.44], { roughness: 0.72 });
-      const matFloorSlate = kit.matte(darkFactoryMode ? [0.11, 0.13, 0.17] : [0.46, 0.49, 0.54], { roughness: 0.88 });
-      const matWall = kit.matte(darkFactoryMode ? [0.17, 0.19, 0.24] : [0.89, 0.91, 0.94], { roughness: 0.84 });
+      const matPodium = kit.matte(darkFactoryMode ? [0.1, 0.12, 0.16] : [0.72, 0.75, 0.8], { roughness: 0.85 });
+      const matSlab = kit.matte(darkFactoryMode ? [0.15, 0.17, 0.22] : [0.83, 0.85, 0.89], { roughness: 0.8 });
+      const matFloorWood = kit.matte(darkFactoryMode ? [0.28, 0.22, 0.17] : [0.68, 0.57, 0.44], { roughness: 0.72 });
+      const matFloorSlate = kit.matte(darkFactoryMode ? [0.12, 0.14, 0.19] : [0.46, 0.49, 0.54], { roughness: 0.86 });
+      const matWall = kit.matte(darkFactoryMode ? [0.18, 0.2, 0.26] : [0.89, 0.91, 0.94], { roughness: 0.84 });
       const matSteel = kit.matte(palette.steel, { roughness: 0.42, metalness: 0.45 });
       const matChrome = kit.matte(palette.chrome, { roughness: 0.22, metalness: 0.75 });
       const matWood = kit.matte(palette.wood, { roughness: 0.55 });
-      const matLeather = kit.matte(darkFactoryMode ? [0.15, 0.17, 0.22] : [0.28, 0.31, 0.38], { roughness: 0.68 });
+      const matLeather = kit.matte(darkFactoryMode ? [0.16, 0.18, 0.24] : [0.28, 0.31, 0.38], { roughness: 0.68 });
       const matPaper = kit.matte(palette.paper, { roughness: 0.42 });
       const matGlass = kit.own(
         new THREE.MeshPhysicalMaterial({
@@ -621,13 +675,21 @@ export function createHoldingTower3DComponent(ctx: Context) {
       const floorW = 11.8;
       const floorD = 7.0;
 
-      // ── PÓDIO DE FUNDAÇÃO ARQUITETÔNICO SOB O 1F ──
-      const podium = new THREE.Mesh(kit.own(new THREE.BoxGeometry(floorW + 1.1, 0.55, floorD + 1.1)), matPodium);
+      // ── PÓDIO BASEPLATE LEGO ARCHITECTURE SOB O 1F ──
+      const podium = new THREE.Mesh(kit.own(new THREE.BoxGeometry(floorW + 1.2, 0.55, floorD + 1.2)), matPodium);
       podium.position.set(0, -0.54, 0);
       podium.receiveShadow = true;
       scene.add(podium);
 
-      // ── ELEVADOR PANORÂMICO DE DADOS (SÓ MOVIMENTA TURNOS REAIS DO BUZZ) ──
+      // Pinos (studs) LEGO discretos contornando a borda frontal do pódio
+      const studGeo = kit.own(new THREE.CylinderGeometry(0.14, 0.14, 0.08, 12));
+      for (let sx = -floorW / 2 - 0.3; sx <= floorW / 2 + 0.31; sx += 0.62) {
+        const stud = new THREE.Mesh(studGeo, matPodium);
+        stud.position.set(sx, -0.23, floorD / 2 + 0.32);
+        scene.add(stud);
+      }
+
+      // ── ELEVADOR PANORÂMICO DE DADOS ──
       const shaftX = -4.9;
       const shaftZ = -2.45;
       const shaft = new THREE.Mesh(kit.own(new THREE.BoxGeometry(1.1, totalH + 0.5, 1.1)), matGlass);
@@ -642,7 +704,6 @@ export function createHoldingTower3DComponent(ctx: Context) {
         }
       }
 
-      // Coleta turnos/pacotes REAIS para o elevador (zero cápsulas falsas!)
       const realElevatorEvents: Array<{
         packet: TowerLivePacket;
         floor: HoldingTowerFloorInfo;
@@ -680,7 +741,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
       }> = [];
 
       const hitTargets: THREE.Object3D[] = [];
-      const selectionByHit = new WeakMap<THREE.Object3D, { sel: TowerSelection; focusY: number }>();
+      const selectionByHit = new WeakMap<THREE.Object3D, { sel: TowerSelection; focusPos: THREE.Vector3 }>();
 
       if (realElevatorEvents.length > 0) {
         realElevatorEvents.slice(0, 6).forEach((ev, i) => {
@@ -699,7 +760,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
           hitTargets.push(frame);
           selectionByHit.set(frame, {
             sel: { kind: "packet", packet: ev.packet, floor: ev.floor },
-            focusY: (ev.fromY + ev.toY) / 2,
+            focusPos: new THREE.Vector3(shaftX * 0.5, (ev.fromY + ev.toY) / 2, shaftZ * 0.5),
           });
           dataCapsules.push({
             mesh: capGroup,
@@ -710,7 +771,6 @@ export function createHoldingTower3DComponent(ctx: Context) {
           });
         });
       } else {
-        // Cabine panorâmica estacionada calmamente no andar ativo quando não há turnos em voo
         const activeIdx = Math.max(0, floors.findIndex((f) => f.slug === props.activeTenant));
         const cabin = new THREE.Mesh(
           kit.own(new THREE.BoxGeometry(0.76, 0.9, 0.76)),
@@ -726,7 +786,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
         scene.add(cabinLight);
       }
 
-      // ── CONSTRUÇÃO ARQUITETÔNICA DE CADA ANDAR ──
+      // ── CONSTRUÇÃO DE CADA ANDAR ──
       const avatars: Array<{ handle: Avatar3DHandle; phase: number; working: boolean; error: boolean }> = [];
       const conveyorPackets: Array<{ mesh: THREE.Group; y: number; z: number; speed: number; offset: number }> = [];
       const warningBeacons: Array<{ mesh: THREE.Mesh; phase: number }> = [];
@@ -756,7 +816,13 @@ export function createHoldingTower3DComponent(ctx: Context) {
           emissiveIntensity: darkFactoryMode ? 0.68 : 0.36,
         });
 
-        // 1. Laje principal + filete de acento luminoso frontal/direito
+        // Iluminação interna quente por andar para eliminar zonas escuras no 1F/2F/3F
+        if (darkFactoryMode) {
+          const interiorLight = new THREE.PointLight(floor.isBoard ? 0xfff1d6 : 0xe0f2fe, 0.85, 11.5);
+          interiorLight.position.set(0.5, FLOOR_H - 0.85, 0.5);
+          floorGroup.add(interiorLight);
+        }
+
         const slab = new THREE.Mesh(kit.own(new THREE.BoxGeometry(floorW, 0.28, floorD)), matSlab);
         slab.position.set(0, -0.14, 0);
         slab.receiveShadow = true;
@@ -771,7 +837,6 @@ export function createHoldingTower3DComponent(ctx: Context) {
         trimRight.position.set(floorW / 2, -0.02, 0);
         floorGroup.add(trimRight);
 
-        // 2. Paredes arquitetônicas em L + Fachada cortina de vidro no lado direito
         const wallH = FLOOR_H - 0.3;
         const backWall = new THREE.Mesh(kit.own(new THREE.BoxGeometry(floorW, wallH, 0.2)), matWall);
         backWall.position.set(0, wallH / 2, -floorD / 2 + 0.1);
@@ -783,17 +848,14 @@ export function createHoldingTower3DComponent(ctx: Context) {
         leftWall.receiveShadow = true;
         floorGroup.add(leftWall);
 
-        // Arremate superior em aço nas paredes
         const backCap = new THREE.Mesh(kit.own(new THREE.BoxGeometry(floorW + 0.04, 0.06, 0.24)), matSteel);
         backCap.position.set(0, wallH + 0.01, -floorD / 2 + 0.1);
         floorGroup.add(backCap);
 
-        // Fachada cortina de vidro temperado na lateral direita traseira (igual ao Conselho 3D)
         const rightGlass = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.05, wallH - 0.15, 3.4)), matGlass);
         rightGlass.position.set(floorW / 2 - 0.12, wallH / 2, -1.65);
         floorGroup.add(rightGlass);
 
-        // Pilares de aço + placa externa 1F / 2F / 3F / 4F
         for (const [px, pz] of [
           [floorW / 2 - 0.14, -floorD / 2 + 0.14],
           [floorW / 2 - 0.14, 0.05],
@@ -814,7 +876,6 @@ export function createHoldingTower3DComponent(ctx: Context) {
         badgeMesh.position.set(floorW / 2 - 0.14, wallH - 0.38, floorD / 2 - 0.05);
         floorGroup.add(badgeMesh);
 
-        // 3. Telão de KPIs reais na parede de fundo de cada andar
         const screenBezel = new THREE.Mesh(kit.own(new THREE.BoxGeometry(4.6, 1.38, 0.1)), kit.matte(palette.sign, { roughness: 0.45 }));
         screenBezel.position.set(0.95, wallH - 1.05, -floorD / 2 + 0.22);
         screenBezel.castShadow = true;
@@ -828,10 +889,9 @@ export function createHoldingTower3DComponent(ctx: Context) {
         screenPlane.position.set(0.95, wallH - 1.05, -floorD / 2 + 0.275);
         floorGroup.add(screenPlane);
 
-        // Farol de alerta se houver erro real neste andar
         if (floor.errorCount > 0) {
           const beacon = new THREE.Mesh(
-            kit.own(new THREE.CylinderGeometry(0.14, 0.18, 0.26, 12)),
+            kit.own(new THREE.BoxGeometry(0.24, 0.26, 0.24)),
             kit.matte([0.98, 0.24, 0.28], { roughness: 0.2, emissive: 0xef4444, emissiveIntensity: 1.2 })
           );
           beacon.position.set(floorW / 2 - 0.7, 0.14, floorD / 2 - 0.65);
@@ -839,13 +899,11 @@ export function createHoldingTower3DComponent(ctx: Context) {
           warningBeacons.push({ mesh: beacon, phase: fIdx * 1.1 });
         }
 
-        // Planta biófila no canto traseiro direito
-        const cornerPlant = buildPlantProp(kit, palette, matSteel);
+        const cornerPlant = buildVoxelPlantProp(kit, palette, matSteel);
         cornerPlant.position.set(floorW / 2 - 0.85, 0, -floorD / 2 + 0.85);
         floorGroup.add(cornerPlant);
 
         if (floor.isBoard) {
-          // ── 4F COBERTURA: SALA EXECUTIVA DO CONSELHO DA HOLDING ──
           const rug = new THREE.Mesh(
             kit.own(new THREE.BoxGeometry(8.2, 0.025, 4.7)),
             kit.matte(darkFactoryMode ? [0.19, 0.21, 0.28] : [0.84, 0.83, 0.8], { roughness: 0.95 })
@@ -860,7 +918,6 @@ export function createHoldingTower3DComponent(ctx: Context) {
             floorGroup.add(rugLine);
           }
 
-          // Mesa executiva com moldura em aço, tampo de madeira, canaleta e pedestais
           const tableFrame = new THREE.Mesh(kit.own(new THREE.BoxGeometry(4.9, 0.08, 2.08)), matSteel);
           tableFrame.position.set(0.6, 0.72, 0.25);
           tableFrame.castShadow = true;
@@ -883,7 +940,6 @@ export function createHoldingTower3DComponent(ctx: Context) {
             floorGroup.add(ped);
           }
 
-          // Holograma central + anel orbital
           const holoGroup = new THREE.Group();
           holoGroup.position.set(0.6, 1.56, 0.25);
           const holo = new THREE.Mesh(
@@ -900,7 +956,6 @@ export function createHoldingTower3DComponent(ctx: Context) {
           floorGroup.add(holoGroup);
           holoCores.push(holoGroup);
 
-          // Cadeiras executivas + avatares esculpidos (SEM fotinha na cabeça) + notebooks
           const slots: Array<{ pos: [number, number, number]; rotY: number; lap: [number, number, number] }> = [
             { pos: [-2.4, 0, 0.25], rotY: Math.PI / 2, lap: [-1.4, 0.83, 0.25] },
             { pos: [-0.65, 0, 1.78], rotY: Math.PI, lap: [-0.65, 0.83, 0.98] },
@@ -916,17 +971,15 @@ export function createHoldingTower3DComponent(ctx: Context) {
             seatWrap.rotation.y = slot.rotY;
             seatWrap.add(buildBoardChair(kit, matLeather, matSteel, matChrome));
 
-            const av = buildCustomAvatar3D(kit, palette, ag, { seatHeight: 0.39, scale: 0.94, showPortraitMedallion: false });
+            const av = buildCustomAvatar3D(kit, palette, ag, { seatHeight: 0.4, scale: 0.96, showPortraitMedallion: false });
             seatWrap.add(av.root);
             floorGroup.add(seatWrap);
 
-            // Notebook pequeno na mesa
-            const lap = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.36, 0.02, 0.24)), matSteel);
+            const lap = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.36, 0.025, 0.24)), matSteel);
             lap.position.set(...slot.lap);
             lap.rotation.y = slot.rotY;
             floorGroup.add(lap);
 
-            // Feixe luminoso se conselheiro estiver em turno ao vivo
             if (ag.status === "working") {
               const curve = new THREE.QuadraticBezierCurve3(
                 new THREE.Vector3(slot.pos[0], 1.15, slot.pos[2]),
@@ -940,17 +993,18 @@ export function createHoldingTower3DComponent(ctx: Context) {
               floorGroup.add(beam);
             }
 
-            // Hitbox clicável do conselheiro
             const aHit = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.85, 1.35, 0.85)), kit.own(new THREE.MeshBasicMaterial({ visible: false })));
             aHit.position.set(0, 0.68, 0);
             seatWrap.add(aHit);
             hitTargets.push(aHit);
-            selectionByHit.set(aHit, { sel: { kind: "agent", agent: ag, floor }, focusY: y0 + 1.2 });
+            selectionByHit.set(aHit, {
+              sel: { kind: "agent", agent: ag, floor },
+              focusPos: new THREE.Vector3(slot.pos[0], y0 + 0.9, slot.pos[2]),
+            });
 
             avatars.push({ handle: av, phase: idx * 0.95, working: ag.status === "working", error: ag.status === "error" });
           });
         } else if (floor.estagio === "planejado") {
-          // ── ANDAR EM INCUBAÇÃO / BLUEPRINT (SaaS Tributário) ──
           const blueprintFloor = new THREE.Mesh(
             kit.own(new THREE.BoxGeometry(8.8, 0.025, 4.8)),
             kit.matte(darkFactoryMode ? [0.12, 0.17, 0.28] : [0.76, 0.83, 0.94], { roughness: 0.9 })
@@ -958,13 +1012,12 @@ export function createHoldingTower3DComponent(ctx: Context) {
           blueprintFloor.position.set(0.6, 0.012, 0.25);
           floorGroup.add(blueprintFloor);
 
-          // Mesa de arquitetura / prancheta com blueprint enrolado
-          const draftTable = new THREE.Mesh(kit.own(new THREE.BoxGeometry(2.6, 0.07, 1.3)), matWood);
+          const draftTable = new THREE.Mesh(kit.own(new THREE.BoxGeometry(2.6, 0.08, 1.3)), matWood);
           draftTable.position.set(0.4, 0.72, 0.1);
           draftTable.castShadow = true;
           floorGroup.add(draftTable);
           for (const lx of [-1.05, 1.05]) {
-            const leg = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.08, 0.7, 1.1)), matSteel);
+            const leg = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.1, 0.7, 1.1)), matSteel);
             leg.position.set(0.4 + lx, 0.35, 0.1);
             floorGroup.add(leg);
           }
@@ -973,17 +1026,14 @@ export function createHoldingTower3DComponent(ctx: Context) {
           roll.position.set(0.4, 0.81, 0.1);
           floorGroup.add(roll);
 
-          // Avatar holográfico de planejamento
           floor.agents.slice(0, 2).forEach((ag, idx) => {
-            const av = buildCustomAvatar3D(kit, palette, ag, { seatHeight: 0.05, scale: 0.88, showPortraitMedallion: false });
+            const av = buildCustomAvatar3D(kit, palette, ag, { seatHeight: 0.02, scale: 0.92, showPortraitMedallion: false });
             av.root.position.set(-1.4 + idx * 1.4, 0, 0.1);
             av.root.rotation.y = Math.PI / 2;
             floorGroup.add(av.root);
             avatars.push({ handle: av, phase: fIdx * 1.4 + idx, working: false, error: false });
           });
         } else {
-          // ── ANDAR OPERACIONAL DE SUBSIDIÁRIA (OrgFy Core / Lumen IPTV) ──
-          // Zona de piso madeira (estações de trabalho) + zona ardósia (baia da esteira)
           const workZone = new THREE.Mesh(kit.own(new THREE.BoxGeometry(9.2, 0.022, 3.0)), matFloorWood);
           workZone.position.set(0.85, 0.011, -1.1);
           workZone.receiveShadow = true;
@@ -994,12 +1044,10 @@ export function createHoldingTower3DComponent(ctx: Context) {
           beltZone.receiveShadow = true;
           floorGroup.add(beltZone);
 
-          // Faixa luminosa separando as duas zonas
           const dividerLine = new THREE.Mesh(kit.own(new THREE.BoxGeometry(9.2, 0.016, 0.05)), matAccent);
           dividerLine.position.set(0.85, 0.024, 0.52);
           floorGroup.add(dividerLine);
 
-          // Rack de servidores ao lado do elevador
           const rack = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.75, 1.7, 0.7)), matSteel);
           rack.position.set(-4.85, 0.85, 0.65);
           rack.castShadow = true;
@@ -1014,7 +1062,6 @@ export function createHoldingTower3DComponent(ctx: Context) {
             rackLeds.push(led);
           }
 
-          // Esteira industrial com trilhos laterais metálicos
           const belt = new THREE.Mesh(kit.own(new THREE.BoxGeometry(8.2, 0.14, 0.92)), matSteel);
           belt.position.set(0.85, 0.18, 1.9);
           belt.receiveShadow = true;
@@ -1027,7 +1074,6 @@ export function createHoldingTower3DComponent(ctx: Context) {
             floorGroup.add(rail);
           }
 
-          // SOMENTE pacotes REAIS (PRs / cards / turnos ao vivo deste andar) trafegam na esteira!
           const pktTotal = floor.packets.length;
           floor.packets.forEach((pktData, pIdx) => {
             const pktRgb = stageColorRgb(pktData.stage, palette);
@@ -1050,7 +1096,10 @@ export function createHoldingTower3DComponent(ctx: Context) {
             scene.add(pktGroup);
 
             hitTargets.push(crate);
-            selectionByHit.set(crate, { sel: { kind: "packet", packet: pktData, floor }, focusY: y0 + 1.1 });
+            selectionByHit.set(crate, {
+              sel: { kind: "packet", packet: pktData, floor },
+              focusPos: new THREE.Vector3(0.8, y0 + 0.7, 1.9),
+            });
 
             conveyorPackets.push({
               mesh: pktGroup,
@@ -1061,7 +1110,6 @@ export function createHoldingTower3DComponent(ctx: Context) {
             });
           });
 
-          // Estações de trabalho completas (mesa + cadeira + monitor aceso) + avatares esculpidos
           const screenMatA = kit.own(new THREE.MeshBasicMaterial({ map: makeDeskScreenTexture(kit, floorAccent, fIdx * 7 + 1) }));
           const screenMatB = kit.own(new THREE.MeshBasicMaterial({ map: makeDeskScreenTexture(kit, palette.accent.reviewer, fIdx * 7 + 2) }));
 
@@ -1080,22 +1128,23 @@ export function createHoldingTower3DComponent(ctx: Context) {
             station.position.set(dx, 0, dz);
             floorGroup.add(station);
 
-            const av = buildCustomAvatar3D(kit, palette, ag, { seatHeight: 0.37, scale: 0.88, showPortraitMedallion: false });
+            const av = buildCustomAvatar3D(kit, palette, ag, { seatHeight: 0.38, scale: 0.92, showPortraitMedallion: false });
             av.root.position.set(dx, 0, dz - 0.14);
             floorGroup.add(av.root);
 
-            // Hitbox clicável do agente
             const aHit = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.85, 1.35, 0.85)), kit.own(new THREE.MeshBasicMaterial({ visible: false })));
             aHit.position.set(dx, 0.68, dz - 0.14);
             floorGroup.add(aHit);
             hitTargets.push(aHit);
-            selectionByHit.set(aHit, { sel: { kind: "agent", agent: ag, floor }, focusY: y0 + 1.15 });
+            selectionByHit.set(aHit, {
+              sel: { kind: "agent", agent: ag, floor },
+              focusPos: new THREE.Vector3(dx, y0 + 0.85, dz),
+            });
 
             avatars.push({ handle: av, phase: fIdx * 1.7 + idx * 0.85, working: ag.status === "working", error: ag.status === "error" });
           });
         }
 
-        // Hitbox de fallback do andar inteiro (adicionada depois para dar prioridade a pacotes/agentes)
         const floorHit = new THREE.Mesh(
           kit.own(new THREE.BoxGeometry(floorW, 0.32, floorD)),
           kit.own(new THREE.MeshBasicMaterial({ visible: false }))
@@ -1103,16 +1152,20 @@ export function createHoldingTower3DComponent(ctx: Context) {
         floorHit.position.set(0, -0.14, 0);
         floorGroup.add(floorHit);
         hitTargets.push(floorHit);
-        selectionByHit.set(floorHit, { sel: { kind: "floor", floor }, focusY: y0 + 1.25 });
+        selectionByHit.set(floorHit, {
+          sel: { kind: "floor", floor },
+          focusPos: new THREE.Vector3(0, y0 + 1.2, 0),
+        });
       });
 
-      // ── INTERAÇÕES DE MOUSE ──
+      // ── NAVEGAÇÃO 3D LIVRE: ORBIT + PAN (BOTÃO DIREITO/SHIFT) + ZOOM PROFUNDO NO CURSOR + WASD/QE ──
       const raycaster = new THREE.Raycaster();
       const pointer = new THREE.Vector2();
-      let dragging = false;
+      let dragMode: "none" | "orbit" | "pan" = "none";
       let moved = false;
       let lastX = 0;
       let lastY = 0;
+      let isHoveringCanvas = false;
 
       const pickTarget = (e: MouseEvent) => {
         const rect = renderer.domElement.getBoundingClientRect();
@@ -1127,23 +1180,42 @@ export function createHoldingTower3DComponent(ctx: Context) {
         return null;
       };
 
+      const onContextMenu = (e: MouseEvent) => e.preventDefault();
+
       const onDown = (e: MouseEvent) => {
-        dragging = true;
+        dragMode = e.button === 2 || e.button === 1 || e.shiftKey ? "pan" : "orbit";
         moved = false;
         lastX = e.clientX;
         lastY = e.clientY;
-        renderer.domElement.style.cursor = "grabbing";
+        desiredPhiRef.current = null;
+        renderer.domElement.style.cursor = dragMode === "pan" ? "move" : "grabbing";
       };
 
       const onMove = (e: MouseEvent) => {
-        if (dragging) {
+        if (dragMode !== "none") {
           const dx = e.clientX - lastX;
           const dy = e.clientY - lastY;
           if (Math.abs(dx) > 2 || Math.abs(dy) > 2) moved = true;
-          theta -= dx * 0.008;
-          phi = Math.max(0.42, Math.min(1.28, phi - dy * 0.006));
           lastX = e.clientX;
           lastY = e.clientY;
+
+          if (dragMode === "orbit") {
+            theta -= dx * 0.0085;
+            // Ângulo phi ampliado até 1.50 rad (~86°): permite abaixar quase até o nível do piso!
+            phi = Math.max(0.18, Math.min(1.5, phi - dy * 0.007));
+          } else {
+            // Pan 3D proporcional ao nível de zoom atual
+            const rect = renderer.domElement.getBoundingClientRect();
+            const unitsPerPx = frustum / Math.max(200, rect.height);
+            const right = new THREE.Vector3(Math.cos(theta), 0, -Math.sin(theta));
+            const up = new THREE.Vector3(0, 1, 0);
+            target.addScaledVector(right, -dx * unitsPerPx);
+            target.addScaledVector(up, dy * unitsPerPx);
+            target.x = Math.max(-9, Math.min(9, target.x));
+            target.z = Math.max(-7, Math.min(7, target.z));
+            target.y = Math.max(-0.5, Math.min(totalH + 2, target.y));
+            desiredTargetRef.current.copy(target);
+          }
           updateCamera();
           return;
         }
@@ -1153,19 +1225,19 @@ export function createHoldingTower3DComponent(ctx: Context) {
       };
 
       const onUp = (e: MouseEvent) => {
-        if (dragging && !moved) {
+        if (dragMode === "orbit" && !moved) {
           const hit = pickTarget(e);
           if (hit) {
             setSelection(hit.sel);
-            targetFloorYRef.current = hit.focusY;
-            targetFrustumRef.current = hit.sel.kind === "floor" ? 9.2 : 7.8;
+            desiredTargetRef.current.copy(hit.focusPos);
+            desiredFrustumRef.current = hit.sel.kind === "floor" ? 8.2 : 4.6;
           } else {
             setSelection(null);
-            targetFloorYRef.current = defaultCenterY;
-            targetFrustumRef.current = defaultFrustum;
+            desiredTargetRef.current.set(0, defaultCenterY, 0);
+            desiredFrustumRef.current = defaultFrustum;
           }
         }
-        dragging = false;
+        dragMode = "none";
         renderer.domElement.style.cursor = "grab";
       };
 
@@ -1176,18 +1248,54 @@ export function createHoldingTower3DComponent(ctx: Context) {
 
       const onWheel = (e: WheelEvent) => {
         e.preventDefault();
-        const nextF = Math.max(6.0, Math.min(26, frustum + e.deltaY * 0.01));
+        const rect = renderer.domElement.getBoundingClientRect();
+        const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        const ny = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        const prevFrustum = frustum;
+        // Zoom profundo: de 26 (torre inteira) até 2.0 (close-up de uma mesa/personagem!)
+        const factor = e.deltaY > 0 ? 1.1 : 0.91;
+        const nextF = Math.max(2.0, Math.min(26, frustum * factor));
+        const deltaF = prevFrustum - nextF;
+
+        // Desloca suavemente o alvo na direção do cursor ao aproximar o zoom
+        if (deltaF > 0) {
+          const asp = rect.width / Math.max(1, rect.height);
+          const right = new THREE.Vector3(Math.cos(theta), 0, -Math.sin(theta));
+          target.addScaledVector(right, nx * deltaF * asp * 0.25);
+          target.y = Math.max(-0.5, Math.min(totalH + 2, target.y + ny * deltaF * 0.25));
+          desiredTargetRef.current.copy(target);
+        }
         frustum = nextF;
-        targetFrustumRef.current = nextF;
+        desiredFrustumRef.current = nextF;
         updateCamera();
+      };
+
+      const onKeyDown = (e: KeyboardEvent) => {
+        if (!isHoveringCanvas) return;
+        const step = Math.max(0.25, frustum * 0.06);
+        const right = new THREE.Vector3(Math.cos(theta), 0, -Math.sin(theta));
+        const forward = new THREE.Vector3(-Math.sin(theta), 0, -Math.cos(theta));
+        let handled = true;
+        if (e.key === "w" || e.key === "W" || e.key === "ArrowUp") desiredTargetRef.current.addScaledVector(forward, step);
+        else if (e.key === "s" || e.key === "S" || e.key === "ArrowDown") desiredTargetRef.current.addScaledVector(forward, -step);
+        else if (e.key === "a" || e.key === "A" || e.key === "ArrowLeft") desiredTargetRef.current.addScaledVector(right, -step);
+        else if (e.key === "d" || e.key === "D" || e.key === "ArrowRight") desiredTargetRef.current.addScaledVector(right, step);
+        else if (e.key === "e" || e.key === "E") desiredTargetRef.current.y = Math.min(totalH + 1, desiredTargetRef.current.y + step);
+        else if (e.key === "q" || e.key === "Q") desiredTargetRef.current.y = Math.max(0, desiredTargetRef.current.y - step);
+        else handled = false;
+        if (handled) e.preventDefault();
       };
 
       const dom = renderer.domElement;
       dom.style.cursor = "grab";
+      dom.addEventListener("contextmenu", onContextMenu);
       dom.addEventListener("mousedown", onDown);
       dom.addEventListener("mousemove", onMove);
       dom.addEventListener("dblclick", onDblClick);
+      dom.addEventListener("mouseenter", () => { isHoveringCanvas = true; });
+      dom.addEventListener("mouseleave", () => { isHoveringCanvas = false; });
       window.addEventListener("mouseup", onUp);
+      window.addEventListener("keydown", onKeyDown);
       dom.addEventListener("wheel", onWheel, { passive: false });
 
       let rafId = 0;
@@ -1197,12 +1305,16 @@ export function createHoldingTower3DComponent(ctx: Context) {
         const t = clock.getElapsedTime();
 
         let camDirty = false;
-        if (targetFloorYRef.current !== null && Math.abs(target.y - targetFloorYRef.current) > 0.01) {
-          target.y += (targetFloorYRef.current - target.y) * 0.09;
+        if (target.distanceTo(desiredTargetRef.current) > 0.01) {
+          target.lerp(desiredTargetRef.current, 0.12);
           camDirty = true;
         }
-        if (targetFrustumRef.current !== null && Math.abs(frustum - targetFrustumRef.current) > 0.02) {
-          frustum += (targetFrustumRef.current - frustum) * 0.09;
+        if (Math.abs(frustum - desiredFrustumRef.current) > 0.015) {
+          frustum += (desiredFrustumRef.current - frustum) * 0.12;
+          camDirty = true;
+        }
+        if (desiredPhiRef.current !== null && Math.abs(phi - desiredPhiRef.current) > 0.005) {
+          phi += (desiredPhiRef.current - phi) * 0.12;
           camDirty = true;
         }
         if (camDirty) updateCamera();
@@ -1211,7 +1323,6 @@ export function createHoldingTower3DComponent(ctx: Context) {
           a.handle.animate(t, a.phase, { working: a.working, error: a.error });
         }
 
-        // Cápsulas REAIS trafegando entre o andar de origem e o Conselho 4F
         for (const cap of dataCapsules) {
           const frac = (t * cap.speed + cap.offset) % 1;
           const pingPong = frac < 0.5 ? frac * 2 : (1 - frac) * 2;
@@ -1219,7 +1330,6 @@ export function createHoldingTower3DComponent(ctx: Context) {
           cap.mesh.rotation.y = t * 1.1;
         }
 
-        // Pacotes REAIS trafegando nas esteiras
         for (const pkt of conveyorPackets) {
           const frac = (t * pkt.speed * 0.14 + pkt.offset) % 1;
           pkt.mesh.position.x = -2.9 + frac * 7.4;
@@ -1257,10 +1367,12 @@ export function createHoldingTower3DComponent(ctx: Context) {
       return () => {
         cancelAnimationFrame(rafId);
         ro?.disconnect();
+        dom.removeEventListener("contextmenu", onContextMenu);
         dom.removeEventListener("mousedown", onDown);
         dom.removeEventListener("mousemove", onMove);
         dom.removeEventListener("dblclick", onDblClick);
         window.removeEventListener("mouseup", onUp);
+        window.removeEventListener("keydown", onKeyDown);
         dom.removeEventListener("wheel", onWheel);
         lights.dispose();
         kit.dispose();
@@ -1280,9 +1392,16 @@ export function createHoldingTower3DComponent(ctx: Context) {
       const idx = floors.findIndex((f) => f.slug === slug);
       if (idx >= 0) {
         setSelection({ kind: "floor", floor: floors[idx] });
-        targetFloorYRef.current = idx * 3.65 + 1.25;
-        targetFrustumRef.current = 9.2;
+        desiredTargetRef.current.set(0, idx * 3.65 + 1.0, 0);
+        desiredFrustumRef.current = 6.8;
       }
+    };
+
+    const handleEyeLevelView = () => {
+      const idx = selectedSlug ? Math.max(0, floors.findIndex((f) => f.slug === selectedSlug)) : 0;
+      desiredTargetRef.current.set(0, idx * 3.65 + 0.85, 0);
+      desiredFrustumRef.current = 4.4;
+      desiredPhiRef.current = 1.42; // ângulo bem baixo, quase no nível do piso!
     };
 
     const totalLivePackets = floors.reduce((sum, f) => sum + f.packets.length, 0);
@@ -1292,6 +1411,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
       {
         "data-holding-tower-3d": "true",
         "data-holding-tower-sculpted": "true",
+        "data-holding-tower-lego": "true",
         style: { display: "flex", flexDirection: "column", gap: "8px", flex: 1, minHeight: "560px" },
       },
       h(
@@ -1353,7 +1473,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
           })
         ),
 
-        // Card flutuante contextual (Pacote real clicado OU Agente clicado OU Andar focado)
+        // Card flutuante contextual (Pacote / Agente / Andar)
         (selection || activeFloorCard) &&
           h(
             "div",
@@ -1502,10 +1622,34 @@ export function createHoldingTower3DComponent(ctx: Context) {
                 ]
           ),
 
-        // Controles no canto inferior direito
+        // Controles no canto inferior direito (Ângulo Piso, Flutuar PiP, Dia/Noite, Tela cheia, Fit)
         h(
           "div",
-          { style: { position: "absolute", right: "12px", bottom: "12px", zIndex: 20, display: "inline-flex", gap: "6px" } },
+          { style: { position: "absolute", right: "12px", bottom: "12px", zIndex: 20, display: "inline-flex", gap: "6px", flexWrap: "wrap" } },
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              style: { background: "rgba(18, 20, 26, 0.88)" },
+              onClick: handleEyeLevelView,
+              title: "Aproximar câmera no nível do piso do andar selecionado",
+            },
+            "👁 Nível Piso"
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-tower-pip-btn": "true",
+              "data-variant": isPipActive ? "primary" : undefined,
+              style: { background: isPipActive ? undefined : "rgba(18, 20, 26, 0.88)" },
+              onClick: () => void handleTogglePiP(),
+              title: "Abrir a Torre 3D como janela flutuante (Picture-in-Picture) fora do Buzz",
+            },
+            isPipActive ? "⧉ Fechar PiP" : "⧉ Flutuar (PiP)"
+          ),
           h(
             "button",
             {
@@ -1547,6 +1691,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
               style: { background: "rgba(18, 20, 26, 0.88)" },
               onClick: () => {
                 setSelection(null);
+                desiredPhiRef.current = 1.02;
                 setFitTick((n) => n + 1);
               },
             },
@@ -1557,7 +1702,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
       h(
         "div",
         { className: "of-muted", style: { textAlign: "center", fontSize: "11px" } },
-        `Torre da Holding Cortexx · ${floors.length} andares · ${totalLivePackets} pacote(s) reais na esteira · Clique em qualquer agente, pacote ou andar`
+        `Torre Cortexx · ${floors.length} andares · ${totalLivePackets} pacote(s) reais · Arraste: girar · Botão direito/Shift: mover · Scroll: zoom profundo · W/A/S/D/Q/E`
       )
     );
   };

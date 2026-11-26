@@ -230,30 +230,31 @@ export function renderFactoryBoardAndFloor(props: BoardAndFloorProps) {
               )
             )
           ),
-        h(
-          "div",
-          { className: "of-segmented", role: "radiogroup", "aria-label": "Modo de visualização" },
+        !props.isBoardTenant &&
           h(
-            "button",
-            {
-              type: "button",
-              className: "of-seg-btn",
-              "data-active": viewMode === "board" ? "true" : "false",
-              onClick: () => onChangeViewMode("board"),
-            },
-            props.isBoardTenant ? "Pautas" : "Board"
+            "div",
+            { className: "of-segmented", role: "radiogroup", "aria-label": "Modo de visualização" },
+            h(
+              "button",
+              {
+                type: "button",
+                className: "of-seg-btn",
+                "data-active": viewMode === "board" ? "true" : "false",
+                onClick: () => onChangeViewMode("board"),
+              },
+              "Board"
+            ),
+            h(
+              "button",
+              {
+                type: "button",
+                className: "of-seg-btn",
+                "data-active": viewMode === "floor" ? "true" : "false",
+                onClick: () => onChangeViewMode("floor"),
+              },
+              "Andar"
+            )
           ),
-          h(
-            "button",
-            {
-              type: "button",
-              className: "of-seg-btn",
-              "data-active": viewMode === "floor" ? "true" : "false",
-              onClick: () => onChangeViewMode("floor"),
-            },
-            props.isBoardTenant ? "Sala 3D" : "Andar"
-          )
-        ),
         props.onRunScout &&
           h(
             "button",
