@@ -285,10 +285,14 @@ export class Crew {
     pose.feet.forEach((lift, i) => {
       feet.push(atLocal(lower, [i === 0 ? -0.1 : 0.1, 0.035 + lift, 0.04]), mem.feet);
     });
+    const legoSkin: Rgb = [0.95, 0.83, 0.69];
+    const legoHair: Rgb = seeded(f.agent.seed, 5) > 0.5 ? [0.16, 0.14, 0.17] : [0.3, 0.21, 0.14];
     this.pool("body", this.m.clay, { colours: true, cast: true }).push(upper, mem.tone);
+    this.pool("head", this.m.clay, { colours: true, cast: true }).push(upper, legoSkin);
+    this.pool("hair", this.m.clay, { colours: true, cast: true }).push(upper, legoHair);
     const hands = this.pool("hand", this.m.clay, { colours: true, cast: true });
-    hands.push(atLocal(upper, pose.handL), mem.tone);
-    hands.push(atLocal(upper, pose.handR), mem.tone);
+    hands.push(atLocal(upper, pose.handL), legoSkin);
+    hands.push(atLocal(upper, pose.handR), legoSkin);
 
     // The face: eyes squash toward their centre to blink; the catchlights hide meanwhile.
     const eyes = atLocal(upper, [0, EYE_Y + pose.eyes.up, 0])

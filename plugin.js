@@ -33679,122 +33679,6 @@ var Curves = /* @__PURE__ */ Object.freeze({
   QuadraticBezierCurve3,
   SplineCurve
 });
-class LatheGeometry extends BufferGeometry {
-  /**
-   * Constructs a new lathe geometry.
-   *
-   * @param {Array<Vector2|Vector3>} [points] - An array of points in 2D space. The x-coordinate of each point
-   * must be greater than zero.
-   * @param {number} [segments=12] - The number of circumference segments to generate.
-   * @param {number} [phiStart=0] - The starting angle in radians.
-   * @param {number} [phiLength=Math.PI*2] - The radian (0 to 2PI) range of the lathed section 2PI is a
-   * closed lathe, less than 2PI is a portion.
-   */
-  constructor(points = [new Vector2(0, -0.5), new Vector2(0.5, 0), new Vector2(0, 0.5)], segments = 12, phiStart = 0, phiLength = Math.PI * 2) {
-    super();
-    this.type = "LatheGeometry";
-    this.parameters = {
-      points,
-      segments,
-      phiStart,
-      phiLength
-    };
-    segments = Math.floor(segments);
-    phiLength = clamp(phiLength, 0, Math.PI * 2);
-    const indices = [];
-    const vertices = [];
-    const uvs = [];
-    const initNormals = [];
-    const normals = [];
-    const inverseSegments = 1 / segments;
-    const vertex2 = new Vector3();
-    const uv = new Vector2();
-    const normal = new Vector3();
-    const curNormal = new Vector3();
-    const prevNormal = new Vector3();
-    let dx = 0;
-    let dy = 0;
-    for (let j = 0; j <= points.length - 1; j++) {
-      switch (j) {
-        case 0:
-          dx = points[j + 1].x - points[j].x;
-          dy = points[j + 1].y - points[j].y;
-          normal.x = dy * 1;
-          normal.y = -dx;
-          normal.z = dy * 0;
-          prevNormal.copy(normal);
-          normal.normalize();
-          initNormals.push(normal.x, normal.y, normal.z);
-          break;
-        case points.length - 1:
-          prevNormal.normalize();
-          initNormals.push(prevNormal.x, prevNormal.y, prevNormal.z);
-          break;
-        default:
-          dx = points[j + 1].x - points[j].x;
-          dy = points[j + 1].y - points[j].y;
-          normal.x = dy * 1;
-          normal.y = -dx;
-          normal.z = dy * 0;
-          curNormal.copy(normal);
-          normal.x += prevNormal.x;
-          normal.y += prevNormal.y;
-          normal.z += prevNormal.z;
-          normal.normalize();
-          initNormals.push(normal.x, normal.y, normal.z);
-          prevNormal.copy(curNormal);
-      }
-    }
-    for (let i = 0; i <= segments; i++) {
-      const phi = phiStart + i * inverseSegments * phiLength;
-      const sin = Math.sin(phi);
-      const cos = Math.cos(phi);
-      for (let j = 0; j <= points.length - 1; j++) {
-        vertex2.x = points[j].x * sin;
-        vertex2.y = points[j].y;
-        vertex2.z = points[j].x * cos;
-        vertices.push(vertex2.x, vertex2.y, vertex2.z);
-        uv.x = i / segments;
-        uv.y = j / (points.length - 1);
-        uvs.push(uv.x, uv.y);
-        const x = initNormals[3 * j + 0] * sin;
-        const y = initNormals[3 * j + 1];
-        const z = initNormals[3 * j + 0] * cos;
-        normals.push(x, y, z);
-      }
-    }
-    for (let i = 0; i < segments; i++) {
-      for (let j = 0; j < points.length - 1; j++) {
-        const base = j + i * points.length;
-        const a = base;
-        const b = base + points.length;
-        const c = base + points.length + 1;
-        const d = base + 1;
-        indices.push(a, b, d);
-        indices.push(c, d, b);
-      }
-    }
-    this.setIndex(indices);
-    this.setAttribute("position", new Float32BufferAttribute(vertices, 3));
-    this.setAttribute("uv", new Float32BufferAttribute(uvs, 2));
-    this.setAttribute("normal", new Float32BufferAttribute(normals, 3));
-  }
-  copy(source) {
-    super.copy(source);
-    this.parameters = Object.assign({}, source.parameters);
-    return this;
-  }
-  /**
-   * Factory method for creating an instance of this class from the given
-   * JSON object.
-   *
-   * @param {Object} data - A JSON object representing the serialized geometry.
-   * @return {LatheGeometry} A new instance.
-   */
-  static fromJSON(data) {
-    return new LatheGeometry(data.points, data.segments, data.phiStart, data.phiLength);
-  }
-}
 class OctahedronGeometry extends PolyhedronGeometry {
   /**
    * Constructs a new octahedron geometry.
@@ -34120,7 +34004,7 @@ class TorusGeometry extends BufferGeometry {
    * @param {number} [thetaStart=0] - Start of the tubular sweep in radians.
    * @param {number} [thetaLength=Math.PI*2] - Length of the tubular sweep in radians.
    */
-  constructor(radius = 1, tube = 0.4, radialSegments = 12, tubularSegments = 48, arc2 = Math.PI * 2, thetaStart = 0, thetaLength = Math.PI * 2) {
+  constructor(radius = 1, tube = 0.4, radialSegments = 12, tubularSegments = 48, arc = Math.PI * 2, thetaStart = 0, thetaLength = Math.PI * 2) {
     super();
     this.type = "TorusGeometry";
     this.parameters = {
@@ -34128,7 +34012,7 @@ class TorusGeometry extends BufferGeometry {
       tube,
       radialSegments,
       tubularSegments,
-      arc: arc2,
+      arc,
       thetaStart,
       thetaLength
     };
@@ -34144,7 +34028,7 @@ class TorusGeometry extends BufferGeometry {
     for (let j = 0; j <= radialSegments; j++) {
       const v2 = thetaStart + j / radialSegments * thetaLength;
       for (let i = 0; i <= tubularSegments; i++) {
-        const u = i / tubularSegments * arc2;
+        const u = i / tubularSegments * arc;
         vertex2.x = (radius + tube * Math.cos(v2)) * Math.cos(u);
         vertex2.y = (radius + tube * Math.cos(v2)) * Math.sin(u);
         vertex2.z = tube * Math.sin(v2);
@@ -48004,32 +47888,10 @@ function mergeAttributes(attributes) {
   }
   return result;
 }
-const PROFILE = [
-  [0, 0.06],
-  [0.15, 0.07],
-  [0.21, 0.13],
-  [0.22, 0.2],
-  [0.2, 0.3],
-  [0.16, 0.4],
-  [0.1, 0.5],
-  [0.04, 0.58],
-  [0, 0.6]
-];
-const DEPTH = 0.9;
-const TIP_Y = 0.68;
-const EYE_Y = 0.4;
-const HEAD_Y = 0.75;
-function radiusAt(y) {
-  for (let i = 1; i < PROFILE.length; i++) {
-    const [r0, y0] = PROFILE[i - 1];
-    const [r1, y1] = PROFILE[i];
-    if (y <= y1) return r0 + (r1 - r0) * (y - y0) / (y1 - y0);
-  }
-  return 0;
-}
-const frontZ = (x, y) => Math.sqrt(Math.max(0, radiusAt(y) ** 2 - x * x)) * DEPTH;
+const TIP_Y = 0.685;
+const EYE_Y = 0.5;
+const HEAD_Y = 0.76;
 function placed(g, x, y, z, rot, scale) {
-  if (scale) g.scale(...scale);
   if (rot) {
     g.rotateX(rot[0]);
     g.rotateY(rot[1]);
@@ -48059,45 +47921,49 @@ function merged(parts) {
   for (const g of indexed) g.dispose();
   return out;
 }
-function arc(r, tube, sweep, y, z, up = false) {
-  const start = up ? Math.PI / 2 - sweep / 2 : -Math.PI / 2 - sweep / 2;
-  return placed(new TorusGeometry(r, tube, 6, 16, sweep), 0, y, z, [0, 0, start]);
+function voxelSmile(y, z, wide = false) {
+  const w = wide ? 0.09 : 0.068;
+  return merged([
+    placed(new BoxGeometry(w, 0.014, 0.01), 0, y, z),
+    placed(new BoxGeometry(0.014, 0.014, 0.01), -w / 2 - 4e-3, y + 0.01, z),
+    placed(new BoxGeometry(0.014, 0.014, 0.01), w / 2 + 4e-3, y + 0.01, z)
+  ]);
 }
-function bar(length, y, z) {
-  return placed(new CylinderGeometry(7e-3, 7e-3, length, 8), 0, y, z, [0, 0, Math.PI / 2]);
+function voxelFrown(y, z) {
+  return merged([
+    placed(new BoxGeometry(0.064, 0.014, 0.01), 0, y + 0.01, z),
+    placed(new BoxGeometry(0.014, 0.014, 0.01), -0.036, y, z),
+    placed(new BoxGeometry(0.014, 0.014, 0.01), 0.036, y, z)
+  ]);
 }
 function mouths() {
-  const z = frontZ(0, 0.345) - 4e-3;
+  const z = 0.124;
   return {
-    smile: arc(0.03, 7e-3, Math.PI * 0.7, 0.37, z),
-    "wide-smile": arc(0.045, 9e-3, Math.PI * 0.85, 0.375, z),
-    "flat-short": bar(0.03, 0.352, z),
-    flat: bar(0.055, 0.352, z),
-    // A small "o": a full ring, radius 0.015.
-    o: placed(new TorusGeometry(0.015, 6e-3, 6, 16), 0, 0.352, z),
-    frown: arc(0.03, 7e-3, Math.PI * 0.65, 0.325, z, true)
+    smile: voxelSmile(0.425, z, false),
+    "wide-smile": voxelSmile(0.425, z, true),
+    "flat-short": placed(new BoxGeometry(0.042, 0.014, 0.01), 0, 0.43, z),
+    flat: placed(new BoxGeometry(0.068, 0.014, 0.01), 0, 0.43, z),
+    o: placed(new BoxGeometry(0.028, 0.028, 0.01), 0, 0.43, z),
+    frown: voxelFrown(0.422, z)
   };
 }
 function icons() {
   return {
-    // Two cones point to point between two caps.
     hourglass: merged([
       placed(new ConeGeometry(0.035, 0.05, 10), 0, 0.025, 0, [Math.PI, 0, 0]),
       placed(new ConeGeometry(0.035, 0.05, 10), 0, -0.025, 0),
       placed(new CylinderGeometry(0.04, 0.04, 8e-3, 12), 0, 0.054, 0),
       placed(new CylinderGeometry(0.04, 0.04, 8e-3, 12), 0, -0.054, 0)
     ]),
-    // A knotted loop of cable.
     cable: placed(new TorusKnotGeometry(0.03, 8e-3, 40, 6, 2, 3), 0, 0, 0),
     ticket: merged([
       placed(new BoxGeometry(0.09, 0.055, 6e-3), 0, 0, 0, [0, 0, 0.2]),
       placed(new CylinderGeometry(8e-3, 8e-3, 8e-3, 8), 0.03, 6e-3, 2e-3, [Math.PI / 2, 0, 0])
     ]),
     person: merged([
-      placed(new SphereGeometry(0.02, 10, 8), 0, 0.03, 0),
-      placed(new SphereGeometry(0.032, 10, 8, 0, Math.PI * 2, 0, Math.PI / 2), 0, -0.03, 0)
+      placed(new BoxGeometry(0.036, 0.036, 0.036), 0, 0.03, 0),
+      placed(new BoxGeometry(0.055, 0.04, 0.036), 0, -0.02, 0)
     ]),
-    // An empty chair: seat, back and four legs.
     chair: merged([
       placed(new BoxGeometry(0.06, 8e-3, 0.06), 0, 0, 0),
       placed(new BoxGeometry(0.06, 0.06, 8e-3), 0, 0.03, -0.026),
@@ -48110,116 +47976,96 @@ function icons() {
   };
 }
 function crewGeometry() {
-  const eyeZ = frontZ(0.07, EYE_Y) - 6e-3;
-  const body = new LatheGeometry(
-    PROFILE.map(([r, y]) => new Vector2(r, y)),
-    24
-  ).scale(1, 1, DEPTH);
+  const eyeZ = 0.123;
+  const torso = merged([
+    placed(new BoxGeometry(0.27, 0.27, 0.175), 0, 0.225, 0),
+    placed(new BoxGeometry(0.28, 0.035, 0.185), 0, 0.105, 0)
+  ]);
   return {
-    body: merged([body, placed(new CylinderGeometry(0.012, 0.012, 0.05, 8), 0, 0.625, 0)]),
-    tip: placed(new SphereGeometry(0.045, 16, 12), 0, TIP_Y, 0),
-    /** One foot, at the origin. */
-    foot: placed(new SphereGeometry(0.07, 12, 8), 0, 0, 0, void 0, [1, 0.5, 1.4]),
-    /** One hand, at the origin. */
-    hand: new SphereGeometry(0.05, 12, 8),
+    body: torso,
+    /** Cabeça cúbica LEGO (pintada em tom pele/cerâmica clara no crew.ts). */
+    head: placed(new BoxGeometry(0.245, 0.235, 0.24), 0, 0.485, 0),
+    /** Cabelo/capacete LEGO em blocos no topo e nuca. */
+    hair: merged([
+      placed(new BoxGeometry(0.265, 0.07, 0.262), 0, 0.62, -4e-3),
+      placed(new BoxGeometry(0.265, 0.17, 0.052), 0, 0.51, -0.108)
+    ]),
+    /** Pino LEGO luminoso de status no topo da cabeça. */
+    tip: placed(new CylinderGeometry(0.05, 0.05, 0.048, 12), 0, TIP_Y, 0),
+    /** Pé/perna em bloco LEGO na origem. */
+    foot: placed(new BoxGeometry(0.092, 0.095, 0.14), 0, 0.015, 0.01),
+    /** Mãozinha em bloco LEGO na origem. */
+    hand: new BoxGeometry(0.074, 0.074, 0.074),
+    /** Olhos quadrados estilo LEGO/Minecraft na face plana. */
     eyes: merged(
-      [-0.07, 0.07].map(
-        (x) => placed(new SphereGeometry(0.03, 12, 8), x, EYE_Y, eyeZ, void 0, [1, 1, 0.45])
-      )
+      [-0.058, 0.058].map((x) => placed(new BoxGeometry(0.038, 0.044, 0.012), x, EYE_Y, eyeZ))
     ),
     catchlights: merged(
-      [-0.07, 0.07].map(
-        (x) => placed(new SphereGeometry(9e-3, 8, 6), x - 0.01, EYE_Y + 0.012, eyeZ + 0.011)
+      [-0.058, 0.058].map(
+        (x) => placed(new BoxGeometry(0.013, 0.013, 8e-3), x - 9e-3, EYE_Y + 0.011, eyeZ + 7e-3)
       )
     ),
-    rim: placed(new CylinderGeometry(0.078, 0.078, 8e-3, 24), 0, 0.17, frontZ(0, 0.17) - 2e-3, [
-      Math.PI / 2,
-      0,
-      0
-    ]),
-    badge: placed(new CircleGeometry(0.07, 24), 0, 0.17, frontZ(0, 0.17) + 25e-4),
+    /** Moldura e crachá frontal no tronco LEGO. */
+    rim: placed(new BoxGeometry(0.115, 0.115, 0.012), 0, 0.225, 0.091),
+    badge: placed(new CircleGeometry(0.048, 20), 0, 0.225, 0.099),
     shadow: placed(new CircleGeometry(0.24, 24), 0, 4e-3, 0.02, [-Math.PI / 2, 0, 0]),
-    // Builder: a knotted neckerchief.
+    // Builder: lenço/gola LEGO
     neckerchief: merged([
-      placed(new TorusGeometry(0.17, 0.03, 8, 24), 0, 0.33, 0, [Math.PI / 2, 0, 0], [1, DEPTH, 1]),
-      ...[-1, 1].map(
-        (side) => placed(new ConeGeometry(0.03, 0.09, 8), side * 0.035, 0.27, frontZ(0, 0.3) + 0.025, [
-          Math.PI + 0.3,
-          0,
-          side * 0.4
-        ])
-      )
+      placed(new BoxGeometry(0.285, 0.042, 0.195), 0, 0.355, 0),
+      placed(new BoxGeometry(0.06, 0.09, 0.025), 0, 0.3, 0.096)
     ]),
-    // Reviewer: round glasses.
+    // Reviewer: óculos quadrados LEGO
     glasses: merged([
-      ...[-0.07, 0.07].map(
-        (x) => placed(new TorusGeometry(0.04, 6e-3, 6, 20), x, EYE_Y, eyeZ + 0.01)
+      ...[-0.058, 0.058].map(
+        (x) => merged([
+          placed(new BoxGeometry(0.068, 0.01, 0.012), x, EYE_Y + 0.032, eyeZ + 8e-3),
+          placed(new BoxGeometry(0.068, 0.01, 0.012), x, EYE_Y - 0.032, eyeZ + 8e-3),
+          placed(new BoxGeometry(0.01, 0.064, 0.012), x - 0.03, EYE_Y, eyeZ + 8e-3),
+          placed(new BoxGeometry(0.01, 0.064, 0.012), x + 0.03, EYE_Y, eyeZ + 8e-3)
+        ])
       ),
-      placed(new CylinderGeometry(5e-3, 5e-3, 0.06, 6), 0, EYE_Y + 5e-3, eyeZ + 0.016, [
-        0,
-        0,
-        Math.PI / 2
-      ])
+      placed(new BoxGeometry(0.042, 0.01, 0.012), 0, EYE_Y + 8e-3, eyeZ + 8e-3)
     ]),
-    // Rebaser and integrator: a collar, and a wrench in the right hand.
-    collar: placed(
-      new TorusGeometry(0.19, 0.02, 8, 24),
-      0,
-      0.29,
-      0,
-      [Math.PI / 2, 0, 0],
-      [1, DEPTH, 1]
-    ),
+    // Rebaser / Integrator: gola técnica LEGO
+    collar: placed(new BoxGeometry(0.29, 0.045, 0.2), 0, 0.35, 0),
     wrench: merged([
-      placed(new CylinderGeometry(0.012, 0.012, 0.15, 8), 0.02, 0.07, 0.03),
-      placed(new TorusGeometry(0.028, 0.011, 6, 12, Math.PI * 1.5), 0.02, 0.165, 0.03, [
-        0,
-        0,
-        -Math.PI * 0.25
-      ])
+      placed(new BoxGeometry(0.022, 0.15, 0.022), 0.02, 0.07, 0.03),
+      placed(new BoxGeometry(0.055, 0.045, 0.024), 0.02, 0.16, 0.03)
     ]),
-    // PM: a headset over the dome, below the stem, with a mic boom.
+    // PM: headset quadrado LEGO nas laterais da cabeça
     headset: merged([
-      placed(new TorusGeometry(0.125, 0.012, 6, 20, Math.PI), 0, 0.47, 0),
-      ...[-0.125, 0.125].map((x) => placed(new SphereGeometry(0.035, 10, 8), x, 0.46, 0))
+      placed(new BoxGeometry(0.285, 0.026, 0.04), 0, 0.655, 0),
+      ...[-0.14, 0.14].map((x) => placed(new BoxGeometry(0.038, 0.09, 0.085), x, 0.5, 0))
     ]),
     mic: merged([
-      rod([-0.13, 0.44, 0.03], [-0.05, 0.355, frontZ(-0.05, 0.355) + 0.01], 6e-3),
-      placed(new SphereGeometry(0.016, 8, 6), -0.05, 0.355, frontZ(-0.05, 0.355) + 0.01)
+      rod([-0.14, 0.47, 0.03], [-0.045, 0.43, 0.135], 7e-3),
+      placed(new BoxGeometry(0.026, 0.02, 0.02), -0.045, 0.43, 0.135)
     ]),
-    // Scout: a spyglass in the right hand. Area reviewers: a magnifier.
     spyglass: merged([
-      placed(new CylinderGeometry(0.018, 0.024, 0.16, 10), 0.02, 0.06, 0.04, [0.5, 0, 0]),
-      placed(new CylinderGeometry(0.026, 0.026, 0.02, 10), 0.02, 0.13, 0.08, [0.5, 0, 0])
+      placed(new CylinderGeometry(0.018, 0.024, 0.16, 8), 0.02, 0.06, 0.04, [0.5, 0, 0]),
+      placed(new CylinderGeometry(0.026, 0.026, 0.02, 8), 0.02, 0.13, 0.08, [0.5, 0, 0])
     ]),
     magnifier: merged([
-      placed(new CylinderGeometry(0.01, 0.01, 0.09, 8), 0.02, 0.05, 0.03),
-      placed(new TorusGeometry(0.04, 8e-3, 6, 20), 0.02, 0.135, 0.03)
+      placed(new BoxGeometry(0.018, 0.09, 0.018), 0.02, 0.05, 0.03),
+      placed(new TorusGeometry(0.04, 9e-3, 6, 12), 0.02, 0.135, 0.03)
     ]),
-    lens: placed(new CircleGeometry(0.036, 20), 0.02, 0.135, 0.032),
-    // Status extras: thinking dots round the tip, the approval beacon's ring, the idle mug.
+    lens: placed(new CircleGeometry(0.036, 12), 0.02, 0.135, 0.032),
     dots: merged(
       [0, 1, 2].map((i) => {
         const a = i * Math.PI * 2 / 3;
-        return placed(new SphereGeometry(0.014, 8, 6), Math.cos(a) * 0.1, 0, Math.sin(a) * 0.1);
+        return placed(new BoxGeometry(0.026, 0.026, 0.026), Math.cos(a) * 0.1, 0, Math.sin(a) * 0.1);
       })
     ),
-    halo: placed(new TorusGeometry(0.07, 8e-3, 6, 32), 0, 0, 0, [Math.PI / 2, 0, 0]),
+    halo: placed(new TorusGeometry(0.07, 8e-3, 6, 24), 0, 0, 0, [Math.PI / 2, 0, 0]),
     mug: merged([
-      placed(new CylinderGeometry(0.035, 0.032, 0.075, 14), 0.03, 0.035, 0.03),
-      placed(new TorusGeometry(0.02, 6e-3, 6, 12, Math.PI), 0.068, 0.035, 0.03, [
-        0,
-        0,
-        -Math.PI / 2
-      ])
+      placed(new BoxGeometry(0.065, 0.075, 0.065), 0.03, 0.035, 0.03),
+      placed(new BoxGeometry(0.022, 0.045, 0.016), 0.07, 0.035, 0.03)
     ]),
-    // Carried things: a ticket (paper) and a PR crate (wood).
     ticket: placed(new BoxGeometry(0.2, 0.012, 0.14), 0, 0, 0),
     crate: placed(new BoxGeometry(0.22, 0.17, 0.22), 0, 0, 0),
-    // Confetti and smoke (moments).
     confetti: new BoxGeometry(0.03, 4e-3, 0.018),
-    puff: new SphereGeometry(0.05, 10, 8),
-    ring: dashedRing(0.32, 0.36, 18),
+    puff: new SphereGeometry(0.05, 8, 6),
+    ring: dashedRing(0.32, 0.36, 16),
     ...prefixed(mouths()),
     ...prefixedIcons(icons())
   };
@@ -50122,10 +49968,14 @@ class Crew {
     pose.feet.forEach((lift, i) => {
       feet.push(atLocal(lower, [i === 0 ? -0.1 : 0.1, 0.035 + lift, 0.04]), mem.feet);
     });
+    const legoSkin = [0.95, 0.83, 0.69];
+    const legoHair = seeded(f.agent.seed, 5) > 0.5 ? [0.16, 0.14, 0.17] : [0.3, 0.21, 0.14];
     this.pool("body", this.m.clay, { colours: true, cast: true }).push(upper, mem.tone);
+    this.pool("head", this.m.clay, { colours: true, cast: true }).push(upper, legoSkin);
+    this.pool("hair", this.m.clay, { colours: true, cast: true }).push(upper, legoHair);
     const hands = this.pool("hand", this.m.clay, { colours: true, cast: true });
-    hands.push(atLocal(upper, pose.handL), mem.tone);
-    hands.push(atLocal(upper, pose.handR), mem.tone);
+    hands.push(atLocal(upper, pose.handL), legoSkin);
+    hands.push(atLocal(upper, pose.handR), legoSkin);
     const eyes = atLocal(upper, [0, EYE_Y + pose.eyes.up, 0]).multiply(new Matrix4().makeScale(1, pose.eyes.open, 1)).multiply(new Matrix4().makeTranslation(0, -EYE_Y, 0));
     this.pool("eyes", this.m.ink).push(eyes);
     if (pose.eyes.open > BLINK_OPEN) this.pool("catchlights", this.m.white).push(eyes);
