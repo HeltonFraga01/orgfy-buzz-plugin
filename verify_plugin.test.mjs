@@ -2434,16 +2434,43 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     }
   });
 
-  test("v18.8: Torre da Holding 3D Multi-Andares + Avatares 3D Personalizados + Holograma & Telão 3-Slides no Conselho", () => {
+  test("v18.9: Escritório Virtual 3D Coworking Editável (presets, A* pathfinding, Dia/Noite 24h) + Fix de balões no Conselho", () => {
     const bundle = fs.readFileSync(path.resolve(__dirname, "plugin.js"), "utf8");
     const boardSrc = fs.readFileSync(path.resolve(__dirname, "src", "factory", "Boardroom3DCanvas.tsx"), "utf8");
-    const towerSrc = fs.readFileSync(path.resolve(__dirname, "src", "factory", "HoldingTower3DCanvas.tsx"), "utf8");
-    assert.ok(bundle.includes("data-holding-tower-3d"), "Torre da Holding 3D multi-andares deve estar no bundle");
-    assert.ok(bundle.includes("Torre Holding"), "Botão Torre Holding deve estar no seletor 3D");
+    const officeSrc = fs.readFileSync(path.resolve(__dirname, "src", "factory", "VirtualOffice3DCanvas.tsx"), "utf8");
+    assert.ok(bundle.includes("data-virtual-office-3d"), "Escritório Virtual 3D editável deve estar no bundle");
+    assert.ok(bundle.includes("Escritório 3D"), "Botão Escritório 3D deve estar no seletor 3D");
+    assert.ok(bundle.includes("Editar Escritório"), "Modo editor de planta baixa deve estar no bundle");
     assert.ok(bundle.includes("FINOPS & NEXUSMIND GATEWAY"), "Telão 3-slides interativo do Conselho deve estar no bundle");
     assert.ok(boardSrc.includes("buildCustomAvatar3D"), "Boardroom3DCanvas deve usar avatares 3D personalizados");
     assert.ok(boardSrc.includes("holoCore"), "Boardroom3DCanvas deve renderizar holograma central de reunião");
-    assert.ok(towerSrc.includes("conveyorPackets"), "HoldingTower3DCanvas deve animar pacotes trafegando nas esteiras");
-    assert.ok(towerSrc.includes("dataCapsules"), "HoldingTower3DCanvas deve animar elevador de dados entre andares");
+    assert.ok(boardSrc.includes("projectedBubbles.sort"), "Boardroom3DCanvas deve resolver colisão vertical entre balões");
+    assert.ok(boardSrc.includes("seenPk.has(e.pubkey)"), "Boardroom3DCanvas deve deduplicar balões por pubkey");
+    assert.ok(officeSrc.includes("findGridPathAStar"), "VirtualOffice3DCanvas deve mover agentes com pathfinding A*");
+    assert.ok(officeSrc.includes("ghostGroup"), "VirtualOffice3DCanvas deve renderizar cursor fantasma 3D no editor");
+
+    // Testes unitários da engine de planta baixa + pathfinding A*
+    const preset = orgfyMod.buildOfficePreset("holding_suites");
+    assert.equal(preset.cols, 16);
+    assert.equal(preset.rows, 12);
+    assert.ok(preset.items.some((i) => i.kind === "desk"), "preset holding_suites deve conter mesas");
+    assert.ok(preset.items.some((i) => i.kind === "glass_wall"), "preset holding_suites deve conter divisórias de vidro");
+
+    // Coloca uma parede bloqueando o caminho direto (5,6) -> (7,6) e valida desvio A*
+    let edited = orgfyMod.placeOrReplaceFurniture(preset, "wall", 6, 6, 1);
+    assert.equal(orgfyMod.isTileWalkable(edited, 6, 6), false, "célula com parede não deve ser caminhável");
+    const pathAround = orgfyMod.findGridPathAStar(edited, { gx: 5, gz: 6 }, { gx: 7, gz: 6 });
+    assert.ok(pathAround.length >= 4, "A* deve contornar a parede recém-colocada");
+    assert.ok(!pathAround.some((pt) => pt.gx === 6 && pt.gz === 6), "A* não pode atravessar a parede");
+
+    // Remove a parede e valida caminho direto novamente
+    edited = orgfyMod.removeFurnitureAt(edited, 6, 6);
+    assert.equal(orgfyMod.isTileWalkable(edited, 6, 6), true, "célula liberada deve voltar a ser caminhável");
+    const directPath = orgfyMod.findGridPathAStar(edited, { gx: 5, gz: 6 }, { gx: 7, gz: 6 });
+    assert.equal(directPath.length, 3, "sem barreira, A* deve ir em linha reta (3 passos)");
+
+    // Pintura de piso
+    const painted = orgfyMod.paintFloorTile(edited, 3, 3, "carpet");
+    assert.equal(painted.floors[3 * 16 + 3], "carpet", "paintFloorTile deve atualizar o piso da célula");
   });
 }

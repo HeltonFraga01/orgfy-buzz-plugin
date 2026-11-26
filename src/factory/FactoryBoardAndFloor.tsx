@@ -42,7 +42,7 @@ export interface BoardAndFloorProps {
   onRefresh: () => void;
   loading: boolean;
   Floor3D?: any;
-  HoldingTower3D?: any;
+  VirtualOffice3D?: any;
   holding?: any;
   onEnterTowerFloor?: (slug: string) => void;
   onOpenChannelInBuzz?: (slug: string) => void;
@@ -208,13 +208,13 @@ export function renderFactoryBoardAndFloor(props: BoardAndFloorProps) {
             (props.isBoardTenant
               ? ([
                   { id: "both", label: "Sala 3D" },
-                  { id: "tower", label: "Torre Holding" },
+                  { id: "tower", label: "Escritório 3D" },
                 ] as const)
               : ([
                   { id: "workshop", label: "Oficina" },
                   { id: "lookout", label: "Mirante" },
                   { id: "both", label: "Ambos" },
-                  { id: "tower", label: "Torre Holding" },
+                  { id: "tower", label: "Escritório 3D" },
                 ] as const)
             ).map((st) =>
               h(
@@ -442,16 +442,23 @@ export function renderFactoryBoardAndFloor(props: BoardAndFloorProps) {
             })
           )
         )
-      : storeyFocus === "tower" && props.HoldingTower3D
-        ? h(props.HoldingTower3D, {
+      : storeyFocus === "tower" && props.VirtualOffice3D
+        ? h(props.VirtualOffice3D, {
             holding: props.holding,
             liveCrew,
             telemetry: props.telemetry,
+            status,
             activeTenant: tenant,
-            onEnterFloor: (slug: string) => {
+            tenantLabel: props.isBoardTenant ? "Conselho" : tenant,
+            onSelectTenant: (slug: string) => {
               props.onEnterTowerFloor?.(slug);
             },
-            onOpenChannel: (slug: string) => props.onOpenChannelInBuzz?.(slug),
+            onOpenAgentDm: (ag: any) => props.onOpenAgentDm?.(ag),
+            onOpenTurnInSideChat: (turn: LiveAgentTurn) => props.onOpenTurnInSideChat?.(turn),
+            onOpenAgentProfile: (ag: { key?: string; pubkey?: string; name?: string }) => {
+              if (props.onOpenAgentProfileNative) props.onOpenAgentProfileNative(ag);
+              else if (ag.key) onSelectAgentKey(ag.key);
+            },
           })
         : props.isBoardTenant && props.Boardroom3D
         ? h(props.Boardroom3D, {

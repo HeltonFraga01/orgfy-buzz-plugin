@@ -256,6 +256,15 @@ export const inject = [
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { TENANTS, SVG, THEME } from "./ui/theme-icons";
+export {
+  buildOfficePreset,
+  placeOrReplaceFurniture,
+  removeFurnitureAt,
+  paintFloorTile,
+  findGridPathAStar,
+  isTileWalkable,
+  getInteractionSpot,
+} from "./factory/office-layout-engine";
 export { TENANTS, SVG, THEME };
 export { buildAutomationFromSession } from "./factory/AutomationEditor";
 export { collectBuzzNativeUsage } from "./services/buzz-usage-live";

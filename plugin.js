@@ -17663,12 +17663,12 @@ function renderFactoryBoardAndFloor(props) {
           { className: "of-segmented", role: "radiogroup", "aria-label": "Andares da fábrica" },
           (props.isBoardTenant ? [
             { id: "both", label: "Sala 3D" },
-            { id: "tower", label: "Torre Holding" }
+            { id: "tower", label: "Escritório 3D" }
           ] : [
             { id: "workshop", label: "Oficina" },
             { id: "lookout", label: "Mirante" },
             { id: "both", label: "Ambos" },
-            { id: "tower", label: "Torre Holding" }
+            { id: "tower", label: "Escritório 3D" }
           ]).map(
             (st) => h(
               "button",
@@ -17878,18 +17878,28 @@ function renderFactoryBoardAndFloor(props) {
           );
         })
       )
-    ) : storeyFocus === "tower" && props.HoldingTower3D ? h(props.HoldingTower3D, {
+    ) : storeyFocus === "tower" && props.VirtualOffice3D ? h(props.VirtualOffice3D, {
       holding: props.holding,
       liveCrew,
       telemetry: props.telemetry,
+      status,
       activeTenant: tenant,
-      onEnterFloor: (slug) => {
+      tenantLabel: props.isBoardTenant ? "Conselho" : tenant,
+      onSelectTenant: (slug) => {
         var _a2;
         (_a2 = props.onEnterTowerFloor) == null ? void 0 : _a2.call(props, slug);
       },
-      onOpenChannel: (slug) => {
+      onOpenAgentDm: (ag) => {
         var _a2;
-        return (_a2 = props.onOpenChannelInBuzz) == null ? void 0 : _a2.call(props, slug);
+        return (_a2 = props.onOpenAgentDm) == null ? void 0 : _a2.call(props, ag);
+      },
+      onOpenTurnInSideChat: (turn) => {
+        var _a2;
+        return (_a2 = props.onOpenTurnInSideChat) == null ? void 0 : _a2.call(props, turn);
+      },
+      onOpenAgentProfile: (ag) => {
+        if (props.onOpenAgentProfileNative) props.onOpenAgentProfileNative(ag);
+        else if (ag.key) onSelectAgentKey(ag.key);
       }
     }) : props.isBoardTenant && props.Boardroom3D ? h(props.Boardroom3D, {
       seats: props.boardroomSeats || [],
@@ -54163,6 +54173,7 @@ function createBoardroom3DComponent(ctx) {
         holoCore.rotation.x = Math.sin(t * 0.6) * 0.28;
         holoGroup.position.y = 1.62 + Math.sin(t * 1.8) * 0.05;
         holoRing.rotation.z = -t * 0.6;
+        const projectedBubbles = [];
         for (const a of animated) {
           a.avatar.animate(t, a.phase, { working: a.seat.status === "working" });
           const bubbleNode = bubbleNodesRef.current.get(a.seat.id);
@@ -54174,10 +54185,23 @@ function createBoardroom3DComponent(ctx) {
             const bh = bubbleNode.offsetHeight || 86;
             const cx = Math.max(bw / 2 + 10, Math.min(cw - bw / 2 - 10, sx));
             const bottom = Math.max(bh + 12, Math.min(ch - 18, sy - 14));
-            bubbleNode.style.transform = `translate3d(${Math.round(cx)}px, ${Math.round(bottom)}px, 0) translate(-50%, -100%)`;
-            bubbleNode.style.opacity = "1";
-            bubbleNode.style.pointerEvents = "auto";
+            projectedBubbles.push({ node: bubbleNode, cx, bottom, w: bw, h: bh });
           }
+        }
+        projectedBubbles.sort((a, b) => a.bottom - b.bottom);
+        for (let i = 0; i < projectedBubbles.length; i += 1) {
+          const cur = projectedBubbles[i];
+          for (let j = 0; j < i; j += 1) {
+            const prev = projectedBubbles[j];
+            const overlapX = Math.abs(cur.cx - prev.cx) < (cur.w + prev.w) * 0.48;
+            const overlapY = Math.abs(cur.bottom - prev.bottom) < prev.h + 8;
+            if (overlapX && overlapY) {
+              cur.bottom = Math.max(cur.h + 14, prev.bottom - prev.h - 10);
+            }
+          }
+          cur.node.style.transform = `translate3d(${Math.round(cur.cx)}px, ${Math.round(cur.bottom)}px, 0) translate(-50%, -100%)`;
+          cur.node.style.opacity = "1";
+          cur.node.style.pointerEvents = "auto";
         }
         renderer.render(scene, camera);
       };
@@ -54233,7 +54257,17 @@ function createBoardroom3DComponent(ctx) {
     const enrichedSeats = seats.map(resolveSeatMeta);
     const workingNowCount = enrichedSeats.filter((e) => Boolean(e.liveTurn)).length;
     const inBuzzCount = enrichedSeats.filter((e) => e.inBuzz).length;
-    const speechBubbles = enrichedSeats.filter((e) => Boolean(e.liveTurn || e.doneRec));
+    const speechBubbles = (() => {
+      const seenPk = /* @__PURE__ */ new Set();
+      return enrichedSeats.filter((e) => {
+        if (!e.liveTurn && !e.doneRec) return false;
+        if (e.pubkey) {
+          if (seenPk.has(e.pubkey)) return false;
+          seenPk.add(e.pubkey);
+        }
+        return true;
+      });
+    })();
     React.useEffect(() => {
       if (speechBubbles.length === 0) return;
       const timer = window.setInterval(() => {
@@ -54787,136 +54821,623 @@ function createBoardroom3DComponent(ctx) {
     );
   };
 }
+const OFFICE_COLS = 16;
+const OFFICE_ROWS = 12;
+function tileIndex(gx, gz, cols = OFFICE_COLS) {
+  return gz * cols + gx;
+}
+function isInsideGrid(gx, gz, cols = OFFICE_COLS, rows = OFFICE_ROWS) {
+  return gx >= 0 && gx < cols && gz >= 0 && gz < rows;
+}
+function buildOfficePreset(preset) {
+  const cols = OFFICE_COLS;
+  const rows = OFFICE_ROWS;
+  const floors = new Array(cols * rows).fill(preset === "cyber_lab" ? "slate" : "wood");
+  const items = [];
+  let seq = 1;
+  const add2 = (kind, gx, gz, rot = 0, label) => {
+    if (!isInsideGrid(gx, gz, cols, rows)) return;
+    if (items.some((i) => i.gx === gx && i.gz === gz)) return;
+    items.push({ id: `it_${seq++}`, kind, gx, gz, rot, label });
+  };
+  const paintRect = (x0, z0, x1, z1, kind) => {
+    for (let z = z0; z <= z1; z += 1) {
+      for (let x = x0; x <= x1; x += 1) {
+        if (isInsideGrid(x, z, cols, rows)) floors[tileIndex(x, z, cols)] = kind;
+      }
+    }
+  };
+  if (preset === "holding_suites") {
+    paintRect(10, 1, 14, 5, "carpet");
+    paintRect(1, 8, 5, 10, "lounge");
+    paintRect(1, 1, 3, 3, "slate");
+    add2("glass_wall", 10, 1, 1);
+    add2("glass_wall", 10, 2, 1);
+    add2("glass_wall", 10, 3, 1);
+    add2("glass_wall", 11, 5, 0);
+    add2("glass_wall", 12, 5, 0);
+    add2("glass_wall", 13, 5, 0);
+    add2("glass_wall", 14, 5, 0);
+    add2("meeting_table", 12, 3, 0, "Conselho");
+    add2("meeting_table", 13, 3, 0);
+    add2("plant", 14, 1, 0);
+    add2("server_rack", 1, 1, 0, "Gateway");
+    add2("server_rack", 2, 1, 0, "NexusMind");
+    add2("wall", 4, 1, 1);
+    add2("wall", 4, 2, 1);
+    const deskCoords = [
+      [5, 2, 0],
+      [7, 2, 0],
+      [5, 5, 0],
+      [7, 5, 0],
+      [9, 7, 0],
+      [11, 7, 0],
+      [13, 7, 0],
+      [9, 9, 2],
+      [11, 9, 2],
+      [13, 9, 2]
+    ];
+    for (const [dx, dz, dr] of deskCoords) add2("desk", dx, dz, dr);
+    add2("coffee_bar", 1, 9, 1, "Café");
+    add2("sofa", 3, 10, 2);
+    add2("sofa", 4, 10, 2);
+    add2("plant", 1, 7, 0);
+    add2("plant", 14, 10, 0);
+    add2("plant", 6, 1, 0);
+  } else if (preset === "startup_open") {
+    paintRect(1, 1, 14, 10, "wood");
+    paintRect(11, 7, 14, 10, "lounge");
+    paintRect(1, 1, 5, 4, "carpet");
+    add2("meeting_table", 3, 2, 0, "War Room");
+    add2("meeting_table", 4, 2, 0);
+    add2("glass_wall", 6, 1, 1);
+    add2("glass_wall", 6, 2, 1);
+    for (const [dx, dz] of [
+      [8, 2],
+      [10, 2],
+      [12, 2],
+      [8, 5],
+      [10, 5],
+      [12, 5],
+      [2, 7],
+      [4, 7],
+      [6, 7],
+      [8, 7]
+    ]) {
+      add2("desk", dx, dz, 0);
+    }
+    add2("coffee_bar", 14, 8, 3, "Café");
+    add2("sofa", 12, 9, 0);
+    add2("sofa", 13, 9, 0);
+    add2("server_rack", 14, 1, 0);
+    add2("plant", 1, 10, 0);
+    add2("plant", 14, 5, 0);
+  } else {
+    paintRect(6, 4, 9, 7, "carpet");
+    add2("server_rack", 7, 1, 0, "Core-A");
+    add2("server_rack", 8, 1, 0, "Core-B");
+    add2("glass_wall", 5, 3, 0);
+    add2("glass_wall", 10, 3, 0);
+    add2("meeting_table", 7, 5, 0, "Ops Hub");
+    add2("meeting_table", 8, 5, 0);
+    for (const [dx, dz] of [
+      [2, 2],
+      [4, 2],
+      [11, 2],
+      [13, 2],
+      [2, 5],
+      [4, 5],
+      [11, 5],
+      [13, 5],
+      [2, 8],
+      [4, 8],
+      [11, 8],
+      [13, 8]
+    ]) {
+      add2("desk", dx, dz, 0);
+    }
+    add2("coffee_bar", 7, 10, 2);
+    add2("sofa", 9, 10, 2);
+    add2("plant", 1, 1, 0);
+    add2("plant", 14, 1, 0);
+    add2("plant", 1, 10, 0);
+    add2("plant", 14, 10, 0);
+  }
+  return {
+    version: 1,
+    cols,
+    rows,
+    presetName: preset,
+    floors,
+    items
+  };
+}
+function placeOrReplaceFurniture(layout, kind, gx, gz, rot = 0) {
+  if (!isInsideGrid(gx, gz, layout.cols, layout.rows)) return layout;
+  const filtered = layout.items.filter((i) => !(i.gx === gx && i.gz === gz));
+  const nextItem = {
+    id: `it_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+    kind,
+    gx,
+    gz,
+    rot
+  };
+  return { ...layout, items: [...filtered, nextItem] };
+}
+function removeFurnitureAt(layout, gx, gz) {
+  return {
+    ...layout,
+    items: layout.items.filter((i) => !(i.gx === gx && i.gz === gz))
+  };
+}
+function paintFloorTile(layout, gx, gz, kind) {
+  if (!isInsideGrid(gx, gz, layout.cols, layout.rows)) return layout;
+  const nextFloors = [...layout.floors];
+  nextFloors[tileIndex(gx, gz, layout.cols)] = kind;
+  return { ...layout, floors: nextFloors };
+}
+function isTileWalkable(layout, gx, gz) {
+  if (!isInsideGrid(gx, gz, layout.cols, layout.rows)) return false;
+  return !layout.items.some((i) => i.gx === gx && i.gz === gz);
+}
+function getInteractionSpot(layout, item) {
+  const deltas = [
+    [0, 1],
+    [0, -1],
+    [1, 0],
+    [-1, 0]
+  ];
+  const rotOrder = [deltas[item.rot % 4], ...deltas.filter((_, i) => i !== item.rot % 4)];
+  for (const [dx, dz] of rotOrder) {
+    const nx = item.gx + dx;
+    const nz = item.gz + dz;
+    if (isTileWalkable(layout, nx, nz)) return { gx: nx, gz: nz };
+  }
+  return null;
+}
+function findGridPathAStar(layout, start, goal) {
+  if (!isInsideGrid(start.gx, start.gz, layout.cols, layout.rows)) return [];
+  if (!isInsideGrid(goal.gx, goal.gz, layout.cols, layout.rows)) return [];
+  if (start.gx === goal.gx && start.gz === goal.gz) return [{ gx: goal.gx, gz: goal.gz }];
+  const blocked = /* @__PURE__ */ new Set();
+  for (const it of layout.items) {
+    blocked.add(`${it.gx},${it.gz}`);
+  }
+  blocked.delete(`${start.gx},${start.gz}`);
+  if (blocked.has(`${goal.gx},${goal.gz}`)) return [];
+  const keyOf2 = (x, z) => `${x},${z}`;
+  const open = [
+    { gx: start.gx, gz: start.gz, g: 0, f: Math.abs(goal.gx - start.gx) + Math.abs(goal.gz - start.gz) }
+  ];
+  const gScore = /* @__PURE__ */ new Map([[keyOf2(start.gx, start.gz), 0]]);
+  const cameFrom = /* @__PURE__ */ new Map();
+  const closed = /* @__PURE__ */ new Set();
+  const dirs = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1]
+  ];
+  while (open.length > 0) {
+    open.sort((a, b) => a.f - b.f);
+    const cur = open.shift();
+    const curKey = keyOf2(cur.gx, cur.gz);
+    if (cur.gx === goal.gx && cur.gz === goal.gz) {
+      const path = [];
+      let trace = { gx: cur.gx, gz: cur.gz };
+      while (trace) {
+        path.push(trace);
+        trace = cameFrom.get(keyOf2(trace.gx, trace.gz));
+      }
+      return path.reverse();
+    }
+    closed.add(curKey);
+    for (const [dx, dz] of dirs) {
+      const nx = cur.gx + dx;
+      const nz = cur.gz + dz;
+      if (!isInsideGrid(nx, nz, layout.cols, layout.rows)) continue;
+      const nKey = keyOf2(nx, nz);
+      if (closed.has(nKey) || blocked.has(nKey)) continue;
+      const tentativeG = cur.g + 1;
+      const prevG = gScore.get(nKey);
+      if (prevG === void 0 || tentativeG < prevG) {
+        cameFrom.set(nKey, { gx: cur.gx, gz: cur.gz });
+        gScore.set(nKey, tentativeG);
+        const h = Math.abs(goal.gx - nx) + Math.abs(goal.gz - nz);
+        open.push({ gx: nx, gz: nz, g: tentativeG, f: tentativeG + h });
+      }
+    }
+  }
+  return [];
+}
+function loadSavedOfficeLayout(tenant) {
+  var _a, _b;
+  try {
+    const raw = (_b = (_a = globalThis == null ? void 0 : globalThis.localStorage) == null ? void 0 : _a.getItem) == null ? void 0 : _b.call(_a, `orgfy_office_layout_v1_${tenant}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if ((parsed == null ? void 0 : parsed.version) === 1 && Array.isArray(parsed.floors) && Array.isArray(parsed.items)) {
+        return parsed;
+      }
+    }
+  } catch {
+  }
+  return buildOfficePreset(tenant === "lumen-iptv" ? "cyber_lab" : "holding_suites");
+}
+function saveOfficeLayout(tenant, layout) {
+  var _a, _b;
+  try {
+    (_b = (_a = globalThis == null ? void 0 : globalThis.localStorage) == null ? void 0 : _a.setItem) == null ? void 0 : _b.call(_a, `orgfy_office_layout_v1_${tenant}`, JSON.stringify(layout));
+  } catch {
+  }
+}
+const EDITOR_TOOLS = [
+  { mode: "furniture", kind: "desk", label: "Mesa + PC" },
+  { mode: "furniture", kind: "wall", label: "Parede" },
+  { mode: "furniture", kind: "glass_wall", label: "Vidro" },
+  { mode: "furniture", kind: "meeting_table", label: "Reunião" },
+  { mode: "furniture", kind: "sofa", label: "Sofá" },
+  { mode: "furniture", kind: "coffee_bar", label: "Café" },
+  { mode: "furniture", kind: "plant", label: "Planta" },
+  { mode: "furniture", kind: "server_rack", label: "Rack" },
+  { mode: "floor", kind: "wood", label: "Piso Madeira" },
+  { mode: "floor", kind: "carpet", label: "Carpete" },
+  { mode: "floor", kind: "lounge", label: "Lounge" },
+  { mode: "floor", kind: "slate", label: "Ardósia" },
+  { mode: "erase", label: "Apagar" }
+];
+const TILE_SIZE = 1;
+function gridToWorld(gx, gz, cols = OFFICE_COLS, rows = OFFICE_ROWS) {
+  return [(gx - cols / 2 + 0.5) * TILE_SIZE, (gz - rows / 2 + 0.5) * TILE_SIZE];
+}
+function worldToGrid(wx, wz, cols = OFFICE_COLS, rows = OFFICE_ROWS) {
+  return {
+    gx: Math.floor(wx / TILE_SIZE + cols / 2),
+    gz: Math.floor(wz / TILE_SIZE + rows / 2)
+  };
+}
 function rgbToCss([r, g, b], alpha = 1) {
   const rr = Math.round(Math.max(0, Math.min(1, r)) * 255);
   const gg = Math.round(Math.max(0, Math.min(1, g)) * 255);
   const bb = Math.round(Math.max(0, Math.min(1, b)) * 255);
   return alpha >= 1 ? `rgb(${rr}, ${gg}, ${bb})` : `rgba(${rr}, ${gg}, ${bb}, ${alpha})`;
 }
-function makeFloorSignTexture(kit, title, subtitle, accent, isDark) {
-  const c = canvasOf(512, 112);
+function fmtClock(tsMs) {
+  if (!tsMs || !Number.isFinite(tsMs)) return "0s";
+  const diffSec = Math.max(0, Math.floor((Date.now() - tsMs) / 1e3));
+  if (diffSec < 60) return `${diffSec}s`;
+  const mins = Math.floor(diffSec / 60);
+  const rem = diffSec % 60;
+  if (mins < 60) return rem > 0 ? `${mins}m ${rem}s` : `${mins}m`;
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+}
+function makeOfficeSignTexture(kit, title, subtitle, p) {
+  const c = canvasOf(640, 128);
   const g = c.getContext("2d");
-  g.fillStyle = isDark ? "#11151d" : "#1d222c";
+  g.fillStyle = rgbToCss(p.sign);
   g.fillRect(0, 0, c.width, c.height);
-  g.fillStyle = rgbToCss(accent);
-  g.fillRect(0, 0, 12, c.height);
-  g.fillRect(12, c.height - 8, c.width - 12, 8);
-  g.fillStyle = "#f8fafc";
-  g.font = "700 32px -apple-system, BlinkMacSystemFont, sans-serif";
-  g.fillText(title.toUpperCase().slice(0, 22), 28, 48);
-  g.fillStyle = "#94a3b8";
-  g.font = "600 18px ui-monospace, Menlo, monospace";
-  g.fillText(subtitle.slice(0, 34), 28, 82);
+  g.strokeStyle = "rgba(255,255,255,0.14)";
+  g.lineWidth = 4;
+  g.strokeRect(4, 4, c.width - 8, c.height - 8);
+  g.fillStyle = rgbToCss(p.lane);
+  g.fillRect(20, c.height - 14, c.width - 40, 7);
+  g.fillStyle = p.signInk;
+  g.font = "700 34px ui-monospace, SFMono-Regular, Menlo, monospace";
+  g.textAlign = "center";
+  g.textBaseline = "middle";
+  g.fillText(title.toUpperCase().slice(0, 26), c.width / 2, 48);
+  g.fillStyle = "rgba(203,213,225,0.85)";
+  g.font = "600 18px ui-monospace, SFMono-Regular, Menlo, monospace";
+  g.fillText(subtitle.toUpperCase().slice(0, 42), c.width / 2, 86);
   return kit.canvasTexture(c);
 }
-function createHoldingTower3DComponent(ctx) {
+function makeMonitorScreenTexture(kit, p, variant) {
+  const c = canvasOf(128, 80);
+  const g = c.getContext("2d");
+  g.fillStyle = "#0b1120";
+  g.fillRect(0, 0, c.width, c.height);
+  const accent = rgbToCss(variant % 2 === 0 ? p.lane : p.accent.reviewer);
+  g.fillStyle = accent;
+  g.fillRect(8, 10, 44, 6);
+  g.fillStyle = "rgba(148,163,184,0.55)";
+  for (let row = 0; row < 5; row += 1) {
+    const w = 36 + (variant * 19 + row * 23) % 64;
+    g.fillRect(8, 22 + row * 10, Math.min(110, w), 5);
+  }
+  g.fillStyle = accent;
+  g.fillRect(92, 54, 24, 16);
+  return kit.canvasTexture(c);
+}
+function buildFurnitureMesh(kit, item, mats, p, ledMeshes) {
+  const g = new Group();
+  g.rotation.y = item.rot % 4 * (Math.PI / 2);
+  switch (item.kind) {
+    case "wall": {
+      const body = new Mesh(kit.own(new BoxGeometry(0.98, 1.85, 0.24)), mats.wall);
+      body.position.y = 0.925;
+      body.castShadow = true;
+      body.receiveShadow = true;
+      g.add(body);
+      const cap = new Mesh(kit.own(new BoxGeometry(1, 0.06, 0.28)), mats.steel);
+      cap.position.y = 1.88;
+      g.add(cap);
+      const base = new Mesh(kit.own(new BoxGeometry(1, 0.08, 0.27)), mats.steel);
+      base.position.y = 0.04;
+      g.add(base);
+      break;
+    }
+    case "glass_wall": {
+      const pane = new Mesh(kit.own(new BoxGeometry(0.96, 1.8, 0.06)), mats.glass);
+      pane.position.y = 0.92;
+      g.add(pane);
+      const topRail = new Mesh(kit.own(new BoxGeometry(1, 0.07, 0.1)), mats.steel);
+      topRail.position.y = 1.84;
+      g.add(topRail);
+      const botRail = new Mesh(kit.own(new BoxGeometry(1, 0.08, 0.1)), mats.steel);
+      botRail.position.y = 0.04;
+      g.add(botRail);
+      for (const sx of [-0.46, 0.46]) {
+        const post = new Mesh(kit.own(new BoxGeometry(0.08, 1.86, 0.1)), mats.steel);
+        post.position.set(sx, 0.93, 0);
+        post.castShadow = true;
+        g.add(post);
+      }
+      break;
+    }
+    case "desk": {
+      const top = new Mesh(kit.own(new BoxGeometry(0.9, 0.06, 0.56)), mats.wood);
+      top.position.set(0, 0.62, -0.06);
+      top.castShadow = true;
+      top.receiveShadow = true;
+      g.add(top);
+      for (const lx of [-0.39, 0.39]) {
+        const leg = new Mesh(kit.own(new BoxGeometry(0.05, 0.6, 0.48)), mats.steel);
+        leg.position.set(lx, 0.3, -0.06);
+        leg.castShadow = true;
+        g.add(leg);
+      }
+      const stand = new Mesh(kit.own(new BoxGeometry(0.08, 0.16, 0.06)), mats.chrome);
+      stand.position.set(0, 0.72, -0.2);
+      g.add(stand);
+      const bezel = new Mesh(kit.own(new BoxGeometry(0.52, 0.32, 0.04)), mats.steel);
+      bezel.position.set(0, 0.88, -0.2);
+      bezel.castShadow = true;
+      g.add(bezel);
+      const disp = new Mesh(
+        kit.own(new PlaneGeometry(0.46, 0.26)),
+        (item.gx + item.gz) % 2 === 0 ? mats.screenA : mats.screenB
+      );
+      disp.position.set(0, 0.88, -0.178);
+      g.add(disp);
+      const kb = new Mesh(kit.own(new BoxGeometry(0.32, 0.018, 0.11)), mats.steel);
+      kb.position.set(-0.04, 0.66, 0.04);
+      g.add(kb);
+      const mug = new Mesh(kit.own(new CylinderGeometry(0.036, 0.032, 0.075, 10)), mats.mug);
+      mug.position.set(0.3, 0.69, 0.04);
+      g.add(mug);
+      const seat = new Mesh(kit.own(new BoxGeometry(0.36, 0.06, 0.34)), mats.fabric);
+      seat.position.set(0, 0.34, 0.32);
+      seat.castShadow = true;
+      g.add(seat);
+      const back = new Mesh(kit.own(new BoxGeometry(0.34, 0.36, 0.06)), mats.fabric);
+      back.position.set(0, 0.52, 0.46);
+      back.castShadow = true;
+      g.add(back);
+      const stem = new Mesh(kit.own(new CylinderGeometry(0.03, 0.04, 0.32, 8)), mats.chrome);
+      stem.position.set(0, 0.16, 0.32);
+      g.add(stem);
+      break;
+    }
+    case "meeting_table": {
+      const top = new Mesh(kit.own(new BoxGeometry(0.96, 0.07, 0.92)), mats.wood);
+      top.position.y = 0.64;
+      top.castShadow = true;
+      top.receiveShadow = true;
+      g.add(top);
+      const inlay = new Mesh(kit.own(new BoxGeometry(0.76, 0.015, 0.1)), mats.lane);
+      inlay.position.y = 0.68;
+      g.add(inlay);
+      const ped = new Mesh(kit.own(new BoxGeometry(0.28, 0.62, 0.46)), mats.steel);
+      ped.position.y = 0.31;
+      ped.castShadow = true;
+      g.add(ped);
+      const base = new Mesh(kit.own(new BoxGeometry(0.56, 0.04, 0.62)), mats.chrome);
+      base.position.y = 0.02;
+      g.add(base);
+      break;
+    }
+    case "sofa": {
+      const base = new Mesh(kit.own(new BoxGeometry(0.92, 0.24, 0.72)), mats.fabricAccent);
+      base.position.set(0, 0.18, 0.04);
+      base.castShadow = true;
+      base.receiveShadow = true;
+      g.add(base);
+      const back = new Mesh(kit.own(new BoxGeometry(0.92, 0.46, 0.18)), mats.fabricAccent);
+      back.position.set(0, 0.44, -0.24);
+      back.castShadow = true;
+      g.add(back);
+      for (const sx of [-0.41, 0.41]) {
+        const arm = new Mesh(kit.own(new BoxGeometry(0.12, 0.34, 0.72)), mats.fabric);
+        arm.position.set(sx, 0.32, 0.04);
+        arm.castShadow = true;
+        g.add(arm);
+      }
+      break;
+    }
+    case "coffee_bar": {
+      const counter = new Mesh(kit.own(new BoxGeometry(0.92, 0.76, 0.66)), mats.woodDark);
+      counter.position.y = 0.38;
+      counter.castShadow = true;
+      counter.receiveShadow = true;
+      g.add(counter);
+      const top = new Mesh(kit.own(new BoxGeometry(0.96, 0.06, 0.7)), mats.steel);
+      top.position.y = 0.79;
+      g.add(top);
+      const mach = new Mesh(kit.own(new BoxGeometry(0.38, 0.34, 0.3)), mats.chrome);
+      mach.position.set(-0.14, 0.99, -0.06);
+      mach.castShadow = true;
+      g.add(mach);
+      const led = new Mesh(kit.own(new BoxGeometry(0.08, 0.03, 0.02)), mats.ledGreen);
+      led.position.set(-0.14, 1.08, 0.1);
+      g.add(led);
+      ledMeshes.push(led);
+      for (const cx of [0.22, 0.34]) {
+        const cup = new Mesh(kit.own(new CylinderGeometry(0.04, 0.032, 0.08, 10)), mats.mug);
+        cup.position.set(cx, 0.86, 0.08);
+        g.add(cup);
+      }
+      break;
+    }
+    case "plant": {
+      const pot = new Mesh(kit.own(new CylinderGeometry(0.24, 0.18, 0.38, 12)), mats.steel);
+      pot.position.y = 0.19;
+      pot.castShadow = true;
+      pot.receiveShadow = true;
+      g.add(pot);
+      const fronds = [
+        [0, 0.72, 0, 0.24],
+        [-0.14, 0.56, 0.1, 0.18],
+        [0.14, 0.59, -0.09, 0.19],
+        [-0.08, 0.53, -0.13, 0.16],
+        [0.11, 0.55, 0.12, 0.17]
+      ];
+      fronds.forEach(([x, y, z, r], i) => {
+        const f = new Mesh(kit.own(new DodecahedronGeometry(r, 0)), i % 2 === 0 ? mats.leaf : mats.leafDark);
+        f.position.set(x, y, z);
+        f.castShadow = true;
+        g.add(f);
+      });
+      break;
+    }
+    case "server_rack": {
+      const cab = new Mesh(kit.own(new BoxGeometry(0.76, 1.56, 0.68)), mats.steel);
+      cab.position.y = 0.78;
+      cab.castShadow = true;
+      cab.receiveShadow = true;
+      g.add(cab);
+      const frontTrim = new Mesh(
+        kit.own(new BoxGeometry(0.68, 1.44, 0.03)),
+        kit.matte(p.dark ? [0.08, 0.1, 0.14] : [0.14, 0.17, 0.22], { roughness: 0.4 })
+      );
+      frontTrim.position.set(0, 0.78, 0.34);
+      g.add(frontTrim);
+      for (let row = 0; row < 5; row += 1) {
+        const led = new Mesh(
+          kit.own(new BoxGeometry(0.46, 0.035, 0.02)),
+          row % 2 === 0 ? mats.ledBlue : mats.ledGreen
+        );
+        led.position.set(0, 0.3 + row * 0.24, 0.365);
+        g.add(led);
+        ledMeshes.push(led);
+      }
+      break;
+    }
+  }
+  return g;
+}
+function createVirtualOffice3DComponent(ctx) {
   const React = ctx.react;
   const h = React.createElement;
-  return function HoldingTower3DCanvas(props) {
+  return function VirtualOffice3DCanvas(props) {
+    var _a;
     const hostRef = React.useRef(null);
     const mountRef = React.useRef(null);
-    const [selectedSlug, setSelectedSlug] = React.useState(null);
-    const [hoveredSlug, setHoveredSlug] = React.useState(null);
+    const bubbleNodesRef = React.useRef(/* @__PURE__ */ new Map());
+    const [layout, setLayout] = React.useState(() => loadSavedOfficeLayout(props.activeTenant));
+    const [editMode, setEditMode] = React.useState(false);
+    const [activeToolIdx, setActiveToolIdx] = React.useState(0);
+    const [toolRot, setToolRot] = React.useState(0);
+    const [timeHour, setTimeHour] = React.useState(14);
+    const [darkFactory, setDarkFactory] = React.useState(true);
     const [fitTick, setFitTick] = React.useState(0);
-    const [darkFactoryMode, setDarkFactoryMode] = React.useState(true);
+    const [themeVersion, setThemeVersion] = React.useState(0);
     const [isFullscreen, setIsFullscreen] = React.useState(false);
-    const floors = React.useMemo(() => {
-      var _a, _b;
-      const byPk = ((_a = props.telemetry) == null ? void 0 : _a.byPubkey) || {};
-      const crew = props.liveCrew || [];
-      const empresas = ((_b = props.holding) == null ? void 0 : _b.empresas) && props.holding.empresas.length > 0 ? props.holding.empresas : [
-        { slug: "orgfy", nome: "OrgFy Core", estagio: "operacional", agentesTotal: 16, agentesProntos: 16 },
-        { slug: "lumen-iptv", nome: "Lumen IPTV", estagio: "operacional", agentesTotal: 6, agentesProntos: 6 },
-        { slug: "saas-tributario", nome: "SaaS Tributário", estagio: "planejado", agentesTotal: 0, agentesProntos: 0 }
-      ];
-      const subsidiaryFloors = empresas.map((emp) => {
-        const slugLower = String(emp.slug || "").toLowerCase();
-        const matchingCrew = crew.filter((a) => {
-          const n = a.name.toLowerCase();
-          if (slugLower === "orgfy") return n.startsWith("orgfy") && !n.includes("iris");
-          if (slugLower.includes("lumen")) return n.includes("lumen");
-          return n.includes(slugLower);
-        });
-        let workingCount = 0;
-        let errorCount = 0;
-        const agents = matchingCrew.slice(0, 6).map((a) => {
-          const turn = a.pubkey ? byPk[a.pubkey.toLowerCase()] : void 0;
-          const isErr = (turn == null ? void 0 : turn.state) === "error";
-          const isWork = Boolean(turn && !isErr);
-          if (isErr) errorCount += 1;
-          if (isWork) workingCount += 1;
-          return {
-            name: a.name,
-            picture: a.picture,
-            status: isErr ? "error" : isWork ? "working" : "active"
-          };
-        });
-        return {
-          slug: emp.slug,
-          nome: emp.nome || emp.slug,
-          estagio: emp.estagio || "operacional",
-          agentesCount: matchingCrew.length || emp.agentesTotal || 0,
-          workingCount,
-          errorCount,
-          agents: agents.length > 0 ? agents : emp.estagio === "planejado" ? [{ name: `${emp.nome} PO`, status: "planned" }] : [{ name: `${emp.nome} Dev`, status: "active" }]
-        };
+    const [selectedAgentKey, setSelectedAgentKey] = React.useState(null);
+    const [copiedJson, setCopiedJson] = React.useState(false);
+    const [, setClockTick] = React.useState(0);
+    React.useEffect(() => {
+      setLayout(loadSavedOfficeLayout(props.activeTenant));
+      setSelectedAgentKey(null);
+    }, [props.activeTenant]);
+    React.useEffect(() => {
+      saveOfficeLayout(props.activeTenant, layout);
+    }, [props.activeTenant, layout]);
+    React.useEffect(() => {
+      var _a2;
+      const root = (_a2 = globalThis.document) == null ? void 0 : _a2.documentElement;
+      if (!root || typeof MutationObserver === "undefined") return;
+      const obs = new MutationObserver(() => setThemeVersion((v2) => v2 + 1));
+      obs.observe(root, {
+        attributes: true,
+        attributeFilter: ["class", "style", "data-accent", "data-color-mode", "data-color-level"]
       });
-      const boardCrew = crew.filter((a) => /iris|conselho/i.test(a.name));
-      let boardWork = 0;
-      let boardErr = 0;
-      const boardAgents = boardCrew.length > 0 ? boardCrew.slice(0, 6).map((a) => {
-        const turn = a.pubkey ? byPk[a.pubkey.toLowerCase()] : void 0;
-        const isErr = (turn == null ? void 0 : turn.state) === "error";
-        const isWork = Boolean(turn && !isErr);
-        if (isErr) boardErr += 1;
-        if (isWork) boardWork += 1;
-        return {
-          name: a.name,
-          picture: a.picture,
-          status: isErr ? "error" : isWork ? "working" : "active"
-        };
-      }) : [
-        { name: "OrgFy Iris", role: "CEO Master", status: "active" },
-        { name: "Conselho CTO", role: "CTO", status: "active" },
-        { name: "Conselho CRO", role: "CRO", status: "active" },
-        { name: "Conselho CPO", role: "CPO", status: "active" },
-        { name: "Conselho COO", role: "COO", status: "active" },
-        { name: "Conselho CGO", role: "CGO", status: "active" }
-      ];
-      const penthouse = {
-        slug: "board",
-        nome: "Conselho da Holding & Iris",
-        estagio: "cobertura",
-        isBoard: true,
-        agentesCount: boardAgents.length,
-        workingCount: boardWork,
-        errorCount: boardErr,
-        agents: boardAgents
+      return () => obs.disconnect();
+    }, []);
+    React.useEffect(() => {
+      if (!editMode) return;
+      const onKey = (e) => {
+        if (e.key === "r" || e.key === "R") {
+          setToolRot((r) => (r + 1) % 4);
+        } else if (e.key === "Escape") {
+          setEditMode(false);
+        }
       };
-      return [...subsidiaryFloors, penthouse];
-    }, [props.holding, props.liveCrew, props.telemetry]);
-    const floorsSignature = floors.map((f) => `${f.slug}:${f.workingCount}:${f.errorCount}:${f.agentesCount}`).join("|");
-    const targetFloorYRef = React.useRef(null);
-    const targetFrustumRef = React.useRef(null);
+      window.addEventListener("keydown", onKey);
+      return () => window.removeEventListener("keydown", onKey);
+    }, [editMode]);
+    const editModeRef = React.useRef(editMode);
+    editModeRef.current = editMode;
+    const activeToolRef = React.useRef(EDITOR_TOOLS[activeToolIdx]);
+    activeToolRef.current = EDITOR_TOOLS[activeToolIdx];
+    const toolRotRef = React.useRef(toolRot);
+    toolRotRef.current = toolRot;
+    const layoutRef = React.useRef(layout);
+    layoutRef.current = layout;
+    const crewList = React.useMemo(() => {
+      const src = props.liveCrew && props.liveCrew.length > 0 ? props.liveCrew : [];
+      return src.slice(0, 14);
+    }, [props.liveCrew]);
+    const speechBubbles = React.useMemo(() => {
+      var _a2;
+      const byPk = ((_a2 = props.telemetry) == null ? void 0 : _a2.byPubkey) || {};
+      const seenPk = /* @__PURE__ */ new Set();
+      const out = [];
+      for (const agent of crewList) {
+        const pk = (agent.pubkey || "").toLowerCase();
+        if (!pk || seenPk.has(pk)) continue;
+        const turn = byPk[pk];
+        if (!turn) continue;
+        seenPk.add(pk);
+        out.push({ agent, turn });
+      }
+      return out;
+    }, [crewList, props.telemetry]);
+    React.useEffect(() => {
+      if (speechBubbles.length === 0) return;
+      const id = window.setInterval(() => setClockTick((n) => n + 1), 1e3);
+      return () => window.clearInterval(id);
+    }, [speechBubbles.length]);
+    const crewSig = crewList.map((c) => `${c.key}:${c.pubkey || ""}:${c.running ? 1 : 0}`).join("|");
+    const layoutSig = `${layout.presetName}:${layout.items.length}:${layout.items.map((i) => `${i.kind}@${i.gx},${i.gz},${i.rot}`).join(";")}:${layout.floors.join("")}`;
+    const workingKeysSig = speechBubbles.map((b) => b.agent.key).join(",");
     React.useEffect(() => {
       const container = mountRef.current;
       if (!container) return;
       const palette = readPalette();
       const kit = new Kit();
-      const width = Math.max(320, container.clientWidth || 780);
-      const height = Math.max(320, container.clientHeight || 520);
+      const width = Math.max(360, container.clientWidth || 780);
+      const height = Math.max(340, container.clientHeight || 500);
       const scene = new Scene();
-      scene.background = darkFactoryMode ? new Color(592656) : new Color(15659767);
-      const FLOOR_H = 3.2;
-      const totalH = floors.length * FLOOR_H;
-      const defaultCenterY = Math.max(2.2, totalH * 0.45);
-      const defaultFrustum = Math.max(12.5, totalH * 1.15);
-      let theta = 0.68;
-      let phi = 1.02;
-      let frustum = defaultFrustum;
-      const target = new Vector3(0, defaultCenterY, 0);
-      targetFloorYRef.current = defaultCenterY;
-      targetFrustumRef.current = defaultFrustum;
+      const dayFactor = darkFactory ? 0.08 : Math.max(0, Math.sin((timeHour - 5) / 14 * Math.PI));
+      const skyColor = darkFactory ? new Color(724500) : new Color().setHSL(0.61, 0.25, 0.09 + dayFactor * 0.72);
+      scene.background = skyColor;
+      let theta = 0.72;
+      let phi = 0.96;
+      let frustum = 14.2;
+      const defaultTarget = new Vector3(0, 0.4, 0.2);
+      const target = defaultTarget.clone();
+      const desiredTarget = defaultTarget.clone();
+      let desiredFrustum = frustum;
       const aspect2 = width / height;
       const camera = new OrthographicCamera(
         -frustum * aspect2 / 2,
@@ -54927,8 +55448,8 @@ function createHoldingTower3DComponent(ctx) {
         160
       );
       const updateCamera = () => {
-        const w = Math.max(320, container.clientWidth || width);
-        const hh = Math.max(320, container.clientHeight || height);
+        const w = Math.max(360, container.clientWidth || width);
+        const hh = Math.max(340, container.clientHeight || height);
         const asp = w / hh;
         camera.left = -frustum * asp / 2;
         camera.right = frustum * asp / 2;
@@ -54956,196 +55477,224 @@ function createHoldingTower3DComponent(ctx) {
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = PCFSoftShadowMap;
       renderer.toneMapping = ACESFilmicToneMapping;
-      renderer.toneMappingExposure = darkFactoryMode ? 1.15 : 1.02;
+      renderer.toneMappingExposure = darkFactory ? 1.12 : 0.88 + dayFactor * 0.24;
       renderer.outputColorSpace = SRGBColorSpace;
       container.innerHTML = "";
       container.appendChild(renderer.domElement);
       const lights = new Lights();
       scene.add(lights.hemi, lights.sun, lights.sun.target);
-      lights.set([{ x0: -6.5, x1: 6.5, y0: 0, y1: totalH + 2, z0: -4.5, z1: 4.5 }], palette, false);
-      if (!darkFactoryMode) {
-        const dayFill = new DirectionalLight(16777215, 0.85);
-        dayFill.position.set(-10, 18, 12);
-        scene.add(dayFill);
+      lights.set([{ x0: -8.5, x1: 8.5, y0: 0, y1: 4.5, z0: -6.5, z1: 6.5 }], palette, false);
+      const sunAngle = (timeHour - 6) / 12 * Math.PI;
+      lights.sun.position.set(Math.cos(sunAngle) * 14, 9 + Math.max(0, Math.sin(sunAngle)) * 8, 9);
+      lights.sun.intensity = darkFactory ? 1.05 : 0.45 + dayFactor * 1.15;
+      lights.hemi.intensity = darkFactory ? 0.65 : 0.35 + dayFactor * 0.65;
+      const officeGlow = new PointLight(
+        darkFactory ? colour(palette.lane) : 16774102,
+        darkFactory ? 0.7 : 0.45 * (1 - dayFactor * 0.5),
+        22
+      );
+      officeGlow.position.set(0, 4.2, 0);
+      scene.add(officeGlow);
+      const mats = {
+        wood: kit.matte(palette.wood, { roughness: 0.58 }),
+        woodDark: kit.matte([palette.wood[0] * 0.65, palette.wood[1] * 0.62, palette.wood[2] * 0.6], { roughness: 0.62 }),
+        steel: kit.matte(palette.steel, { roughness: 0.48, metalness: 0.35 }),
+        chrome: kit.matte(palette.chrome, { roughness: 0.24, metalness: 0.75 }),
+        wall: kit.matte(palette.wall, { roughness: 0.84 }),
+        glass: kit.own(
+          new MeshPhysicalMaterial({
+            color: colour(palette.glass),
+            transparent: true,
+            opacity: darkFactory ? 0.22 : 0.32,
+            roughness: 0.1,
+            metalness: 0.05
+          })
+        ),
+        lane: kit.matte(palette.lane, {
+          roughness: 0.35,
+          emissive: colour(palette.lane),
+          emissiveIntensity: darkFactory ? 0.55 : 0.3
+        }),
+        fabric: kit.matte(darkFactory ? [0.18, 0.2, 0.26] : [0.28, 0.32, 0.39], { roughness: 0.78 }),
+        fabricAccent: kit.matte(darkFactory ? [0.22, 0.28, 0.38] : [0.32, 0.42, 0.56], { roughness: 0.8 }),
+        leaf: kit.matte(palette.lamp.green, { roughness: 0.72 }),
+        leafDark: kit.matte([palette.lamp.green[0] * 0.76, palette.lamp.green[1] * 0.76, palette.lamp.green[2] * 0.76], {
+          roughness: 0.75
+        }),
+        mug: kit.matte(palette.paper, { roughness: 0.4 }),
+        screenA: kit.own(new MeshBasicMaterial({ map: makeMonitorScreenTexture(kit, palette, 0) })),
+        screenB: kit.own(new MeshBasicMaterial({ map: makeMonitorScreenTexture(kit, palette, 1) })),
+        ledGreen: kit.own(new MeshBasicMaterial({ color: 3462041 })),
+        ledBlue: kit.own(new MeshBasicMaterial({ color: 3718648 }))
+      };
+      const slabW = layout.cols * TILE_SIZE + 0.5;
+      const slabD = layout.rows * TILE_SIZE + 0.5;
+      const baseSlab = new Mesh(
+        kit.own(new BoxGeometry(slabW, 0.36, slabD)),
+        kit.matte(palette.floor, { roughness: 0.9 })
+      );
+      baseSlab.position.set(0, -0.18, 0);
+      baseSlab.receiveShadow = true;
+      scene.add(baseSlab);
+      const frontTrim = new Mesh(kit.own(new BoxGeometry(slabW + 0.04, 0.08, 0.08)), mats.lane);
+      frontTrim.position.set(0, -0.04, slabD / 2);
+      scene.add(frontTrim);
+      const rightTrim = new Mesh(kit.own(new BoxGeometry(0.08, 0.08, slabD + 0.04)), mats.lane);
+      rightTrim.position.set(slabW / 2, -0.04, 0);
+      scene.add(rightTrim);
+      const floorTileMats = {
+        wood: kit.matte(darkFactory ? [0.27, 0.22, 0.17] : [0.68, 0.56, 0.42], { roughness: 0.74 }),
+        slate: kit.matte(darkFactory ? [0.15, 0.17, 0.21] : [0.42, 0.45, 0.5], { roughness: 0.86 }),
+        carpet: kit.matte(darkFactory ? [0.17, 0.2, 0.28] : [0.34, 0.4, 0.52], { roughness: 0.96 }),
+        lounge: kit.matte(darkFactory ? [0.25, 0.21, 0.2] : [0.76, 0.67, 0.57], { roughness: 0.85 })
+      };
+      const tileGeo = kit.own(new BoxGeometry(TILE_SIZE - 0.03, 0.03, TILE_SIZE - 0.03));
+      for (let gz = 0; gz < layout.rows; gz += 1) {
+        for (let gx = 0; gx < layout.cols; gx += 1) {
+          const kind = layout.floors[tileIndex(gx, gz, layout.cols)] || "wood";
+          const tile = new Mesh(tileGeo, floorTileMats[kind]);
+          const [wx, wz] = gridToWorld(gx, gz, layout.cols, layout.rows);
+          tile.position.set(wx, 0.015, wz);
+          tile.receiveShadow = true;
+          scene.add(tile);
+        }
       }
-      const matSlab = kit.matte(darkFactoryMode ? [0.13, 0.15, 0.19] : [0.82, 0.84, 0.88], { roughness: 0.82 });
-      const matWall = kit.matte(darkFactoryMode ? [0.16, 0.18, 0.22] : [0.89, 0.9, 0.93], { roughness: 0.85 });
-      const matSteel = kit.matte(palette.steel, { roughness: 0.42, metalness: 0.45 });
-      const matWood = kit.matte(palette.wood, { roughness: 0.55 });
-      const matGlass = kit.own(
-        new MeshPhysicalMaterial({
-          color: darkFactoryMode ? 6333946 : 3900150,
+      const floorPickPlane = new Mesh(
+        kit.own(new PlaneGeometry(layout.cols * TILE_SIZE, layout.rows * TILE_SIZE)),
+        kit.own(new MeshBasicMaterial({ visible: false }))
+      );
+      floorPickPlane.rotation.x = -Math.PI / 2;
+      floorPickPlane.position.y = 0.035;
+      scene.add(floorPickPlane);
+      const wallH = 2.95;
+      const backWall = new Mesh(kit.own(new BoxGeometry(slabW, wallH, 0.24)), mats.wall);
+      backWall.position.set(0, wallH / 2, -slabD / 2 + 0.12);
+      backWall.castShadow = true;
+      backWall.receiveShadow = true;
+      scene.add(backWall);
+      const leftWall = new Mesh(kit.own(new BoxGeometry(0.24, wallH, slabD)), mats.wall);
+      leftWall.position.set(-slabW / 2 + 0.12, wallH / 2, 0);
+      leftWall.castShadow = true;
+      leftWall.receiveShadow = true;
+      scene.add(leftWall);
+      const backCap = new Mesh(kit.own(new BoxGeometry(slabW + 0.04, 0.08, 0.28)), mats.steel);
+      backCap.position.set(0, wallH + 0.02, -slabD / 2 + 0.12);
+      scene.add(backCap);
+      const leftCap = new Mesh(kit.own(new BoxGeometry(0.28, 0.08, slabD + 0.04)), mats.steel);
+      leftCap.position.set(-slabW / 2 + 0.12, wallH + 0.02, 0);
+      scene.add(leftCap);
+      const signTex = makeOfficeSignTexture(
+        kit,
+        `ESCRITÓRIO 3D · ${props.tenantLabel || props.activeTenant}`,
+        `${crewList.length} agentes · ${layout.items.filter((i) => i.kind === "desk").length} mesas · A* ativo`,
+        palette
+      );
+      const signMesh = new Mesh(
+        kit.own(new BoxGeometry(4.2, 0.84, 0.08)),
+        [mats.steel, mats.steel, mats.steel, mats.steel, kit.own(new MeshBasicMaterial({ map: signTex })), mats.steel]
+      );
+      signMesh.position.set(0, 2.05, -slabD / 2 + 0.28);
+      signMesh.castShadow = true;
+      scene.add(signMesh);
+      const ledMeshes = [];
+      for (const item of layout.items) {
+        const mesh = buildFurnitureMesh(kit, item, mats, palette, ledMeshes);
+        const [wx, wz] = gridToWorld(item.gx, item.gz, layout.cols, layout.rows);
+        mesh.position.set(wx, 0.03, wz);
+        scene.add(mesh);
+      }
+      const ghostGroup = new Group();
+      ghostGroup.visible = false;
+      const ghostMat = kit.own(
+        new MeshBasicMaterial({
+          color: colour(palette.lane),
           transparent: true,
-          opacity: 0.16,
-          roughness: 0.1
+          opacity: 0.38,
+          depthWrite: false
         })
       );
-      const shaftX = -4.2;
-      const shaftZ = -2.2;
-      const shaft = new Mesh(kit.own(new BoxGeometry(0.95, totalH + 0.6, 0.95)), matGlass);
-      shaft.position.set(shaftX, totalH / 2, shaftZ);
-      scene.add(shaft);
-      for (const sx of [-0.46, 0.46]) {
-        for (const sz of [-0.46, 0.46]) {
-          const rail = new Mesh(kit.own(new CylinderGeometry(0.03, 0.03, totalH + 0.7, 8)), matSteel);
-          rail.position.set(shaftX + sx, totalH / 2, shaftZ + sz);
-          scene.add(rail);
-        }
-      }
-      const dataCapsules = [];
-      for (let i = 0; i < 4; i += 1) {
-        const cap = new Mesh(
-          kit.own(new BoxGeometry(0.42, 0.24, 0.42)),
-          kit.matte(palette.lane, { roughness: 0.2, emissive: colour(palette.lane), emissiveIntensity: 0.85 })
-        );
-        cap.position.set(shaftX, 0.5, shaftZ);
-        scene.add(cap);
-        dataCapsules.push({ mesh: cap, speed: 0.22 + i * 0.06, offset: i * 0.25 });
-      }
-      const avatars = [];
-      const conveyorPackets = [];
-      const warningBeacons = [];
-      const holoCores = [];
-      const hitTargets = [];
-      const floorByHit = /* @__PURE__ */ new WeakMap();
-      const floorW = 10.6;
-      const floorD = 6.2;
-      floors.forEach((floor, fIdx) => {
-        const y0 = fIdx * FLOOR_H;
-        const floorGroup = new Group();
-        floorGroup.position.set(0, y0, 0);
-        scene.add(floorGroup);
-        const floorAccent = floor.errorCount > 0 ? [0.95, 0.32, 0.34] : floor.isBoard ? [0.96, 0.78, 0.24] : floor.workingCount > 0 ? palette.accent.reviewer : floor.estagio === "planejado" ? [0.45, 0.48, 0.55] : palette.lane;
-        const matAccent = kit.matte(floorAccent, {
-          roughness: 0.3,
-          emissive: colour(floorAccent),
-          emissiveIntensity: darkFactoryMode ? 0.65 : 0.35
-        });
-        const slab = new Mesh(kit.own(new BoxGeometry(floorW, 0.26, floorD)), matSlab);
-        slab.position.set(0, -0.13, 0);
-        slab.receiveShadow = true;
-        slab.castShadow = true;
-        floorGroup.add(slab);
-        const trimFront = new Mesh(kit.own(new BoxGeometry(floorW + 0.04, 0.07, 0.07)), matAccent);
-        trimFront.position.set(0, -0.02, floorD / 2);
-        floorGroup.add(trimFront);
-        const trimRight = new Mesh(kit.own(new BoxGeometry(0.07, 0.07, floorD + 0.04)), matAccent);
-        trimRight.position.set(floorW / 2, -0.02, 0);
-        floorGroup.add(trimRight);
-        const wallH = FLOOR_H - 0.32;
-        const backWall = new Mesh(kit.own(new BoxGeometry(floorW, wallH, 0.18)), matWall);
-        backWall.position.set(0, wallH / 2, -floorD / 2 + 0.09);
-        backWall.receiveShadow = true;
-        floorGroup.add(backWall);
-        const leftWall = new Mesh(kit.own(new BoxGeometry(0.18, wallH, floorD)), matWall);
-        leftWall.position.set(-floorW / 2 + 0.09, wallH / 2, 0);
-        leftWall.receiveShadow = true;
-        floorGroup.add(leftWall);
-        for (const [px2, pz2] of [
-          [floorW / 2 - 0.14, -floorD / 2 + 0.14],
-          [floorW / 2 - 0.14, floorD / 2 - 0.14],
-          [-floorW / 2 + 0.14, floorD / 2 - 0.14]
-        ]) {
-          const col = new Mesh(kit.own(new BoxGeometry(0.14, wallH, 0.14)), matSteel);
-          col.position.set(px2, wallH / 2, pz2);
-          floorGroup.add(col);
-        }
-        const subText = floor.isBoard ? `${floor.agentesCount} conselheiros · ${floor.workingCount} em turno` : `${floor.estagio.toUpperCase()} · ${floor.agentesCount} agentes · ${floor.workingCount} ativos`;
-        const signTex = makeFloorSignTexture(kit, `${fIdx + 1}F · ${floor.nome}`, subText, floorAccent, darkFactoryMode);
-        const signMesh = new Mesh(
-          kit.own(new PlaneGeometry(3.4, 0.74)),
-          kit.own(new MeshBasicMaterial({ map: signTex }))
-        );
-        signMesh.position.set(1.4, wallH - 0.62, -floorD / 2 + 0.21);
-        floorGroup.add(signMesh);
-        if (floor.errorCount > 0) {
-          const beacon = new Mesh(
-            kit.own(new CylinderGeometry(0.14, 0.18, 0.24, 12)),
-            kit.matte([0.98, 0.25, 0.28], { roughness: 0.2, emissive: 15680580, emissiveIntensity: 1.2 })
-          );
-          beacon.position.set(4.5, 0.14, 2.3);
-          floorGroup.add(beacon);
-          warningBeacons.push({ mesh: beacon, phase: fIdx * 1.1 });
-        }
-        if (floor.isBoard) {
-          const table = new Mesh(kit.own(new BoxGeometry(4.4, 0.12, 1.9)), matWood);
-          table.position.set(0.6, 0.62, 0.2);
-          table.castShadow = true;
-          table.receiveShadow = true;
-          floorGroup.add(table);
-          const holo = new Mesh(
-            kit.own(new OctahedronGeometry(0.38, 0)),
-            kit.own(
-              new MeshBasicMaterial({
-                color: colour(floorAccent),
-                wireframe: true,
-                transparent: true,
-                opacity: 0.85
-              })
-            )
-          );
-          holo.position.set(0.6, 1.38, 0.2);
-          floorGroup.add(holo);
-          holoCores.push(holo);
-          const slots = [
-            [-2, 0, 0.2],
-            [-0.5, 0, 1.55],
-            [0.7, 0, 1.55],
-            [1.9, 0, 1.55],
-            [-0.2, 0, -1.15],
-            [1.4, 0, -1.15]
-          ];
-          floor.agents.slice(0, slots.length).forEach((ag, idx) => {
-            const av = buildCustomAvatar3D(kit, palette, ag, { seatHeight: 0.12, scale: 0.92, showPortraitMedallion: true });
-            const [ax, ay, az] = slots[idx];
-            av.root.position.set(ax, ay, az);
-            av.root.rotation.y = idx === 0 ? Math.PI / 2 : az > 0.2 ? Math.PI : 0;
-            floorGroup.add(av.root);
-            avatars.push({ handle: av, phase: idx * 0.9, working: ag.status === "working", error: ag.status === "error" });
-          });
-        } else {
-          const belt = new Mesh(kit.own(new BoxGeometry(7.2, 0.12, 0.85)), matSteel);
-          belt.position.set(0.8, 0.18, 1.45);
-          belt.receiveShadow = true;
-          floorGroup.add(belt);
-          const pktCount = floor.estagio === "planejado" ? 1 : 3;
-          for (let pIdx = 0; pIdx < pktCount; pIdx += 1) {
-            const pkt = new Mesh(
-              kit.own(new BoxGeometry(0.44, 0.28, 0.44)),
-              kit.matte(floorAccent, { roughness: 0.35, emissive: colour(floorAccent), emissiveIntensity: 0.45 })
-            );
-            pkt.position.set(0, y0 + 0.38, 1.45);
-            pkt.castShadow = true;
-            scene.add(pkt);
-            conveyorPackets.push({
-              mesh: pkt,
-              y: y0 + 0.38,
-              z: 1.45,
-              speed: floor.workingCount > 0 ? 1.5 : 0.65,
-              offset: pIdx / pktCount
-            });
+      const ghostBox = new Mesh(kit.own(new BoxGeometry(0.94, 0.72, 0.94)), ghostMat);
+      ghostBox.position.y = 0.38;
+      ghostGroup.add(ghostBox);
+      const ghostBorder = new Mesh(
+        kit.own(new RingGeometry(0.42, 0.5, 4)),
+        kit.own(new MeshBasicMaterial({ color: colour(palette.lane), side: DoubleSide }))
+      );
+      ghostBorder.rotation.x = -Math.PI / 2;
+      ghostBorder.rotation.z = Math.PI / 4;
+      ghostBorder.position.y = 0.05;
+      ghostGroup.add(ghostBorder);
+      scene.add(ghostGroup);
+      const desks = layout.items.filter((i) => i.kind === "desk");
+      const socialTargets = layout.items.filter(
+        (i) => i.kind === "coffee_bar" || i.kind === "sofa" || i.kind === "meeting_table"
+      );
+      const workingKeySet = new Set(speechBubbles.map((b) => b.agent.key));
+      const walkers = [];
+      const agentHitTargets = [];
+      const agentByHit = /* @__PURE__ */ new WeakMap();
+      const findFallbackSpot = (idx) => {
+        for (let tries = 0; tries < 40; tries += 1) {
+          const gx = 2 + (idx * 3 + tries) % (layout.cols - 4);
+          const gz = 2 + (idx * 2 + Math.floor(tries / 4)) % (layout.rows - 4);
+          if (isTileWalkable(layout, gx, gz)) {
+            const [wx, wz] = gridToWorld(gx, gz, layout.cols, layout.rows);
+            return { gx, gz, lookAt: [wx, wz + 1] };
           }
-          floor.agents.slice(0, 6).forEach((ag, idx) => {
-            const dx = -2.2 + idx * 1.35;
-            const dz = -0.85;
-            const desk = new Mesh(kit.own(new BoxGeometry(0.92, 0.56, 0.54)), matWood);
-            desk.position.set(dx, 0.28, dz + 0.42);
-            desk.castShadow = true;
-            floorGroup.add(desk);
-            const av = buildCustomAvatar3D(kit, palette, ag, { seatHeight: 0.08, scale: 0.86, showPortraitMedallion: true });
-            av.root.position.set(dx, 0, dz - 0.15);
-            floorGroup.add(av.root);
-            avatars.push({ handle: av, phase: fIdx * 1.7 + idx * 0.8, working: ag.status === "working", error: ag.status === "error" });
-          });
         }
+        return { gx: 7, gz: 6, lookAt: [0, 1] };
+      };
+      crewList.forEach((agent, idx) => {
+        var _a2;
+        const desk = desks[idx % Math.max(1, desks.length)];
+        let homeSpot = findFallbackSpot(idx);
+        if (desk) {
+          const spot = getInteractionSpot(layout, desk);
+          if (spot) {
+            const [dwx, dwz] = gridToWorld(desk.gx, desk.gz, layout.cols, layout.rows);
+            homeSpot = { gx: spot.gx, gz: spot.gz, lookAt: [dwx, dwz] };
+          }
+        }
+        const isWorking = workingKeySet.has(agent.key) || Boolean(agent.running);
+        const pk = (agent.pubkey || "").toLowerCase();
+        const liveTurn = pk && ((_a2 = props.telemetry) == null ? void 0 : _a2.byPubkey) ? props.telemetry.byPubkey[pk] : void 0;
+        const avStatus = (liveTurn == null ? void 0 : liveTurn.state) === "error" ? "error" : isWorking ? "working" : "active";
+        const group = new Group();
+        const [wx, wz] = gridToWorld(homeSpot.gx, homeSpot.gz, layout.cols, layout.rows);
+        group.position.set(wx, 0.03, wz);
+        group.rotation.y = Math.atan2(homeSpot.lookAt[0] - wx, homeSpot.lookAt[1] - wz);
+        scene.add(group);
+        const avatar = buildCustomAvatar3D(
+          kit,
+          palette,
+          { name: agent.name, role: agent.model || "", picture: agent.picture, status: avStatus },
+          { seatHeight: 0.02, scale: 0.92, showPortraitMedallion: true }
+        );
+        group.add(avatar.root);
         const hitBox = new Mesh(
-          kit.own(new BoxGeometry(floorW, FLOOR_H - 0.2, floorD)),
+          kit.own(new BoxGeometry(0.75, 1.35, 0.75)),
           kit.own(new MeshBasicMaterial({ visible: false }))
         );
-        hitBox.position.set(0, FLOOR_H / 2 - 0.1, 0);
-        floorGroup.add(hitBox);
-        hitTargets.push(hitBox);
-        floorByHit.set(hitBox, { floor, y: y0 + 1.1 });
+        hitBox.position.set(0, 0.68, 0);
+        group.add(hitBox);
+        agentHitTargets.push(hitBox);
+        const w = {
+          agent,
+          group,
+          avatar,
+          homeSpot,
+          gx: homeSpot.gx,
+          gz: homeSpot.gz,
+          path: [],
+          pathIdx: 0,
+          segProgress: 0,
+          waitTimer: 2 + idx % 5 * 1.6,
+          working: isWorking,
+          phase: idx * 1.17,
+          hitBox
+        };
+        walkers.push(w);
+        agentByHit.set(hitBox, w);
       });
       const raycaster = new Raycaster();
       const pointer = new Vector2();
@@ -55153,14 +55702,11 @@ function createHoldingTower3DComponent(ctx) {
       let moved = false;
       let lastX = 0;
       let lastY = 0;
-      const pickFloor = (e) => {
+      const setPointer = (e) => {
         const rect = renderer.domElement.getBoundingClientRect();
         pointer.x = (e.clientX - rect.left) / rect.width * 2 - 1;
         pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
         raycaster.setFromCamera(pointer, camera);
-        const hits = raycaster.intersectObjects(hitTargets, false);
-        if (hits.length === 0) return null;
-        return floorByHit.get(hits[0].object) || null;
       };
       const onDown = (e) => {
         dragging = true;
@@ -55173,128 +55719,251 @@ function createHoldingTower3DComponent(ctx) {
         if (dragging) {
           const dx = e.clientX - lastX;
           const dy = e.clientY - lastY;
-          if (Math.abs(dx) > 2 || Math.abs(dy) > 2) moved = true;
+          if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
           theta -= dx * 8e-3;
-          phi = Math.max(0.42, Math.min(1.3, phi - dy * 6e-3));
+          phi = Math.max(0.45, Math.min(1.22, phi - dy * 6e-3));
           lastX = e.clientX;
           lastY = e.clientY;
           updateCamera();
           return;
         }
-        const hit2 = pickFloor(e);
-        setHoveredSlug(hit2 ? hit2.floor.slug : null);
-        renderer.domElement.style.cursor = hit2 ? "pointer" : "grab";
+        setPointer(e);
+        if (editModeRef.current) {
+          const hit2 = raycaster.intersectObject(floorPickPlane, false)[0];
+          if (hit2) {
+            const { gx, gz } = worldToGrid(hit2.point.x, hit2.point.z, layout.cols, layout.rows);
+            if (gx >= 0 && gx < layout.cols && gz >= 0 && gz < layout.rows) {
+              const [wx, wz] = gridToWorld(gx, gz, layout.cols, layout.rows);
+              ghostGroup.visible = true;
+              ghostGroup.position.set(wx, 0.03, wz);
+              ghostGroup.rotation.y = toolRotRef.current % 4 * (Math.PI / 2);
+              const isErase = activeToolRef.current.mode === "erase";
+              ghostMat.color.set(isErase ? 15680580 : colour(palette.lane));
+              renderer.domElement.style.cursor = "crosshair";
+              return;
+            }
+          }
+          ghostGroup.visible = false;
+          renderer.domElement.style.cursor = "grab";
+          return;
+        }
+        ghostGroup.visible = false;
+        const hitAgent = raycaster.intersectObjects(agentHitTargets, false)[0];
+        renderer.domElement.style.cursor = hitAgent ? "pointer" : "grab";
       };
       const onUp = (e) => {
         if (dragging && !moved) {
-          const hit2 = pickFloor(e);
-          if (hit2) {
-            setSelectedSlug(hit2.floor.slug);
-            targetFloorYRef.current = hit2.y;
-            targetFrustumRef.current = 8.4;
+          setPointer(e);
+          if (editModeRef.current) {
+            const hit2 = raycaster.intersectObject(floorPickPlane, false)[0];
+            if (hit2) {
+              const { gx, gz } = worldToGrid(hit2.point.x, hit2.point.z, layout.cols, layout.rows);
+              if (gx >= 0 && gx < layout.cols && gz >= 0 && gz < layout.rows) {
+                const tool = activeToolRef.current;
+                const rot = toolRotRef.current;
+                setLayout((prev) => {
+                  if (tool.mode === "erase") return removeFurnitureAt(prev, gx, gz);
+                  if (tool.mode === "floor") return paintFloorTile(prev, gx, gz, tool.kind);
+                  return placeOrReplaceFurniture(prev, tool.kind, gx, gz, rot);
+                });
+              }
+            }
           } else {
-            setSelectedSlug(null);
-            targetFloorYRef.current = defaultCenterY;
-            targetFrustumRef.current = defaultFrustum;
+            const hitAgent = raycaster.intersectObjects(agentHitTargets, false)[0];
+            if (hitAgent) {
+              const w = agentByHit.get(hitAgent.object);
+              if (w) {
+                setSelectedAgentKey(w.agent.key);
+                desiredTarget.set(w.group.position.x * 0.7, 0.6, w.group.position.z * 0.7);
+                desiredFrustum = 8.4;
+              }
+            } else {
+              setSelectedAgentKey(null);
+              desiredTarget.copy(defaultTarget);
+              desiredFrustum = 14.2;
+            }
           }
         }
         dragging = false;
-        renderer.domElement.style.cursor = "grab";
-      };
-      const onDblClick = (e) => {
-        const hit2 = pickFloor(e);
-        if (hit2) props.onEnterFloor(hit2.floor.slug);
+        renderer.domElement.style.cursor = editModeRef.current ? "crosshair" : "grab";
       };
       const onWheel = (e) => {
         e.preventDefault();
-        const nextF = Math.max(6.2, Math.min(24, frustum + e.deltaY * 0.01));
-        frustum = nextF;
-        targetFrustumRef.current = nextF;
+        frustum = Math.max(6.2, Math.min(20.5, frustum + e.deltaY * 0.01));
+        desiredFrustum = frustum;
         updateCamera();
       };
       const dom = renderer.domElement;
       dom.style.cursor = "grab";
       dom.addEventListener("mousedown", onDown);
       dom.addEventListener("mousemove", onMove);
-      dom.addEventListener("dblclick", onDblClick);
       window.addEventListener("mouseup", onUp);
       dom.addEventListener("wheel", onWheel, { passive: false });
       let rafId = 0;
       const clock = new Clock();
+      const headVec = new Vector3();
+      const pickIdleDestination = (w) => {
+        if (Math.random() < 0.65 && socialTargets.length > 0) {
+          const targetItem = socialTargets[Math.floor(Math.random() * socialTargets.length)];
+          const spot = getInteractionSpot(layoutRef.current, targetItem);
+          if (spot) return spot;
+        }
+        if (w.gx !== w.homeSpot.gx || w.gz !== w.homeSpot.gz) {
+          return { gx: w.homeSpot.gx, gz: w.homeSpot.gz };
+        }
+        for (let tries = 0; tries < 10; tries += 1) {
+          const rx = 1 + Math.floor(Math.random() * (layout.cols - 2));
+          const rz = 1 + Math.floor(Math.random() * (layout.rows - 2));
+          if (isTileWalkable(layoutRef.current, rx, rz)) return { gx: rx, gz: rz };
+        }
+        return null;
+      };
       const animate = () => {
         rafId = requestAnimationFrame(animate);
-        const t = clock.getElapsedTime();
+        const dt = Math.min(0.05, clock.getDelta());
+        const t = clock.elapsedTime;
+        const cw = container.clientWidth || width;
+        const ch = container.clientHeight || height;
         let camDirty = false;
-        if (targetFloorYRef.current !== null && Math.abs(target.y - targetFloorYRef.current) > 0.01) {
-          target.y += (targetFloorYRef.current - target.y) * 0.09;
+        if (target.distanceTo(desiredTarget) > 0.01) {
+          target.lerp(desiredTarget, 0.09);
           camDirty = true;
         }
-        if (targetFrustumRef.current !== null && Math.abs(frustum - targetFrustumRef.current) > 0.02) {
-          frustum += (targetFrustumRef.current - frustum) * 0.09;
+        if (Math.abs(frustum - desiredFrustum) > 0.02) {
+          frustum += (desiredFrustum - frustum) * 0.09;
           camDirty = true;
         }
         if (camDirty) updateCamera();
-        for (const a of avatars) {
-          a.handle.animate(t, a.phase, { working: a.working, error: a.error });
+        for (let i = 0; i < ledMeshes.length; i += 1) {
+          ledMeshes[i].visible = Math.sin(t * 3.5 + i * 1.7) > -0.65;
         }
-        for (const cap of dataCapsules) {
-          const frac = (t * cap.speed + cap.offset) % 1;
-          const pingPong = frac < 0.5 ? frac * 2 : (1 - frac) * 2;
-          cap.mesh.position.y = 0.4 + pingPong * Math.max(1, totalH - 0.9);
-          cap.mesh.rotation.y = t * 1.4;
+        const projectedBubbles = [];
+        for (const w of walkers) {
+          w.avatar.animate(t, w.phase, { working: w.working });
+          if (w.path.length > 1 && w.pathIdx < w.path.length - 1) {
+            const speed = w.working ? 2.6 : 1.55;
+            w.segProgress += dt * speed;
+            while (w.segProgress >= 1 && w.pathIdx < w.path.length - 1) {
+              w.segProgress -= 1;
+              w.pathIdx += 1;
+              w.gx = w.path[w.pathIdx].gx;
+              w.gz = w.path[w.pathIdx].gz;
+            }
+            if (w.pathIdx < w.path.length - 1) {
+              const a = w.path[w.pathIdx];
+              const b = w.path[w.pathIdx + 1];
+              const [ax, az] = gridToWorld(a.gx, a.gz, layout.cols, layout.rows);
+              const [bx, bz] = gridToWorld(b.gx, b.gz, layout.cols, layout.rows);
+              const px2 = ax + (bx - ax) * w.segProgress;
+              const pz2 = az + (bz - az) * w.segProgress;
+              const bob = Math.abs(Math.sin(t * 9.5 + w.phase)) * 0.06;
+              w.group.position.set(px2, 0.03 + bob, pz2);
+              const targetYaw = Math.atan2(bx - ax, bz - az);
+              w.group.rotation.y += Math.atan2(Math.sin(targetYaw - w.group.rotation.y), Math.cos(targetYaw - w.group.rotation.y)) * 0.2;
+            } else {
+              const [fx, fz] = gridToWorld(w.gx, w.gz, layout.cols, layout.rows);
+              w.group.position.set(fx, 0.03, fz);
+              w.path = [];
+              w.waitTimer = 5 + Math.random() * 8;
+            }
+          } else {
+            if (w.working && (w.gx !== w.homeSpot.gx || w.gz !== w.homeSpot.gz)) {
+              const path = findGridPathAStar(layoutRef.current, { gx: w.gx, gz: w.gz }, { gx: w.homeSpot.gx, gz: w.homeSpot.gz });
+              if (path.length > 1) {
+                w.path = path;
+                w.pathIdx = 0;
+                w.segProgress = 0;
+              }
+            } else if (!w.working && !editModeRef.current) {
+              w.waitTimer -= dt;
+              if (w.waitTimer <= 0) {
+                const dest = pickIdleDestination(w);
+                if (dest && (dest.gx !== w.gx || dest.gz !== w.gz)) {
+                  const path = findGridPathAStar(layoutRef.current, { gx: w.gx, gz: w.gz }, dest);
+                  if (path.length > 1) {
+                    w.path = path;
+                    w.pathIdx = 0;
+                    w.segProgress = 0;
+                  } else {
+                    w.waitTimer = 6;
+                  }
+                } else {
+                  w.waitTimer = 6;
+                }
+              }
+            }
+          }
+          const bubbleNode = bubbleNodesRef.current.get(w.agent.key);
+          if (bubbleNode) {
+            headVec.set(0, 1.48, 0).applyMatrix4(w.group.matrixWorld).project(camera);
+            const sx = (headVec.x * 0.5 + 0.5) * cw;
+            const sy = (-headVec.y * 0.5 + 0.5) * ch;
+            const bw = bubbleNode.offsetWidth || 212;
+            const bh = bubbleNode.offsetHeight || 78;
+            const cx = Math.max(bw / 2 + 10, Math.min(cw - bw / 2 - 10, sx));
+            const bottom = Math.max(bh + 14, Math.min(ch - 18, sy - 12));
+            projectedBubbles.push({ node: bubbleNode, cx, bottom, w: bw, h: bh });
+          }
         }
-        for (const pkt of conveyorPackets) {
-          const frac = (t * pkt.speed * 0.16 + pkt.offset) % 1;
-          pkt.mesh.position.x = -2.4 + frac * 6.4;
-          pkt.mesh.position.y = pkt.y + Math.sin(t * 4 + pkt.offset * 6) * 0.02;
-        }
-        for (const holo of holoCores) {
-          holo.rotation.y = t * 0.9;
-          holo.rotation.x = Math.sin(t * 0.7) * 0.25;
-        }
-        for (const b of warningBeacons) {
-          b.mesh.scale.setScalar(1 + Math.sin(t * 7 + b.phase) * 0.14);
+        projectedBubbles.sort((a, b) => a.bottom - b.bottom);
+        for (let i = 0; i < projectedBubbles.length; i += 1) {
+          const cur = projectedBubbles[i];
+          for (let j = 0; j < i; j += 1) {
+            const prev = projectedBubbles[j];
+            const overlapX = Math.abs(cur.cx - prev.cx) < (cur.w + prev.w) * 0.48;
+            const overlapY = Math.abs(cur.bottom - prev.bottom) < prev.h + 8;
+            if (overlapX && overlapY) {
+              cur.bottom = Math.max(cur.h + 14, prev.bottom - prev.h - 10);
+            }
+          }
+          cur.node.style.transform = `translate3d(${Math.round(cur.cx)}px, ${Math.round(cur.bottom)}px, 0) translate(-50%, -100%)`;
+          cur.node.style.opacity = "1";
+          cur.node.style.pointerEvents = "auto";
         }
         renderer.render(scene, camera);
       };
       animate();
-      const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => {
-        const w = Math.max(320, container.clientWidth || width);
-        const hh = Math.max(320, container.clientHeight || height);
+      const resizeObserver = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => {
+        const w = Math.max(360, container.clientWidth || width);
+        const hh = Math.max(340, container.clientHeight || height);
         renderer.setSize(w, hh);
         updateCamera();
       }) : null;
-      ro == null ? void 0 : ro.observe(container);
+      resizeObserver == null ? void 0 : resizeObserver.observe(container);
       return () => {
         cancelAnimationFrame(rafId);
-        ro == null ? void 0 : ro.disconnect();
+        resizeObserver == null ? void 0 : resizeObserver.disconnect();
         dom.removeEventListener("mousedown", onDown);
         dom.removeEventListener("mousemove", onMove);
-        dom.removeEventListener("dblclick", onDblClick);
         window.removeEventListener("mouseup", onUp);
         dom.removeEventListener("wheel", onWheel);
         lights.dispose();
         kit.dispose();
         renderer.dispose();
       };
-    }, [floorsSignature, fitTick, darkFactoryMode]);
-    const focusedFloor = floors.find((f) => f.slug === (selectedSlug || hoveredSlug)) || null;
-    const focusFloorBySlug = (slug) => {
-      setSelectedSlug(slug);
-      if (!slug) {
-        setFitTick((n) => n + 1);
-        return;
-      }
-      const idx = floors.findIndex((f) => f.slug === slug);
-      if (idx >= 0) {
-        targetFloorYRef.current = idx * 3.2 + 1.1;
-        targetFrustumRef.current = 8.4;
+    }, [layoutSig, crewSig, workingKeysSig, timeHour, darkFactory, fitTick, themeVersion, props.activeTenant, props.tenantLabel]);
+    const focusedAgent = selectedAgentKey ? crewList.find((c) => c.key === selectedAgentKey) || null : null;
+    const focusedTurn = (focusedAgent == null ? void 0 : focusedAgent.pubkey) && ((_a = props.telemetry) == null ? void 0 : _a.byPubkey) ? props.telemetry.byPubkey[focusedAgent.pubkey.toLowerCase()] || null : null;
+    const handleExportJson = () => {
+      var _a2, _b;
+      try {
+        const json = JSON.stringify(layout, null, 2);
+        void ((_b = (_a2 = navigator == null ? void 0 : navigator.clipboard) == null ? void 0 : _a2.writeText) == null ? void 0 : _b.call(_a2, json));
+        setCopiedJson(true);
+        window.setTimeout(() => setCopiedJson(false), 2e3);
+      } catch {
       }
     };
+    const empresas = React.useMemo(() => {
+      var _a2;
+      const list = Array.isArray((_a2 = props.holding) == null ? void 0 : _a2.empresas) ? props.holding.empresas.map((e) => ({ id: String(e.id || e.slug), nome: String(e.nome || e.id) })) : [{ id: props.activeTenant, nome: props.tenantLabel || props.activeTenant }];
+      return list;
+    }, [props.holding, props.activeTenant, props.tenantLabel]);
     return h(
       "div",
       {
-        "data-holding-tower-3d": "true",
+        "data-virtual-office-3d": "true",
+        "data-office-preset": layout.presetName,
         style: { display: "flex", flexDirection: "column", gap: "8px", flex: 1, minHeight: "560px" }
       },
       h(
@@ -55307,68 +55976,278 @@ function createHoldingTower3DComponent(ctx) {
             minHeight: "520px",
             borderRadius: "12px",
             border: "1px solid var(--border)",
-            background: darkFactoryMode ? "#090b10" : "#eef2f7",
+            background: "#0b0e14",
             overflow: "hidden"
           }
         },
         h("div", { ref: mountRef, style: { width: "100%", height: "100%" } }),
-        // Seletor rápido de andares (Elevador na esquerda)
+        // Camada de balões de chat ao vivo (sem sobreposição)
+        h(
+          "div",
+          {
+            "data-office-speech-layer": "true",
+            style: { position: "absolute", inset: 0, zIndex: 18, pointerEvents: "none", overflow: "hidden" }
+          },
+          speechBubbles.map(({ agent, turn }) => {
+            const isErr = turn.state === "error";
+            const borderColor = isErr ? "rgba(239, 68, 68, 0.72)" : "rgba(59, 130, 246, 0.65)";
+            const accentColor = isErr ? "#f87171" : "#60a5fa";
+            return h(
+              "div",
+              {
+                key: agent.key,
+                "data-office-speech-bubble": agent.key,
+                ref: (el) => {
+                  if (el) bubbleNodesRef.current.set(agent.key, el);
+                  else bubbleNodesRef.current.delete(agent.key);
+                },
+                style: {
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  opacity: 0,
+                  pointerEvents: "none",
+                  willChange: "transform",
+                  width: "212px"
+                },
+                onClick: () => setSelectedAgentKey(agent.key)
+              },
+              h(
+                "div",
+                {
+                  style: {
+                    borderRadius: "10px",
+                    border: `1px solid ${borderColor}`,
+                    background: "rgba(15, 18, 24, 0.94)",
+                    backdropFilter: "blur(10px)",
+                    boxShadow: "0 10px 24px rgba(0,0,0,0.45)",
+                    padding: "6px 9px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "4px",
+                    cursor: "pointer"
+                  }
+                },
+                h(
+                  "div",
+                  { style: { display: "flex", alignItems: "center", gap: "6px" } },
+                  h("span", { style: { width: "6px", height: "6px", borderRadius: "999px", background: accentColor, flexShrink: 0 } }),
+                  h("span", { style: { fontSize: "11px", fontWeight: 700, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, agent.name),
+                  h("span", { className: "of-mono", style: { fontSize: "9.5px", color: accentColor } }, fmtClock(turn.startedAt))
+                ),
+                h(
+                  "div",
+                  { style: { fontSize: "10.5px", color: isErr ? "#fca5a5" : "rgba(229,231,235,0.88)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
+                  turn.stepLabel || "Trabalhando..."
+                ),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "of-btn",
+                    "data-variant": "ghost",
+                    style: { width: "100%", justifyContent: "center", padding: "2px 6px", fontSize: "10px" },
+                    onClick: (ev) => {
+                      ev.stopPropagation();
+                      if (turn.channelId && props.onOpenTurnInSideChat) props.onOpenTurnInSideChat(turn);
+                      else if (props.onOpenAgentDm) props.onOpenAgentDm({ key: agent.key, pubkey: agent.pubkey, name: agent.name });
+                    }
+                  },
+                  "Ver chat ↗"
+                )
+              )
+            );
+          })
+        ),
+        // Barra superior esquerda: Seletor de Empresa + Botão Editar Escritório + Presets
         h(
           "div",
           {
             style: {
               position: "absolute",
-              top: "12px",
-              left: "12px",
-              zIndex: 20,
+              top: "10px",
+              left: "10px",
+              zIndex: 22,
               display: "flex",
-              flexDirection: "column",
-              gap: "4px",
-              padding: "8px",
-              borderRadius: "10px",
-              border: "1px solid var(--border)",
-              background: "rgba(14, 17, 24, 0.9)",
-              backdropFilter: "blur(10px)"
+              alignItems: "center",
+              gap: "6px",
+              flexWrap: "wrap",
+              maxWidth: "calc(100% - 260px)"
             }
           },
-          h("div", { style: { fontSize: "9.5px", fontWeight: 700, letterSpacing: "0.06em", color: "var(--muted-foreground)", padding: "0 4px 3px" } }, "TORRE CORTEXX"),
-          [...floors].reverse().map((f, revIdx) => {
-            const floorNum = floors.length - revIdx;
-            const active = selectedSlug === f.slug;
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-variant": editMode ? "primary" : void 0,
+              "data-office-edit-toggle": "true",
+              style: { background: editMode ? void 0 : "rgba(18, 20, 26, 0.9)", fontWeight: 600 },
+              onClick: () => setEditMode((v2) => !v2)
+            },
+            editMode ? "✓ Concluir Edição" : "✎ Editar Escritório"
+          ),
+          empresas.length > 1 && h(
+            "select",
+            {
+              value: props.activeTenant,
+              onChange: (ev) => {
+                var _a2;
+                return (_a2 = props.onSelectTenant) == null ? void 0 : _a2.call(props, ev.target.value);
+              },
+              style: {
+                background: "rgba(18, 20, 26, 0.9)",
+                color: "var(--foreground)",
+                border: "1px solid var(--border)",
+                borderRadius: "7px",
+                padding: "4px 8px",
+                fontSize: "11px"
+              }
+            },
+            empresas.map((emp) => h("option", { key: emp.id, value: emp.id }, emp.nome))
+          ),
+          ["holding_suites", "startup_open", "cyber_lab"].map((presetKey) => {
+            const labels = { holding_suites: "Holding Suites", startup_open: "Startup Open", cyber_lab: "Cyber Lab" };
+            const active = layout.presetName === presetKey;
             return h(
               "button",
               {
-                key: f.slug,
+                key: presetKey,
                 type: "button",
                 className: "of-btn",
-                "data-variant": active ? "primary" : void 0,
-                style: { justifyContent: "space-between", fontSize: "11px", padding: "4px 8px", minWidth: "164px" },
-                onClick: () => focusFloorBySlug(active ? null : f.slug)
+                "data-variant": active ? "primary" : "ghost",
+                style: {
+                  background: active ? void 0 : "rgba(18, 20, 26, 0.85)",
+                  fontSize: "10.5px",
+                  padding: "4px 8px"
+                },
+                onClick: () => setLayout(buildOfficePreset(presetKey))
               },
-              h("span", null, `${floorNum}F · ${f.isBoard ? "Conselho" : f.nome}`),
-              h(
-                "span",
-                { className: "of-mono", style: { fontSize: "10px", opacity: 0.85 } },
-                f.errorCount > 0 ? `!${f.errorCount}` : f.workingCount > 0 ? `⚡${f.workingCount}` : `${f.agentesCount}`
-              )
+              labels[presetKey]
             );
           })
         ),
-        // Card flutuante do andar selecionado/hover no canto superior direito
-        focusedFloor && h(
+        // Barra superior direita: Slider Dia/Noite 24h + Dark Factory
+        h(
           "div",
           {
             style: {
               position: "absolute",
-              top: "12px",
-              right: "12px",
+              top: "10px",
+              right: "10px",
               zIndex: 22,
-              width: "268px",
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              background: "rgba(18, 20, 26, 0.9)",
+              border: "1px solid var(--border)",
+              borderRadius: "8px",
+              padding: "4px 9px",
+              backdropFilter: "blur(8px)"
+            }
+          },
+          !darkFactory && h(
+            "label",
+            { style: { display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "10.5px" } },
+            h("span", { className: "of-mono" }, `${String(Math.round(timeHour)).padStart(2, "0")}h`),
+            h("input", {
+              type: "range",
+              min: 6,
+              max: 23,
+              step: 1,
+              value: timeHour,
+              onChange: (ev) => setTimeHour(Number(ev.target.value)),
+              style: { width: "68px", accentColor: "var(--primary)" }
+            })
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-variant": darkFactory ? "primary" : "ghost",
+              style: { fontSize: "10.5px", padding: "3px 7px" },
+              onClick: () => setDarkFactory((d) => !d)
+            },
+            darkFactory ? "☾ Dark Factory" : "☀ Dia/Noite"
+          )
+        ),
+        // Paleta do Editor Interativo (quando editMode === true)
+        editMode && h(
+          "div",
+          {
+            "data-office-editor-bar": "true",
+            style: {
+              position: "absolute",
+              left: "10px",
+              right: "160px",
+              bottom: "10px",
+              zIndex: 24,
+              display: "flex",
+              alignItems: "center",
+              gap: "5px",
+              flexWrap: "wrap",
+              padding: "7px 9px",
               borderRadius: "10px",
               border: "1px solid var(--border-strong)",
-              background: "rgba(15, 18, 24, 0.94)",
+              background: "rgba(15, 18, 24, 0.95)",
               backdropFilter: "blur(10px)",
-              padding: "11px 13px",
+              boxShadow: "0 10px 28px rgba(0,0,0,0.45)"
+            }
+          },
+          EDITOR_TOOLS.map(
+            (tool, idx) => h(
+              "button",
+              {
+                key: `${tool.mode}:${"kind" in tool ? tool.kind : "x"}`,
+                type: "button",
+                className: "of-btn",
+                "data-variant": activeToolIdx === idx ? "primary" : "ghost",
+                style: { fontSize: "10.5px", padding: "3px 7px" },
+                onClick: () => setActiveToolIdx(idx)
+              },
+              tool.label
+            )
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              style: { fontSize: "10.5px", padding: "3px 7px", marginLeft: "auto" },
+              title: "Girar móvel em 90° (atalho: R)",
+              onClick: () => setToolRot((r) => (r + 1) % 4)
+            },
+            `↻ ${toolRot * 90}° [R]`
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              style: { fontSize: "10.5px", padding: "3px 7px" },
+              onClick: handleExportJson
+            },
+            copiedJson ? "✓ JSON Copiado" : "⤓ JSON"
+          )
+        ),
+        // Popover do agente selecionado
+        focusedAgent && !editMode && h(
+          "div",
+          {
+            "data-office-agent-popover": "true",
+            style: {
+              position: "absolute",
+              top: "52px",
+              right: "10px",
+              zIndex: 25,
+              width: "260px",
+              borderRadius: "10px",
+              border: "1px solid var(--border-strong)",
+              background: "rgba(18, 20, 26, 0.95)",
+              backdropFilter: "blur(10px)",
+              boxShadow: "0 12px 30px rgba(0,0,0,0.45)",
+              padding: "10px 12px",
               display: "flex",
               flexDirection: "column",
               gap: "8px"
@@ -55376,64 +56255,64 @@ function createHoldingTower3DComponent(ctx) {
           },
           h(
             "div",
-            { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" } },
-            h("strong", { style: { fontSize: "12.5px" } }, focusedFloor.nome),
+            { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px" } },
             h(
-              "span",
+              "div",
+              { style: { display: "inline-flex", alignItems: "center", gap: "7px", minWidth: 0 } },
+              focusedAgent.picture && h("img", {
+                src: focusedAgent.picture,
+                alt: focusedAgent.name,
+                style: { width: "22px", height: "22px", borderRadius: "5px", objectFit: "cover" }
+              }),
+              h("strong", { style: { fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, focusedAgent.name)
+            ),
+            h(
+              "button",
               {
-                className: "of-pill",
-                "data-tone": focusedFloor.errorCount > 0 ? "failed" : focusedFloor.workingCount > 0 ? "running" : "done",
-                style: { fontSize: "10px" }
+                type: "button",
+                className: "of-btn",
+                "data-variant": "ghost",
+                style: { padding: "1px 5px" },
+                onClick: () => setSelectedAgentKey(null)
               },
-              focusedFloor.estagio
+              "×"
             )
           ),
           h(
             "div",
             { className: "of-muted", style: { fontSize: "11px" } },
-            `${focusedFloor.agentesCount} agentes · ${focusedFloor.workingCount} respondendo${focusedFloor.errorCount > 0 ? ` · ${focusedFloor.errorCount} com erro` : ""}`
+            (focusedTurn == null ? void 0 : focusedTurn.stepLabel) || `${focusedAgent.provider} · ${focusedAgent.model}` || "Caminhando pelo escritório (A*)"
           ),
           h(
             "div",
             { style: { display: "flex", gap: "6px" } },
-            h(
+            props.onOpenAgentDm && focusedAgent.pubkey && h(
               "button",
               {
                 type: "button",
                 className: "of-btn",
                 "data-variant": "primary",
-                style: { flex: 1, justifyContent: "center", fontSize: "11px" },
-                onClick: () => props.onEnterFloor(focusedFloor.slug)
+                style: { flex: 1, justifyContent: "center", fontSize: "11px", padding: "4px 8px" },
+                onClick: () => props.onOpenAgentDm({ key: focusedAgent.key, pubkey: focusedAgent.pubkey, name: focusedAgent.name })
               },
-              focusedFloor.isBoard ? "Entrar na Sala 3D ↗" : "Entrar no Andar 3D ↗"
+              "Abrir chat ↗"
             ),
-            props.onOpenChannel && h(
+            props.onOpenAgentProfile && focusedAgent.pubkey && h(
               "button",
               {
                 type: "button",
                 className: "of-btn",
-                style: { fontSize: "11px" },
-                onClick: () => props.onOpenChannel(focusedFloor.slug)
+                style: { fontSize: "11px", padding: "4px 8px" },
+                onClick: () => props.onOpenAgentProfile({ key: focusedAgent.key, pubkey: focusedAgent.pubkey, name: focusedAgent.name })
               },
-              "Canal"
+              "Perfil ↗"
             )
           )
         ),
-        // Controles no canto inferior direito (Dia/Noite Dark Factory, Tela cheia, Fit)
+        // Controles inferiores direitos: Tela cheia + Fit
         h(
           "div",
-          { style: { position: "absolute", right: "12px", bottom: "12px", zIndex: 20, display: "inline-flex", gap: "6px" } },
-          h(
-            "button",
-            {
-              type: "button",
-              className: "of-btn",
-              style: { background: "rgba(18, 20, 26, 0.88)" },
-              onClick: () => setDarkFactoryMode((v2) => !v2),
-              title: "Alternar iluminação Dia vs. Dark Factory"
-            },
-            darkFactoryMode ? "☀ Modo Dia" : "☾ Dark Factory"
-          ),
+          { style: { position: "absolute", right: "10px", bottom: "10px", zIndex: 22, display: "inline-flex", gap: "6px" } },
           h(
             "button",
             {
@@ -55441,12 +56320,12 @@ function createHoldingTower3DComponent(ctx) {
               className: "of-btn",
               style: { background: "rgba(18, 20, 26, 0.88)" },
               onClick: () => {
-                var _a, _b;
+                var _a2, _b;
                 const el = hostRef.current;
                 if (!el) return;
                 try {
                   if (document.fullscreenElement) {
-                    void ((_a = document.exitFullscreen) == null ? void 0 : _a.call(document));
+                    void ((_a2 = document.exitFullscreen) == null ? void 0 : _a2.call(document));
                     setIsFullscreen(false);
                   } else {
                     void ((_b = el.requestFullscreen) == null ? void 0 : _b.call(el));
@@ -55464,10 +56343,7 @@ function createHoldingTower3DComponent(ctx) {
               type: "button",
               className: "of-btn",
               style: { background: "rgba(18, 20, 26, 0.88)" },
-              onClick: () => {
-                setSelectedSlug(null);
-                setFitTick((n) => n + 1);
-              }
+              onClick: () => setFitTick((n) => n + 1)
             },
             "⤢ Fit"
           )
@@ -55476,7 +56352,7 @@ function createHoldingTower3DComponent(ctx) {
       h(
         "div",
         { className: "of-muted", style: { textAlign: "center", fontSize: "11px" } },
-        `Torre da Holding Cortexx · ${floors.length} andares ao vivo · Clique no andar para aproximar · Duplo clique para entrar`
+        editMode ? `Modo Editor ativo · Clique no piso para construir/pintar · Tecla R gira 90° · Layout salvo automaticamente` : `Escritório 3D (${props.tenantLabel || props.activeTenant}) · ${crewList.length} agentes com A* · ${layout.items.length} móveis/divisórias · Arraste para orbitar`
       )
     );
   };
@@ -63319,7 +64195,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
   const h = React.createElement;
   const Floor3D = createFloor3DComponent(ctx);
   const Boardroom3D = createBoardroom3DComponent(ctx);
-  const HoldingTower3D = createHoldingTower3DComponent(ctx);
+  const VirtualOffice3D = createVirtualOffice3DComponent(ctx);
   const CodeDenInspectorDrawer = createCodeDenInspectorDrawer(React);
   const QuestionCardsPanel = createQuestionCardsPanel(React);
   const crdtStore = getOrgfyCrdtStore(ctx);
@@ -65503,7 +66379,7 @@ Nota: ${evidence.note}`
                 onRefresh: () => refresh(tenant, false, false),
                 loading,
                 Floor3D,
-                HoldingTower3D,
+                VirtualOffice3D,
                 holding,
                 onEnterTowerFloor: (slug) => {
                   setTenant(slug);
@@ -66423,6 +67299,7 @@ export {
   buildEmptyFactoryStatus,
   buildHandoffPack,
   buildLiveAgentRoster,
+  buildOfficePreset,
   buildUnifiedOrgfyTools,
   checkMentionTargetIdentity,
   checkThreadWakeAntiLoop,
@@ -66437,10 +67314,12 @@ export {
   executeCardProgress,
   exportAutomationToBuzzWorkflowYaml,
   fetchFactoryStatus,
+  findGridPathAStar,
   formatOrgfyAttentionText,
   formatTextWithNostrMentions,
   getBuzzNativeState,
   getDeferredFocusNotices,
+  getInteractionSpot,
   getOrgfyCrdtStore,
   getOrgfyPipelineEvents,
   getTelemetrySnapshot,
@@ -66448,18 +67327,22 @@ export {
   hydrateIssueDetail,
   inject,
   insertOrgfyPickerEntry,
+  isTileWalkable,
   isUnsupportedAgentModel,
   notifyRespectingFocus,
+  paintFloorTile,
   parseBuzzOrgfyEntityUrl,
   parseCardProgress,
   parseEvalTable,
   parseFactoryStatus,
   parseOrgfyCardStructure,
   parseOrgfyMessageContext,
+  placeOrReplaceFurniture,
   readBuzzFocusState,
   reconcileAgentPresenceAndLocks,
   reconcileAgentsViaBuzzApi,
   registerBuzzNativeIntegrations,
+  removeFurnitureAt,
   requestModelFailover,
   resetPresenceStateForTests,
   resetTelemetryForTests,
