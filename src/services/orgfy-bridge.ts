@@ -788,7 +788,9 @@ export async function fetchLiveKanbanSnapshot(
 
           const aceiteRecord = aceites[fullId] || aceites[shortId] || null;
           const hasFrozenAceite = Boolean(aceiteRecord);
-          const stage: PipelineCard["stage"] = hasFrozenAceite ? "despachado" : "triagem";
+          const entryStatus = String(entry?.status || "").trim().toLowerCase();
+          const isEntryDone = entryStatus === "merged" || entryStatus === "resolved" || entryStatus === "closed" || entryStatus === "feito";
+          const stage: PipelineCard["stage"] = isEntryDone ? "feito" : hasFrozenAceite ? "despachado" : "triagem";
           const title = String(entry?.title || fields.title || `Issue #${shortId}`).trim();
 
           cardMap.set(shortId, {

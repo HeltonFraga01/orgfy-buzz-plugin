@@ -695,7 +695,11 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
       failedToday: 0,
       revertedToday: 0,
       medianMergeMs7d: null,
-      merged7d: Number((kpis as any)?.fluxo?.vazao_7d ?? recent.length),
+      merged7d: Number(
+        (kpis as any)?.fluxo?.vazao_por_tenant?.[slug]?.["7d"] ??
+          (slug === "orgfy" ? (kpis as any)?.fluxo?.vazao_7d : undefined) ??
+          recent.length
+      ),
     },
     activeSessions: tenantAgents.filter((a) => a.running).length,
     wip: {
@@ -747,8 +751,10 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
       canalBuzz: typeof empresaJson?.canal === "string" ? empresaJson.canal : null,
       papeis: empresaJson?.papeis && typeof empresaJson.papeis === "object" ? empresaJson.papeis : {},
     },
-    lastTickAt: Date.now(),
-    coordenador: killSwitch ? "parado" : "ativo",
+    lastTickAt: esteiraState?.ultimo_ciclo?.timestamp
+      ? (Number(esteiraState.ultimo_ciclo.timestamp) < 1e12 ? Number(esteiraState.ultimo_ciclo.timestamp) * 1000 : Number(esteiraState.ultimo_ciclo.timestamp))
+      : Date.now(),
+    coordenador: !killSwitch && (slug === "board" || Boolean(esteiraState?.ultimo_ciclo?.timestamp)) ? "ativo" : "parado",
     kpis: kpis
       ? {
           disponivel: true,

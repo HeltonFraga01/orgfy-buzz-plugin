@@ -595,7 +595,9 @@ async function fetchLiveKanbanSnapshot(ctx, filter) {
           }
           const aceiteRecord = aceites[fullId] || aceites[shortId] || null;
           const hasFrozenAceite = Boolean(aceiteRecord);
-          const stage = hasFrozenAceite ? "despachado" : "triagem";
+          const entryStatus = String((entry == null ? void 0 : entry.status) || "").trim().toLowerCase();
+          const isEntryDone = entryStatus === "merged" || entryStatus === "resolved" || entryStatus === "closed" || entryStatus === "feito";
+          const stage = isEntryDone ? "feito" : hasFrozenAceite ? "despachado" : "triagem";
           const title = String((entry == null ? void 0 : entry.title) || fields.title || `Issue #${shortId}`).trim();
           cardMap.set(shortId, {
             id: `card-${shortId}`,
@@ -13251,7 +13253,7 @@ function describeOrgfyRole(papelRaw) {
   return map[p] || { funcao: p ? `Agente · ${p}` : "Agente da Esteira", categoria: "execucao" };
 }
 async function hydrateFactoryStatusFromFiles(ctx, slug) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x2, _y2, _z2, _A, _B, _C, _D;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x2, _y2, _z2, _A, _B, _C, _D, _E, _F, _G, _H, _I;
   const base = buildEmptyFactoryStatus(slug);
   const host = ctx == null ? void 0 : ctx.host;
   const stateRelPath = slug === "orgfy" ? ".esteira/estado/esteira-minima-state.json" : `.esteira/estado/esteira-minima-${slug}-state.json`;
@@ -13509,7 +13511,9 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
       failedToday: 0,
       revertedToday: 0,
       medianMergeMs7d: null,
-      merged7d: Number(((_B = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _B.vazao_7d) ?? recent.length)
+      merged7d: Number(
+        ((_D = (_C = (_B = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _B.vazao_por_tenant) == null ? void 0 : _C[slug]) == null ? void 0 : _D["7d"]) ?? (slug === "orgfy" ? (_E = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _E.vazao_7d : void 0) ?? recent.length
+      )
     },
     activeSessions: tenantAgents.filter((a) => a.running).length,
     wip: {
@@ -13544,8 +13548,8 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
     orgfyVision: {
       projectMd: projectMd ? projectMd.slice(0, 2400) : null,
       agentsMd: agentsMd ? agentsMd.slice(0, 2400) : null,
-      invariantes: Array.isArray((_C = boardJson == null ? void 0 : boardJson.protocolo_governanca) == null ? void 0 : _C.invariantes) ? boardJson.protocolo_governanca.invariantes : [],
-      cadeiaComando: Array.isArray((_D = boardJson == null ? void 0 : boardJson.protocolo_governanca) == null ? void 0 : _D.cadeia_comando) ? boardJson.protocolo_governanca.cadeia_comando : [],
+      invariantes: Array.isArray((_F = boardJson == null ? void 0 : boardJson.protocolo_governanca) == null ? void 0 : _F.invariantes) ? boardJson.protocolo_governanca.invariantes : [],
+      cadeiaComando: Array.isArray((_G = boardJson == null ? void 0 : boardJson.protocolo_governanca) == null ? void 0 : _G.cadeia_comando) ? boardJson.protocolo_governanca.cadeia_comando : [],
       fluxoEscalada: (boardJson == null ? void 0 : boardJson.fluxo_escalada) && typeof boardJson.fluxo_escalada === "object" ? boardJson.fluxo_escalada : {},
       regrasProbatorias: Object.entries((regrasJson == null ? void 0 : regrasJson.regras) || {}).map(([id, r]) => ({
         id,
@@ -13557,8 +13561,8 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
       canalBuzz: typeof (empresaJson == null ? void 0 : empresaJson.canal) === "string" ? empresaJson.canal : null,
       papeis: (empresaJson == null ? void 0 : empresaJson.papeis) && typeof empresaJson.papeis === "object" ? empresaJson.papeis : {}
     },
-    lastTickAt: Date.now(),
-    coordenador: killSwitch ? "parado" : "ativo",
+    lastTickAt: ((_H = esteiraState == null ? void 0 : esteiraState.ultimo_ciclo) == null ? void 0 : _H.timestamp) ? Number(esteiraState.ultimo_ciclo.timestamp) < 1e12 ? Number(esteiraState.ultimo_ciclo.timestamp) * 1e3 : Number(esteiraState.ultimo_ciclo.timestamp) : Date.now(),
+    coordenador: !killSwitch && (slug === "board" || Boolean((_I = esteiraState == null ? void 0 : esteiraState.ultimo_ciclo) == null ? void 0 : _I.timestamp)) ? "ativo" : "parado",
     kpis: kpis ? {
       disponivel: true,
       gerado_em: kpis.gerado_em || null,
