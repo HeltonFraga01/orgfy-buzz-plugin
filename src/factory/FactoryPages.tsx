@@ -234,26 +234,50 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
     onSelectModeQuick,
   } = props;
 
-  // ── 1. CONSELHO DA HOLDING (BOARD) — 100% REAL DE empresas/board.json + empresas/*.json ──
+  // ── 1. CONSELHO DA HOLDING (BOARD) — ESPELHA UMA HOLDING REAL (BESTIE IRIS + CONSELHO COMO EMPRESA COM PIPELINE PRÓPRIO) ──
   if (tab === "holding") {
     const empresas = holding?.empresas || [];
     const boardAreas = holding?.conselho || [];
     const approvals = holding?.approvals || [];
+    const deliberations = props.councilDeliberations || [];
+    const pendingDelibs = deliberations.filter((d) => d.status === "pendente").length;
+    const approvedDelibs = deliberations.filter((d) => d.status === "aprovada").length;
+    const pendingApprovals = approvals.filter((a) => a.status === "pendente").length;
+
+    const resolveMemberPubkey = (name: string) => {
+      const low = name.toLowerCase();
+      const match = liveCrew.find((c) => c.name.toLowerCase() === low);
+      return match?.pubkey || "";
+    };
+
+    // Na mesa do Boardroom 3D sentam a Bestie (OrgFy Iris) na cabeceira + os Conselheiros funcionais do Board (não nomes de empresas)
     const boardroomSeats = [
       {
-        id: "ceo-holding",
+        id: "bestie-iris",
         label: holding?.ceoHolding?.nome || "OrgFy Iris",
-        role: "CEO Holding",
+        role: "Bestie · Orquestradora Buzz",
         status: (holding?.ceoHolding?.pubkey && props.telemetry?.byPubkey?.[holding.ceoHolding.pubkey.toLowerCase()]) ? "working" : "active",
         onClick: () => onOpenAgentDm?.({ name: holding?.ceoHolding?.nome || "OrgFy Iris", pubkey: holding?.ceoHolding?.pubkey || "" }),
       },
-      ...empresas.map((emp) => ({
-        id: emp.slug,
-        label: emp.workspaceBuzz || emp.nome,
-        role: emp.estagio === "operacional" ? `${emp.agentesProntos}/${emp.agentesTotal} agentes` : emp.estagio,
-        status: emp.estagio === "operacional" ? "active" : "planned",
-        onClick: () => onSelectTenant(emp.slug),
-      })),
+      ...(boardAreas.length > 0
+        ? boardAreas.map((area) => {
+            const pk = resolveMemberPubkey(area.responsavel);
+            const isWorking = Boolean(pk && props.telemetry?.byPubkey?.[pk.toLowerCase()]);
+            return {
+              id: area.id,
+              label: area.area,
+              role: area.responsavel,
+              status: area.status !== "ativo" ? "planned" : isWorking ? "working" : "active",
+              onClick: pk ? () => onOpenAgentDm?.({ name: area.responsavel, pubkey: pk }) : undefined,
+            };
+          })
+        : empresas.map((emp) => ({
+            id: emp.slug,
+            label: emp.workspaceBuzz || emp.nome,
+            role: emp.estagio === "operacional" ? `${emp.agentesProntos}/${emp.agentesTotal} agentes` : emp.estagio,
+            status: emp.estagio === "operacional" ? "active" : "planned",
+            onClick: () => onSelectTenant(emp.slug),
+          }))),
     ];
 
     return h(
@@ -265,11 +289,16 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
         h(
           "div",
           null,
-          h("div", { style: { fontSize: "15px", fontWeight: 700 } }, "Conselho da Holding Cortexx · Portfólio Multi-Empresa"),
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
+            h("span", { style: { fontSize: "15px", fontWeight: 700 } }, "Conselho da Holding Cortexx · Governança & Board"),
+            h("span", { className: "of-pill", style: { background: "var(--primary-soft)", borderColor: "var(--primary-border)", color: "var(--primary-text)" } }, `Bestie: ${holding?.ceoHolding?.nome || "OrgFy Iris"}`)
+          ),
           h(
             "div",
             { className: "of-muted", style: { marginTop: "3px" } },
-            `Fundador: ${holding?.fundador?.nome || "Helton Fraga"} · CEO Holding: ${holding?.ceoHolding?.nome || "OrgFy Iris"} · ${empresas.length} empresas no portfólio · ${approvals.filter((a) => a.status === "pendente").length} aprovação(ões) pendente(s)`
+            `Fundador: ${holding?.fundador?.nome || "Helton Fraga"} (DM exclusiva via Bestie) · ${boardAreas.length} cadeiras no Conselho · ${empresas.length} empresas no portfólio · ${pendingApprovals + pendingDelibs} pauta(s) pendente(s)`
           )
         ),
         h(
@@ -295,7 +324,7 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                 "data-variant": "primary",
                 onClick: () => onOpenAgentDm({ name: holding?.ceoHolding?.nome || "OrgFy Iris", pubkey: holding?.ceoHolding?.pubkey || "" }),
               },
-              `Falar com ${holding?.ceoHolding?.nome || "OrgFy Iris"} ↗`
+              `DM com ${holding?.ceoHolding?.nome || "OrgFy Iris"} (Bestie) ↗`
             )
         )
       ),
@@ -393,7 +422,156 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
             )
           )
         ),
-      props.Boardroom3D && h(props.Boardroom3D, { seats: boardroomSeats, title: "Sala de Reunião do Conselho · Tema Boardroom 3D" }),
+      props.Boardroom3D && h(props.Boardroom3D, { seats: boardroomSeats, title: "Sala de Reunião do Conselho · Conselheiros & Bestie" }),
+
+      // ── PIPELINE PRÓPRIO DO CONSELHO (Deliberação Técnica & Governança) ──
+      h(
+        "section",
+        { className: "of-card-pad", "data-council-pipeline": "true", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" } },
+          h(
+            "div",
+            null,
+            h("div", { style: { fontSize: "13px", fontWeight: 700 } }, "Pipeline de Deliberação do Conselho"),
+            h("div", { className: "of-muted", style: { fontSize: "11px" } }, "Fluxo lógico da Holding: separado da esteira de código das subsidiárias. Somente pautas que excedem a alçada do Conselho sobem para a Bestie (OrgFy Iris).")
+          ),
+          h("span", { className: "of-pill", "data-tone": pendingDelibs + pendingApprovals > 0 ? "waiting" : "done" }, `${pendingDelibs + pendingApprovals} em deliberação · ${approvedDelibs} decidida(s)`)
+        ),
+        h(
+          "div",
+          { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(165px, 1fr))", gap: "8px" } },
+          [
+            {
+              step: "1 · PAUTA",
+              tag: "Subsidiária",
+              title: "Escalonamento COO → CEO",
+              desc: "CEO da empresa abre pauta quando excede orçamento, risco ou escopo local.",
+              active: pendingApprovals > 0,
+            },
+            {
+              step: "2 · COMITÊS",
+              tag: "Parecer Técnico",
+              title: "CFO · CTO · CRO · CPO",
+              desc: "Conselheiros analisam viabilidade econômica, arquitetura, risco e produto em paralelo.",
+              active: boardAreas.some((a) => a.status === "ativo"),
+            },
+            {
+              step: "3 · QUORUM",
+              tag: "Board CRDT",
+              title: "Votação & Resolução",
+              desc: "Deliberação colegiada registrada em ata CRDT com status DECIDIDO ou RECUSADO.",
+              active: pendingDelibs > 0,
+            },
+            {
+              step: "4A · DESPACHO",
+              tag: "Dentro da Alçada",
+              title: "Retorna à Subsidiária",
+              desc: "Ordem volta ao CEO/COO da empresa para virar Spec + Card na fábrica.",
+              active: approvedDelibs > 0,
+            },
+            {
+              step: "4B · BESTIE",
+              tag: "Acima da Alçada",
+              title: "OrgFy Iris → DM Fundador",
+              desc: "Apenas a Iris (Bestie) aciona Helton Fraga em DM ou Question Card.",
+              active: pendingApprovals > 0,
+            },
+          ].map((node) =>
+            h(
+              "div",
+              {
+                key: node.step,
+                className: "of-surface",
+                style: {
+                  padding: "10px 11px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "5px",
+                  borderColor: node.active ? "var(--primary-border)" : undefined,
+                  background: node.active ? "var(--primary-soft)" : undefined,
+                },
+              },
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" } },
+                h("span", { className: "of-mono", style: { fontSize: "9.5px", fontWeight: 700, color: node.active ? "var(--primary-text)" : "var(--muted-foreground)" } }, node.step),
+                h("span", { className: "of-pill", style: { fontSize: "9px", padding: "0 5px" } }, node.tag)
+              ),
+              h("div", { style: { fontSize: "12px", fontWeight: 700 } }, node.title),
+              h("div", { className: "of-muted", style: { fontSize: "10.5px", lineHeight: 1.4 } }, node.desc)
+            )
+          )
+        )
+      ),
+
+      // ── ORGANOGRAMA & CADEIA DE ESCALADA POR PERMISSÃO (5 NÍVEIS) ──
+      h(
+        "section",
+        { className: "of-card-pad", "data-holding-orgchart": "true", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+        h(
+          "div",
+          null,
+          h("div", { style: { fontSize: "13px", fontWeight: 700 } }, "Organograma & Cadeia de Escalada por Permissão"),
+          h("div", { className: "of-muted", style: { fontSize: "11px" } }, "Cada nível só aciona o nível imediatamente superior mediante gatilho ou permissão. Tudo fora disso permanece contido no organograma.")
+        ),
+        h(
+          "div",
+          { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(175px, 1fr))", gap: "8px" } },
+          [
+            {
+              level: "NÍVEL 5 · ACIONISTA",
+              actor: holding?.fundador?.nome || "Helton Fraga",
+              rule: "Recebe apenas DMs e Question Cards da Bestie (Iris).",
+              tone: "accent",
+            },
+            {
+              level: "NÍVEL 4 · BESTIE BUZZ",
+              actor: holding?.ceoHolding?.nome || "OrgFy Iris",
+              rule: "Fixada no topo do Buzz · acesso multi-workspace · única ponte Conselho ↔ Fundador.",
+              tone: "accent",
+            },
+            {
+              level: "NÍVEL 3 · CONSELHO",
+              actor: `Board (${boardAreas.length} comitês)`,
+              rule: "CFO · CTO · CRO · CPO · COO · CGO. Delibera estratégia, orçamento e risco.",
+              tone: "done",
+            },
+            {
+              level: "NÍVEL 2 · DIRETORIA",
+              actor: "CEO ← COO / PM",
+              rule: "COO/PM (ex.: Bento) só sobe ao CEO com permissão; CEO só pauta o Conselho.",
+              tone: "running",
+            },
+            {
+              level: "NÍVEL 1 · FÁBRICA",
+              actor: "Executores & L-01",
+              rule: "Execução em worktree isolada, CI, Revisores L-01 e Oráculo dentro da empresa.",
+              tone: "idle",
+            },
+          ].map((lvl) =>
+            h(
+              "div",
+              {
+                key: lvl.level,
+                className: "of-surface",
+                style: {
+                  padding: "9px 11px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "4px",
+                  borderColor: lvl.tone === "accent" ? "var(--primary-border)" : undefined,
+                },
+              },
+              h("div", { className: "of-mono", style: { fontSize: "9.5px", fontWeight: 700, color: lvl.tone === "accent" ? "var(--primary-text)" : "var(--muted-foreground)" } }, lvl.level),
+              h("div", { style: { fontSize: "12.5px", fontWeight: 700 } }, lvl.actor),
+              h("div", { className: "of-muted", style: { fontSize: "10.5px", lineHeight: 1.4 } }, lvl.rule)
+            )
+          )
+        )
+      ),
+
       h(
         "div",
         { className: "of-grid-3" },

@@ -55660,7 +55660,7 @@ function fmtTokens(n) {
   return String(n);
 }
 function renderFactorySecondaryPage(props) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x2, _y2, _z2, _A, _B;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x2, _y2, _z2, _A, _B, _C, _D;
   const {
     h,
     tab,
@@ -55688,18 +55688,38 @@ function renderFactorySecondaryPage(props) {
     const empresas = (holding == null ? void 0 : holding.empresas) || [];
     const boardAreas = (holding == null ? void 0 : holding.conselho) || [];
     const approvals = (holding == null ? void 0 : holding.approvals) || [];
+    const deliberations = props.councilDeliberations || [];
+    const pendingDelibs = deliberations.filter((d) => d.status === "pendente").length;
+    const approvedDelibs = deliberations.filter((d) => d.status === "aprovada").length;
+    const pendingApprovals = approvals.filter((a) => a.status === "pendente").length;
+    const resolveMemberPubkey = (name) => {
+      const low = name.toLowerCase();
+      const match = liveCrew.find((c) => c.name.toLowerCase() === low);
+      return (match == null ? void 0 : match.pubkey) || "";
+    };
     const boardroomSeats = [
       {
-        id: "ceo-holding",
+        id: "bestie-iris",
         label: ((_a = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _a.nome) || "OrgFy Iris",
-        role: "CEO Holding",
+        role: "Bestie · Orquestradora Buzz",
         status: ((_b = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _b.pubkey) && ((_d = (_c = props.telemetry) == null ? void 0 : _c.byPubkey) == null ? void 0 : _d[holding.ceoHolding.pubkey.toLowerCase()]) ? "working" : "active",
         onClick: () => {
           var _a2, _b2;
           return onOpenAgentDm == null ? void 0 : onOpenAgentDm({ name: ((_a2 = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _a2.nome) || "OrgFy Iris", pubkey: ((_b2 = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _b2.pubkey) || "" });
         }
       },
-      ...empresas.map((emp) => ({
+      ...boardAreas.length > 0 ? boardAreas.map((area) => {
+        var _a2, _b2;
+        const pk = resolveMemberPubkey(area.responsavel);
+        const isWorking = Boolean(pk && ((_b2 = (_a2 = props.telemetry) == null ? void 0 : _a2.byPubkey) == null ? void 0 : _b2[pk.toLowerCase()]));
+        return {
+          id: area.id,
+          label: area.area,
+          role: area.responsavel,
+          status: area.status !== "ativo" ? "planned" : isWorking ? "working" : "active",
+          onClick: pk ? () => onOpenAgentDm == null ? void 0 : onOpenAgentDm({ name: area.responsavel, pubkey: pk }) : void 0
+        };
+      }) : empresas.map((emp) => ({
         id: emp.slug,
         label: emp.workspaceBuzz || emp.nome,
         role: emp.estagio === "operacional" ? `${emp.agentesProntos}/${emp.agentesTotal} agentes` : emp.estagio,
@@ -55716,11 +55736,16 @@ function renderFactorySecondaryPage(props) {
         h(
           "div",
           null,
-          h("div", { style: { fontSize: "15px", fontWeight: 700 } }, "Conselho da Holding Cortexx · Portfólio Multi-Empresa"),
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
+            h("span", { style: { fontSize: "15px", fontWeight: 700 } }, "Conselho da Holding Cortexx · Governança & Board"),
+            h("span", { className: "of-pill", style: { background: "var(--primary-soft)", borderColor: "var(--primary-border)", color: "var(--primary-text)" } }, `Bestie: ${((_e = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _e.nome) || "OrgFy Iris"}`)
+          ),
           h(
             "div",
             { className: "of-muted", style: { marginTop: "3px" } },
-            `Fundador: ${((_e = holding == null ? void 0 : holding.fundador) == null ? void 0 : _e.nome) || "Helton Fraga"} · CEO Holding: ${((_f = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _f.nome) || "OrgFy Iris"} · ${empresas.length} empresas no portfólio · ${approvals.filter((a) => a.status === "pendente").length} aprovação(ões) pendente(s)`
+            `Fundador: ${((_f = holding == null ? void 0 : holding.fundador) == null ? void 0 : _f.nome) || "Helton Fraga"} (DM exclusiva via Bestie) · ${boardAreas.length} cadeiras no Conselho · ${empresas.length} empresas no portfólio · ${pendingApprovals + pendingDelibs} pauta(s) pendente(s)`
           )
         ),
         h(
@@ -55750,7 +55775,7 @@ function renderFactorySecondaryPage(props) {
                 return onOpenAgentDm({ name: ((_a2 = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _a2.nome) || "OrgFy Iris", pubkey: ((_b2 = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _b2.pubkey) || "" });
               }
             },
-            `Falar com ${((_h = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _h.nome) || "OrgFy Iris"} ↗`
+            `DM com ${((_h = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _h.nome) || "OrgFy Iris"} (Bestie) ↗`
           )
         )
       ),
@@ -55847,7 +55872,153 @@ function renderFactorySecondaryPage(props) {
           )
         )
       ),
-      props.Boardroom3D && h(props.Boardroom3D, { seats: boardroomSeats, title: "Sala de Reunião do Conselho · Tema Boardroom 3D" }),
+      props.Boardroom3D && h(props.Boardroom3D, { seats: boardroomSeats, title: "Sala de Reunião do Conselho · Conselheiros & Bestie" }),
+      // ── PIPELINE PRÓPRIO DO CONSELHO (Deliberação Técnica & Governança) ──
+      h(
+        "section",
+        { className: "of-card-pad", "data-council-pipeline": "true", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" } },
+          h(
+            "div",
+            null,
+            h("div", { style: { fontSize: "13px", fontWeight: 700 } }, "Pipeline de Deliberação do Conselho"),
+            h("div", { className: "of-muted", style: { fontSize: "11px" } }, "Fluxo lógico da Holding: separado da esteira de código das subsidiárias. Somente pautas que excedem a alçada do Conselho sobem para a Bestie (OrgFy Iris).")
+          ),
+          h("span", { className: "of-pill", "data-tone": pendingDelibs + pendingApprovals > 0 ? "waiting" : "done" }, `${pendingDelibs + pendingApprovals} em deliberação · ${approvedDelibs} decidida(s)`)
+        ),
+        h(
+          "div",
+          { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(165px, 1fr))", gap: "8px" } },
+          [
+            {
+              step: "1 · PAUTA",
+              tag: "Subsidiária",
+              title: "Escalonamento COO → CEO",
+              desc: "CEO da empresa abre pauta quando excede orçamento, risco ou escopo local.",
+              active: pendingApprovals > 0
+            },
+            {
+              step: "2 · COMITÊS",
+              tag: "Parecer Técnico",
+              title: "CFO · CTO · CRO · CPO",
+              desc: "Conselheiros analisam viabilidade econômica, arquitetura, risco e produto em paralelo.",
+              active: boardAreas.some((a) => a.status === "ativo")
+            },
+            {
+              step: "3 · QUORUM",
+              tag: "Board CRDT",
+              title: "Votação & Resolução",
+              desc: "Deliberação colegiada registrada em ata CRDT com status DECIDIDO ou RECUSADO.",
+              active: pendingDelibs > 0
+            },
+            {
+              step: "4A · DESPACHO",
+              tag: "Dentro da Alçada",
+              title: "Retorna à Subsidiária",
+              desc: "Ordem volta ao CEO/COO da empresa para virar Spec + Card na fábrica.",
+              active: approvedDelibs > 0
+            },
+            {
+              step: "4B · BESTIE",
+              tag: "Acima da Alçada",
+              title: "OrgFy Iris → DM Fundador",
+              desc: "Apenas a Iris (Bestie) aciona Helton Fraga em DM ou Question Card.",
+              active: pendingApprovals > 0
+            }
+          ].map(
+            (node) => h(
+              "div",
+              {
+                key: node.step,
+                className: "of-surface",
+                style: {
+                  padding: "10px 11px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "5px",
+                  borderColor: node.active ? "var(--primary-border)" : void 0,
+                  background: node.active ? "var(--primary-soft)" : void 0
+                }
+              },
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" } },
+                h("span", { className: "of-mono", style: { fontSize: "9.5px", fontWeight: 700, color: node.active ? "var(--primary-text)" : "var(--muted-foreground)" } }, node.step),
+                h("span", { className: "of-pill", style: { fontSize: "9px", padding: "0 5px" } }, node.tag)
+              ),
+              h("div", { style: { fontSize: "12px", fontWeight: 700 } }, node.title),
+              h("div", { className: "of-muted", style: { fontSize: "10.5px", lineHeight: 1.4 } }, node.desc)
+            )
+          )
+        )
+      ),
+      // ── ORGANOGRAMA & CADEIA DE ESCALADA POR PERMISSÃO (5 NÍVEIS) ──
+      h(
+        "section",
+        { className: "of-card-pad", "data-holding-orgchart": "true", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+        h(
+          "div",
+          null,
+          h("div", { style: { fontSize: "13px", fontWeight: 700 } }, "Organograma & Cadeia de Escalada por Permissão"),
+          h("div", { className: "of-muted", style: { fontSize: "11px" } }, "Cada nível só aciona o nível imediatamente superior mediante gatilho ou permissão. Tudo fora disso permanece contido no organograma.")
+        ),
+        h(
+          "div",
+          { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(175px, 1fr))", gap: "8px" } },
+          [
+            {
+              level: "NÍVEL 5 · ACIONISTA",
+              actor: ((_j = holding == null ? void 0 : holding.fundador) == null ? void 0 : _j.nome) || "Helton Fraga",
+              rule: "Recebe apenas DMs e Question Cards da Bestie (Iris).",
+              tone: "accent"
+            },
+            {
+              level: "NÍVEL 4 · BESTIE BUZZ",
+              actor: ((_k = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _k.nome) || "OrgFy Iris",
+              rule: "Fixada no topo do Buzz · acesso multi-workspace · única ponte Conselho ↔ Fundador.",
+              tone: "accent"
+            },
+            {
+              level: "NÍVEL 3 · CONSELHO",
+              actor: `Board (${boardAreas.length} comitês)`,
+              rule: "CFO · CTO · CRO · CPO · COO · CGO. Delibera estratégia, orçamento e risco.",
+              tone: "done"
+            },
+            {
+              level: "NÍVEL 2 · DIRETORIA",
+              actor: "CEO ← COO / PM",
+              rule: "COO/PM (ex.: Bento) só sobe ao CEO com permissão; CEO só pauta o Conselho.",
+              tone: "running"
+            },
+            {
+              level: "NÍVEL 1 · FÁBRICA",
+              actor: "Executores & L-01",
+              rule: "Execução em worktree isolada, CI, Revisores L-01 e Oráculo dentro da empresa.",
+              tone: "idle"
+            }
+          ].map(
+            (lvl) => h(
+              "div",
+              {
+                key: lvl.level,
+                className: "of-surface",
+                style: {
+                  padding: "9px 11px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "4px",
+                  borderColor: lvl.tone === "accent" ? "var(--primary-border)" : void 0
+                }
+              },
+              h("div", { className: "of-mono", style: { fontSize: "9.5px", fontWeight: 700, color: lvl.tone === "accent" ? "var(--primary-text)" : "var(--muted-foreground)" } }, lvl.level),
+              h("div", { style: { fontSize: "12.5px", fontWeight: 700 } }, lvl.actor),
+              h("div", { className: "of-muted", style: { fontSize: "10.5px", lineHeight: 1.4 } }, lvl.rule)
+            )
+          )
+        )
+      ),
       h(
         "div",
         { className: "of-grid-3" },
@@ -55990,7 +56161,7 @@ function renderFactorySecondaryPage(props) {
             "div",
             { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" } },
             h("div", { className: "of-meter-label" }, "Locks Distribuídos Ativos (CRDT Sync)"),
-            h("span", { className: "of-pill", "data-tone": ((_j = props.crdtBackendInfo) == null ? void 0 : _j.mode) === "buzz_artifact_collection" ? "done" : "idle" }, ((_k = props.crdtBackendInfo) == null ? void 0 : _k.mode) === "buzz_artifact_collection" ? "Relay CRDT" : "Cache local")
+            h("span", { className: "of-pill", "data-tone": ((_l = props.crdtBackendInfo) == null ? void 0 : _l.mode) === "buzz_artifact_collection" ? "done" : "idle" }, ((_m2 = props.crdtBackendInfo) == null ? void 0 : _m2.mode) === "buzz_artifact_collection" ? "Relay CRDT" : "Cache local")
           ),
           (props.distributedLocks || []).length === 0 ? h("div", { className: "of-muted", style: { fontSize: "11.5px" } }, "Nenhum lock distribuído ativo no momento.") : (props.distributedLocks || []).map(
             (lk) => h(
@@ -56013,7 +56184,7 @@ function renderFactorySecondaryPage(props) {
     return renderFactoryInboxPage({
       h,
       tenant,
-      companyName: ((_l = status.tenantManifest) == null ? void 0 : _l.nome) || tenant,
+      companyName: ((_n = status.tenantManifest) == null ? void 0 : _n.nome) || tenant,
       status,
       automations: props.automations,
       inboxFilter,
@@ -56120,7 +56291,7 @@ function renderFactorySecondaryPage(props) {
         tenant,
         companyName: (tm == null ? void 0 : tm.nome) || tenant,
         automations: props.automations,
-        selectedId: props.selectedAutomationId || ((_m2 = props.automations[0]) == null ? void 0 : _m2.id) || "",
+        selectedId: props.selectedAutomationId || ((_o = props.automations[0]) == null ? void 0 : _o.id) || "",
         onSelectId: props.onSelectAutomationId,
         onUpdateAutomation: props.onUpdateAutomation,
         onCreateAutomation: props.onCreateAutomation,
@@ -56142,10 +56313,10 @@ function renderFactorySecondaryPage(props) {
     );
   }
   if (tab === "agents") {
-    const tenantAgents = ((_n = status.tenantManifest) == null ? void 0 : _n.agentes) || [];
+    const tenantAgents = ((_p = status.tenantManifest) == null ? void 0 : _p.agentes) || [];
     const modelos = status.modelos || [];
-    const revisoresSurf = Object.entries(((_o = status.tenantManifest) == null ? void 0 : _o.revisoresPorSuperficie) || {});
-    const empresaNome = ((_p = status.tenantManifest) == null ? void 0 : _p.nome) || tenant;
+    const revisoresSurf = Object.entries(((_q = status.tenantManifest) == null ? void 0 : _q.revisoresPorSuperficie) || {});
+    const empresaNome = ((_r = status.tenantManifest) == null ? void 0 : _r.nome) || tenant;
     return h(
       "div",
       { style: { display: "flex", flexDirection: "column", gap: "12px" } },
@@ -56844,8 +57015,8 @@ function renderFactorySecondaryPage(props) {
       renderBuzzCanvasViewer({
         h,
         tenant,
-        channelName: (ch == null ? void 0 : ch.name) || ((_q = status.tenantManifest) == null ? void 0 : _q.nome) || tenant,
-        channelId: (ch == null ? void 0 : ch.channelId) || ((_r = status.tenantManifest) == null ? void 0 : _r.canal) || null,
+        channelName: (ch == null ? void 0 : ch.name) || ((_s = status.tenantManifest) == null ? void 0 : _s.nome) || tenant,
+        channelId: (ch == null ? void 0 : ch.channelId) || ((_t = status.tenantManifest) == null ? void 0 : _t.canal) || null,
         content: props.channelCanvas ?? null,
         draft: props.canvasDraft ?? props.channelCanvas ?? "",
         onChangeDraft: (v2) => {
@@ -56908,7 +57079,7 @@ function renderFactorySecondaryPage(props) {
         h(
           "section",
           { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-          h("div", { className: "of-meter-label" }, `2. Workspace & Arquivos de Contexto (${((_s = status.tenantManifest) == null ? void 0 : _s.nome) || tenant})`),
+          h("div", { className: "of-meter-label" }, `2. Workspace & Arquivos de Contexto (${((_u = status.tenantManifest) == null ? void 0 : _u.nome) || tenant})`),
           papeis.length > 0 && h(
             "div",
             { style: { display: "flex", flexWrap: "wrap", gap: "6px" } },
@@ -56971,7 +57142,7 @@ function renderFactorySecondaryPage(props) {
     );
   }
   const chInfo = props.channelInfo;
-  const settingsTenantAgents = ((_t = status.tenantManifest) == null ? void 0 : _t.agentes) || [];
+  const settingsTenantAgents = ((_v = status.tenantManifest) == null ? void 0 : _v.agentes) || [];
   const resolvedMembers = ((chInfo == null ? void 0 : chInfo.memberPubkeys) || []).map((pk) => {
     var _a2, _b2;
     const pkLow = pk.toLowerCase();
@@ -57013,7 +57184,7 @@ function renderFactorySecondaryPage(props) {
           h(
             "div",
             null,
-            h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Canal da Empresa no Buzz · #${(chInfo == null ? void 0 : chInfo.name) || ((_u = status.tenantManifest) == null ? void 0 : _u.nome) || tenant}`),
+            h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Canal da Empresa no Buzz · #${(chInfo == null ? void 0 : chInfo.name) || ((_w = status.tenantManifest) == null ? void 0 : _w.nome) || tenant}`),
             h(
               "div",
               { className: "of-muted", style: { marginTop: "2px" } },
@@ -57179,7 +57350,7 @@ function renderFactorySecondaryPage(props) {
       h(
         "div",
         { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-        h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Modo de autonomia · ${((_v = status.tenantManifest) == null ? void 0 : _v.nome) || tenant}`),
+        h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Modo de autonomia · ${((_x2 = status.tenantManifest) == null ? void 0 : _x2.nome) || tenant}`),
         h("div", { className: "of-muted" }, "Suba um degrau por vez. Áreas protegidas e regra L-01 sempre permanecem ativas."),
         h(
           "div",
@@ -57321,8 +57492,8 @@ function renderFactorySecondaryPage(props) {
             h(
               "div",
               { style: { display: "flex", alignItems: "center", gap: "6px" } },
-              h("span", { className: "of-pill", "data-tone": ((_w = status.holdoutStatus) == null ? void 0 : _w.status) === "pass" ? "done" : ((_x2 = status.holdoutStatus) == null ? void 0 : _x2.status) === "fail" ? "failed" : "idle" }, status.holdoutStatus ? `${status.holdoutStatus.passed ?? 0}/${status.holdoutStatus.total ?? 0} ${status.holdoutStatus.status.toUpperCase()}` : "Não executado"),
-              ((_y2 = status.holdoutStatus) == null ? void 0 : _y2.external_verified) && h("span", { className: "of-muted", style: { fontSize: "10.5px" } }, `sha:${status.holdoutStatus.suite_sha256 || "ok"}`)
+              h("span", { className: "of-pill", "data-tone": ((_y2 = status.holdoutStatus) == null ? void 0 : _y2.status) === "pass" ? "done" : ((_z2 = status.holdoutStatus) == null ? void 0 : _z2.status) === "fail" ? "failed" : "idle" }, status.holdoutStatus ? `${status.holdoutStatus.passed ?? 0}/${status.holdoutStatus.total ?? 0} ${status.holdoutStatus.status.toUpperCase()}` : "Não executado"),
+              ((_A = status.holdoutStatus) == null ? void 0 : _A.external_verified) && h("span", { className: "of-muted", style: { fontSize: "10.5px" } }, `sha:${status.holdoutStatus.suite_sha256 || "ok"}`)
             ),
             props.onRunHoldoutNow && h("button", { type: "button", className: "of-btn", disabled: props.runningHoldout, style: { alignSelf: "flex-start", padding: "3px 9px", fontSize: "11px" }, onClick: props.onRunHoldoutNow }, props.runningHoldout ? "Rodando..." : "▶ Rodar Holdout")
           ),
@@ -57348,7 +57519,7 @@ function renderFactorySecondaryPage(props) {
             h(
               "div",
               { style: { fontSize: "12px", fontWeight: 600 } },
-              ((_z2 = props.focusState) == null ? void 0 : _z2.active) ? `🔭 Focus ativo até ${props.focusState.untilFormatted}` : "Focus inativo"
+              ((_B = props.focusState) == null ? void 0 : _B.active) ? `🔭 Focus ativo até ${props.focusState.untilFormatted}` : "Focus inativo"
             ),
             h("div", { className: "of-muted", style: { fontSize: "10.5px" } }, "Notificações não críticas são silenciadas durante o modo Focus; apenas alertas P0/Kill Switch atravessam.")
           )
@@ -57377,7 +57548,7 @@ function renderFactorySecondaryPage(props) {
             props.evaluatingTrust ? "Calculando..." : "↻ Recalcular Escape Rate"
           )
         ),
-        ((_B = (_A = status.trustEngine) == null ? void 0 : _A.categories) == null ? void 0 : _B.length) && h(
+        ((_D = (_C = status.trustEngine) == null ? void 0 : _C.categories) == null ? void 0 : _D.length) && h(
           "div",
           { style: { display: "flex", flexDirection: "column", gap: "8px" } },
           status.trustEngine.categories.map(

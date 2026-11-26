@@ -2419,4 +2419,18 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     assert.ok(boardSrc.includes("OrthographicCamera"), "Boardroom3DCanvas deve usar câmera ortográfica isométrica igual ao Andar 3D");
     assert.ok(boardSrc.includes("PCFSoftShadowMap"), "Boardroom3DCanvas deve ativar sombras suaves PCFSoftShadowMap");
   });
+
+  test("v18.7: Conselho da Holding com 6 comitês técnicos, Pipeline de Deliberação próprio e Organograma de Escalada (Bestie Iris -> Fundador)", () => {
+    const bundle = fs.readFileSync(path.resolve(__dirname, "plugin.js"), "utf8");
+    assert.ok(bundle.includes("data-council-pipeline"), "Pipeline de Deliberação do Conselho deve estar no bundle");
+    assert.ok(bundle.includes("data-holding-orgchart"), "Organograma & Cadeia de Escalada por Permissão deve estar no bundle");
+    assert.ok(bundle.includes("Bestie · Orquestradora Buzz"), "OrgFy Iris deve ocupar a cabeceira como Bestie Orquestradora");
+
+    const boardJsonPath = path.resolve(process.env.ORGFY_HOME || process.env.HOME || "", ".buzz", "REPOS", "orgfy", "empresas", "board.json");
+    if (fs.existsSync(boardJsonPath)) {
+      const board = JSON.parse(fs.readFileSync(boardJsonPath, "utf8"));
+      assert.equal(board.ceo_holding?.bestie, true, "board.json deve marcar OrgFy Iris como Bestie");
+      assert.ok(Array.isArray(board.conselho) && board.conselho.length >= 6, "board.json deve declarar os 6 comitês do Conselho");
+    }
+  });
 }
