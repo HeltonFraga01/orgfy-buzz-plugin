@@ -53,6 +53,12 @@ import { fetchHoldingControlPlane, type HoldingControlPlaneSnapshot } from "../s
 import { executeCardProgress } from "../services/card-progress";
 import { renderCommandPalette, renderFactorySidebar, type FactorySidebarProps } from "./FactorySidebar";
 import { buildDefaultAutomations, exportAutomationToBuzzWorkflowYaml, type OrgfyAutomation } from "./AutomationEditor";
+import { createQuestionCardsPanel } from "./QuestionCardsPanel";
+import {
+  getOrgfyCrdtStore,
+  type OrgfyQuestionCard,
+  type QuestionCardAnswer,
+} from "../services/orgfy-crdt-store";
 
 type FactoryTab =
   | "holding"
@@ -84,6 +90,8 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
   const Floor3D = createFloor3DComponent(ctx);
   const Boardroom3D = createBoardroom3DComponent(ctx);
   const CodeDenInspectorDrawer = createCodeDenInspectorDrawer(React);
+  const QuestionCardsPanel = createQuestionCardsPanel(React);
+  const crdtStore = getOrgfyCrdtStore(ctx);
 
   return function OrgFyFactoryApp() {
     const [tenant, setTenant] = React.useState<string>("orgfy");
@@ -136,6 +144,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     const [runningAutomationId, setRunningAutomationId] = React.useState<string | null>(null);
     const [cooUpdatesExpanded, setCooUpdatesExpanded] = React.useState<boolean>(true);
     const [sendingCooUpdates, setSendingCooUpdates] = React.useState<boolean>(false);
+    const [questionCards, setQuestionCards] = React.useState<OrgfyQuestionCard[]>([]);
     const [compactDensity, setCompactDensity] = React.useState<boolean>(false);
     const [expandedProjects, setExpandedProjects] = React.useState<Record<string, boolean>>({ orgfy: true });
     const [showAllByProject, setShowAllByProject] = React.useState<Record<string, boolean>>({});
@@ -1081,6 +1090,99 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       [tenant, status.tenantManifest, holding, tenantAgents, liveCrew, notify]
     );
 
+    // Carrega e assina Question Cards via OrgfyCrdtStore (ctx.artifactStorage.open + fallback)
+    const refreshQuestionCards = React.useCallback(async () => {
+      try {
+        const list = await crdtStore.listQuestionCards();
+        setQuestionCards(list);
+      } catch {}
+    }, []);
+
+    React.useEffect(() => {
+      void refreshQuestionCards();
+      return crdtStore.subscribe(() => {
+        void refreshQuestionCards();
+      });
+    }, [refreshQuestionCards]);
+
+    const handleAnswerQuestionCard = React.useCallback(
+      async (card: OrgfyQuestionCard, answer: QuestionCardAnswer) => {
+        const updated = await crdtStore.answerQuestionCard(card.id, answer);
+        await refreshQuestionCards();
+        if (!updated) {
+          notify("Não foi possível atualizar o Question Card.");
+          return;
+        }
+        const selectedLabels = (answer.selectedIds || [])
+          .map((id) => card.options.find((o) => o.id === id)?.label || id)
+          .join(", ");
+        const agentsApi = (ctx as any)?.agents;
+        const targetAg =
+          (card.requestedByPubkey &&
+            (tenantAgents.find((a) => a.pubkey?.toLowerCase() === card.requestedByPubkey?.toLowerCase()) ||
+              liveCrew.find((a) => a.pubkey?.toLowerCase() === card.requestedByPubkey?.toLowerCase()))) ||
+          tenantAgents.find((a) => a.name.toLowerCase().includes(card.requestedBy.toLowerCase())) ||
+          liveCrew.find((a) => a.name.toLowerCase().includes(card.requestedBy.toLowerCase()));
+        const agentKey = (targetAg && "agentKey" in targetAg ? targetAg.agentKey : targetAg?.key) || "";
+        const canal = card.channelId || status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === card.tenant)?.canal || undefined;
+        if (typeof agentsApi?.wake === "function" && agentKey) {
+          try {
+            await agentsApi.wake(agentKey, {
+              ...(canal ? { channelId: canal } : {}),
+              ...(card.threadRoot ? { threadRoot: card.threadRoot } : {}),
+              text: `[ORGFY QUESTION CARD RESPONDIDO · ${card.id}]\nDecisão: ${card.title}\nOpções selecionadas: ${selectedLabels || "(texto livre)"}${answer.freeText ? `\nObservação do Fundador: ${answer.freeText}` : ""}`,
+            });
+            notify(`Resposta salva no CRDT e enviada para ${card.requestedBy} via ctx.agents.wake.`);
+            return;
+          } catch {}
+        }
+        notify(`Resposta registrada para "${card.title}" (CRDT sincronizado).`);
+      },
+      [refreshQuestionCards, tenantAgents, liveCrew, status.tenantManifest, holding, notify]
+    );
+
+    const handleDismissQuestionCard = React.useCallback(
+      async (card: OrgfyQuestionCard) => {
+        await crdtStore.dismissQuestionCard(card.id);
+        await refreshQuestionCards();
+        notify(`Question Card "${card.title}" adiado.`);
+      },
+      [refreshQuestionCards, notify]
+    );
+
+    const handleRecordVisualEvidence = React.useCallback(
+      async (evidence: { url: string; note: string; verdict: "approved" | "changes_requested" }, item: FactoryWorkItem, executorName?: string) => {
+        await crdtStore.recordVisualEvidence({
+          tenant,
+          itemId: item.id,
+          url: evidence.url,
+          note: evidence.note,
+          verdict: evidence.verdict,
+        });
+        const agentsApi = (ctx as any)?.agents;
+        const targetName = executorName || status.tenantManifest?.coo || "OrgFy Bento";
+        const targetAg =
+          tenantAgents.find((a) => a.name.toLowerCase().includes(targetName.toLowerCase())) ||
+          liveCrew.find((a) => a.name.toLowerCase().includes(targetName.toLowerCase()));
+        const agentKey = (targetAg && "agentKey" in targetAg ? targetAg.agentKey : targetAg?.key) || "";
+        const canal = status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === tenant)?.canal || undefined;
+        if (typeof agentsApi?.wake === "function" && agentKey) {
+          try {
+            await agentsApi.wake(agentKey, {
+              ...(canal ? { channelId: canal } : {}),
+              text: `[ORGFY VISUAL PREVIEW · ${evidence.verdict === "approved" ? "APROVADO ✓" : "AJUSTE SOLICITADO"} · #${item.id.slice(0, 8)} ${item.title}]\nURL: ${evidence.url}\nNota: ${evidence.note}`,
+            });
+          } catch {}
+        }
+        notify(
+          evidence.verdict === "approved"
+            ? `Evidência visual aprovada e sincronizada (CRDT) para #${item.id.slice(0, 8)}.`
+            : `Ajuste visual enviado para ${targetName}.`
+        );
+      },
+      [tenant, status.tenantManifest, holding, tenantAgents, liveCrew, notify]
+    );
+
     // CEO Master dinâmico: respeita session.mainAgent do Buzz se configurado, senão board.json (OrgFy Iris)
     const masterLive =
       (mainAgentPubkey && liveCrew.find((a) => a.pubkey?.toLowerCase() === mainAgentPubkey)) ||
@@ -1107,8 +1209,10 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     const isGlobalView = GLOBAL_TABS.has(tab);
 
     const pendingApprovals = (holding?.approvals || []).filter((a) => a.status === "pendente").length;
+    const pendingQuestionCardsCount = questionCards.filter((c) => c.status === "pending").length;
     const abaixoMinimoCount = (status.modelos || []).filter((m) => m.abaixo_minimo).length;
     const inboxCount =
+      pendingQuestionCardsCount +
       status.held.length +
       [...status.inProgress, ...status.recent].filter((i) => i.stage === "escalated" || i.stage === "failed" || i.stage === "reverted").length;
 
@@ -1541,6 +1645,11 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                     onRunAutomationNow: handleRunAutomationNow,
                     onExportAutomationYaml: handleExportAutomationYaml,
                     runningAutomationId,
+                    QuestionCardsPanel,
+                    questionCards,
+                    crdtBackendInfo: crdtStore.getBackendInfo(),
+                    onAnswerQuestionCard: handleAnswerQuestionCard,
+                    onDismissQuestionCard: handleDismissQuestionCard,
                   })
             )
           )
@@ -1576,6 +1685,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         onSessionAction: handleAgentSessionAction,
         onToggleChecklistStep: handleToggleChecklistStep,
         onSendDiffReview: handleSendDiffReview,
+        onRecordVisualEvidence: handleRecordVisualEvidence,
         onClose: () => setSelectedItem(null),
       }),
       renderAgentProfileDrawer({

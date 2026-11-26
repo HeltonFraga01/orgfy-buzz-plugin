@@ -41,7 +41,8 @@ export type OrgfyPipelineEventType =
   | "loop.detected"
   | "ci.failed"
   | "budget.80pct"
-  | "attention.cleaned_up";
+  | "attention.cleaned_up"
+  | "question_card.created";
 
 export interface OrgfyPipelineEvent {
   id: string;

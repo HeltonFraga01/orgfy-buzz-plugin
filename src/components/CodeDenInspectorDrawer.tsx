@@ -22,7 +22,7 @@ import {
   readBuzzProjectGit,
 } from "../services/buzz-repos-live";
 
-export type InspectorTab = "diff" | "files" | "pr" | "details";
+export type InspectorTab = "diff" | "files" | "pr" | "preview" | "details";
 
 export interface DiffAnchoredComment {
   id: string;
@@ -30,6 +30,12 @@ export interface DiffAnchoredComment {
   line: number;
   lineText: string;
   comment: string;
+}
+
+export interface VisualEvidenceSubmission {
+  url: string;
+  note: string;
+  verdict: "approved" | "changes_requested";
 }
 
 export interface CodeDenInspectorDrawerProps {
@@ -56,6 +62,7 @@ export interface CodeDenInspectorDrawerProps {
   onSessionAction?: (agentKey: string, action: "interrupt" | "compact" | "new") => void;
   onToggleChecklistStep?: (stepId: string, nextDone: boolean, item: FactoryWorkItem) => void;
   onSendDiffReview?: (comments: DiffAnchoredComment[], item: FactoryWorkItem, executorName?: string) => Promise<void> | void;
+  onRecordVisualEvidence?: (evidence: VisualEvidenceSubmission, item: FactoryWorkItem, executorName?: string) => Promise<void> | void;
   onClose: () => void;
 }
 
@@ -110,6 +117,8 @@ function Icon({ h, name, size = 14, color }: { h: any; name: string; size?: numb
       return h("svg", base, h("path", { d: "m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z" }));
     case "bot":
       return h("svg", base, h("path", { d: "M12 8V4H8" }), h("rect", { width: 16, height: 12, x: 4, y: 8, rx: 2 }), h("path", { d: "M2 14h2" }), h("path", { d: "M20 14h2" }), h("path", { d: "M15 13v2" }), h("path", { d: "M9 13v2" }));
+    case "globe":
+      return h("svg", base, h("circle", { cx: 12, cy: 12, r: 10 }), h("line", { x1: 2, y1: 12, x2: 22, y2: 12 }), h("path", { d: "M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" }));
     default:
       return null;
   }
@@ -700,10 +709,15 @@ export function createCodeDenInspectorDrawer(React: Context["react"]) {
       onSessionAction,
       onToggleChecklistStep,
       onSendDiffReview,
+      onRecordVisualEvidence,
       onClose,
     } = props;
 
     const [activeTab, setActiveTab] = React.useState<InspectorTab>("pr");
+    const [previewUrlInput, setPreviewUrlInput] = React.useState<string>("");
+    const [previewLiveUrl, setPreviewLiveUrl] = React.useState<string>("");
+    const [visualEvidenceNote, setVisualEvidenceNote] = React.useState<string>("");
+    const [submittingEvidence, setSubmittingEvidence] = React.useState<boolean>(false);
     const [localChecklistOverrides, setLocalChecklistOverrides] = React.useState<Record<string, boolean>>({});
     const [activeAnchor, setActiveAnchor] = React.useState<{ file: string; line: number; text: string } | null>(null);
     const [anchorDraft, setAnchorDraft] = React.useState<string>("");
@@ -887,8 +901,13 @@ export function createCodeDenInspectorDrawer(React: Context["react"]) {
       { id: "diff", label: "Diff", icon: "diff", count: parsedDiffFiles.length || undefined },
       { id: "files", label: "Arquivos", icon: "files", count: gitSnap?.files?.length || undefined },
       { id: "pr", label: "Issue / PR", icon: "pr" },
+      { id: "preview", label: "Preview", icon: "globe" },
       { id: "details", label: "Detalhes", icon: "info" },
     ];
+
+    const browserApi = (ctx as any)?.browser || (ctx as any)?.reflect?.get?.("browser");
+    const BrowserView = browserApi?.View || null;
+    const browserAvailable = Boolean(BrowserView && browserApi?.available !== false);
 
     // ── RENDER TREE NODE (Files tab) ──
     const renderTreeNode = (node: TreeNodeData, depth: number): any => {
@@ -1871,7 +1890,188 @@ export function createCodeDenInspectorDrawer(React: Context["react"]) {
                 })()
             ),
 
-          // ── ABA 4: DETALHES (1:1 CodeDen DetailsPanel) ──
+          // ── ABA 4: PREVIEW VISUAL AO VIVO (ctx.browser.View · Onda 3) ──
+          activeTab === "preview" &&
+            h(
+              "div",
+              { "data-orgfy-browser-preview": "true", style: { display: "flex", flexDirection: "column", flex: 1, minHeight: 0 } },
+              h(
+                "div",
+                {
+                  style: {
+                    padding: "10px 14px",
+                    borderBottom: "1px solid var(--border)",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "8px",
+                    background: "var(--card)",
+                  },
+                },
+                h(
+                  "div",
+                  { style: { display: "flex", alignItems: "center", gap: "6px" } },
+                  h("input", {
+                    className: "of-input",
+                    style: { flex: 1, fontSize: "11.5px", fontFamily: "var(--font-mono)" },
+                    placeholder: "https://preview-ou-dev-server...",
+                    value: previewUrlInput,
+                    onChange: (e: any) => setPreviewUrlInput(e.target.value),
+                    onKeyDown: (e: any) => {
+                      if (e.key === "Enter" && previewUrlInput.trim()) setPreviewLiveUrl(previewUrlInput.trim());
+                    },
+                  }),
+                  h(
+                    "button",
+                    {
+                      type: "button",
+                      className: "of-btn",
+                      "data-variant": "primary",
+                      style: { fontSize: "11px", padding: "5px 10px" },
+                      onClick: () => {
+                        if (previewUrlInput.trim()) setPreviewLiveUrl(previewUrlInput.trim());
+                      },
+                    },
+                    "Abrir"
+                  )
+                ),
+                h(
+                  "div",
+                  { style: { display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" } },
+                  [
+                    { label: "Vite :5173", port: "5173" },
+                    { label: "Web :3000", port: "3000" },
+                    { label: "API :8000", port: "8000" },
+                  ].map((preset) => {
+                    const url = `http://localhost:${preset.port}`;
+                    return h(
+                      "button",
+                      {
+                        key: preset.port,
+                        type: "button",
+                        className: "of-btn",
+                        style: { fontSize: "10.5px", padding: "2px 7px" },
+                        onClick: () => {
+                          setPreviewUrlInput(url);
+                          setPreviewLiveUrl(url);
+                        },
+                      },
+                      preset.label
+                    );
+                  }),
+                  h(
+                    "span",
+                    { className: "of-pill", "data-tone": browserAvailable ? "done" : "waiting", style: { marginLeft: "auto" } },
+                    browserAvailable ? "ctx.browser.View ativo" : "Browser nativo indisponível"
+                  )
+                )
+              ),
+              h(
+                "div",
+                { style: { flex: 1, minHeight: "320px", position: "relative", background: "rgba(0,0,0,0.22)" } },
+                browserAvailable && BrowserView && previewLiveUrl
+                  ? h(BrowserView, {
+                      url: previewLiveUrl,
+                      storage: `orgfy-preview-${tenant.replace(/[^a-z0-9._-]/gi, "-")}`,
+                      label: `${tenant} · ${item.title.slice(0, 28)}`,
+                    })
+                  : h(
+                      "div",
+                      { style: { padding: "28px 18px", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" } },
+                      Icon({ h, name: "globe", size: 24, color: "var(--muted-foreground)" }),
+                      h("div", { style: { fontSize: "13px", fontWeight: 600 } }, "Preview visual embarcado (ctx.browser.View)"),
+                      h(
+                        "div",
+                        { className: "of-muted", style: { fontSize: "12px", maxWidth: "420px", lineHeight: 1.5 } },
+                        previewLiveUrl
+                          ? `URL configurada: ${previewLiveUrl}. No Buzz Desktop com webview habilitado, a aplicação ao vivo renderiza diretamente aqui dentro do Inspector.`
+                          : "Escolha um preset acima (Vite :5173, Web :3000, API :8000) ou cole a URL de preview do PR para validar a interface ao vivo."
+                      )
+                    )
+              ),
+              onRecordVisualEvidence &&
+                h(
+                  "div",
+                  {
+                    "data-visual-evidence-bar": "true",
+                    style: {
+                      padding: "10px 14px",
+                      borderTop: "1px solid var(--border)",
+                      background: "var(--card)",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "8px",
+                    },
+                  },
+                  h("input", {
+                    className: "of-input",
+                    style: { fontSize: "11.5px" },
+                    placeholder: "Nota de validação visual para o Gate (ex.: layout validado em 1440px, sem overflow)...",
+                    value: visualEvidenceNote,
+                    onChange: (e: any) => setVisualEvidenceNote(e.target.value),
+                  }),
+                  h(
+                    "div",
+                    { style: { display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "8px" } },
+                    h(
+                      "button",
+                      {
+                        type: "button",
+                        className: "of-btn",
+                        disabled: submittingEvidence,
+                        style: { fontSize: "11px" },
+                        onClick: async () => {
+                          setSubmittingEvidence(true);
+                          try {
+                            await onRecordVisualEvidence(
+                              {
+                                url: previewLiveUrl || previewUrlInput.trim() || "preview://local",
+                                note: visualEvidenceNote.trim() || "Ajuste visual solicitado no preview.",
+                                verdict: "changes_requested",
+                              },
+                              item,
+                              executorName || undefined
+                            );
+                            setVisualEvidenceNote("");
+                          } finally {
+                            setSubmittingEvidence(false);
+                          }
+                        },
+                      },
+                      "Solicitar ajuste visual"
+                    ),
+                    h(
+                      "button",
+                      {
+                        type: "button",
+                        className: "of-btn",
+                        "data-variant": "primary",
+                        disabled: submittingEvidence,
+                        style: { fontSize: "11px" },
+                        onClick: async () => {
+                          setSubmittingEvidence(true);
+                          try {
+                            await onRecordVisualEvidence(
+                              {
+                                url: previewLiveUrl || previewUrlInput.trim() || "preview://local",
+                                note: visualEvidenceNote.trim() || "Preview visual validado pelo operador.",
+                                verdict: "approved",
+                              },
+                              item,
+                              executorName || undefined
+                            );
+                            setVisualEvidenceNote("");
+                          } finally {
+                            setSubmittingEvidence(false);
+                          }
+                        },
+                      },
+                      submittingEvidence ? "Salvando..." : "Aprovar evidência visual ✓"
+                    )
+                  )
+                )
+            ),
+
+          // ── ABA 5: DETALHES (1:1 CodeDen DetailsPanel) ──
           activeTab === "details" &&
             h(
               "div",

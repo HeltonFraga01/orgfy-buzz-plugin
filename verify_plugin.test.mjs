@@ -108,7 +108,7 @@ function makeHarness(failReads = false) {
 
 // 1. Testes Originais (Kanban & Status Positivo/Negativo + MCP)
 const h1 = makeHarness(false);
-assert.equal(h1.tools.size, 21, "devem existir exatamente 21 agentTools registradas");
+assert.equal(h1.tools.size, 22, "devem existir exatamente 22 agentTools registradas");
 assert.ok(h1.panels.has("orgfy-channel-pulse"), "sidebar panel orgfy-channel-pulse deve ser registrado");
 assert.ok(h1.hooks.length >= 1, "hooks de governança devem ser registrados");
 
@@ -1878,5 +1878,134 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     const feed = orgfyMod.buildCooUpdatesFeed(st, "orgfy");
     assert.ok(feed.some((e) => e.kind === "paused"));
     assert.ok(feed.some((e) => e.kind === "merged" && e.title.includes("PR #11")));
+  });
+
+  test("Onda 3 (v17.7): Preview visual (ctx.browser.View), CRDT sync (ctx.artifactStorage.open) e Question Cards no Inbox", async () => {
+    const bundle = fs.readFileSync(path.resolve(__dirname, "plugin.js"), "utf8");
+    assert.ok(bundle.includes("data-orgfy-browser-preview"), "Aba Preview visual via ctx.browser.View deve estar no bundle");
+    assert.ok(bundle.includes("data-visual-evidence-bar"), "Barra de evidência visual no Preview deve estar no bundle");
+    assert.ok(bundle.includes("data-orgfy-question-cards"), "Painel de Question Cards estruturados no Inbox deve estar no bundle");
+    assert.ok(bundle.includes("orgfy_question_card"), "agentTool orgfy_question_card deve estar no bundle");
+
+    // 1. Mock fiel de ctx.artifactStorage.open() (ArtifactCollection oficial do Buzz)
+    const entries = new Map();
+    const listeners = new Set();
+    let openedDef = null;
+    const crdtCtx = {
+      artifactStorage: {
+        open(def) {
+          openedDef = def;
+          return {
+            scope: { viewer: "pub-founder", relay: "wss://relay.cortexx.digital", partition: "default" },
+            async get(id) {
+              return entries.get(id);
+            },
+            async page({ index, value }) {
+              const matched = [];
+              for (const entry of entries.values()) {
+                const projected = def.project(entry);
+                if (projected.some((p) => p.index === index && p.value === value)) {
+                  matched.push(entry);
+                }
+              }
+              return { entries: matched };
+            },
+            subscribe(fn) {
+              listeners.add(fn);
+              return () => listeners.delete(fn);
+            },
+            preferences: {
+              async get(id) {
+                return entries.get(id)?.preference;
+              },
+              async update(id, change) {
+                const cur = entries.get(id) || { record: { id, availability: { state: "available" } } };
+                const nextPref = change(cur.preference);
+                entries.set(id, { ...cur, preference: nextPref });
+                for (const l of listeners) l();
+              },
+            },
+            async importBatch(batch) {
+              for (const r of batch.records || []) {
+                entries.set(r.id, { record: { id: r.id, local: r.local, availability: { state: "available" } } });
+              }
+              for (const p of batch.preferences || []) {
+                const cur = entries.get(p.id) || { record: { id: p.id, availability: { state: "available" } } };
+                entries.set(p.id, { ...cur, preference: p.value });
+              }
+              for (const l of listeners) l();
+            },
+            async imported() {
+              return false;
+            },
+            close() {},
+          };
+        },
+      },
+    };
+
+    const store = orgfyMod.getOrgfyCrdtStore(crdtCtx);
+    const info = store.getBackendInfo();
+    assert.equal(info.mode, "buzz_artifact_collection", "deve usar ArtifactCollection oficial quando ctx.artifactStorage.open() existe");
+    assert.equal(info.scope?.relay, "wss://relay.cortexx.digital");
+    assert.equal(openedDef?.name, "orgfy_factory_state_v1");
+
+    let notifyCount = 0;
+    const unsub = store.subscribe(() => { notifyCount++; });
+
+    const createdCard = await store.createQuestionCard({
+      tenant: "orgfy",
+      title: "Aprovar rollout do Gateway v2?",
+      question: "Podemos ativar o novo roteador para 100% dos tenants?",
+      requestedBy: "OrgFy Bento",
+      selectionMode: "single",
+      options: [
+        { id: "sim", label: "Sim, ativar 100%" },
+        { id: "canary", label: "Canary 20% primeiro" },
+      ],
+      timeoutMinutes: 60,
+    });
+    assert.equal(createdCard.status, "pending");
+    assert.equal(createdCard.options.length, 2);
+    assert.ok(notifyCount >= 1, "store.subscribe deve disparar ao criar Question Card");
+
+    const listed = await store.listQuestionCards("orgfy");
+    assert.ok(listed.some((c) => c.id === createdCard.id && c.status === "pending"));
+
+    const answered = await store.answerQuestionCard(createdCard.id, {
+      selectedIds: ["canary"],
+      freeText: "Validar latência p95 por 2h antes de subir para 100%.",
+      answeredBy: "Fundador",
+    });
+    assert.equal(answered?.status, "answered");
+    assert.deepEqual(answered?.answer?.selectedIds, ["canary"]);
+
+    // 2. Evidência visual sincronizada no mesmo CRDT store
+    const ev = await store.recordVisualEvidence({
+      tenant: "lumen-iptv",
+      itemId: "pr-visual-01",
+      url: "http://localhost:5173",
+      note: "Player responsivo validado em 1440px",
+      verdict: "approved",
+    });
+    assert.equal(ev.verdict, "approved");
+    const evList = await store.listVisualEvidence("lumen-iptv", "pr-visual-01");
+    assert.equal(evList.length, 1);
+
+    unsub();
+
+    // 3. agentTool orgfy_question_card registrada em h1 cria Question Card com sucesso
+    const qTool = h1.tools.get("orgfy_question_card");
+    assert.ok(qTool, "agentTool orgfy_question_card deve estar registrada");
+    const toolRes = JSON.parse(await qTool.call({}, {}, {
+      title: "Escolher estratégia de cache",
+      question: "Qual TTL padrão usar no feed do COO?",
+      requested_by: "OrgFy Otto",
+      tenant: "orgfy",
+      options: [{ label: "5 minutos" }, { label: "15 minutos" }],
+    }));
+    assert.equal(toolRes.ok, true);
+    assert.equal(toolRes.card.requestedBy, "OrgFy Otto");
+    assert.equal(toolRes.card.options.length, 2);
   });
 }

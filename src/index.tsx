@@ -198,6 +198,8 @@ import {
 } from "./factory/AutomationEditor";
 import { parseBuzzOrgfyEntityUrl } from "./components/OrgfyLiveChatRenderers";
 import { buildCooUpdatesFeed } from "./factory/FactoryCooUpdatesFeed";
+import { OrgfyCrdtStore, getOrgfyCrdtStore } from "./services/orgfy-crdt-store";
+import { createQuestionCardsPanel } from "./factory/QuestionCardsPanel";
 import {
   parseFactoryStatus,
   buildEmptyFactoryStatus,
@@ -218,6 +220,9 @@ export {
   exportAutomationToBuzzWorkflowYaml,
   parseBuzzOrgfyEntityUrl,
   buildCooUpdatesFeed,
+  OrgfyCrdtStore,
+  getOrgfyCrdtStore,
+  createQuestionCardsPanel,
   FACTORY_SHADOW_CSS,
   attachFactoryShadowStyles,
   PT_BR,
