@@ -62212,9 +62212,6 @@ function createFactoryAppComponent(ctx, opts = {}) {
         const picture = (crewByPk == null ? void 0 : crewByPk.picture) || (crewByKey == null ? void 0 : crewByKey.picture);
         if (/^[0-9a-f]{64}$/.test(pubkey)) {
           const profileTarget = `buzz:agent-profile:${pubkey}`;
-          if (openProfileTargetInSideColumn(profileTarget, { name: agentName, picture })) {
-            return;
-          }
           const scope = resolveBuzzScope();
           if ((_c2 = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _c2.open) {
             try {
@@ -62232,6 +62229,10 @@ function createFactoryAppComponent(ctx, opts = {}) {
               }
             } catch {
             }
+          }
+          if (openProfileTargetInSideColumn(profileTarget, { name: agentName, picture })) {
+            notify2(`Perfil de ${agentName} aberto na coluna lateral do Buzz.`);
+            return;
           }
         }
         if (resolvedKey) {

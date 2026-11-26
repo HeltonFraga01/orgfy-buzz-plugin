@@ -1430,7 +1430,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       [liveCrew, tenantAgents]
     );
 
-    // Abre o Perfil NATIVO do agente na coluna lateral direita (sem sair da OrgFy Factory), com fallback para buzz.agents
+    // Abre o Perfil NATIVO do agente na interface principal do Buzz (buzz.agents), com fallback para a coluna lateral
     const handleOpenNativeAgentProfile = React.useCallback(
       async (target?: { key?: string; pubkey?: string; name?: string } | string | null) => {
         const resolved =
@@ -1455,10 +1455,8 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         const picture = crewByPk?.picture || crewByKey?.picture;
         if (/^[0-9a-f]{64}$/.test(pubkey)) {
           const profileTarget = `buzz:agent-profile:${pubkey}`;
-          if (openProfileTargetInSideColumn(profileTarget, { name: agentName, picture })) {
-            return;
-          }
           const scope = resolveBuzzScope();
+          // Prioridade: Perfil nativo na interface principal do Buzz, não dentro do container do plugin.
           if ((ctx as any)?.navigation?.open) {
             try {
               const res = await (ctx as any).navigation.open({
@@ -1474,6 +1472,11 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                 return;
               }
             } catch {}
+          }
+          // Fallback apenas se a navegação principal não estiver disponível ou falhar.
+          if (openProfileTargetInSideColumn(profileTarget, { name: agentName, picture })) {
+            notify(`Perfil de ${agentName} aberto na coluna lateral do Buzz.`);
+            return;
           }
         }
         if (resolvedKey) {
