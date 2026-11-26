@@ -60991,8 +60991,6 @@ function createFactoryAppComponent(ctx, opts = {}) {
     const [editingAgentKey, setEditingAgentKey] = React.useState(null);
     const [syncingPromptKey, setSyncingPromptKey] = React.useState(null);
     const [agentPromptSyncMap, setAgentPromptSyncMap] = React.useState({});
-    const [sideProfileTabs, setSideProfileTabs] = React.useState([]);
-    const [activeSideProfileKey, setActiveSideProfileKey] = React.useState(null);
     const [buzzCatalog, setBuzzCatalog] = React.useState({ available: false, workspaces: [], allChannels: [], assignments: {} });
     const [linkedWorkspaceId, setLinkedWorkspaceId] = React.useState("");
     const [linkedChannelId, setLinkedChannelId] = React.useState("");
@@ -62153,52 +62151,9 @@ function createFactoryAppComponent(ctx, opts = {}) {
       },
       [selectedDmAgent, resolveBuzzScope, notify2]
     );
-    const closeSideProfileTab = React.useCallback((targetUrl) => {
-      setSideProfileTabs((prev) => {
-        const idx = prev.findIndex((t) => t.target === targetUrl);
-        const next = prev.filter((t) => t.target !== targetUrl);
-        setActiveSideProfileKey((cur) => {
-          var _a2, _b2;
-          if (cur !== targetUrl) return cur;
-          if (next.length === 0) return null;
-          const fallbackIdx = Math.max(0, Math.min(idx - 1, next.length - 1));
-          return ((_a2 = next[fallbackIdx]) == null ? void 0 : _a2.target) || ((_b2 = next[0]) == null ? void 0 : _b2.target) || null;
-        });
-        return next;
-      });
-    }, []);
-    const openProfileTargetInSideColumn = React.useCallback(
-      (targetUrl, meta) => {
-        const panelsApi = ctx == null ? void 0 : ctx.panels;
-        const resolvedPanel = typeof (panelsApi == null ? void 0 : panelsApi.resolve) === "function" ? panelsApi.resolve(targetUrl) : null;
-        if (!(resolvedPanel == null ? void 0 : resolvedPanel.component)) return false;
-        const pkMatch = /^buzz:agent-profile:([0-9a-f]{64})$/i.exec(targetUrl);
-        const pk = pkMatch ? pkMatch[1].toLowerCase() : "";
-        const crewMatch = pk ? liveCrew.find((c) => {
-          var _a2;
-          return ((_a2 = c.pubkey) == null ? void 0 : _a2.toLowerCase()) === pk;
-        }) : void 0;
-        const tenantMatch = pk ? tenantAgents.find((a) => {
-          var _a2;
-          return ((_a2 = a.pubkey) == null ? void 0 : _a2.toLowerCase()) === pk;
-        }) : void 0;
-        const name = (meta == null ? void 0 : meta.name) || (crewMatch == null ? void 0 : crewMatch.name) || (tenantMatch == null ? void 0 : tenantMatch.name) || (pk ? `Agente ${pk.slice(0, 8)}` : resolvedPanel.title || "Perfil");
-        const picture = (meta == null ? void 0 : meta.picture) || (crewMatch == null ? void 0 : crewMatch.picture);
-        setSideProfileTabs((prev) => {
-          const exists = prev.some((t) => t.target === targetUrl);
-          if (exists) {
-            return prev.map((t) => t.target === targetUrl ? { ...t, name, picture: picture || t.picture } : t);
-          }
-          return [...prev, { pubkey: pk, name, picture, target: targetUrl }];
-        });
-        setActiveSideProfileKey(targetUrl);
-        return true;
-      },
-      [liveCrew, tenantAgents]
-    );
     const handleOpenNativeAgentProfile = React.useCallback(
       async (target) => {
-        var _a2, _b2, _c2;
+        var _a2, _b2, _c2, _d2;
         const resolved = typeof target === "string" ? liveCrew.find((a) => a.key === target) || tenantAgents.find((a) => a.agentKey === target) : target;
         const resolvedKey = resolved && "key" in resolved ? resolved.key : resolved && "agentKey" in resolved ? resolved.agentKey : void 0;
         const crewByKey = resolvedKey ? liveCrew.find((a) => a.key === resolvedKey) : void 0;
@@ -62209,39 +62164,49 @@ function createFactoryAppComponent(ctx, opts = {}) {
           return ((_a3 = a.pubkey) == null ? void 0 : _a3.toLowerCase()) === pubkey;
         }) : void 0;
         const agentName = (resolved && "name" in resolved ? resolved.name : "") || (crewByPk == null ? void 0 : crewByPk.name) || (crewByKey == null ? void 0 : crewByKey.name) || "Agente";
-        const picture = (crewByPk == null ? void 0 : crewByPk.picture) || (crewByKey == null ? void 0 : crewByKey.picture);
-        if (/^[0-9a-f]{64}$/.test(pubkey)) {
+        if (/^[0-9a-f]{64}$/.test(pubkey) && ((_c2 = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _c2.open)) {
           const profileTarget = `buzz:agent-profile:${pubkey}`;
           const scope = resolveBuzzScope();
-          if ((_c2 = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _c2.open) {
+          const activeCanal = resolveActiveChannelId(tenant) || ((_d2 = buzzCatalog.allChannels[0]) == null ? void 0 : _d2.id) || "";
+          if (activeCanal && scope) {
             try {
               const res = await ctx.navigation.open({
                 version: 1,
-                kind: "page",
-                pluginId: "buzz.agents",
-                pageId: "agents",
-                ...scope ? { scope } : {},
-                route: { version: 1, params: { agent: pubkey } }
+                kind: "conversation",
+                scope,
+                channelId: activeCanal,
+                detail: { target: profileTarget }
               });
               if (!res || res.status === "opened") {
-                notify2(`Perfil nativo de ${agentName} aberto no Buzz.`);
+                notify2(`Perfil de ${agentName} aberto na lateral direita do Buzz.`);
                 return;
               }
             } catch {
             }
           }
-          if (openProfileTargetInSideColumn(profileTarget, { name: agentName, picture })) {
-            notify2(`Perfil de ${agentName} aberto na coluna lateral do Buzz.`);
-            return;
+          try {
+            const res = await ctx.navigation.open({
+              version: 1,
+              kind: "page",
+              pluginId: "buzz.agents",
+              pageId: "agents",
+              ...scope ? { scope } : {},
+              route: { version: 1, params: { agent: pubkey } }
+            });
+            if (!res || res.status === "opened") {
+              notify2(`Perfil nativo de ${agentName} aberto no Buzz.`);
+              return;
+            }
+          } catch {
           }
         }
         if (resolvedKey) {
           setSelectedAgentKey(resolvedKey);
         } else {
-          notify2(`Pubkey de ${agentName} indisponível para abrir o perfil lateral.`);
+          notify2(`Pubkey de ${agentName} indisponível para abrir o perfil.`);
         }
       },
-      [liveCrew, tenantAgents, openProfileTargetInSideColumn, resolveBuzzScope, notify2]
+      [liveCrew, tenantAgents, tenant, buzzCatalog.allChannels, resolveActiveChannelId, resolveBuzzScope, notify2]
     );
     const wakeAgentInBuzz = React.useCallback(
       async (opts2) => {
@@ -63361,120 +63326,6 @@ Nota: ${evidence.note}`
           )
         )
       ),
-      sideProfileTabs.length > 0 && activeSideProfileKey && (() => {
-        var _a2;
-        const panelsApi = ctx == null ? void 0 : ctx.panels;
-        const PanelWorkspace = (_a2 = panelsApi == null ? void 0 : panelsApi.ui) == null ? void 0 : _a2.Workspace;
-        const activeChannel = resolveActiveChannelId(tenant) || "";
-        const workspaceItems = sideProfileTabs.map((pt) => {
-          const resolvedPanel = typeof (panelsApi == null ? void 0 : panelsApi.resolve) === "function" ? panelsApi.resolve(pt.target) : null;
-          if (!(resolvedPanel == null ? void 0 : resolvedPanel.component)) return null;
-          return {
-            id: pt.target,
-            label: pt.name,
-            icon: pt.picture ? h("img", {
-              src: pt.picture,
-              alt: pt.name,
-              style: { width: "16px", height: "16px", borderRadius: "4px", objectFit: "cover", display: "block" }
-            }) : void 0,
-            close: () => closeSideProfileTab(pt.target),
-            content: h(resolvedPanel.component, {
-              key: pt.target,
-              target: pt.target,
-              close: () => closeSideProfileTab(pt.target),
-              context: {
-                channelId: activeChannel,
-                canOpen: (nextTarget) => Boolean(typeof (panelsApi == null ? void 0 : panelsApi.resolve) === "function" && panelsApi.resolve(nextTarget)),
-                open: (nextTarget) => openProfileTargetInSideColumn(nextTarget)
-              }
-            })
-          };
-        }).filter(Boolean);
-        if (workspaceItems.length === 0) return null;
-        const activeItem = workspaceItems.find((i) => i.id === activeSideProfileKey) || workspaceItems[0];
-        return h(
-          "aside",
-          {
-            "data-agent-side-profile-column": "true",
-            "aria-label": "Perfil do agente",
-            style: {
-              width: "460px",
-              minWidth: "400px",
-              maxWidth: "520px",
-              height: "100%",
-              flexShrink: 0,
-              borderLeft: "1px solid var(--border)",
-              background: "var(--card, var(--surface-base))",
-              display: "flex",
-              flexDirection: "column",
-              minHeight: 0,
-              overflow: "hidden"
-            }
-          },
-          PanelWorkspace ? h(PanelWorkspace, {
-            value: activeItem.id,
-            select: (nextId) => setActiveSideProfileKey(nextId),
-            label: "Perfis de agentes",
-            focusOnMount: false,
-            items: workspaceItems
-          }) : h(
-            React.Fragment,
-            null,
-            h(
-              "div",
-              {
-                style: {
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "4px",
-                  padding: "6px 8px",
-                  borderBottom: "1px solid var(--border)",
-                  overflowX: "auto",
-                  flexShrink: 0
-                }
-              },
-              workspaceItems.map(
-                (it) => h(
-                  "div",
-                  {
-                    key: it.id,
-                    style: {
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "5px",
-                      padding: "4px 8px",
-                      borderRadius: "6px",
-                      fontSize: "12px",
-                      fontWeight: it.id === activeItem.id ? 600 : 400,
-                      background: it.id === activeItem.id ? "var(--muted)" : "transparent",
-                      color: it.id === activeItem.id ? "var(--foreground)" : "var(--muted-foreground)",
-                      cursor: "pointer",
-                      whiteSpace: "nowrap"
-                    },
-                    onClick: () => setActiveSideProfileKey(it.id)
-                  },
-                  it.icon,
-                  h("span", null, it.label),
-                  h(
-                    "button",
-                    {
-                      type: "button",
-                      "aria-label": `Fechar ${it.label}`,
-                      style: { border: "none", background: "transparent", color: "inherit", cursor: "pointer", padding: "0 2px", fontSize: "13px", lineHeight: 1 },
-                      onClick: (e) => {
-                        e.stopPropagation();
-                        it.close();
-                      }
-                    },
-                    "×"
-                  )
-                )
-              )
-            ),
-            h("div", { style: { flex: 1, minHeight: 0, overflow: "auto" } }, activeItem.content)
-          )
-        );
-      })(),
       h(CodeDenInspectorDrawer, {
         ctx,
         item: selectedItem,
