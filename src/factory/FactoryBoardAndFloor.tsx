@@ -388,11 +388,12 @@ export function renderItemSheetDrawer(props: {
   EmbeddedThread?: any;
   threadChannelId?: string | null;
   relaySession?: any;
+  relayScope?: string | null;
   onOpenCommitInBuzz?: (commit: string) => void;
   onClose: () => void;
   onOpenInBuzz?: (item: FactoryWorkItem) => void;
 }) {
-  const { h, item, tenant, repoDetail, repoLoading, resolveAuthor, EmbeddedThread, threadChannelId, relaySession, onOpenCommitInBuzz, onClose, onOpenInBuzz } = props;
+  const { h, item, tenant, repoDetail, repoLoading, resolveAuthor, EmbeddedThread, threadChannelId, relaySession, relayScope, onOpenCommitInBuzz, onClose, onOpenInBuzz } = props;
   if (!item) return null;
 
   const steps = ["Entrada", "Identificar tipo", "Execução (Worktree)", "Revisão L-01 + CI", "Merge na main"];
@@ -517,12 +518,18 @@ export function renderItemSheetDrawer(props: {
             )
           )
         ),
-      EmbeddedThread && threadChannelId && relaySession &&
+      EmbeddedThread && threadChannelId && relaySession && typeof relayScope === "string" && relayScope.length > 0 && /^[0-9a-f]{64}$/i.test(String(item.id || "")) &&
         h(
           "section",
           { className: "of-surface", style: { padding: "10px 12px", minHeight: "220px" }, "data-embedded-buzz-thread": "true" },
           h("div", { className: "of-meter-label", style: { marginBottom: "6px" } }, "Thread ao vivo no Buzz"),
-          h(EmbeddedThread, { session: relaySession, channelId: threadChannelId, rootId: item.id })
+          h(EmbeddedThread, {
+            session: relaySession,
+            scope: relayScope,
+            channelId: threadChannelId,
+            channelName: tenant,
+            messageId: item.id,
+          })
         )
     )
   );
@@ -581,19 +588,27 @@ export function renderAgentProfileDrawer(props: {
         onSessionAction && agent.key &&
           h("button", { type: "button", className: "of-btn", "data-variant": "danger", onClick: () => onSessionAction(agent.key, "interrupt") }, "Parar")
       ),
-      TranscriptComponent
-        ? h(
-            "section",
-            { className: "of-surface", style: { padding: "10px 12px", flex: 1, minHeight: "260px", overflowY: "auto" }, "data-agent-transcript": "true" },
-            h("div", { className: "of-meter-label", style: { marginBottom: "8px" } }, "Transcript ao vivo (ctx.agents.ui.Transcript)"),
-            h(TranscriptComponent, { agentKey: agent.key, channelId: liveTurn?.channelId || channelId || undefined })
+      h(
+        "section",
+        { className: "of-surface", style: { padding: "12px", display: "flex", flexDirection: "column", gap: "8px" }, "data-agent-transcript": "true" },
+        h("div", { className: "of-meter-label" }, "Atividade & Turno ao vivo (session.agentActivity)"),
+        liveTurn
+          ? h(
+              "div",
+              { style: { display: "flex", flexDirection: "column", gap: "6px", fontSize: "12px" } },
+              h("div", { style: { fontWeight: 600, color: liveTurn.state === "error" ? "var(--status-failed)" : "var(--status-running)" } }, liveTurn.stepLabel),
+              liveTurn.toolName && h("div", { className: "of-mono of-muted", style: { fontSize: "11px" } }, `Tool: ${liveTurn.toolName}${liveTurn.toolTarget ? ` · ${liveTurn.toolTarget}` : ""}`),
+              liveTurn.error && h("div", { style: { color: "var(--status-failed)", fontSize: "11.5px" } }, liveTurn.error)
+            )
+          : h("div", { className: "of-muted", style: { fontSize: "12px" } }, "Nenhum turno em execução agora. Clique em DM lateral ↗ para conversar ou acompanhar o histórico completo no Buzz."),
+        agent.instructions &&
+          h(
+            "details",
+            { style: { marginTop: "4px" } },
+            h("summary", { className: "of-muted", style: { cursor: "pointer", fontSize: "11px" } }, "Instructions NIP-AP ativas"),
+            h("pre", { className: "of-muted", style: { margin: "6px 0 0", whiteSpace: "pre-wrap", fontSize: "11px", maxHeight: "200px", overflowY: "auto", fontFamily: "inherit" } }, agent.instructions)
           )
-        : h(
-            "section",
-            { className: "of-surface", style: { padding: "12px" }, "data-agent-transcript-fallback": "true" },
-            h("div", { className: "of-meter-label", style: { marginBottom: "6px" } }, "Atividade do agente"),
-            h("div", { className: "of-muted", style: { fontSize: "12px" } }, liveTurn ? `Em execução agora: ${liveTurn.stepLabel}` : "Nenhum turno ativo no momento. Clique em DM lateral ↗ para conversar com o agente.")
-          )
+      )
     )
   );
 }

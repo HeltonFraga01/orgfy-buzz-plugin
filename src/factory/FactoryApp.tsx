@@ -771,7 +771,14 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         return null;
       }
     }, [relayTick, status.lastTickAt]);
-    const useNativeSideTabs = Boolean(NativeTabs && relaySnap?.session && relaySnap?.scope);
+    const useNativeSideTabs = Boolean(
+      NativeTabs &&
+        relaySnap?.session &&
+        typeof relaySnap?.scope === "string" &&
+        relaySnap.scope.length > 0 &&
+        typeof relaySnap?.session?.viewer === "string" &&
+        relaySnap.session.viewer.length > 0
+    );
 
     const pageContent = h(
       "div",
@@ -1128,6 +1135,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         EmbeddedThread: (ctx as any)?.conversation?.ui?.Thread,
         threadChannelId: status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === tenant)?.canal || null,
         relaySession: relaySnap?.session,
+        relayScope: typeof relaySnap?.scope === "string" ? relaySnap.scope : null,
         onOpenCommitInBuzz: handleOpenCommitInBuzz,
         onClose: () => setSelectedItem(null),
         onOpenInBuzz: handleOpenInBuzz,
