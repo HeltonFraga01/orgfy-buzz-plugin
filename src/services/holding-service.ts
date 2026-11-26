@@ -98,6 +98,7 @@ export interface HoldingControlPlaneSnapshot {
   ok: boolean;
   loadedAt: string;
   boardNome: string;
+  boardCanal: string;
   fundador: { nome: string; papel: string; pubkey: string };
   ceoHolding: { nome: string; papel: string; pubkey: string };
   conselho: BoardCouncilMember[];
@@ -453,6 +454,7 @@ export async function fetchHoldingControlPlane(ctx: Context): Promise<HoldingCon
     ok: boardJson !== null || orgfyJson !== null,
     loadedAt: new Date().toISOString(),
     boardNome: String(boardJson?.nome || "Conselho da Holding OrgFy"),
+    boardCanal: String(boardJson?.canal || "").trim(),
     fundador: {
       nome: String(boardJson?.fundador?.nome || "Helton Fraga"),
       papel: String(boardJson?.fundador?.papel || "Fundador"),

@@ -12182,6 +12182,7 @@ async function fetchHoldingControlPlane(ctx) {
     ok: boardJson !== null || orgfyJson !== null,
     loadedAt: (/* @__PURE__ */ new Date()).toISOString(),
     boardNome: String((boardJson == null ? void 0 : boardJson.nome) || "Conselho da Holding OrgFy"),
+    boardCanal: String((boardJson == null ? void 0 : boardJson.canal) || "").trim(),
     fundador: {
       nome: String(((_b = boardJson == null ? void 0 : boardJson.fundador) == null ? void 0 : _b.nome) || "Helton Fraga"),
       papel: String(((_c = boardJson == null ? void 0 : boardJson.fundador) == null ? void 0 : _c.papel) || "Fundador"),
@@ -60183,7 +60184,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
         var _a2;
         const slug = typeof targetSlug === "string" && targetSlug ? targetSlug : tenant;
         const emp = holding == null ? void 0 : holding.empresas.find((e) => e.slug === slug);
-        return (slug === tenant ? (_a2 = status.tenantManifest) == null ? void 0 : _a2.canal : null) || (emp == null ? void 0 : emp.canal) || (slug === "board" ? findBuzzChannelIdByName(ctx, ["Conselho", "Board", "Conselho da Holding"]) : null);
+        return (slug === tenant ? (_a2 = status.tenantManifest) == null ? void 0 : _a2.canal : null) || (emp == null ? void 0 : emp.canal) || (slug === "board" ? (holding == null ? void 0 : holding.boardCanal) || findBuzzChannelIdByName(ctx, ["Conselho-Canal", "Conselho", "Board", "Conselho da Holding"]) || "80529b52-ee97-40d4-ab4c-aa9d13b9bcee" : null);
       },
       [tenant, status.tenantManifest, holding]
     );

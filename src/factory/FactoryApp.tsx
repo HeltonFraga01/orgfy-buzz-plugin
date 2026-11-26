@@ -492,7 +492,11 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         return (
           (slug === tenant ? status.tenantManifest?.canal : null) ||
           emp?.canal ||
-          (slug === "board" ? findBuzzChannelIdByName(ctx, ["Conselho", "Board", "Conselho da Holding"]) : null)
+          (slug === "board"
+            ? holding?.boardCanal ||
+              findBuzzChannelIdByName(ctx, ["Conselho-Canal", "Conselho", "Board", "Conselho da Holding"]) ||
+              "80529b52-ee97-40d4-ab4c-aa9d13b9bcee"
+            : null)
         );
       },
       [tenant, status.tenantManifest, holding]
