@@ -3,6 +3,7 @@
 
 import type { FactoryStatusPayload, FactoryWorkItem } from "./factory-adapter";
 import type { BuzzLiveTelemetrySnapshot, LiveAgentTurn } from "./buzz-live-telemetry";
+import type { LiveCrewAgent } from "./FactoryBoardAndFloor";
 import { PT_BR } from "../i18n/pt-BR";
 import { renderPipelineDiagram } from "./PipelineDiagram";
 import { renderCooUpdatesFeedCard, type CooUpdateEntry } from "./FactoryCooUpdatesFeed";
@@ -11,11 +12,13 @@ export interface FactoryOverviewProps {
   h: any;
   tenant: string;
   status: FactoryStatusPayload;
+  liveCrew?: LiveCrewAgent[];
   telemetry?: BuzzLiveTelemetrySnapshot;
   workingNowCount?: number;
   onOpenTurnInSideChat?: (turn: LiveAgentTurn) => void;
   onInterruptTurn?: (turn: LiveAgentTurn) => void;
   onOpenAgentDm?: (agent: { key?: string; pubkey?: string; name?: string }) => void;
+  onOpenAgentProfile?: (agent: { key?: string; pubkey?: string; name?: string }) => void;
   onNavigateTab?: (tab: "costs" | "automations" | "agents" | "board" | "floor" | "vision" | "settings") => void;
   loading: boolean;
   confirmKill: boolean;
@@ -219,9 +222,22 @@ export function renderFactoryOverviewPanel(props: FactoryOverviewProps) {
           ? h("div", { className: "of-now-empty" }, "Nada executando agora.")
           : h(
               "div",
-              { className: "of-now-cards" },
-              activeTurns.map((t) =>
-                h(
+              {
+                className: "of-now-cards",
+                "data-now-two-rows": "true",
+                style: {
+                  display: "grid",
+                  gridTemplateRows: nowRunningCount > 2 ? "repeat(2, minmax(78px, auto))" : "auto",
+                  gridAutoFlow: "column",
+                  gridAutoColumns: "minmax(215px, 240px)",
+                  gap: "8px",
+                  overflowX: "auto",
+                  paddingBottom: "4px",
+                },
+              },
+              activeTurns.map((t) => {
+                const turnCrew = (props.liveCrew || []).find((c) => c.pubkey?.toLowerCase() === t.agentPubkey.toLowerCase());
+                return h(
                   "div",
                   {
                     key: `turn-${t.agentPubkey}-${t.channelId}-${t.messageId || t.startedAt}`,
@@ -231,7 +247,9 @@ export function renderFactoryOverviewPanel(props: FactoryOverviewProps) {
                   h(
                     "div",
                     { style: { display: "flex", alignItems: "center", gap: "7px" } },
-                    h("span", { className: "of-dot", "data-tone": t.state === "error" ? "failed" : "running" }),
+                    turnCrew?.picture
+                      ? h("img", { src: turnCrew.picture, alt: t.agentName, style: { width: "18px", height: "18px", borderRadius: "5px", objectFit: "cover", border: "1px solid var(--status-running)", flexShrink: 0 } })
+                      : h("span", { className: "of-dot", "data-tone": t.state === "error" ? "failed" : "running" }),
                     h("strong", { style: { fontSize: "12.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 } }, t.agentName),
                     onInterruptTurn && t.stoppable &&
                       h(
@@ -260,9 +278,9 @@ export function renderFactoryOverviewPanel(props: FactoryOverviewProps) {
                     h("span", { className: "of-mono" }, "Buzz ao vivo"),
                     h("span", { className: "of-mono" }, fmtAge(t.startedAt))
                   )
-                )
-              ),
-              status.inProgress.slice(0, 6).map((item) =>
+                );
+              }),
+              status.inProgress.slice(0, 10).map((item) =>
                 h(
                   "button",
                   {
@@ -517,26 +535,55 @@ export function renderFactoryOverviewPanel(props: FactoryOverviewProps) {
             : h(
                 "div",
                 { style: { display: "flex", flexDirection: "column" } },
-                openPrs.slice(0, 6).map((pr: any, idx: number) =>
-                  h(
-                    "div",
+                openPrs.slice(0, 8).map((pr: any, idx: number) => {
+                  const pid = String(pr.id || idx);
+                  const matchedItem:
+                    | FactoryWorkItem
+                    | undefined = status.inProgress.find((w) => w.id === pid);
+                  const clickableItem: FactoryWorkItem = matchedItem || {
+                    id: pid,
+                    title: String(pr.title || pr.branch || `PR ${pid.slice(0, 8)}`),
+                    workKey: `pr:${pid.slice(0, 12)}`,
+                    stage: pr.quarentena ? "failed" : "verifying",
+                    step: pr.quarentena ? "quarantine" : "review",
+                    type: /fix|bug|hotfix/i.test(String(pr.title || "")) ? "bug" : "feature",
+                    attempts: 1,
+                    sessionId: null,
+                    activeSessionId: null,
+                    reason: pr.quarentena ? "PR em quarentena no coordenador" : null,
+                    note: pr.branch ? `PR aberto · ${pr.branch}` : "PR aberto aguardando revisão/GATE",
+                    updatedAt: typeof pr.created_at === "number" ? (pr.created_at < 1e12 ? pr.created_at * 1000 : pr.created_at) : Date.now(),
+                  };
+                  return h(
+                    "button",
                     {
-                      key: pr.id || idx,
+                      key: pid,
+                      type: "button",
+                      className: "of-list-row",
+                      "data-overview-pr-row": pid.slice(0, 8),
+                      onClick: () => onSelectItem(clickableItem),
                       style: {
+                        width: "100%",
+                        textAlign: "left",
                         display: "flex",
                         alignItems: "center",
                         gap: "8px",
                         padding: "7px 12px",
-                        borderBottom: idx < Math.min(openPrs.length, 6) - 1 ? "1px solid var(--border)" : "none",
+                        border: "none",
+                        borderBottom: idx < Math.min(openPrs.length, 8) - 1 ? "1px solid var(--border)" : "none",
+                        background: "transparent",
+                        color: "var(--foreground)",
+                        cursor: "pointer",
                         fontSize: "12px",
                       },
                     },
                     h("span", { className: "of-dot", "data-tone": pr.quarentena ? "failed" : "running" }),
-                    h("span", { className: "of-mono", style: { color: "var(--primary)", fontSize: "11px" } }, `#${String(pr.id || idx).slice(0, 8)}`),
+                    h("span", { className: "of-mono", style: { color: "var(--primary)", fontSize: "11px", flexShrink: 0 } }, `#${pid.slice(0, 8)}`),
                     h("span", { style: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, pr.title || pr.branch || "Pull Request"),
-                    pr.quarentena && h("span", { className: "of-pill", "data-tone": "failed" }, "quarentena")
-                  )
-                )
+                    pr.quarentena && h("span", { className: "of-pill", "data-tone": "failed" }, "quarentena"),
+                    h("span", { className: "of-muted", style: { fontSize: "11px", flexShrink: 0 } }, "↗")
+                  );
+                })
               )
         ),
 
@@ -668,42 +715,153 @@ export function renderFactoryOverviewPanel(props: FactoryOverviewProps) {
                 )
               )
             ),
-            modelos.length === 0 && porModelo.length === 0
-              ? h("div", { className: "of-muted" }, PT_BR.labels.unavailable)
-              : h(
-                  "table",
-                  { className: "of-table" },
+            (() => {
+              const crewList = props.liveCrew || [];
+              const modelEvalByName = new Map(modelos.map((m) => [m.agente.toLowerCase(), m]));
+              const costByModel = new Map<string, { usd: number; calls: number }>();
+              for (const row of porModelo) {
+                const mk = String((row as any)?.modelo || "").toLowerCase();
+                if (!mk) continue;
+                const val = { usd: Number((row as any)?.custo_usd || 0), calls: Number((row as any)?.requisicoes ?? (row as any)?.chamadas ?? 0) };
+                costByModel.set(mk, val);
+                const shortK = mk.includes("/") ? mk.split("/").pop()! : mk;
+                if (!costByModel.has(shortK)) costByModel.set(shortK, val);
+              }
+              const filteredAgents = tenantAgents.filter((ag) => {
+                if (scorecardView === "reviewers") return ag.categoria === "revisao";
+                if (scorecardView === "builders") return ag.categoria === "execucao" || ag.categoria === "lideranca";
+                return true;
+              });
+              if (filteredAgents.length === 0) {
+                return h("div", { className: "of-muted", style: { fontSize: "12px" } }, "Nenhum agente nesta categoria.");
+              }
+              return h(
+                "table",
+                { className: "of-table", "data-scorecard-rich": "true" },
+                h(
+                  "thead",
+                  null,
                   h(
-                    "thead",
+                    "tr",
                     null,
-                    h("tr", null, h("th", null, scorecardView === "reviewers" ? "Revisor / Agente" : "Agente"), h("th", null, "Papel"), h("th", null, "Modelo"), h("th", null, "Eval R5.1"), h("th", null, "Status"))
-                  ),
-                  h(
-                    "tbody",
-                    null,
-                    modelos.slice(0, 10).map((m) =>
+                    h("th", null, scorecardView === "reviewers" ? "Revisor L-01" : "Agente"),
+                    h("th", null, "Função & Papel"),
+                    h("th", null, "Modelo & Uso"),
+                    h("th", null, "Ao vivo (Buzz)"),
+                    h("th", null, "Ações")
+                  )
+                ),
+                h(
+                  "tbody",
+                  null,
+                  filteredAgents.map((ag) => {
+                    const pkLower = (ag.pubkey || "").toLowerCase();
+                    const liveMatch = crewList.find((c) => c.key === ag.agentKey || (pkLower && c.pubkey?.toLowerCase() === pkLower));
+                    const liveTurn = pkLower && telemetry?.byPubkey ? telemetry.byPubkey[pkLower] : null;
+                    const presence = pkLower && telemetry?.presenceByPubkey ? telemetry.presenceByPubkey[pkLower] : undefined;
+                    const evRow = modelEvalByName.get(ag.name.toLowerCase());
+                    const modelName = liveMatch?.model || ag.model || PT_BR.labels.unavailable;
+                    const modelShort = modelName.includes("/") ? modelName.split("/").pop()!.toLowerCase() : modelName.toLowerCase();
+                    const usage = costByModel.get(modelName.toLowerCase()) || costByModel.get(modelShort);
+                    return h(
+                      "tr",
+                      { key: ag.agentKey || ag.name },
                       h(
-                        "tr",
-                        { key: m.agente },
-                        h("td", { style: { fontWeight: 600 } }, m.agente),
-                        h("td", { className: "of-muted" }, m.papel || "—"),
-                        h("td", { className: "of-mono" }, m.modelo || PT_BR.labels.unavailable),
+                        "td",
+                        { style: { fontWeight: 600 } },
                         h(
-                          "td",
-                          null,
-                          h("span", { className: "of-pill", "data-tone": m.abaixo_minimo ? "failed" : m.toolcall_eval ? "done" : "idle" }, m.toolcall_eval || PT_BR.labels.unavailable)
-                        ),
+                          "span",
+                          { style: { display: "inline-flex", alignItems: "center", gap: "8px" } },
+                          liveMatch?.picture
+                            ? h("img", {
+                                src: liveMatch.picture,
+                                alt: ag.name,
+                                style: {
+                                  width: "24px",
+                                  height: "24px",
+                                  borderRadius: "6px",
+                                  objectFit: "cover",
+                                  border: liveTurn ? "1.5px solid var(--status-running)" : "1px solid var(--border)",
+                                  flexShrink: 0,
+                                },
+                              })
+                            : h("span", { className: "of-dot", "data-tone": liveTurn ? (liveTurn.state === "error" ? "failed" : "running") : ag.inBuzz ? "done" : "idle" }),
+                          h("span", null, ag.name)
+                        )
+                      ),
+                      h(
+                        "td",
+                        null,
+                        h("div", { style: { fontSize: "11.5px" } }, ag.funcao),
+                        h("div", { className: "of-mono of-muted", style: { fontSize: "10px" } }, `${ag.papel} · ${ag.parallelism}x`)
+                      ),
+                      h(
+                        "td",
+                        null,
+                        h("div", { className: "of-mono", style: { fontSize: "11.5px" } }, modelName),
                         h(
-                          "td",
-                          null,
-                          m.abaixo_minimo
-                            ? h("span", { style: { color: "var(--status-failed)", fontWeight: 700, fontSize: "11px" } }, PT_BR.labels.evalBelowMin)
-                            : h("span", { className: "of-muted" }, "OK")
+                          "div",
+                          { style: { display: "flex", alignItems: "center", gap: "5px", marginTop: "2px", flexWrap: "wrap" } },
+                          h("span", { className: "of-mono of-muted", style: { fontSize: "10px" } }, liveMatch?.provider || ag.provider || "buzz"),
+                          evRow?.toolcall_eval &&
+                            h("span", { className: "of-pill", "data-tone": evRow.abaixo_minimo ? "failed" : "done", style: { fontSize: "9.5px", padding: "0 5px" } }, `Eval ${evRow.toolcall_eval}`),
+                          usage &&
+                            h("span", { className: "of-mono of-muted", style: { fontSize: "10px" } }, `· ${usage.calls} calls · $${usage.usd.toFixed(2)}`)
+                        )
+                      ),
+                      h(
+                        "td",
+                        null,
+                        liveTurn
+                          ? h(
+                              "div",
+                              { style: { display: "flex", flexDirection: "column", gap: "2px" } },
+                              h("span", { className: "of-pill", "data-tone": liveTurn.state === "error" ? "failed" : "running", style: { width: "fit-content", fontSize: "10px" } }, "⚡ Respondendo"),
+                              h("span", { className: "of-mono of-muted", style: { fontSize: "10px", maxWidth: "170px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: liveTurn.stepLabel }, liveTurn.stepLabel)
+                            )
+                          : h(
+                              "span",
+                              { className: "of-pill", "data-tone": presence === "online" || ag.inBuzz ? "done" : "waiting", style: { fontSize: "10px" } },
+                              presence === "online" ? "Online" : ag.inBuzz ? "Disponível" : "A provisionar"
+                            )
+                      ),
+                      h(
+                        "td",
+                        null,
+                        h(
+                          "div",
+                          { style: { display: "inline-flex", alignItems: "center", gap: "4px" } },
+                          props.onOpenAgentProfile && ag.pubkey &&
+                            h(
+                              "button",
+                              {
+                                type: "button",
+                                className: "of-btn",
+                                "data-variant": "ghost",
+                                style: { padding: "2px 6px", fontSize: "10.5px" },
+                                onClick: () => props.onOpenAgentProfile!({ key: ag.agentKey, pubkey: ag.pubkey, name: ag.name }),
+                              },
+                              "Perfil"
+                            ),
+                          onOpenAgentDm && ag.pubkey &&
+                            h(
+                              "button",
+                              {
+                                type: "button",
+                                className: "of-btn",
+                                "data-variant": "ghost",
+                                style: { padding: "2px 6px", fontSize: "10.5px", color: "var(--primary)" },
+                                onClick: () => onOpenAgentDm({ key: ag.agentKey, pubkey: ag.pubkey, name: ag.name }),
+                              },
+                              "DM ↗"
+                            )
                         )
                       )
-                    )
-                  )
+                    );
+                  })
                 )
+              );
+            })()
           )
         ),
 
@@ -795,6 +953,7 @@ export function renderFactoryOverviewPanel(props: FactoryOverviewProps) {
           ? h("div", { className: "of-muted", style: { padding: "18px", textAlign: "center" } }, "Nenhum agente provisionado nesta empresa.")
           : tenantAgents.slice(0, 7).map((ag) => {
               const pkLower = (ag.pubkey || "").toLowerCase();
+              const liveMatch = (props.liveCrew || []).find((c) => c.key === ag.agentKey || (pkLower && c.pubkey?.toLowerCase() === pkLower));
               const liveTurn = pkLower && telemetry?.byPubkey ? telemetry.byPubkey[pkLower] : null;
               const presence = pkLower && telemetry?.presenceByPubkey ? telemetry.presenceByPubkey[pkLower] : undefined;
               return h(
@@ -805,7 +964,9 @@ export function renderFactoryOverviewPanel(props: FactoryOverviewProps) {
                   className: "of-list-row",
                   onClick: () => onOpenAgentDm?.({ key: ag.agentKey, pubkey: ag.pubkey, name: ag.name }),
                 },
-                h("span", { className: "of-dot", "data-tone": liveTurn ? (liveTurn.state === "error" ? "failed" : "running") : ag.inBuzz ? "done" : "idle" }),
+                liveMatch?.picture
+                  ? h("img", { src: liveMatch.picture, alt: ag.name, style: { width: "22px", height: "22px", borderRadius: "6px", objectFit: "cover", border: liveTurn ? "1.5px solid var(--status-running)" : "1px solid var(--border)", flexShrink: 0 } })
+                  : h("span", { className: "of-dot", "data-tone": liveTurn ? (liveTurn.state === "error" ? "failed" : "running") : ag.inBuzz ? "done" : "idle" }),
                 h(
                   "div",
                   { style: { flex: 1, minWidth: 0 } },
