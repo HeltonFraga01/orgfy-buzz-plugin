@@ -1121,7 +1121,7 @@ export function renderFactoryOverviewPanel(props: FactoryOverviewProps) {
             // 4. Barra Digest colapsável (1:1 CodeDen)
             h(
               "details",
-              { className: "of-surface", style: { borderColor: "rgba(245, 158, 11, 0.32)" }, "data-codeden-digest": "true" },
+              { className: "of-surface", style: { borderColor: "var(--primary-border)" }, "data-codeden-digest": "true" },
               h(
                 "summary",
                 { style: { cursor: "pointer", padding: "8px 12px", fontSize: "11.5px", color: "var(--muted-foreground)" } },

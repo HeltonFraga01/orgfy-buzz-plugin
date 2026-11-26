@@ -1138,11 +1138,12 @@ export const FACTORY_SHADOW_CSS = `
 
 .of-exp-badge {
   border-radius: 9999px;
-  border: 1px solid rgba(245, 158, 11, 0.35);
+  border: 1px solid var(--primary-border);
+  background: var(--primary-soft);
   padding: 1px 6px;
   font-size: 10px;
   font-weight: 500;
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .of-btn {
@@ -1401,8 +1402,8 @@ export const FACTORY_SHADOW_CSS = `
 }
 
 .of-pd-node[data-active="true"] {
-  border-color: rgba(245, 158, 11, 0.55);
-  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1);
+  border-color: var(--primary-border);
+  box-shadow: 0 0 0 3px var(--primary-soft);
 }
 
 .of-pd-badge {
@@ -1464,8 +1465,8 @@ export const FACTORY_SHADOW_CSS = `
 }
 
 .of-chip:hover {
-  border-color: rgba(245, 158, 11, 0.6);
-  background: rgba(245, 158, 11, 0.08);
+  border-color: var(--primary-border);
+  background: var(--primary-soft);
 }
 
 .of-chip[data-queued="true"] {
@@ -1584,7 +1585,7 @@ export const FACTORY_SHADOW_CSS = `
 }
 
 .of-view-card:hover {
-  border-color: rgba(245, 158, 11, 0.55);
+  border-color: var(--primary-border);
 }
 
 .of-view-card[data-state="person"] {
@@ -1623,7 +1624,7 @@ export const FACTORY_SHADOW_CSS = `
   border-radius: 12px;
   border: 1px solid var(--border-strong);
   background:
-    radial-gradient(circle at 15% 10%, rgba(245, 158, 11, 0.06), transparent 45%),
+    radial-gradient(circle at 15% 10%, var(--primary-soft), transparent 45%),
     linear-gradient(180deg, oklch(0.18 0.009 264), oklch(0.15 0.008 264));
 }
 

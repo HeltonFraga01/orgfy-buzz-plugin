@@ -718,7 +718,7 @@ function ToggleSwitch({ h, checked, onChange, label }: { h: any; checked: boolea
         border: "none",
         padding: "2px",
         cursor: "pointer",
-        background: checked ? "#f59e0b" : "rgba(255,255,255,0.16)",
+        background: checked ? "var(--primary)" : "var(--affordance-subtle-hover, rgba(255,255,255,0.16))",
         display: "inline-flex",
         alignItems: "center",
         justifyContent: checked ? "flex-end" : "flex-start",
@@ -731,8 +731,8 @@ function ToggleSwitch({ h, checked, onChange, label }: { h: any; checked: boolea
         width: "15px",
         height: "15px",
         borderRadius: "999px",
-        background: "#fff",
-        boxShadow: "0 1px 3px rgba(0,0,0,0.4)",
+        background: checked ? "var(--primary-foreground)" : "#fff",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.35)",
       },
     })
   );
@@ -825,11 +825,11 @@ export function renderAutomationEditor(props: AutomationEditorProps) {
             gap: "12px",
             padding: "12px 16px",
             borderRadius: "12px",
-            border: "1px solid rgba(245, 158, 11, 0.32)",
-            background: "rgba(245, 158, 11, 0.06)",
+            border: "1px solid var(--primary-border)",
+            background: "var(--primary-soft)",
           },
         },
-        AutoIcon({ h, name: "sparkles", size: 18, color: "#f59e0b" }),
+        AutoIcon({ h, name: "sparkles", size: 18, color: "var(--primary-text)" }),
         h(
           "div",
           { style: { flex: 1, minWidth: "220px" } },
@@ -906,8 +906,9 @@ export function renderAutomationEditor(props: AutomationEditorProps) {
                   {
                     style: {
                       borderRadius: "999px",
-                      background: "rgba(245, 158, 11, 0.14)",
-                      color: "#fbbf24",
+                      background: "var(--primary-soft)",
+                      color: "var(--primary-text)",
+                      border: "1px solid var(--primary-border)",
                       padding: "2px 7px",
                       fontSize: "10px",
                       fontWeight: 600,
@@ -1090,7 +1091,7 @@ export function renderAutomationEditor(props: AutomationEditorProps) {
             ToggleSwitch({ h, checked: a.enabled, label: `Ativar ${a.name}`, onChange: (v) => onUpdateAutomation(a.id, { enabled: v }) }),
             h(
               "span",
-              { style: { color: a.enabled ? "#f59e0b" : "var(--muted-foreground)" } },
+              { style: { color: a.enabled ? "var(--primary-text)" : "var(--muted-foreground)" } },
               AutoIcon({ h, name: a.triggerKind, size: 15 })
             ),
             h(
@@ -1364,13 +1365,13 @@ export function renderAutomationEditor(props: AutomationEditorProps) {
                     display: "flex",
                     alignItems: "flex-start",
                     gap: "9px",
-                    borderColor: sel ? "rgba(245, 158, 11, 0.75)" : undefined,
-                    background: sel ? "rgba(245, 158, 11, 0.08)" : undefined,
-                    boxShadow: sel ? "0 0 0 1px rgba(245, 158, 11, 0.25)" : undefined,
+                    borderColor: sel ? "var(--primary-border)" : undefined,
+                    background: sel ? "var(--primary-soft)" : undefined,
+                    boxShadow: sel ? "0 0 0 1px var(--primary-border)" : undefined,
                   },
                   onClick: () => onUpdateAutomation(active.id, { triggerKind: t.id }),
                 },
-                h("span", { style: { marginTop: "2px", color: sel ? "#f59e0b" : "var(--muted-foreground)" } }, AutoIcon({ h, name: t.id, size: 15 })),
+                h("span", { style: { marginTop: "2px", color: sel ? "var(--primary-text)" : "var(--muted-foreground)" } }, AutoIcon({ h, name: t.id, size: 15 })),
                 h(
                   "span",
                   null,
@@ -1483,7 +1484,7 @@ export function renderAutomationEditor(props: AutomationEditorProps) {
                     className: "of-surface",
                     style: { padding: "10px 12px", display: "flex", alignItems: "flex-start", gap: "10px", fontSize: "11.5px" },
                   },
-                  h("span", { style: { marginTop: "2px", color: "#f59e0b" } }, AutoIcon({ h, name: "schedule", size: 15 })),
+                  h("span", { style: { marginTop: "2px", color: "var(--primary-text)" } }, AutoIcon({ h, name: "schedule", size: 15 })),
                   h(
                     "div",
                     null,
@@ -1710,12 +1711,12 @@ export function renderAutomationEditor(props: AutomationEditorProps) {
                       textAlign: "left",
                       cursor: "pointer",
                       color: "var(--foreground)",
-                      borderColor: sel ? "rgba(245, 158, 11, 0.75)" : undefined,
-                      background: sel ? "rgba(245, 158, 11, 0.08)" : undefined,
+                      borderColor: sel ? "var(--primary-border)" : undefined,
+                      background: sel ? "var(--primary-soft)" : undefined,
                     },
                     onClick: () => onUpdateAutomation(active.id, { autonomy: lvl.id }),
                   },
-                  h("div", { style: { fontSize: "12px", fontWeight: 600, display: "flex", alignItems: "center", gap: "5px" } }, AutoIcon({ h, name: "shield", size: 12, color: sel ? "#f59e0b" : undefined }), lvl.label),
+                  h("div", { style: { fontSize: "12px", fontWeight: 600, display: "flex", alignItems: "center", gap: "5px" } }, AutoIcon({ h, name: "shield", size: 12, color: sel ? "var(--primary-text)" : undefined }), lvl.label),
                   h("div", { className: "of-muted", style: { fontSize: "10px", marginTop: "3px", lineHeight: 1.35 } }, lvl.desc)
                 );
               })
@@ -1936,10 +1937,10 @@ export function renderAutomationEditor(props: AutomationEditorProps) {
                 "data-variant": "primary",
                 "data-automation-run-now": "true",
                 disabled: runningId === active.id,
-                style: { fontSize: "11.5px", padding: "5px 11px", background: "#f59e0b", color: "#111", borderColor: "#f59e0b", fontWeight: 600 },
+                style: { fontSize: "11.5px", padding: "5px 11px", fontWeight: 600 },
                 onClick: () => onRunNow(active),
               },
-              AutoIcon({ h, name: "play", size: 12, color: "#111" }),
+              AutoIcon({ h, name: "play", size: 12 }),
               runningId === active.id ? "Rodando..." : "Executar agora"
             ),
             active.triggerKind === "schedule" &&

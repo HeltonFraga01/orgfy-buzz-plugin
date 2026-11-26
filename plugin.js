@@ -14209,11 +14209,12 @@ const FACTORY_SHADOW_CSS = `
 
 .of-exp-badge {
   border-radius: 9999px;
-  border: 1px solid rgba(245, 158, 11, 0.35);
+  border: 1px solid var(--primary-border);
+  background: var(--primary-soft);
   padding: 1px 6px;
   font-size: 10px;
   font-weight: 500;
-  color: var(--primary);
+  color: var(--primary-text);
 }
 
 .of-btn {
@@ -14472,8 +14473,8 @@ const FACTORY_SHADOW_CSS = `
 }
 
 .of-pd-node[data-active="true"] {
-  border-color: rgba(245, 158, 11, 0.55);
-  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1);
+  border-color: var(--primary-border);
+  box-shadow: 0 0 0 3px var(--primary-soft);
 }
 
 .of-pd-badge {
@@ -14535,8 +14536,8 @@ const FACTORY_SHADOW_CSS = `
 }
 
 .of-chip:hover {
-  border-color: rgba(245, 158, 11, 0.6);
-  background: rgba(245, 158, 11, 0.08);
+  border-color: var(--primary-border);
+  background: var(--primary-soft);
 }
 
 .of-chip[data-queued="true"] {
@@ -14655,7 +14656,7 @@ const FACTORY_SHADOW_CSS = `
 }
 
 .of-view-card:hover {
-  border-color: rgba(245, 158, 11, 0.55);
+  border-color: var(--primary-border);
 }
 
 .of-view-card[data-state="person"] {
@@ -14694,7 +14695,7 @@ const FACTORY_SHADOW_CSS = `
   border-radius: 12px;
   border: 1px solid var(--border-strong);
   background:
-    radial-gradient(circle at 15% 10%, rgba(245, 158, 11, 0.06), transparent 45%),
+    radial-gradient(circle at 15% 10%, var(--primary-soft), transparent 45%),
     linear-gradient(180deg, oklch(0.18 0.009 264), oklch(0.15 0.008 264));
 }
 
@@ -16325,7 +16326,7 @@ function renderFactoryOverviewPanel(props) {
             // 4. Barra Digest colapsável (1:1 CodeDen)
             h(
               "details",
-              { className: "of-surface", style: { borderColor: "rgba(245, 158, 11, 0.32)" }, "data-codeden-digest": "true" },
+              { className: "of-surface", style: { borderColor: "var(--primary-border)" }, "data-codeden-digest": "true" },
               h(
                 "summary",
                 { style: { cursor: "pointer", padding: "8px 12px", fontSize: "11.5px", color: "var(--muted-foreground)" } },
@@ -17751,9 +17752,10 @@ function token(style, name, fallback) {
   return value && cssToSrgb(value) || fallback;
 }
 function readPalette(root = ((_a) => (_a = globalThis.document) == null ? void 0 : _a.documentElement)()) {
+  var _a2;
   const style = root ? getComputedStyle(root) : null;
-  const dark = !((root == null ? void 0 : root.classList.contains("light")) || (style == null ? void 0 : style.colorScheme) === "light");
-  const primary = token(style, "--accent-primary", null) || token(style, "--brand-primary", null) || token(style, "--green-11", null) || token(style, "--primary", ok(0.76, 0.14, 155));
+  const dark = !(((_a2 = root == null ? void 0 : root.dataset) == null ? void 0 : _a2.colorMode) === "light" || (root == null ? void 0 : root.classList.contains("light")) || (style == null ? void 0 : style.colorScheme) === "light");
+  const primary = token(style, "--affordance-accent-prominent", null) || token(style, "--accent-9", null) || token(style, "--primary", ok(0.76, 0.14, 155));
   const chart2 = token(style, "--chart-2", ok(0.68, 0.13, 230));
   const chart3 = token(style, "--chart-3", ok(0.72, 0.14, 155));
   const chart4 = token(style, "--chart-4", ok(0.68, 0.16, 300));
@@ -48810,6 +48812,7 @@ function createFloor3DComponent(ctx) {
     const [isFullscreen, setIsFullscreen] = React.useState(false);
     const [completedTurns, setCompletedTurns] = React.useState({});
     const [, setClockTick] = React.useState(0);
+    const [themeVersion, setThemeVersion] = React.useState(0);
     const tenantAgents = ((_a = status.tenantManifest) == null ? void 0 : _a.agentes) || [];
     const empresaNome = ((_b = status.tenantManifest) == null ? void 0 : _b.nome) || tenant;
     const adapted = React.useMemo(() => adaptStatusFor3D(status, liveCrew, telemetry), [status, liveCrew, telemetry]);
@@ -48974,11 +48977,22 @@ function createFloor3DComponent(ctx) {
       };
     }, []);
     React.useEffect(() => {
+      var _a2;
+      const root = (_a2 = globalThis.document) == null ? void 0 : _a2.documentElement;
+      if (!root || typeof MutationObserver === "undefined") return;
+      const obs = new MutationObserver(() => setThemeVersion((v2) => v2 + 1));
+      obs.observe(root, {
+        attributes: true,
+        attributeFilter: ["class", "style", "data-accent", "data-color-mode", "data-color-level"]
+      });
+      return () => obs.disconnect();
+    }, []);
+    React.useEffect(() => {
       const st = stageRef.current;
       if (!st) return;
       const palette = readPalette();
       st.update({ layout, scene, palette, lookout });
-    }, [layout, scene, lookout]);
+    }, [layout, scene, lookout, themeVersion]);
     React.useEffect(() => {
       var _a2;
       (_a2 = stageRef.current) == null ? void 0 : _a2.setFocus(focus);
@@ -51127,7 +51141,7 @@ function ToggleSwitch({ h, checked, onChange, label }) {
         border: "none",
         padding: "2px",
         cursor: "pointer",
-        background: checked ? "#f59e0b" : "rgba(255,255,255,0.16)",
+        background: checked ? "var(--primary)" : "var(--affordance-subtle-hover, rgba(255,255,255,0.16))",
         display: "inline-flex",
         alignItems: "center",
         justifyContent: checked ? "flex-end" : "flex-start",
@@ -51140,8 +51154,8 @@ function ToggleSwitch({ h, checked, onChange, label }) {
         width: "15px",
         height: "15px",
         borderRadius: "999px",
-        background: "#fff",
-        boxShadow: "0 1px 3px rgba(0,0,0,0.4)"
+        background: checked ? "var(--primary-foreground)" : "#fff",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.35)"
       }
     })
   );
@@ -51227,11 +51241,11 @@ function renderAutomationEditor(props) {
             gap: "12px",
             padding: "12px 16px",
             borderRadius: "12px",
-            border: "1px solid rgba(245, 158, 11, 0.32)",
-            background: "rgba(245, 158, 11, 0.06)"
+            border: "1px solid var(--primary-border)",
+            background: "var(--primary-soft)"
           }
         },
-        AutoIcon({ h, name: "sparkles", size: 18, color: "#f59e0b" }),
+        AutoIcon({ h, name: "sparkles", size: 18, color: "var(--primary-text)" }),
         h(
           "div",
           { style: { flex: 1, minWidth: "220px" } },
@@ -51307,8 +51321,9 @@ function renderAutomationEditor(props) {
                 {
                   style: {
                     borderRadius: "999px",
-                    background: "rgba(245, 158, 11, 0.14)",
-                    color: "#fbbf24",
+                    background: "var(--primary-soft)",
+                    color: "var(--primary-text)",
+                    border: "1px solid var(--primary-border)",
                     padding: "2px 7px",
                     fontSize: "10px",
                     fontWeight: 600,
@@ -51483,7 +51498,7 @@ function renderAutomationEditor(props) {
             ToggleSwitch({ h, checked: a.enabled, label: `Ativar ${a.name}`, onChange: (v2) => onUpdateAutomation(a.id, { enabled: v2 }) }),
             h(
               "span",
-              { style: { color: a.enabled ? "#f59e0b" : "var(--muted-foreground)" } },
+              { style: { color: a.enabled ? "var(--primary-text)" : "var(--muted-foreground)" } },
               AutoIcon({ h, name: a.triggerKind, size: 15 })
             ),
             h(
@@ -51741,13 +51756,13 @@ function renderAutomationEditor(props) {
                     display: "flex",
                     alignItems: "flex-start",
                     gap: "9px",
-                    borderColor: sel ? "rgba(245, 158, 11, 0.75)" : void 0,
-                    background: sel ? "rgba(245, 158, 11, 0.08)" : void 0,
-                    boxShadow: sel ? "0 0 0 1px rgba(245, 158, 11, 0.25)" : void 0
+                    borderColor: sel ? "var(--primary-border)" : void 0,
+                    background: sel ? "var(--primary-soft)" : void 0,
+                    boxShadow: sel ? "0 0 0 1px var(--primary-border)" : void 0
                   },
                   onClick: () => onUpdateAutomation(active.id, { triggerKind: t.id })
                 },
-                h("span", { style: { marginTop: "2px", color: sel ? "#f59e0b" : "var(--muted-foreground)" } }, AutoIcon({ h, name: t.id, size: 15 })),
+                h("span", { style: { marginTop: "2px", color: sel ? "var(--primary-text)" : "var(--muted-foreground)" } }, AutoIcon({ h, name: t.id, size: 15 })),
                 h(
                   "span",
                   null,
@@ -51853,7 +51868,7 @@ function renderAutomationEditor(props) {
                 className: "of-surface",
                 style: { padding: "10px 12px", display: "flex", alignItems: "flex-start", gap: "10px", fontSize: "11.5px" }
               },
-              h("span", { style: { marginTop: "2px", color: "#f59e0b" } }, AutoIcon({ h, name: "schedule", size: 15 })),
+              h("span", { style: { marginTop: "2px", color: "var(--primary-text)" } }, AutoIcon({ h, name: "schedule", size: 15 })),
               h(
                 "div",
                 null,
@@ -52068,12 +52083,12 @@ function renderAutomationEditor(props) {
                     textAlign: "left",
                     cursor: "pointer",
                     color: "var(--foreground)",
-                    borderColor: sel ? "rgba(245, 158, 11, 0.75)" : void 0,
-                    background: sel ? "rgba(245, 158, 11, 0.08)" : void 0
+                    borderColor: sel ? "var(--primary-border)" : void 0,
+                    background: sel ? "var(--primary-soft)" : void 0
                   },
                   onClick: () => onUpdateAutomation(active.id, { autonomy: lvl.id })
                 },
-                h("div", { style: { fontSize: "12px", fontWeight: 600, display: "flex", alignItems: "center", gap: "5px" } }, AutoIcon({ h, name: "shield", size: 12, color: sel ? "#f59e0b" : void 0 }), lvl.label),
+                h("div", { style: { fontSize: "12px", fontWeight: 600, display: "flex", alignItems: "center", gap: "5px" } }, AutoIcon({ h, name: "shield", size: 12, color: sel ? "var(--primary-text)" : void 0 }), lvl.label),
                 h("div", { className: "of-muted", style: { fontSize: "10px", marginTop: "3px", lineHeight: 1.35 } }, lvl.desc)
               );
             })
@@ -52286,10 +52301,10 @@ function renderAutomationEditor(props) {
                 "data-variant": "primary",
                 "data-automation-run-now": "true",
                 disabled: runningId === active.id,
-                style: { fontSize: "11.5px", padding: "5px 11px", background: "#f59e0b", color: "#111", borderColor: "#f59e0b", fontWeight: 600 },
+                style: { fontSize: "11.5px", padding: "5px 11px", fontWeight: 600 },
                 onClick: () => onRunNow(active)
               },
-              AutoIcon({ h, name: "play", size: 12, color: "#111" }),
+              AutoIcon({ h, name: "play", size: 12 }),
               runningId === active.id ? "Rodando..." : "Executar agora"
             ),
             active.triggerKind === "schedule" && active.enabled && h(

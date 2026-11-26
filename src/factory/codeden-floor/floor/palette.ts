@@ -65,11 +65,14 @@ export function readPalette(
   root: HTMLElement | null = globalThis.document?.documentElement,
 ): FloorPalette {
   const style = root ? getComputedStyle(root) : null;
-  const dark = !(root?.classList.contains("light") || style?.colorScheme === "light");
+  const dark = !(
+    root?.dataset?.colorMode === "light" ||
+    root?.classList.contains("light") ||
+    style?.colorScheme === "light"
+  );
   const primary =
-    token(style, "--accent-primary", null as any) ||
-    token(style, "--brand-primary", null as any) ||
-    token(style, "--green-11", null as any) ||
+    token(style, "--affordance-accent-prominent", null as any) ||
+    token(style, "--accent-9", null as any) ||
     token(style, "--primary", ok(0.76, 0.14, 155));
   const chart2 = token(style, "--chart-2", ok(0.68, 0.13, 230));
   const chart3 = token(style, "--chart-3", ok(0.72, 0.14, 155));
