@@ -2276,7 +2276,7 @@ REGRAS POR PAPEL (APLIQUE APENAS O SEU):
     }
   }
 
-  // ── REGISTRO UNIFICADO DAS 16 AGENT TOOLS (v13 SINGLE SOURCE OF TRUTH + OTEL TRACING) ──
+  // ── REGISTRO UNIFICADO DAS AGENT TOOLS (v13 SINGLE SOURCE OF TRUTH + OTEL TRACING) ──
   if ((ctx.agents as any)?.addTool) {
     try {
       const unifiedTools = buildUnifiedOrgfyTools(ctx);
@@ -2285,8 +2285,8 @@ REGRAS POR PAPEL (APLIQUE APENAS O SEU):
           name: tool.name,
           description: tool.description,
           inputSchema: tool.inputSchema,
-          call: async (_client: any, _context: any, args: any) => {
-            const res = await tool.execute(args || {});
+          call: async (client: any, context: any, args: any) => {
+            const res = await tool.execute(args || {}, { client, context });
             return res.text;
           },
         });
