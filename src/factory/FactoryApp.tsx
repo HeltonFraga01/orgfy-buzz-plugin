@@ -17,7 +17,7 @@ import { renderAgentProfileDrawer, renderFactoryBoardAndFloor, type LiveCrewAgen
 import { createCodeDenInspectorDrawer } from "../components/CodeDenInspectorDrawer";
 import { createFloor3DComponent } from "./codeden-floor/Floor3DCanvas";
 import { createBoardroom3DComponent } from "./Boardroom3DCanvas";
-import { createVirtualOffice3DComponent } from "./VirtualOffice3DCanvas";
+import { createClaw3DEmbedComponent } from "./Claw3DEmbedView";
 import { renderFactorySecondaryPage } from "./FactoryPages";
 import {
   dismissErrorTurn,
@@ -109,7 +109,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
   const h = React.createElement;
   const Floor3D = createFloor3DComponent(ctx);
   const Boardroom3D = createBoardroom3DComponent(ctx);
-  const VirtualOffice3D = createVirtualOffice3DComponent(ctx);
+  const VirtualOffice3D = createClaw3DEmbedComponent(ctx);
   const CodeDenInspectorDrawer = createCodeDenInspectorDrawer(React);
   const QuestionCardsPanel = createQuestionCardsPanel(React);
   const crdtStore = getOrgfyCrdtStore(ctx);

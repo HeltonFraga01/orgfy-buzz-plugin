@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-This plugin includes UI architecture, component layouts, pipeline diagrams, and contract schemas adapted from **CodeDen** (commit `b0b2a5a`), licensed under the MIT License.
+This plugin includes UI architecture, component layouts, pipeline diagrams, and contract schemas adapted from **CodeDen** (commit `b0b2a5a`), licensed under the MIT License, and integrates **Claw3D** (`iamlukethedev/Claw3D`), also licensed under the MIT License.
 
 ---
 
@@ -25,3 +25,11 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+## Claw3D
+
+Copyright (c) 2026 LukeTheDev (`iamlukethedev/Claw3D`)
+Repository: https://github.com/iamlukethedev/claw3d
+License: MIT

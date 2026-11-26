@@ -2438,6 +2438,9 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     const bundle = fs.readFileSync(path.resolve(__dirname, "plugin.js"), "utf8");
     const boardSrc = fs.readFileSync(path.resolve(__dirname, "src", "factory", "Boardroom3DCanvas.tsx"), "utf8");
     const officeSrc = fs.readFileSync(path.resolve(__dirname, "src", "factory", "VirtualOffice3DCanvas.tsx"), "utf8");
+    assert.ok(bundle.includes("data-claw3d-embed"), "Integração real do Claw3D (Claw3DEmbedView) deve estar no bundle");
+    assert.ok(bundle.includes("Claw3D Escritório"), "Aba Claw3D Escritório deve estar no bundle");
+    assert.ok(bundle.includes("Claw3D Builder"), "Aba Claw3D Builder deve estar no bundle");
     assert.ok(bundle.includes("data-virtual-office-3d"), "Escritório Virtual 3D editável deve estar no bundle");
     assert.ok(bundle.includes("Escritório 3D"), "Botão Escritório 3D deve estar no seletor 3D");
     assert.ok(bundle.includes("Editar Escritório"), "Modo editor de planta baixa deve estar no bundle");
