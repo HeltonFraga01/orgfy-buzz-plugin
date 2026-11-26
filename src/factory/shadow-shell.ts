@@ -819,23 +819,29 @@ export const FACTORY_SHADOW_CSS = `
 }
 
 .of-now-cards {
-  display: flex;
-  gap: 10px;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 256px;
+  gap: 8px;
   overflow-x: auto;
-  padding-bottom: 4px;
+  padding: 2px 2px 6px;
+  box-sizing: border-box;
 }
 
 .of-now-card {
   display: flex;
   flex-direction: column;
+  justify-content: space-between;
   gap: 6px;
-  min-width: 248px;
-  max-width: 290px;
-  flex-shrink: 0;
-  border-radius: 11px;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  box-sizing: border-box;
+  overflow: hidden;
+  border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--card);
-  padding: 10px 12px;
+  padding: 9px 11px;
   text-align: left;
   color: var(--foreground);
   cursor: pointer;
