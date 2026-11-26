@@ -41,6 +41,7 @@ import {
 } from "../services/buzz-repos-live";
 import { subscribeRelayUpdates } from "../services/buzz-native";
 import {
+  findBuzzChannelIdByName,
   loadBuzzChannelLiveInfo,
   navigateToBuzzChannel,
   resolveBuzzNavigationScope,
@@ -237,7 +238,10 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     // Lê Canvas ao vivo + histórico (session.canvas.read/history), metadados do canal (session.channels/channelDetails) e Buzz Repos NIP-34
     React.useEffect(() => {
       let cancelled = false;
-      const canal = status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === tenant)?.canal || null;
+      const canal =
+        status.tenantManifest?.canal ||
+        holding?.empresas.find((e) => e.slug === tenant)?.canal ||
+        (tenant === "board" ? findBuzzChannelIdByName(ctx, ["Conselho", "Board", "Conselho da Holding"]) : null);
       const dtag = status.tenantManifest?.repoId || tenant;
       readBuzzChannelCanvasDetailed(ctx, canal)
         .then((st) => {
@@ -481,8 +485,21 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       [tenant, liveRepo, status.tenantManifest, notify]
     );
 
+    const resolveActiveChannelId = React.useCallback(
+      (targetSlug?: string) => {
+        const slug = typeof targetSlug === "string" && targetSlug ? targetSlug : tenant;
+        const emp = holding?.empresas.find((e) => e.slug === slug);
+        return (
+          (slug === tenant ? status.tenantManifest?.canal : null) ||
+          emp?.canal ||
+          (slug === "board" ? findBuzzChannelIdByName(ctx, ["Conselho", "Board", "Conselho da Holding"]) : null)
+        );
+      },
+      [tenant, status.tenantManifest, holding]
+    );
+
     const handleSaveCanvas = React.useCallback(async () => {
-      const canal = status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === tenant)?.canal || null;
+      const canal = resolveActiveChannelId();
       setCanvasSaving(true);
       const res = await saveBuzzChannelCanvas(ctx, canal, canvasDraft, canvasEventId);
       setCanvasSaving(false);
@@ -495,10 +512,10 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       } else {
         notify(`Falha ao salvar Canvas: ${res.error || "indisponível"}`);
       }
-    }, [status.tenantManifest, holding, tenant, canvasDraft, canvasEventId, notify]);
+    }, [resolveActiveChannelId, canvasDraft, canvasEventId, notify]);
 
     const handleReloadCanvas = React.useCallback(async () => {
-      const canal = status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === tenant)?.canal || null;
+      const canal = resolveActiveChannelId();
       const [st, hist] = await Promise.all([
         readBuzzChannelCanvasDetailed(ctx, canal, { strong: true }),
         readBuzzChannelCanvasHistory(ctx, canal),
@@ -509,10 +526,10 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       setCanvasWritable(st.writable);
       setCanvasHistory(hist);
       notify("Canvas recarregado ao vivo do canal no Buzz.");
-    }, [status.tenantManifest, holding, tenant, notify]);
+    }, [resolveActiveChannelId, notify]);
 
     const handleSaveChannelDetails = React.useCallback(async () => {
-      const canal = status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === tenant)?.canal || null;
+      const canal = resolveActiveChannelId();
       setSavingChannelDetails(true);
       const res = await saveBuzzChannelDetailsLive(ctx, channelInfo?.detailsBase, channelDetailsDraft);
       setSavingChannelDetails(false);
@@ -523,10 +540,10 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       } else {
         notify(`Falha ao salvar canal: ${res.error || "indisponível"}`);
       }
-    }, [status.tenantManifest, holding, tenant, channelInfo, channelDetailsDraft, notify]);
+    }, [resolveActiveChannelId, channelInfo, channelDetailsDraft, notify]);
 
     const handleChannelDiagnostic = React.useCallback(async (action: "markRead" | "markUnread" | "refresh") => {
-      const canal = status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === tenant)?.canal || null;
+      const canal = resolveActiveChannelId();
       if (!canal) {
         notify("Canal da empresa não configurado.");
         return;
@@ -568,8 +585,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
 
     const handleOpenChannelInBuzz = React.useCallback(async (targetSlug?: string) => {
       const slug = typeof targetSlug === "string" && targetSlug ? targetSlug : tenant;
-      const emp = holding?.empresas.find((e) => e.slug === slug);
-      const canal = (slug === tenant ? status.tenantManifest?.canal : null) || emp?.canal;
+      const canal = resolveActiveChannelId(slug);
       if (!canal) {
         notify(`Canal não configurado no manifesto de ${slug}.`);
         return;
@@ -580,11 +596,10 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       } else {
         notify(`Não foi possível abrir o canal ${canal.slice(0, 8)}… no Buzz (verifique a conexão do relay).`);
       }
-    }, [holding, status.tenantManifest, tenant, notify]);
+    }, [resolveActiveChannelId, tenant, notify]);
 
     const handleOpenChannelFullPage = React.useCallback(async (opts?: { panel?: "members" }) => {
-      const emp = holding?.empresas.find((e) => e.slug === tenant);
-      const canal = status.tenantManifest?.canal || emp?.canal;
+      const canal = resolveActiveChannelId(tenant);
       if (!canal) {
         notify(`Canal não configurado no manifesto de ${tenant}.`);
         return;
@@ -1580,24 +1595,34 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     // Assentos da Sala de Reunião 3D do Conselho (OrgFy Iris Bestie + 6 Comitês funcionais de board.json)
     const boardroomSeats = React.useMemo(() => {
       const boardAreas = holding?.conselho || [];
-      const resolvePk = (name: string) => liveCrew.find((c) => c.name.toLowerCase() === name.toLowerCase())?.pubkey || "";
+      const resolveCrew = (name: string) => liveCrew.find((c) => c.name.toLowerCase() === name.toLowerCase()) || null;
+      const irisName = holding?.ceoHolding?.nome || "OrgFy Iris";
+      const irisCrew = resolveCrew(irisName);
+      const irisPk = holding?.ceoHolding?.pubkey || irisCrew?.pubkey || "";
       return [
         {
           id: "bestie-iris",
-          label: holding?.ceoHolding?.nome || "OrgFy Iris",
+          label: irisName,
           role: "Bestie · Orquestradora Buzz",
-          status: (holding?.ceoHolding?.pubkey && telemetry.byPubkey?.[holding.ceoHolding.pubkey.toLowerCase()] ? "working" : "active") as "active" | "working" | "planned",
-          onClick: () => handleOpenAgentDmInBuzz({ name: holding?.ceoHolding?.nome || "OrgFy Iris", pubkey: holding?.ceoHolding?.pubkey || "" }),
+          agentName: irisName,
+          agentKey: irisCrew?.key || "orgfy-iris",
+          pubkey: irisPk,
+          status: (irisPk && telemetry.byPubkey?.[irisPk.toLowerCase()] ? "working" : "active") as "active" | "working" | "planned",
+          onClick: () => handleOpenAgentDmInBuzz({ key: irisCrew?.key, name: irisName, pubkey: irisPk }),
         },
         ...boardAreas.map((area) => {
-          const pk = resolvePk(area.responsavel);
+          const crewMatch = resolveCrew(area.responsavel);
+          const pk = (area as any).pubkey || crewMatch?.pubkey || "";
           const isWorking = Boolean(pk && telemetry.byPubkey?.[pk.toLowerCase()]);
           return {
             id: area.id,
             label: area.area,
             role: area.responsavel,
+            agentName: area.responsavel,
+            agentKey: crewMatch?.key || area.id,
+            pubkey: pk,
             status: (area.status !== "ativo" ? "planned" : isWorking ? "working" : "active") as "active" | "working" | "planned",
-            onClick: pk ? () => handleOpenAgentDmInBuzz({ name: area.responsavel, pubkey: pk }) : undefined,
+            onClick: pk ? () => handleOpenAgentDmInBuzz({ key: crewMatch?.key, name: area.responsavel, pubkey: pk }) : undefined,
           };
         }),
       ];

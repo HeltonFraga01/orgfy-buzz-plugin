@@ -10,11 +10,17 @@ import { Lights } from "./codeden-floor/floor/lights";
 import { Kit, colour, canvasOf } from "./codeden-floor/floor/kit";
 import { crewGeometry, type CrewGeometry } from "./codeden-floor/floor/crew-geometry";
 import type { Rgb } from "./codeden-floor/oklch";
+import type { FactoryStatusPayload } from "./factory-adapter";
+import type { BuzzLiveTelemetrySnapshot, LiveAgentTurn } from "./buzz-live-telemetry";
+import type { LiveCrewAgent } from "./FactoryBoardAndFloor";
 
 export interface BoardroomSeat {
   id: string;
   label: string;
   role: string;
+  agentName?: string;
+  agentKey?: string;
+  pubkey?: string;
   status: "active" | "working" | "planned";
   onClick?: () => void;
 }
@@ -23,6 +29,43 @@ export interface Boardroom3DProps {
   seats: BoardroomSeat[];
   title?: string;
   fullHeight?: boolean;
+  status?: FactoryStatusPayload;
+  liveCrew?: LiveCrewAgent[];
+  telemetry?: BuzzLiveTelemetrySnapshot;
+  onOpenAgentDm?: (agent: { key?: string; pubkey?: string; name?: string }) => void;
+  onOpenAgentProfile?: (agent: { key?: string; pubkey?: string; name?: string }) => void;
+  onOpenTurnInSideChat?: (turn: LiveAgentTurn) => void;
+}
+
+interface BoardroomCompletedTurn {
+  turn: LiveAgentTurn;
+  finishedAt: number;
+  dismissed?: boolean;
+}
+
+const BOARDROOM_BUBBLE_TTL_MS = 3 * 60 * 1000;
+
+function fmtBoardroomClock(tsMs?: number | null): string {
+  if (!tsMs || !Number.isFinite(tsMs)) return "0s";
+  const diffSec = Math.max(0, Math.floor((Date.now() - tsMs) / 1000));
+  if (diffSec < 60) return `${diffSec}s`;
+  const mins = Math.floor(diffSec / 60);
+  const rem = diffSec % 60;
+  if (mins < 60) return rem > 0 ? `${mins}m ${rem}s` : `${mins}m`;
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+}
+
+function fmtBoardroomElapsed(tsMs?: number | string | null): string {
+  if (!tsMs) return "—";
+  const ms = typeof tsMs === "number" ? tsMs : Date.parse(String(tsMs));
+  if (!Number.isFinite(ms)) return "—";
+  const diffSec = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  if (diffSec < 60) return diffSec < 10 ? "agora" : `${diffSec}s`;
+  const mins = Math.floor(diffSec / 60);
+  if (mins < 60) return `${mins} min`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ${mins % 60}m`;
+  return `${Math.floor(hours / 24)}d`;
 }
 
 function rgbToCss([r, g, b]: Rgb, alpha = 1): string {
@@ -544,10 +587,17 @@ export function createBoardroom3DComponent(ctx: Context) {
   return function Boardroom3DCanvas(props: Boardroom3DProps) {
     const hostRef = React.useRef<HTMLDivElement | null>(null);
     const mountRef = React.useRef<HTMLDivElement | null>(null);
+    const bubbleNodesRef = React.useRef<Map<string, HTMLDivElement>>(new Map());
+    const prevActiveByPubkeyRef = React.useRef<Record<string, LiveAgentTurn>>({});
     const [fitTick, setFitTick] = React.useState(0);
     const [themeVersion, setThemeVersion] = React.useState(0);
     const [isFullscreen, setIsFullscreen] = React.useState(false);
-    const [hoveredSeat, setHoveredSeat] = React.useState<BoardroomSeat | null>(null);
+    const [rosterOpen, setRosterOpen] = React.useState(true);
+    const [rosterFilter, setRosterFilter] = React.useState<"all" | "active">("all");
+    const [hoveredSeatId, setHoveredSeatId] = React.useState<string | null>(null);
+    const [selectedSeatId, setSelectedSeatId] = React.useState<string | null>(null);
+    const [completedTurns, setCompletedTurns] = React.useState<Record<string, BoardroomCompletedTurn>>({});
+    const [, setClockTick] = React.useState(0);
 
     // Observa trocas ao vivo de acento/tema no Buzz Desktop (igual ao Andar 3D)
     React.useEffect(() => {
@@ -560,6 +610,43 @@ export function createBoardroom3DComponent(ctx: Context) {
       });
       return () => obs.disconnect();
     }, []);
+
+    React.useEffect(() => {
+      const currentMap = props.telemetry?.byPubkey || {};
+      const prevMap = prevActiveByPubkeyRef.current;
+      const now = Date.now();
+      let changed = false;
+      const updates: Record<string, BoardroomCompletedTurn | null> = {};
+      for (const [pk, prevTurn] of Object.entries(prevMap)) {
+        if (!currentMap[pk]) {
+          updates[pk] = { turn: prevTurn, finishedAt: now };
+          changed = true;
+        }
+      }
+      for (const pk of Object.keys(currentMap)) {
+        updates[pk] = null;
+        changed = true;
+      }
+      prevActiveByPubkeyRef.current = { ...currentMap };
+      if (changed) {
+        setCompletedTurns((prev) => {
+          let mutated = false;
+          const copy: Record<string, BoardroomCompletedTurn> = { ...prev };
+          for (const [pk, val] of Object.entries(updates)) {
+            if (val === null) {
+              if (copy[pk]) {
+                delete copy[pk];
+                mutated = true;
+              }
+            } else {
+              copy[pk] = val;
+              mutated = true;
+            }
+          }
+          return mutated ? copy : prev;
+        });
+      }
+    }, [props.telemetry]);
 
     const seats = React.useMemo<BoardroomSeat[]>(
       () =>
@@ -906,6 +993,7 @@ export function createBoardroom3DComponent(ctx: Context) {
 
       interface AnimatedDirector {
         seat: BoardroomSeat;
+        seatGroup: THREE.Group;
         bodyGroup: THREE.Group;
         eyesMesh: THREE.Mesh;
         dotsMesh: THREE.Mesh | null;
@@ -932,13 +1020,11 @@ export function createBoardroom3DComponent(ctx: Context) {
         const director = buildCodeDenDirector(kit, crew, palette, seat, idx);
         seatGroup.add(director.root);
 
-        // Laptop + caneca + bloco de notas na mesa diante do assento
         const propsGroup = buildSeatDeskProps(kit, palette, seat.status);
         propsGroup.position.set(...slot.deskPos);
         propsGroup.rotation.y = slot.rotY;
         scene.add(propsGroup);
 
-        // Hitbox invisível para clique/hover confortável
         const hitBox = new THREE.Mesh(
           kit.own(new THREE.BoxGeometry(0.95, 1.45, 0.95)),
           kit.own(new THREE.MeshBasicMaterial({ visible: false }))
@@ -950,6 +1036,7 @@ export function createBoardroom3DComponent(ctx: Context) {
 
         animated.push({
           seat,
+          seatGroup,
           bodyGroup: director.bodyGroup,
           eyesMesh: director.eyesMesh,
           dotsMesh: director.dotsMesh,
@@ -960,7 +1047,6 @@ export function createBoardroom3DComponent(ctx: Context) {
         });
       });
 
-      // ── 6. INTERAÇÃO: ÓRBITA SUAVE + ZOOM + HOVER/CLIQUE NOS DIRETORES ──
       const raycaster = new THREE.Raycaster();
       const pointer = new THREE.Vector2();
       let dragging = false;
@@ -999,14 +1085,14 @@ export function createBoardroom3DComponent(ctx: Context) {
           return;
         }
         const hit = pickSeat(e);
-        setHoveredSeat((cur) => (cur?.id === hit?.id ? cur : hit));
+        setHoveredSeatId((cur) => (cur === (hit?.id || null) ? cur : (hit?.id || null)));
         renderer.domElement.style.cursor = hit ? "pointer" : "grab";
       };
 
       const onUp = (e: MouseEvent) => {
         if (dragging && !moved) {
           const hit = pickSeat(e);
-          if (hit?.onClick) hit.onClick();
+          setSelectedSeatId(hit ? hit.id : null);
         }
         dragging = false;
         renderer.domElement.style.cursor = "grab";
@@ -1019,7 +1105,7 @@ export function createBoardroom3DComponent(ctx: Context) {
       };
 
       const onLeave = () => {
-        setHoveredSeat(null);
+        setHoveredSeatId(null);
       };
 
       const dom = renderer.domElement;
@@ -1030,18 +1116,19 @@ export function createBoardroom3DComponent(ctx: Context) {
       window.addEventListener("mouseup", onUp);
       dom.addEventListener("wheel", onWheel, { passive: false });
 
-      // Loop de animação leve: respiração orgânica, piscada periódica e rotação de status
       let rafId = 0;
       const clock = new THREE.Clock();
+      const headVec = new THREE.Vector3();
       const animate = () => {
         rafId = requestAnimationFrame(animate);
         const t = clock.getElapsedTime();
+        const cw = container.clientWidth || width;
+        const ch = container.clientHeight || height;
         for (const a of animated) {
           const speed = a.seat.status === "working" ? 3.2 : 1.7;
           const amp = a.seat.status === "planned" ? 0.004 : 0.015;
           a.bodyGroup.position.y = a.baseY + Math.sin(t * speed + a.phase) * amp;
 
-          // Piscada natural a cada ~4.2s
           const blinkCycle = (t + a.phase) % 4.2;
           const blinkScale = blinkCycle > 4.06 ? 0.14 : 1;
           a.eyesMesh.scale.y = blinkScale;
@@ -1052,6 +1139,20 @@ export function createBoardroom3DComponent(ctx: Context) {
           if (a.seat.status === "working") {
             const s = 1.38 + Math.sin(t * 3.6 + a.phase) * 0.08;
             a.ringMesh.scale.set(s, s, 1);
+          }
+
+          const bubbleNode = bubbleNodesRef.current.get(a.seat.id);
+          if (bubbleNode) {
+            headVec.set(0, 1.55, 0).applyMatrix4(a.seatGroup.matrixWorld).project(camera);
+            const sx = (headVec.x * 0.5 + 0.5) * cw;
+            const sy = (-headVec.y * 0.5 + 0.5) * ch;
+            const bw = bubbleNode.offsetWidth || 224;
+            const bh = bubbleNode.offsetHeight || 86;
+            const cx = Math.max(bw / 2 + 10, Math.min(cw - bw / 2 - 10, sx));
+            const bottom = Math.max(bh + 12, Math.min(ch - 18, sy - 14));
+            bubbleNode.style.transform = `translate3d(${Math.round(cx)}px, ${Math.round(bottom)}px, 0) translate(-50%, -100%)`;
+            bubbleNode.style.opacity = "1";
+            bubbleNode.style.pointerEvents = "auto";
           }
         }
         renderer.render(scene, camera);
@@ -1083,58 +1184,539 @@ export function createBoardroom3DComponent(ctx: Context) {
       };
     }, [seatsKey, fitTick, themeVersion]);
 
+    const liveCrew = props.liveCrew || [];
+    const resolveSeatMeta = (s: BoardroomSeat) => {
+      const displayName = s.agentName || s.role || s.label;
+      const pk = (s.pubkey || "").toLowerCase();
+      const crewMatch =
+        liveCrew.find((c) => (pk && c.pubkey?.toLowerCase() === pk) || c.name.toLowerCase() === displayName.toLowerCase()) ||
+        null;
+      const resolvedPk = pk || (crewMatch?.pubkey || "").toLowerCase();
+      const liveTurn = resolvedPk && props.telemetry?.byPubkey ? props.telemetry.byPubkey[resolvedPk] || null : null;
+      const doneRec = resolvedPk ? completedTurns[resolvedPk] : undefined;
+      const hasFreshDone = Boolean(doneRec && !doneRec.dismissed && Date.now() - doneRec.finishedAt < BOARDROOM_BUBBLE_TTL_MS);
+      return {
+        seat: s,
+        displayName,
+        committee: s.id === "bestie-iris" ? s.role : s.label,
+        pubkey: resolvedPk,
+        agentKey: s.agentKey || crewMatch?.key || s.id,
+        picture: crewMatch?.picture,
+        provider: crewMatch?.provider || "nexusmind_anthropic",
+        model: crewMatch?.model || "claude-sonnet-5-5",
+        inBuzz: Boolean(crewMatch || resolvedPk),
+        running: Boolean(crewMatch?.running || liveTurn),
+        liveTurn,
+        doneRec: hasFreshDone ? doneRec : undefined,
+      };
+    };
+
+    const enrichedSeats = seats.map(resolveSeatMeta);
+    const workingNowCount = enrichedSeats.filter((e) => Boolean(e.liveTurn)).length;
+    const inBuzzCount = enrichedSeats.filter((e) => e.inBuzz).length;
+
+    const speechBubbles = enrichedSeats.filter((e) => Boolean(e.liveTurn || e.doneRec));
+
+    React.useEffect(() => {
+      if (speechBubbles.length === 0) return;
+      const timer = window.setInterval(() => {
+        setClockTick((n) => n + 1);
+        const now = Date.now();
+        setCompletedTurns((prev) => {
+          let expired = false;
+          const next: Record<string, BoardroomCompletedTurn> = {};
+          for (const [pk, item] of Object.entries(prev)) {
+            if (!item.dismissed && now - item.finishedAt < BOARDROOM_BUBBLE_TTL_MS) next[pk] = item;
+            else expired = true;
+          }
+          return expired ? next : prev;
+        });
+      }, 1000);
+      return () => window.clearInterval(timer);
+    }, [speechBubbles.length]);
+
+    const filterRows = (list: typeof enrichedSeats) =>
+      rosterFilter === "active" ? list.filter((e) => Boolean(e.liveTurn || e.running)) : list;
+    const leadershipRows = filterRows(enrichedSeats.slice(0, 1));
+    const committeeRows = filterRows(enrichedSeats.slice(1));
+
+    const focusSeatId = selectedSeatId || hoveredSeatId;
+    const focusedMeta = focusSeatId ? enrichedSeats.find((e) => e.seat.id === focusSeatId) || null : null;
+
+    const renderRosterRow = (e: (typeof enrichedSeats)[number]) => {
+      const isSelected = selectedSeatId === e.seat.id;
+      const statusLabel = e.liveTurn
+        ? e.liveTurn.state === "error"
+          ? "Erro"
+          : "Respondendo"
+        : e.running
+        ? "Em execução"
+        : e.inBuzz
+        ? "Disponível"
+        : "Pendente";
+      const stepLine = e.liveTurn?.stepLabel || e.committee;
+
+      return h(
+        "div",
+        {
+          key: e.seat.id,
+          role: "button",
+          tabIndex: 0,
+          "data-floor3d-roster-row": e.seat.id,
+          style: {
+            display: "flex",
+            flexDirection: "column",
+            gap: "3px",
+            padding: "8px 10px",
+            borderBottom: "1px solid var(--border-subtle, rgba(255,255,255,0.06))",
+            background: isSelected ? "var(--affordance-selected, rgba(255,255,255,0.08))" : "transparent",
+            cursor: "pointer",
+            textAlign: "left",
+          },
+          onMouseEnter: () => setHoveredSeatId(e.seat.id),
+          onMouseLeave: () => setHoveredSeatId((cur) => (cur === e.seat.id ? null : cur)),
+          onClick: () => setSelectedSeatId(e.seat.id),
+        },
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", gap: "6px", minWidth: 0 } },
+          e.picture
+            ? h("img", { src: e.picture, alt: e.displayName, style: { width: "16px", height: "16px", borderRadius: "4px", objectFit: "cover", flexShrink: 0 } })
+            : h("span", {
+                className: "of-dot",
+                "data-tone": e.liveTurn ? (e.liveTurn.state === "error" ? "failed" : "running") : e.inBuzz ? "done" : "idle",
+              }),
+          h("span", { style: { fontSize: "11.5px", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 } }, e.displayName)
+        ),
+        h(
+          "div",
+          { style: { fontSize: "10px", color: e.liveTurn ? "var(--status-running)" : "var(--muted-foreground)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: `${stepLine} · ${statusLabel}` },
+          `${stepLine} · ${statusLabel}`
+        ),
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px", marginTop: "1px" } },
+          h("span", { className: "of-mono of-muted", style: { fontSize: "9.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 } }, `${e.provider} · ${e.model}`),
+          h(
+            "div",
+            { style: { display: "inline-flex", alignItems: "center", gap: "4px", flexShrink: 0 } },
+            props.onOpenAgentProfile &&
+              e.pubkey &&
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "of-btn",
+                  "data-variant": "ghost",
+                  title: `Abrir perfil nativo de ${e.displayName} no Buzz`,
+                  style: { padding: "1px 5px", fontSize: "9.5px" },
+                  onClick: (ev: any) => {
+                    ev.stopPropagation();
+                    props.onOpenAgentProfile!({ key: e.agentKey, pubkey: e.pubkey, name: e.displayName });
+                  },
+                },
+                "Perfil"
+              ),
+            props.onOpenAgentDm &&
+              e.pubkey &&
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "of-btn",
+                  "data-variant": "ghost",
+                  title: `Abrir DM nativa com ${e.displayName} no Buzz`,
+                  style: { padding: "1px 5px", fontSize: "9.5px", color: "var(--primary)" },
+                  onClick: (ev: any) => {
+                    ev.stopPropagation();
+                    props.onOpenAgentDm!({ key: e.agentKey, pubkey: e.pubkey, name: e.displayName });
+                  },
+                },
+                "DM ↗"
+              )
+          )
+        )
+      );
+    };
+
     return h(
       "div",
       {
-        ref: hostRef,
-        className: "of-card",
         "data-boardroom-3d": "true",
         "data-boardroom-codeden-v2": "true",
-        style: {
-          position: "relative",
-          overflow: "hidden",
-          ...(props.fullHeight ? { flex: 1, minHeight: 0, display: "flex", flexDirection: "column" } : {}),
-        },
+        style: { display: "flex", flexDirection: "column", gap: "8px", flex: 1, minHeight: "560px" },
       },
       h(
         "div",
         {
+          ref: hostRef,
           style: {
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "9px 14px",
-            borderBottom: "1px solid var(--border)",
-            fontSize: "12px",
+            position: "relative",
+            flex: 1,
+            minHeight: "520px",
+            borderRadius: "12px",
+            border: "1px solid var(--border)",
+            background: "radial-gradient(circle at 50% 40%, #15171d, #0a0b0f)",
+            overflow: "hidden",
           },
         },
+        h("div", {
+          ref: mountRef,
+          style: { width: "100%", height: "100%", background: "var(--background)" },
+        }),
+
+        // Camada de balões de chat ao vivo sobre a cabeça dos conselheiros (1:1 com Andar 3D)
         h(
           "div",
-          { style: { display: "inline-flex", alignItems: "center", gap: "8px" } },
-          h("strong", null, props.title || "Sala de Reunião do Conselho · Boardroom 3D"),
+          {
+            "data-floor3d-speech-layer": "true",
+            style: { position: "absolute", inset: 0, zIndex: 18, pointerEvents: "none", overflow: "hidden" },
+          },
+          speechBubbles.map((e) => {
+            const isDone = !e.liveTurn && Boolean(e.doneRec);
+            const turn = e.liveTurn || e.doneRec!.turn;
+            const isErr = !isDone && turn.state === "error";
+            const borderColor = isDone
+              ? "rgba(16, 185, 129, 0.72)"
+              : isErr
+              ? "rgba(239, 68, 68, 0.72)"
+              : "rgba(59, 130, 246, 0.65)";
+            const accentColor = isDone ? "#34d399" : isErr ? "#f87171" : "#60a5fa";
+            const handleOpenResponse = (ev: any) => {
+              ev.stopPropagation();
+              if (isDone && e.pubkey) {
+                setCompletedTurns((prev) => {
+                  const cur = prev[e.pubkey];
+                  if (!cur) return prev;
+                  return { ...prev, [e.pubkey]: { ...cur, dismissed: true } };
+                });
+              }
+              if (turn.channelId && props.onOpenTurnInSideChat) props.onOpenTurnInSideChat(turn);
+              else if (props.onOpenAgentDm) props.onOpenAgentDm({ key: e.agentKey, pubkey: e.pubkey, name: e.displayName });
+            };
+
+            return h(
+              "div",
+              {
+                key: e.seat.id,
+                "data-floor3d-speech-bubble": e.seat.id,
+                "data-bubble-state": isDone ? "done" : isErr ? "error" : "working",
+                ref: (el: HTMLDivElement | null) => {
+                  if (el) bubbleNodesRef.current.set(e.seat.id, el);
+                  else bubbleNodesRef.current.delete(e.seat.id);
+                },
+                style: {
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  opacity: 0,
+                  pointerEvents: "none",
+                  willChange: "transform",
+                  width: "224px",
+                  maxWidth: "240px",
+                },
+                onClick: () => setSelectedSeatId(e.seat.id),
+              },
+              h(
+                "div",
+                {
+                  style: {
+                    borderRadius: "10px",
+                    border: `1px solid ${borderColor}`,
+                    background: "rgba(15, 18, 24, 0.94)",
+                    backdropFilter: "blur(10px)",
+                    boxShadow: "0 10px 26px rgba(0,0,0,0.48)",
+                    padding: "7px 10px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "5px",
+                    cursor: "pointer",
+                  },
+                },
+                h(
+                  "div",
+                  { style: { display: "flex", alignItems: "center", gap: "6px", minWidth: 0 } },
+                  h("span", {
+                    style: {
+                      width: "7px",
+                      height: "7px",
+                      borderRadius: "999px",
+                      background: accentColor,
+                      boxShadow: `0 0 8px ${accentColor}`,
+                      flexShrink: 0,
+                    },
+                  }),
+                  h("span", { style: { fontSize: "11px", fontWeight: 700, color: "var(--foreground)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 } }, e.displayName),
+                  h("span", { className: "of-mono", style: { fontSize: "9.5px", color: accentColor, flexShrink: 0 } }, isDone ? "Respondeu" : fmtBoardroomClock(turn.startedAt))
+                ),
+                h(
+                  "div",
+                  { style: { fontSize: "11px", color: isErr ? "#fca5a5" : "rgba(229, 231, 235, 0.88)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: turn.stepLabel },
+                  isDone ? "Resposta pronta no chat do Buzz" : turn.stepLabel || "Pensando..."
+                ),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "of-btn",
+                    "data-variant": isDone ? "primary" : "ghost",
+                    onClick: handleOpenResponse,
+                    style: { width: "100%", justifyContent: "center", padding: "3px 8px", fontSize: "10px", fontWeight: 600 },
+                  },
+                  isDone ? "Abrir resposta ↗" : "Ver chat ↗"
+                )
+              ),
+              h("div", {
+                style: {
+                  width: 0,
+                  height: 0,
+                  margin: "0 auto",
+                  borderLeft: "7px solid transparent",
+                  borderRight: "7px solid transparent",
+                  borderTop: `7px solid ${borderColor}`,
+                },
+              })
+            );
+          })
+        ),
+
+        // Roster lateral flutuante 1:1 com o Andar 3D
+        rosterOpen
+          ? h(
+              "nav",
+              {
+                "aria-label": "Roster do Conselho",
+                "data-codeden-floor-roster": "true",
+                style: {
+                  position: "absolute",
+                  top: "10px",
+                  left: "10px",
+                  bottom: "10px",
+                  width: "256px",
+                  zIndex: 20,
+                  borderRadius: "10px",
+                  border: "1px solid var(--border)",
+                  background: "rgba(15, 17, 22, 0.93)",
+                  backdropFilter: "blur(10px)",
+                  display: "flex",
+                  flexDirection: "column",
+                  overflow: "hidden",
+                  boxShadow: "0 10px 28px rgba(0,0,0,0.4)",
+                },
+              },
+              h(
+                "div",
+                {
+                  style: {
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    padding: "8px 10px",
+                    borderBottom: "1px solid var(--border)",
+                    fontSize: "11.5px",
+                    fontWeight: 700,
+                    flexShrink: 0,
+                  },
+                },
+                h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, "Equipe Conselho"),
+                h("span", { className: "of-pill of-num", style: { fontSize: "10px", padding: "0 5px" } }, String(enrichedSeats.length)),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "of-btn",
+                    "data-variant": "ghost",
+                    style: { marginLeft: "auto", padding: "1px 6px", fontSize: "10px" },
+                    onClick: () => setRosterFilter((f) => (f === "all" ? "active" : "all")),
+                  },
+                  rosterFilter === "active" ? `Ativos (${workingNowCount})` : "Todos"
+                ),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "of-btn",
+                    "data-variant": "ghost",
+                    style: { padding: "1px 6px" },
+                    title: "Recolher roster",
+                    onClick: () => setRosterOpen(false),
+                  },
+                  "‹"
+                )
+              ),
+              h(
+                "div",
+                { style: { flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" } },
+                h(
+                  "div",
+                  {
+                    style: {
+                      position: "sticky",
+                      top: 0,
+                      zIndex: 1,
+                      display: "flex",
+                      justifyContent: "space-between",
+                      padding: "5px 10px",
+                      fontSize: "9.5px",
+                      fontWeight: 700,
+                      letterSpacing: "0.06em",
+                      textTransform: "uppercase",
+                      color: "var(--muted-foreground)",
+                      background: "rgba(22, 25, 32, 0.94)",
+                      borderBottom: "1px solid var(--border)",
+                    },
+                  },
+                  h("span", null, "BESTIE · ORQUESTRADORA"),
+                  h("span", { className: "of-num" }, String(leadershipRows.length))
+                ),
+                leadershipRows.map(renderRosterRow),
+                h(
+                  "div",
+                  {
+                    style: {
+                      position: "sticky",
+                      top: 0,
+                      zIndex: 1,
+                      display: "flex",
+                      justifyContent: "space-between",
+                      padding: "5px 10px",
+                      fontSize: "9.5px",
+                      fontWeight: 700,
+                      letterSpacing: "0.06em",
+                      textTransform: "uppercase",
+                      color: "var(--muted-foreground)",
+                      background: "rgba(22, 25, 32, 0.94)",
+                      borderTop: "1px solid var(--border)",
+                      borderBottom: "1px solid var(--border)",
+                    },
+                  },
+                  h("span", null, "COMITÊS DO CONSELHO"),
+                  h("span", { className: "of-num" }, String(committeeRows.length))
+                ),
+                committeeRows.map(renderRosterRow)
+              )
+            )
+          : h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                style: { position: "absolute", top: "10px", left: "10px", zIndex: 20 },
+                onClick: () => setRosterOpen(true),
+              },
+              `Equipe Conselho (${enrichedSeats.length}) ›`
+            ),
+
+        // Popover flutuante no canto superior direito 1:1 com o Andar 3D
+        focusedMeta &&
           h(
-            "span",
+            "div",
             {
-              className: "of-pill",
+              "data-floor3d-agent-popover": "true",
               style: {
-                background: "var(--primary-soft)",
-                borderColor: "var(--primary-border)",
-                color: "var(--primary-text)",
+                position: "absolute",
+                top: "10px",
+                right: "10px",
+                zIndex: 25,
+                width: "276px",
+                borderRadius: "10px",
+                border: "1px solid var(--border-strong)",
+                background: "rgba(18, 20, 26, 0.95)",
+                backdropFilter: "blur(10px)",
+                boxShadow: "0 12px 30px rgba(0,0,0,0.45)",
+                padding: "11px 13px",
+                fontSize: "11.5px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "8px",
               },
             },
-            `${seats.length} assentos`
-          )
-        ),
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", borderBottom: "1px solid var(--border)", paddingBottom: "7px" } },
+              h(
+                "div",
+                { style: { display: "inline-flex", alignItems: "center", gap: "7px", minWidth: 0 } },
+                focusedMeta.picture && h("img", { src: focusedMeta.picture, alt: focusedMeta.displayName, style: { width: "20px", height: "20px", borderRadius: "5px", objectFit: "cover" } }),
+                h("strong", { style: { fontSize: "12.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, focusedMeta.displayName)
+              ),
+              h(
+                "div",
+                { style: { display: "inline-flex", alignItems: "center", gap: "6px", flexShrink: 0 } },
+                h(
+                  "span",
+                  {
+                    className: "of-pill",
+                    "data-tone": focusedMeta.liveTurn ? (focusedMeta.liveTurn.state === "error" ? "failed" : "running") : focusedMeta.inBuzz ? "done" : "idle",
+                    style: { fontSize: "10px", padding: "1px 6px" },
+                  },
+                  focusedMeta.liveTurn ? "Respondendo" : focusedMeta.running ? "Em execução" : focusedMeta.inBuzz ? "Disponível" : "Pendente"
+                ),
+                selectedSeatId &&
+                  h(
+                    "button",
+                    {
+                      type: "button",
+                      className: "of-btn",
+                      "data-variant": "ghost",
+                      style: { padding: "1px 5px", fontSize: "12px" },
+                      title: "Fechar",
+                      onClick: () => setSelectedSeatId(null),
+                    },
+                    "×"
+                  )
+              )
+            ),
+            h(
+              "div",
+              { style: { display: "grid", gridTemplateColumns: "64px 1fr", gap: "4px 8px", fontSize: "11px" } },
+              h("span", { className: "of-muted" }, "Etapa"),
+              h("span", { style: { fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: focusedMeta.liveTurn?.stepLabel || focusedMeta.committee }, focusedMeta.liveTurn?.stepLabel || focusedMeta.committee),
+              h("span", { className: "of-muted" }, "Na etapa"),
+              h("span", { className: "of-mono of-muted", style: { fontSize: "10.5px" } }, fmtBoardroomElapsed(focusedMeta.liveTurn?.startedAt || props.status?.lastTickAt)),
+              h("span", { className: "of-muted" }, "Agente"),
+              h("span", { className: "of-mono of-muted", style: { fontSize: "10.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: `${focusedMeta.provider} · ${focusedMeta.model}` }, `${focusedMeta.provider} · ${focusedMeta.model}`)
+            ),
+            h(
+              "div",
+              { style: { display: "flex", gap: "6px", paddingTop: "2px" } },
+              props.onOpenAgentDm && focusedMeta.pubkey &&
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "of-btn",
+                    "data-variant": "primary",
+                    style: { flex: 1, justifyContent: "center", fontSize: "11px", padding: "5px 8px" },
+                    onClick: () => props.onOpenAgentDm!({ key: focusedMeta.agentKey, pubkey: focusedMeta.pubkey, name: focusedMeta.displayName }),
+                  },
+                  "Abrir chat lateral ↗"
+                ),
+              props.onOpenAgentProfile && focusedMeta.pubkey &&
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "of-btn",
+                    style: { fontSize: "11px", padding: "5px 8px" },
+                    onClick: () => props.onOpenAgentProfile!({ key: focusedMeta.agentKey, pubkey: focusedMeta.pubkey, name: focusedMeta.displayName }),
+                  },
+                  "Perfil ↗"
+                )
+            )
+          ),
+
+        // Controles flutuantes no canto inferior direito 1:1 com o Andar 3D
         h(
           "div",
-          { style: { display: "inline-flex", alignItems: "center", gap: "6px" } },
+          { style: { position: "absolute", right: "12px", bottom: "12px", zIndex: 20, display: "inline-flex", gap: "6px" } },
           h(
             "button",
             {
               type: "button",
               className: "of-btn",
-              "data-variant": "ghost",
-              style: { fontSize: "11px", padding: "3px 8px" },
+              style: { background: "rgba(18, 20, 26, 0.88)" },
+              title: isFullscreen ? "Sair da tela cheia" : "Tela cheia na Sala de Reunião 3D",
               onClick: () => {
                 const el = hostRef.current;
                 if (!el) return;
@@ -1156,91 +1738,18 @@ export function createBoardroom3DComponent(ctx: Context) {
             {
               type: "button",
               className: "of-btn",
-              "data-variant": "ghost",
-              style: { fontSize: "11px", padding: "3px 8px" },
+              style: { background: "rgba(18, 20, 26, 0.88)" },
+              title: "Enquadrar a Sala de Reunião 3D",
               onClick: () => setFitTick((n) => n + 1),
             },
-            "⤢ Enquadrar"
+            "⤢ Fit"
           )
         )
       ),
       h(
         "div",
-        {
-          style: {
-            position: "relative",
-            width: "100%",
-            ...(props.fullHeight && !isFullscreen
-              ? { flex: 1, minHeight: "360px" }
-              : { height: isFullscreen ? "calc(100vh - 88px)" : "380px" }),
-          },
-        },
-        h("div", {
-          ref: mountRef,
-          style: { width: "100%", height: "100%", background: "var(--background)" },
-        }),
-        hoveredSeat &&
-          h(
-            "div",
-            {
-              style: {
-                position: "absolute",
-                top: "12px",
-                left: "12px",
-                pointerEvents: "none",
-                padding: "7px 11px",
-                borderRadius: "8px",
-                border: "1px solid var(--primary-border)",
-                background: "rgba(15, 17, 22, 0.92)",
-                backdropFilter: "blur(8px)",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "8px",
-                fontSize: "11.5px",
-                boxShadow: "0 8px 22px rgba(0,0,0,0.45)",
-              },
-            },
-            h("span", {
-              className: "of-dot",
-              "data-tone": hoveredSeat.status === "working" ? "running" : hoveredSeat.status === "active" ? "done" : "idle",
-            }),
-            h("strong", null, hoveredSeat.label),
-            h("span", { className: "of-muted" }, `· ${hoveredSeat.role}`),
-            hoveredSeat.onClick && h("span", { style: { color: "var(--primary-text)", fontSize: "10.5px" } }, "Clique para abrir ↗")
-          )
-      ),
-      h(
-        "div",
-        {
-          style: {
-            display: "flex",
-            flexWrap: "wrap",
-            gap: "6px",
-            padding: "8px 12px",
-            borderTop: "1px solid var(--border)",
-            background: "var(--panel)",
-          },
-        },
-        seats.map((s) =>
-          h(
-            "button",
-            {
-              key: s.id,
-              type: "button",
-              className: "of-chip",
-              onClick: s.onClick,
-              onMouseEnter: () => setHoveredSeat(s),
-              onMouseLeave: () => setHoveredSeat((cur) => (cur?.id === s.id ? null : cur)),
-              title: `${s.label} — ${s.role}`,
-            },
-            h("span", {
-              className: "of-dot",
-              "data-tone": s.status === "working" ? "running" : s.status === "active" ? "done" : "idle",
-            }),
-            h("span", null, s.label),
-            h("span", { className: "of-muted", style: { fontSize: "10px" } }, `· ${s.role}`)
-          )
-        )
+        { className: "of-muted", style: { textAlign: "center", fontSize: "11px" } },
+        `Conselho da Holding (board) · ${inBuzzCount}/${enrichedSeats.length} no Buzz · ${workingNowCount} respondendo agora · Sala de Reunião 3D`
       )
     );
   };

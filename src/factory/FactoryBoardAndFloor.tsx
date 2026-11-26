@@ -432,6 +432,15 @@ export function renderFactoryBoardAndFloor(props: BoardAndFloorProps) {
             seats: props.boardroomSeats || [],
             title: "Sala de Reunião do Conselho · Conselheiros & Bestie (OrgFy Iris)",
             fullHeight: true,
+            status,
+            liveCrew,
+            telemetry: props.telemetry,
+            onOpenAgentDm: (ag: any) => props.onOpenAgentDm?.(ag),
+            onOpenTurnInSideChat: (turn: LiveAgentTurn) => props.onOpenTurnInSideChat?.(turn),
+            onOpenAgentProfile: (ag: { key?: string; pubkey?: string; name?: string }) => {
+              if (props.onOpenAgentProfileNative) props.onOpenAgentProfileNative(ag);
+              else if (ag.key) onSelectAgentKey(ag.key);
+            },
           })
         : // Modo Andar (Floor): Motor 3D Three.js 1:1 oficial do CodeDen isolado por empresa (key=tenant)
         props.Floor3D

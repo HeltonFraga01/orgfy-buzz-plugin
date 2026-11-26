@@ -12506,6 +12506,221 @@ const PT_BR = {
     modelsTitle: "Agentes & Eval de Tool Call (R5.1)"
   }
 };
+function resolveBuzzNavigationScope(ctx) {
+  var _a, _b, _c, _d, _e, _f;
+  try {
+    const navSnap = typeof ((_a = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a.snapshot) === "function" ? ctx.navigation.snapshot() : null;
+    const navScope = (_c = (_b = navSnap == null ? void 0 : navSnap.entry) == null ? void 0 : _b.target) == null ? void 0 : _c.scope;
+    if ((navScope == null ? void 0 : navScope.viewer) && (navScope == null ? void 0 : navScope.communityOrigin)) {
+      return { viewer: String(navScope.viewer), communityOrigin: String(navScope.communityOrigin) };
+    }
+  } catch {
+  }
+  try {
+    const relaySnap = typeof ((_d = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _d.snapshot) === "function" ? ctx.relay.snapshot() : null;
+    const viewer = (relaySnap == null ? void 0 : relaySnap.viewer) ? String(relaySnap.viewer) : ((_e = relaySnap == null ? void 0 : relaySnap.session) == null ? void 0 : _e.viewer) ? String(relaySnap.session.viewer) : "";
+    let communityOrigin = (relaySnap == null ? void 0 : relaySnap.origin) ? String(relaySnap.origin) : "";
+    if (!communityOrigin && viewer && typeof (relaySnap == null ? void 0 : relaySnap.scope) === "string" && relaySnap.scope.endsWith(`:${viewer}`)) {
+      communityOrigin = relaySnap.scope.slice(0, -(viewer.length + 1));
+    }
+    if (!communityOrigin && viewer && typeof ((_f = relaySnap == null ? void 0 : relaySnap.session) == null ? void 0 : _f.scope) === "string" && relaySnap.session.scope.endsWith(`:${viewer}`)) {
+      communityOrigin = relaySnap.session.scope.slice(0, -(viewer.length + 1));
+    }
+    if (viewer && communityOrigin) {
+      return { viewer, communityOrigin };
+    }
+  } catch {
+  }
+  return null;
+}
+function findBuzzChannelIdByName(ctx, candidateNames) {
+  var _a, _b, _c, _d;
+  try {
+    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+    const listSnap = typeof ((_d = session == null ? void 0 : session.channels) == null ? void 0 : _d.list) === "function" ? session.channels.list() : null;
+    const allChannels = Array.isArray(listSnap == null ? void 0 : listSnap.channels) ? listSnap.channels : [];
+    const normalizedTargets = candidateNames.map((n) => n.trim().toLowerCase()).filter(Boolean);
+    if (normalizedTargets.length === 0) return null;
+    for (const target of normalizedTargets) {
+      const exact = allChannels.find(
+        (ch) => (ch == null ? void 0 : ch.id) && (ch == null ? void 0 : ch.channelType) !== "dm" && (ch == null ? void 0 : ch.channelType) !== "solo" && String((ch == null ? void 0 : ch.name) || "").trim().toLowerCase() === target
+      );
+      if (exact == null ? void 0 : exact.id) return String(exact.id);
+    }
+    for (const target of normalizedTargets) {
+      const partial = allChannels.find(
+        (ch) => (ch == null ? void 0 : ch.id) && (ch == null ? void 0 : ch.channelType) !== "dm" && (ch == null ? void 0 : ch.channelType) !== "solo" && String((ch == null ? void 0 : ch.name) || "").trim().toLowerCase().includes(target)
+      );
+      if (partial == null ? void 0 : partial.id) return String(partial.id);
+    }
+  } catch {
+  }
+  return null;
+}
+async function loadBuzzChannelLiveInfo(ctx, channelId) {
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
+  if (!channelId) return null;
+  try {
+    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+    if (!session) return null;
+    const listSnap = typeof ((_d = session.channels) == null ? void 0 : _d.list) === "function" ? session.channels.list() : null;
+    const allChannels = Array.isArray(listSnap == null ? void 0 : listSnap.channels) ? listSnap.channels : [];
+    const summary = (typeof ((_e = session.channels) == null ? void 0 : _e.get) === "function" ? session.channels.get(channelId) : void 0) || allChannels.find((ch) => String((ch == null ? void 0 : ch.id) || "") === channelId) || null;
+    let details = null;
+    if (((_f = session.channelDetails) == null ? void 0 : _f.available) && typeof session.channelDetails.load === "function") {
+      try {
+        details = await session.channelDetails.load(channelId);
+      } catch {
+      }
+    }
+    const rawMembers = Array.isArray(summary == null ? void 0 : summary.members) ? summary.members : Array.isArray(summary == null ? void 0 : summary.participants) ? summary.participants : [];
+    const uniqueMembers = Array.from(new Set(rawMembers.map((m) => String(m || "").toLowerCase()).filter(Boolean)));
+    let unreadCount = null;
+    let attentionCount = null;
+    try {
+      if (typeof ((_g = session.unread) == null ? void 0 : _g.snapshot) === "function") {
+        const uSnap = session.unread.snapshot({ kind: "channel", channelId });
+        if (uSnap && typeof uSnap === "object") {
+          if (typeof uSnap.observedCount === "number") unreadCount = uSnap.observedCount;
+          if (typeof uSnap.attentionCount === "number") attentionCount = uSnap.attentionCount;
+        }
+      }
+    } catch {
+    }
+    let liveStatus2 = "unknown";
+    try {
+      const lSnap = (_i = (_h = session.live) == null ? void 0 : _h.snapshot) == null ? void 0 : _i.call(_h);
+      if (lSnap == null ? void 0 : lSnap.status) liveStatus2 = String(lSnap.status);
+    } catch {
+    }
+    const visibility = (details == null ? void 0 : details.visibility) === "private" || (summary == null ? void 0 : summary.visibility) === "private" || (summary == null ? void 0 : summary.private) === true ? "private" : (details == null ? void 0 : details.visibility) === "public" || (summary == null ? void 0 : summary.visibility) === "public" ? "public" : "unknown";
+    return {
+      available: Boolean(summary || details),
+      channelId,
+      name: String((details == null ? void 0 : details.name) || (summary == null ? void 0 : summary.name) || "Canal"),
+      description: String((details == null ? void 0 : details.description) ?? (summary == null ? void 0 : summary.description) ?? ""),
+      visibility,
+      channelType: String((summary == null ? void 0 : summary.channelType) || "stream"),
+      viewerRole: (summary == null ? void 0 : summary.viewerRole) ? String(summary.viewerRole) : void 0,
+      archived: Boolean(summary == null ? void 0 : summary.archived),
+      memberPubkeys: uniqueMembers,
+      memberCount: uniqueMembers.length,
+      labels: Array.isArray(details == null ? void 0 : details.labels) ? details.labels.map(String) : Array.isArray(summary == null ? void 0 : summary.labels) ? summary.labels.map(String) : [],
+      canEdit: Boolean((details == null ? void 0 : details.canEdit) && ((_j = session.channelDetails) == null ? void 0 : _j.available) && typeof session.channelDetails.save === "function"),
+      detailsBase: details || void 0,
+      unreadCount,
+      attentionCount,
+      liveStatus: liveStatus2,
+      rosterTotalChannels: allChannels.length,
+      lastActivityAt: typeof (summary == null ? void 0 : summary.lastActivityAt) === "number" ? summary.lastActivityAt : void 0
+    };
+  } catch {
+    return null;
+  }
+}
+async function saveBuzzChannelDetailsLive(ctx, detailsBase, patch) {
+  var _a, _b, _c, _d;
+  try {
+    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+    if (!((_d = session == null ? void 0 : session.channelDetails) == null ? void 0 : _d.available) || typeof session.channelDetails.save !== "function") {
+      return { ok: false, error: "API session.channelDetails.save indisponível nesta versão do Buzz." };
+    }
+    if (!detailsBase) {
+      return { ok: false, error: "Metadados base do canal ainda não carregados." };
+    }
+    const draft = {
+      name: patch.name !== void 0 ? patch.name.trim() : String(detailsBase.name || ""),
+      description: patch.description !== void 0 ? patch.description.trim() : String(detailsBase.description || ""),
+      visibility: patch.visibility || (detailsBase.visibility === "public" ? "public" : "private"),
+      ...detailsBase.joinRole ? { joinRole: detailsBase.joinRole } : {},
+      ...typeof detailsBase.ttlSeconds === "number" ? { ttlSeconds: detailsBase.ttlSeconds } : {},
+      ...Array.isArray(detailsBase.labels) ? { labels: detailsBase.labels } : {}
+    };
+    await session.channelDetails.save(detailsBase, draft);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: (err == null ? void 0 : err.message) || String(err) };
+  }
+}
+async function runBuzzChannelDiagnosticAction(ctx, channelId, action) {
+  var _a, _b, _c, _d, _e, _f, _g, _h;
+  try {
+    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+    if (!session) return { ok: false, message: "Sessão do relay Buzz indisponível." };
+    if (action === "markRead") {
+      if (typeof ((_d = session.unread) == null ? void 0 : _d.markChannelRead) === "function") {
+        await session.unread.markChannelRead(channelId);
+        return { ok: true, message: "Canal marcado como lido no Buzz." };
+      }
+      return { ok: false, message: "markChannelRead indisponível." };
+    }
+    if (action === "markUnread") {
+      if (typeof ((_e = session.unread) == null ? void 0 : _e.markUnreadLocal) === "function") {
+        await session.unread.markUnreadLocal({ kind: "channel", channelId });
+        return { ok: true, message: "Canal marcado como não lido." };
+      }
+      return { ok: false, message: "markUnreadLocal indisponível." };
+    }
+    if (typeof ((_f = session.channels) == null ? void 0 : _f.refreshList) === "function") {
+      session.channels.refreshList();
+    }
+    if (typeof ((_g = session.channels) == null ? void 0 : _g.refreshRoster) === "function") {
+      await session.channels.refreshRoster(channelId).catch(() => {
+      });
+    }
+    if (typeof ((_h = session.channels) == null ? void 0 : _h.refresh) === "function") {
+      session.channels.refresh(channelId);
+    }
+    return { ok: true, message: "Lista de canais e roster atualizados via Buzz relay." };
+  } catch (err) {
+    return { ok: false, message: (err == null ? void 0 : err.message) || String(err) };
+  }
+}
+async function navigateToBuzzChannel(ctx, channelId, options) {
+  var _a, _b;
+  if (!channelId) return { ok: false, mode: "none" };
+  const scope = resolveBuzzNavigationScope(ctx);
+  if ((options == null ? void 0 : options.preferFullPage) && scope && typeof ((_a = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a.open) === "function") {
+    try {
+      const target = {
+        version: 1,
+        kind: "conversation",
+        scope,
+        channelId
+      };
+      if (options.panel) target.panel = options.panel;
+      const res = await ctx.navigation.open(target);
+      if (!res || res.status === "opened") {
+        return { ok: true, mode: "navigation" };
+      }
+    } catch {
+    }
+  }
+  if (options == null ? void 0 : options.sideTabOpener) {
+    try {
+      const opened = options.sideTabOpener({ channelId }, { keep: true });
+      if (opened) return { ok: true, mode: "sidetab" };
+    } catch {
+    }
+  }
+  if (scope && typeof ((_b = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _b.open) === "function") {
+    try {
+      const target = {
+        version: 1,
+        kind: "conversation",
+        scope,
+        channelId
+      };
+      if (options == null ? void 0 : options.panel) target.panel = options.panel;
+      const res = await ctx.navigation.open(target);
+      if (!res || res.status === "opened") {
+        return { ok: true, mode: "navigation" };
+      }
+    } catch {
+    }
+  }
+  return { ok: false, mode: "none" };
+}
 const VALID_MODES = /* @__PURE__ */ new Set(["manual", "assisted", "software_factory", "dark_factory"]);
 const VALID_LOOP_STATES = /* @__PURE__ */ new Set(["idle", "discovering", "building", "verifying", "paused", "stopped", "draining"]);
 function parseFactoryStatus(raw) {
@@ -12715,11 +12930,11 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
     for (const c of conselhoList) {
       const resp = String((c == null ? void 0 : c.responsavel) || "").trim();
       if (!resp || out[resp]) continue;
-      const roleKey = String((c == null ? void 0 : c.id) || (c == null ? void 0 : c.cargo) || "conselheiro").toLowerCase();
+      const roleKey = String((c == null ? void 0 : c.sigla) || (c == null ? void 0 : c.id) || "conselheiro").toLowerCase();
       out[resp] = {
         papel: roleKey,
-        funcaoCustom: `${(c == null ? void 0 : c.cargo) || "Conselheiro"} · ${(c == null ? void 0 : c.area) || "Conselho"}`,
-        pubkey: "",
+        funcaoCustom: `${(c == null ? void 0 : c.sigla) || "Board"} · ${(c == null ? void 0 : c.area) || "Conselho"}`,
+        pubkey: typeof (c == null ? void 0 : c.pubkey) === "string" ? c.pubkey : "",
         model: (c == null ? void 0 : c.status) === "ativo" ? "claude-sonnet-5-5" : "planejado",
         provider: "nexusmind_anthropic",
         parallelism: 1
@@ -12772,12 +12987,13 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
       agentKey: liveKey || `manifest:${slug}:${agName}`
     });
   }
+  const resolvedBoardChannel = isBoardSlug ? typeof (boardJson == null ? void 0 : boardJson.canal) === "string" && boardJson.canal.trim() ? boardJson.canal.trim() : findBuzzChannelIdByName(ctx, [String((boardJson == null ? void 0 : boardJson.canal_nome) || "Conselho"), "Conselho", "Board", "Conselho da Holding"]) : null;
   const tenantManifest = {
     slug,
     nome: isBoardSlug ? "Conselho da Holding" : String(((_e = empresaJson == null ? void 0 : empresaJson.hierarquia) == null ? void 0 : _e.workspace_buzz) || (empresaJson == null ? void 0 : empresaJson.empresa) || slug),
     repoId: isBoardSlug ? "board" : String((empresaJson == null ? void 0 : empresaJson.repo_id) || slug),
     nivel: isBoardSlug ? "holding" : String(((_f = empresaJson == null ? void 0 : empresaJson.hierarquia) == null ? void 0 : _f.nivel) || "subsidiaria"),
-    canal: typeof (empresaJson == null ? void 0 : empresaJson.canal) === "string" ? empresaJson.canal : null,
+    canal: isBoardSlug ? resolvedBoardChannel : typeof (empresaJson == null ? void 0 : empresaJson.canal) === "string" ? empresaJson.canal : null,
     ceoEmpresa: isBoardSlug ? String(((_g = boardJson == null ? void 0 : boardJson.ceo_holding) == null ? void 0 : _g.nome) || "OrgFy Iris") : String(((_h = empresaJson == null ? void 0 : empresaJson.hierarquia) == null ? void 0 : _h.ceo_empresa) || ((_i = empresaJson == null ? void 0 : empresaJson.papeis) == null ? void 0 : _i.ceo_empresa) || "OrgFy Iris"),
     coo: isBoardSlug ? String(((_j = boardJson == null ? void 0 : boardJson.ceo_holding) == null ? void 0 : _j.nome) || "OrgFy Iris") : String(((_k = empresaJson == null ? void 0 : empresaJson.papeis) == null ? void 0 : _k.coo) || "OrgFy Bento"),
     modoExecucao: String((empresaJson == null ? void 0 : empresaJson.modo_execucao_workers) || "efemero_headless"),
@@ -17098,7 +17314,22 @@ function renderFactoryBoardAndFloor(props) {
     ) : props.isBoardTenant && props.Boardroom3D ? h(props.Boardroom3D, {
       seats: props.boardroomSeats || [],
       title: "Sala de Reunião do Conselho · Conselheiros & Bestie (OrgFy Iris)",
-      fullHeight: true
+      fullHeight: true,
+      status,
+      liveCrew,
+      telemetry: props.telemetry,
+      onOpenAgentDm: (ag) => {
+        var _a2;
+        return (_a2 = props.onOpenAgentDm) == null ? void 0 : _a2.call(props, ag);
+      },
+      onOpenTurnInSideChat: (turn) => {
+        var _a2;
+        return (_a2 = props.onOpenTurnInSideChat) == null ? void 0 : _a2.call(props, turn);
+      },
+      onOpenAgentProfile: (ag) => {
+        if (props.onOpenAgentProfileNative) props.onOpenAgentProfileNative(ag);
+        else if (ag.key) onSelectAgentKey(ag.key);
+      }
     }) : (
       // Modo Andar (Floor): Motor 3D Three.js 1:1 oficial do CodeDen isolado por empresa (key=tenant)
       props.Floor3D ? h(props.Floor3D, {
@@ -50792,6 +51023,28 @@ function createFloor3DComponent(ctx) {
     );
   };
 }
+const BOARDROOM_BUBBLE_TTL_MS = 3 * 60 * 1e3;
+function fmtBoardroomClock(tsMs) {
+  if (!tsMs || !Number.isFinite(tsMs)) return "0s";
+  const diffSec = Math.max(0, Math.floor((Date.now() - tsMs) / 1e3));
+  if (diffSec < 60) return `${diffSec}s`;
+  const mins = Math.floor(diffSec / 60);
+  const rem = diffSec % 60;
+  if (mins < 60) return rem > 0 ? `${mins}m ${rem}s` : `${mins}m`;
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+}
+function fmtBoardroomElapsed(tsMs) {
+  if (!tsMs) return "—";
+  const ms = typeof tsMs === "number" ? tsMs : Date.parse(String(tsMs));
+  if (!Number.isFinite(ms)) return "—";
+  const diffSec = Math.max(0, Math.floor((Date.now() - ms) / 1e3));
+  if (diffSec < 60) return diffSec < 10 ? "agora" : `${diffSec}s`;
+  const mins = Math.floor(diffSec / 60);
+  if (mins < 60) return `${mins} min`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ${mins % 60}m`;
+  return `${Math.floor(hours / 24)}d`;
+}
 function rgbToCss([r, g, b], alpha = 1) {
   const rr = Math.round(Math.max(0, Math.min(1, r)) * 255);
   const gg = Math.round(Math.max(0, Math.min(1, g)) * 255);
@@ -51179,15 +51432,23 @@ function createBoardroom3DComponent(ctx) {
   const React = ctx.react;
   const h = React.createElement;
   return function Boardroom3DCanvas(props) {
+    var _a, _b, _c, _d;
     const hostRef = React.useRef(null);
     const mountRef = React.useRef(null);
+    const bubbleNodesRef = React.useRef(/* @__PURE__ */ new Map());
+    const prevActiveByPubkeyRef = React.useRef({});
     const [fitTick, setFitTick] = React.useState(0);
     const [themeVersion, setThemeVersion] = React.useState(0);
     const [isFullscreen, setIsFullscreen] = React.useState(false);
-    const [hoveredSeat, setHoveredSeat] = React.useState(null);
+    const [rosterOpen, setRosterOpen] = React.useState(true);
+    const [rosterFilter, setRosterFilter] = React.useState("all");
+    const [hoveredSeatId, setHoveredSeatId] = React.useState(null);
+    const [selectedSeatId, setSelectedSeatId] = React.useState(null);
+    const [completedTurns, setCompletedTurns] = React.useState({});
+    const [, setClockTick] = React.useState(0);
     React.useEffect(() => {
-      var _a;
-      const root = (_a = globalThis.document) == null ? void 0 : _a.documentElement;
+      var _a2;
+      const root = (_a2 = globalThis.document) == null ? void 0 : _a2.documentElement;
       if (!root || typeof MutationObserver === "undefined") return;
       const obs = new MutationObserver(() => setThemeVersion((v2) => v2 + 1));
       obs.observe(root, {
@@ -51196,6 +51457,43 @@ function createBoardroom3DComponent(ctx) {
       });
       return () => obs.disconnect();
     }, []);
+    React.useEffect(() => {
+      var _a2;
+      const currentMap = ((_a2 = props.telemetry) == null ? void 0 : _a2.byPubkey) || {};
+      const prevMap = prevActiveByPubkeyRef.current;
+      const now = Date.now();
+      let changed = false;
+      const updates = {};
+      for (const [pk, prevTurn] of Object.entries(prevMap)) {
+        if (!currentMap[pk]) {
+          updates[pk] = { turn: prevTurn, finishedAt: now };
+          changed = true;
+        }
+      }
+      for (const pk of Object.keys(currentMap)) {
+        updates[pk] = null;
+        changed = true;
+      }
+      prevActiveByPubkeyRef.current = { ...currentMap };
+      if (changed) {
+        setCompletedTurns((prev) => {
+          let mutated = false;
+          const copy = { ...prev };
+          for (const [pk, val] of Object.entries(updates)) {
+            if (val === null) {
+              if (copy[pk]) {
+                delete copy[pk];
+                mutated = true;
+              }
+            } else {
+              copy[pk] = val;
+              mutated = true;
+            }
+          }
+          return mutated ? copy : prev;
+        });
+      }
+    }, [props.telemetry]);
     const seats = React.useMemo(
       () => props.seats.length > 0 ? props.seats : [
         { id: "ceo", label: "OrgFy Iris", role: "CEO Holding", status: "active" },
@@ -51493,6 +51791,7 @@ function createBoardroom3DComponent(ctx) {
         seatByObject.set(hitBox, seat);
         animated.push({
           seat,
+          seatGroup,
           bodyGroup: director.bodyGroup,
           eyesMesh: director.eyesMesh,
           dotsMesh: director.dotsMesh,
@@ -51537,13 +51836,13 @@ function createBoardroom3DComponent(ctx) {
           return;
         }
         const hit2 = pickSeat(e);
-        setHoveredSeat((cur) => (cur == null ? void 0 : cur.id) === (hit2 == null ? void 0 : hit2.id) ? cur : hit2);
+        setHoveredSeatId((cur) => cur === ((hit2 == null ? void 0 : hit2.id) || null) ? cur : (hit2 == null ? void 0 : hit2.id) || null);
         renderer.domElement.style.cursor = hit2 ? "pointer" : "grab";
       };
       const onUp = (e) => {
         if (dragging && !moved) {
           const hit2 = pickSeat(e);
-          if (hit2 == null ? void 0 : hit2.onClick) hit2.onClick();
+          setSelectedSeatId(hit2 ? hit2.id : null);
         }
         dragging = false;
         renderer.domElement.style.cursor = "grab";
@@ -51554,7 +51853,7 @@ function createBoardroom3DComponent(ctx) {
         updateCamera();
       };
       const onLeave = () => {
-        setHoveredSeat(null);
+        setHoveredSeatId(null);
       };
       const dom = renderer.domElement;
       dom.style.cursor = "grab";
@@ -51565,9 +51864,12 @@ function createBoardroom3DComponent(ctx) {
       dom.addEventListener("wheel", onWheel, { passive: false });
       let rafId = 0;
       const clock = new Clock();
+      const headVec = new Vector3();
       const animate = () => {
         rafId = requestAnimationFrame(animate);
         const t = clock.getElapsedTime();
+        const cw = container.clientWidth || width;
+        const ch = container.clientHeight || height;
         for (const a of animated) {
           const speed = a.seat.status === "working" ? 3.2 : 1.7;
           const amp = a.seat.status === "planned" ? 4e-3 : 0.015;
@@ -51581,6 +51883,19 @@ function createBoardroom3DComponent(ctx) {
           if (a.seat.status === "working") {
             const s = 1.38 + Math.sin(t * 3.6 + a.phase) * 0.08;
             a.ringMesh.scale.set(s, s, 1);
+          }
+          const bubbleNode = bubbleNodesRef.current.get(a.seat.id);
+          if (bubbleNode) {
+            headVec.set(0, 1.55, 0).applyMatrix4(a.seatGroup.matrixWorld).project(camera);
+            const sx = (headVec.x * 0.5 + 0.5) * cw;
+            const sy = (-headVec.y * 0.5 + 0.5) * ch;
+            const bw = bubbleNode.offsetWidth || 224;
+            const bh = bubbleNode.offsetHeight || 86;
+            const cx = Math.max(bw / 2 + 10, Math.min(cw - bw / 2 - 10, sx));
+            const bottom = Math.max(bh + 12, Math.min(ch - 18, sy - 14));
+            bubbleNode.style.transform = `translate3d(${Math.round(cx)}px, ${Math.round(bottom)}px, 0) translate(-50%, -100%)`;
+            bubbleNode.style.opacity = "1";
+            bubbleNode.style.pointerEvents = "auto";
           }
         }
         renderer.render(scene, camera);
@@ -51606,68 +51921,514 @@ function createBoardroom3DComponent(ctx) {
         renderer.dispose();
       };
     }, [seatsKey, fitTick, themeVersion]);
+    const liveCrew = props.liveCrew || [];
+    const resolveSeatMeta = (s) => {
+      var _a2;
+      const displayName = s.agentName || s.role || s.label;
+      const pk = (s.pubkey || "").toLowerCase();
+      const crewMatch = liveCrew.find((c) => {
+        var _a3;
+        return pk && ((_a3 = c.pubkey) == null ? void 0 : _a3.toLowerCase()) === pk || c.name.toLowerCase() === displayName.toLowerCase();
+      }) || null;
+      const resolvedPk = pk || ((crewMatch == null ? void 0 : crewMatch.pubkey) || "").toLowerCase();
+      const liveTurn = resolvedPk && ((_a2 = props.telemetry) == null ? void 0 : _a2.byPubkey) ? props.telemetry.byPubkey[resolvedPk] || null : null;
+      const doneRec = resolvedPk ? completedTurns[resolvedPk] : void 0;
+      const hasFreshDone = Boolean(doneRec && !doneRec.dismissed && Date.now() - doneRec.finishedAt < BOARDROOM_BUBBLE_TTL_MS);
+      return {
+        seat: s,
+        displayName,
+        committee: s.id === "bestie-iris" ? s.role : s.label,
+        pubkey: resolvedPk,
+        agentKey: s.agentKey || (crewMatch == null ? void 0 : crewMatch.key) || s.id,
+        picture: crewMatch == null ? void 0 : crewMatch.picture,
+        provider: (crewMatch == null ? void 0 : crewMatch.provider) || "nexusmind_anthropic",
+        model: (crewMatch == null ? void 0 : crewMatch.model) || "claude-sonnet-5-5",
+        inBuzz: Boolean(crewMatch || resolvedPk),
+        running: Boolean((crewMatch == null ? void 0 : crewMatch.running) || liveTurn),
+        liveTurn,
+        doneRec: hasFreshDone ? doneRec : void 0
+      };
+    };
+    const enrichedSeats = seats.map(resolveSeatMeta);
+    const workingNowCount = enrichedSeats.filter((e) => Boolean(e.liveTurn)).length;
+    const inBuzzCount = enrichedSeats.filter((e) => e.inBuzz).length;
+    const speechBubbles = enrichedSeats.filter((e) => Boolean(e.liveTurn || e.doneRec));
+    React.useEffect(() => {
+      if (speechBubbles.length === 0) return;
+      const timer = window.setInterval(() => {
+        setClockTick((n) => n + 1);
+        const now = Date.now();
+        setCompletedTurns((prev) => {
+          let expired = false;
+          const next = {};
+          for (const [pk, item] of Object.entries(prev)) {
+            if (!item.dismissed && now - item.finishedAt < BOARDROOM_BUBBLE_TTL_MS) next[pk] = item;
+            else expired = true;
+          }
+          return expired ? next : prev;
+        });
+      }, 1e3);
+      return () => window.clearInterval(timer);
+    }, [speechBubbles.length]);
+    const filterRows = (list) => rosterFilter === "active" ? list.filter((e) => Boolean(e.liveTurn || e.running)) : list;
+    const leadershipRows = filterRows(enrichedSeats.slice(0, 1));
+    const committeeRows = filterRows(enrichedSeats.slice(1));
+    const focusSeatId = selectedSeatId || hoveredSeatId;
+    const focusedMeta = focusSeatId ? enrichedSeats.find((e) => e.seat.id === focusSeatId) || null : null;
+    const renderRosterRow = (e) => {
+      var _a2;
+      const isSelected = selectedSeatId === e.seat.id;
+      const statusLabel = e.liveTurn ? e.liveTurn.state === "error" ? "Erro" : "Respondendo" : e.running ? "Em execução" : e.inBuzz ? "Disponível" : "Pendente";
+      const stepLine = ((_a2 = e.liveTurn) == null ? void 0 : _a2.stepLabel) || e.committee;
+      return h(
+        "div",
+        {
+          key: e.seat.id,
+          role: "button",
+          tabIndex: 0,
+          "data-floor3d-roster-row": e.seat.id,
+          style: {
+            display: "flex",
+            flexDirection: "column",
+            gap: "3px",
+            padding: "8px 10px",
+            borderBottom: "1px solid var(--border-subtle, rgba(255,255,255,0.06))",
+            background: isSelected ? "var(--affordance-selected, rgba(255,255,255,0.08))" : "transparent",
+            cursor: "pointer",
+            textAlign: "left"
+          },
+          onMouseEnter: () => setHoveredSeatId(e.seat.id),
+          onMouseLeave: () => setHoveredSeatId((cur) => cur === e.seat.id ? null : cur),
+          onClick: () => setSelectedSeatId(e.seat.id)
+        },
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", gap: "6px", minWidth: 0 } },
+          e.picture ? h("img", { src: e.picture, alt: e.displayName, style: { width: "16px", height: "16px", borderRadius: "4px", objectFit: "cover", flexShrink: 0 } }) : h("span", {
+            className: "of-dot",
+            "data-tone": e.liveTurn ? e.liveTurn.state === "error" ? "failed" : "running" : e.inBuzz ? "done" : "idle"
+          }),
+          h("span", { style: { fontSize: "11.5px", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 } }, e.displayName)
+        ),
+        h(
+          "div",
+          { style: { fontSize: "10px", color: e.liveTurn ? "var(--status-running)" : "var(--muted-foreground)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: `${stepLine} · ${statusLabel}` },
+          `${stepLine} · ${statusLabel}`
+        ),
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px", marginTop: "1px" } },
+          h("span", { className: "of-mono of-muted", style: { fontSize: "9.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 } }, `${e.provider} · ${e.model}`),
+          h(
+            "div",
+            { style: { display: "inline-flex", alignItems: "center", gap: "4px", flexShrink: 0 } },
+            props.onOpenAgentProfile && e.pubkey && h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                "data-variant": "ghost",
+                title: `Abrir perfil nativo de ${e.displayName} no Buzz`,
+                style: { padding: "1px 5px", fontSize: "9.5px" },
+                onClick: (ev) => {
+                  ev.stopPropagation();
+                  props.onOpenAgentProfile({ key: e.agentKey, pubkey: e.pubkey, name: e.displayName });
+                }
+              },
+              "Perfil"
+            ),
+            props.onOpenAgentDm && e.pubkey && h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                "data-variant": "ghost",
+                title: `Abrir DM nativa com ${e.displayName} no Buzz`,
+                style: { padding: "1px 5px", fontSize: "9.5px", color: "var(--primary)" },
+                onClick: (ev) => {
+                  ev.stopPropagation();
+                  props.onOpenAgentDm({ key: e.agentKey, pubkey: e.pubkey, name: e.displayName });
+                }
+              },
+              "DM ↗"
+            )
+          )
+        )
+      );
+    };
     return h(
       "div",
       {
-        ref: hostRef,
-        className: "of-card",
         "data-boardroom-3d": "true",
         "data-boardroom-codeden-v2": "true",
-        style: {
-          position: "relative",
-          overflow: "hidden",
-          ...props.fullHeight ? { flex: 1, minHeight: 0, display: "flex", flexDirection: "column" } : {}
-        }
+        style: { display: "flex", flexDirection: "column", gap: "8px", flex: 1, minHeight: "560px" }
       },
       h(
         "div",
         {
+          ref: hostRef,
           style: {
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            padding: "9px 14px",
-            borderBottom: "1px solid var(--border)",
-            fontSize: "12px"
+            position: "relative",
+            flex: 1,
+            minHeight: "520px",
+            borderRadius: "12px",
+            border: "1px solid var(--border)",
+            background: "radial-gradient(circle at 50% 40%, #15171d, #0a0b0f)",
+            overflow: "hidden"
           }
         },
+        h("div", {
+          ref: mountRef,
+          style: { width: "100%", height: "100%", background: "var(--background)" }
+        }),
+        // Camada de balões de chat ao vivo sobre a cabeça dos conselheiros (1:1 com Andar 3D)
         h(
           "div",
-          { style: { display: "inline-flex", alignItems: "center", gap: "8px" } },
-          h("strong", null, props.title || "Sala de Reunião do Conselho · Boardroom 3D"),
+          {
+            "data-floor3d-speech-layer": "true",
+            style: { position: "absolute", inset: 0, zIndex: 18, pointerEvents: "none", overflow: "hidden" }
+          },
+          speechBubbles.map((e) => {
+            const isDone = !e.liveTurn && Boolean(e.doneRec);
+            const turn = e.liveTurn || e.doneRec.turn;
+            const isErr = !isDone && turn.state === "error";
+            const borderColor = isDone ? "rgba(16, 185, 129, 0.72)" : isErr ? "rgba(239, 68, 68, 0.72)" : "rgba(59, 130, 246, 0.65)";
+            const accentColor = isDone ? "#34d399" : isErr ? "#f87171" : "#60a5fa";
+            const handleOpenResponse = (ev) => {
+              ev.stopPropagation();
+              if (isDone && e.pubkey) {
+                setCompletedTurns((prev) => {
+                  const cur = prev[e.pubkey];
+                  if (!cur) return prev;
+                  return { ...prev, [e.pubkey]: { ...cur, dismissed: true } };
+                });
+              }
+              if (turn.channelId && props.onOpenTurnInSideChat) props.onOpenTurnInSideChat(turn);
+              else if (props.onOpenAgentDm) props.onOpenAgentDm({ key: e.agentKey, pubkey: e.pubkey, name: e.displayName });
+            };
+            return h(
+              "div",
+              {
+                key: e.seat.id,
+                "data-floor3d-speech-bubble": e.seat.id,
+                "data-bubble-state": isDone ? "done" : isErr ? "error" : "working",
+                ref: (el) => {
+                  if (el) bubbleNodesRef.current.set(e.seat.id, el);
+                  else bubbleNodesRef.current.delete(e.seat.id);
+                },
+                style: {
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  opacity: 0,
+                  pointerEvents: "none",
+                  willChange: "transform",
+                  width: "224px",
+                  maxWidth: "240px"
+                },
+                onClick: () => setSelectedSeatId(e.seat.id)
+              },
+              h(
+                "div",
+                {
+                  style: {
+                    borderRadius: "10px",
+                    border: `1px solid ${borderColor}`,
+                    background: "rgba(15, 18, 24, 0.94)",
+                    backdropFilter: "blur(10px)",
+                    boxShadow: "0 10px 26px rgba(0,0,0,0.48)",
+                    padding: "7px 10px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "5px",
+                    cursor: "pointer"
+                  }
+                },
+                h(
+                  "div",
+                  { style: { display: "flex", alignItems: "center", gap: "6px", minWidth: 0 } },
+                  h("span", {
+                    style: {
+                      width: "7px",
+                      height: "7px",
+                      borderRadius: "999px",
+                      background: accentColor,
+                      boxShadow: `0 0 8px ${accentColor}`,
+                      flexShrink: 0
+                    }
+                  }),
+                  h("span", { style: { fontSize: "11px", fontWeight: 700, color: "var(--foreground)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 } }, e.displayName),
+                  h("span", { className: "of-mono", style: { fontSize: "9.5px", color: accentColor, flexShrink: 0 } }, isDone ? "Respondeu" : fmtBoardroomClock(turn.startedAt))
+                ),
+                h(
+                  "div",
+                  { style: { fontSize: "11px", color: isErr ? "#fca5a5" : "rgba(229, 231, 235, 0.88)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: turn.stepLabel },
+                  isDone ? "Resposta pronta no chat do Buzz" : turn.stepLabel || "Pensando..."
+                ),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "of-btn",
+                    "data-variant": isDone ? "primary" : "ghost",
+                    onClick: handleOpenResponse,
+                    style: { width: "100%", justifyContent: "center", padding: "3px 8px", fontSize: "10px", fontWeight: 600 }
+                  },
+                  isDone ? "Abrir resposta ↗" : "Ver chat ↗"
+                )
+              ),
+              h("div", {
+                style: {
+                  width: 0,
+                  height: 0,
+                  margin: "0 auto",
+                  borderLeft: "7px solid transparent",
+                  borderRight: "7px solid transparent",
+                  borderTop: `7px solid ${borderColor}`
+                }
+              })
+            );
+          })
+        ),
+        // Roster lateral flutuante 1:1 com o Andar 3D
+        rosterOpen ? h(
+          "nav",
+          {
+            "aria-label": "Roster do Conselho",
+            "data-codeden-floor-roster": "true",
+            style: {
+              position: "absolute",
+              top: "10px",
+              left: "10px",
+              bottom: "10px",
+              width: "256px",
+              zIndex: 20,
+              borderRadius: "10px",
+              border: "1px solid var(--border)",
+              background: "rgba(15, 17, 22, 0.93)",
+              backdropFilter: "blur(10px)",
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+              boxShadow: "0 10px 28px rgba(0,0,0,0.4)"
+            }
+          },
           h(
-            "span",
+            "div",
             {
-              className: "of-pill",
               style: {
-                background: "var(--primary-soft)",
-                borderColor: "var(--primary-border)",
-                color: "var(--primary-text)"
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "8px 10px",
+                borderBottom: "1px solid var(--border)",
+                fontSize: "11.5px",
+                fontWeight: 700,
+                flexShrink: 0
               }
             },
-            `${seats.length} assentos`
+            h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, "Equipe Conselho"),
+            h("span", { className: "of-pill of-num", style: { fontSize: "10px", padding: "0 5px" } }, String(enrichedSeats.length)),
+            h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                "data-variant": "ghost",
+                style: { marginLeft: "auto", padding: "1px 6px", fontSize: "10px" },
+                onClick: () => setRosterFilter((f) => f === "all" ? "active" : "all")
+              },
+              rosterFilter === "active" ? `Ativos (${workingNowCount})` : "Todos"
+            ),
+            h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                "data-variant": "ghost",
+                style: { padding: "1px 6px" },
+                title: "Recolher roster",
+                onClick: () => setRosterOpen(false)
+              },
+              "‹"
+            )
+          ),
+          h(
+            "div",
+            { style: { flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" } },
+            h(
+              "div",
+              {
+                style: {
+                  position: "sticky",
+                  top: 0,
+                  zIndex: 1,
+                  display: "flex",
+                  justifyContent: "space-between",
+                  padding: "5px 10px",
+                  fontSize: "9.5px",
+                  fontWeight: 700,
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  color: "var(--muted-foreground)",
+                  background: "rgba(22, 25, 32, 0.94)",
+                  borderBottom: "1px solid var(--border)"
+                }
+              },
+              h("span", null, "BESTIE · ORQUESTRADORA"),
+              h("span", { className: "of-num" }, String(leadershipRows.length))
+            ),
+            leadershipRows.map(renderRosterRow),
+            h(
+              "div",
+              {
+                style: {
+                  position: "sticky",
+                  top: 0,
+                  zIndex: 1,
+                  display: "flex",
+                  justifyContent: "space-between",
+                  padding: "5px 10px",
+                  fontSize: "9.5px",
+                  fontWeight: 700,
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  color: "var(--muted-foreground)",
+                  background: "rgba(22, 25, 32, 0.94)",
+                  borderTop: "1px solid var(--border)",
+                  borderBottom: "1px solid var(--border)"
+                }
+              },
+              h("span", null, "COMITÊS DO CONSELHO"),
+              h("span", { className: "of-num" }, String(committeeRows.length))
+            ),
+            committeeRows.map(renderRosterRow)
+          )
+        ) : h(
+          "button",
+          {
+            type: "button",
+            className: "of-btn",
+            style: { position: "absolute", top: "10px", left: "10px", zIndex: 20 },
+            onClick: () => setRosterOpen(true)
+          },
+          `Equipe Conselho (${enrichedSeats.length}) ›`
+        ),
+        // Popover flutuante no canto superior direito 1:1 com o Andar 3D
+        focusedMeta && h(
+          "div",
+          {
+            "data-floor3d-agent-popover": "true",
+            style: {
+              position: "absolute",
+              top: "10px",
+              right: "10px",
+              zIndex: 25,
+              width: "276px",
+              borderRadius: "10px",
+              border: "1px solid var(--border-strong)",
+              background: "rgba(18, 20, 26, 0.95)",
+              backdropFilter: "blur(10px)",
+              boxShadow: "0 12px 30px rgba(0,0,0,0.45)",
+              padding: "11px 13px",
+              fontSize: "11.5px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "8px"
+            }
+          },
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", borderBottom: "1px solid var(--border)", paddingBottom: "7px" } },
+            h(
+              "div",
+              { style: { display: "inline-flex", alignItems: "center", gap: "7px", minWidth: 0 } },
+              focusedMeta.picture && h("img", { src: focusedMeta.picture, alt: focusedMeta.displayName, style: { width: "20px", height: "20px", borderRadius: "5px", objectFit: "cover" } }),
+              h("strong", { style: { fontSize: "12.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, focusedMeta.displayName)
+            ),
+            h(
+              "div",
+              { style: { display: "inline-flex", alignItems: "center", gap: "6px", flexShrink: 0 } },
+              h(
+                "span",
+                {
+                  className: "of-pill",
+                  "data-tone": focusedMeta.liveTurn ? focusedMeta.liveTurn.state === "error" ? "failed" : "running" : focusedMeta.inBuzz ? "done" : "idle",
+                  style: { fontSize: "10px", padding: "1px 6px" }
+                },
+                focusedMeta.liveTurn ? "Respondendo" : focusedMeta.running ? "Em execução" : focusedMeta.inBuzz ? "Disponível" : "Pendente"
+              ),
+              selectedSeatId && h(
+                "button",
+                {
+                  type: "button",
+                  className: "of-btn",
+                  "data-variant": "ghost",
+                  style: { padding: "1px 5px", fontSize: "12px" },
+                  title: "Fechar",
+                  onClick: () => setSelectedSeatId(null)
+                },
+                "×"
+              )
+            )
+          ),
+          h(
+            "div",
+            { style: { display: "grid", gridTemplateColumns: "64px 1fr", gap: "4px 8px", fontSize: "11px" } },
+            h("span", { className: "of-muted" }, "Etapa"),
+            h("span", { style: { fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: ((_a = focusedMeta.liveTurn) == null ? void 0 : _a.stepLabel) || focusedMeta.committee }, ((_b = focusedMeta.liveTurn) == null ? void 0 : _b.stepLabel) || focusedMeta.committee),
+            h("span", { className: "of-muted" }, "Na etapa"),
+            h("span", { className: "of-mono of-muted", style: { fontSize: "10.5px" } }, fmtBoardroomElapsed(((_c = focusedMeta.liveTurn) == null ? void 0 : _c.startedAt) || ((_d = props.status) == null ? void 0 : _d.lastTickAt))),
+            h("span", { className: "of-muted" }, "Agente"),
+            h("span", { className: "of-mono of-muted", style: { fontSize: "10.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: `${focusedMeta.provider} · ${focusedMeta.model}` }, `${focusedMeta.provider} · ${focusedMeta.model}`)
+          ),
+          h(
+            "div",
+            { style: { display: "flex", gap: "6px", paddingTop: "2px" } },
+            props.onOpenAgentDm && focusedMeta.pubkey && h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                "data-variant": "primary",
+                style: { flex: 1, justifyContent: "center", fontSize: "11px", padding: "5px 8px" },
+                onClick: () => props.onOpenAgentDm({ key: focusedMeta.agentKey, pubkey: focusedMeta.pubkey, name: focusedMeta.displayName })
+              },
+              "Abrir chat lateral ↗"
+            ),
+            props.onOpenAgentProfile && focusedMeta.pubkey && h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                style: { fontSize: "11px", padding: "5px 8px" },
+                onClick: () => props.onOpenAgentProfile({ key: focusedMeta.agentKey, pubkey: focusedMeta.pubkey, name: focusedMeta.displayName })
+              },
+              "Perfil ↗"
+            )
           )
         ),
+        // Controles flutuantes no canto inferior direito 1:1 com o Andar 3D
         h(
           "div",
-          { style: { display: "inline-flex", alignItems: "center", gap: "6px" } },
+          { style: { position: "absolute", right: "12px", bottom: "12px", zIndex: 20, display: "inline-flex", gap: "6px" } },
           h(
             "button",
             {
               type: "button",
               className: "of-btn",
-              "data-variant": "ghost",
-              style: { fontSize: "11px", padding: "3px 8px" },
+              style: { background: "rgba(18, 20, 26, 0.88)" },
+              title: isFullscreen ? "Sair da tela cheia" : "Tela cheia na Sala de Reunião 3D",
               onClick: () => {
-                var _a, _b;
+                var _a2, _b2;
                 const el = hostRef.current;
                 if (!el) return;
                 try {
                   if (document.fullscreenElement) {
-                    void ((_a = document.exitFullscreen) == null ? void 0 : _a.call(document));
+                    void ((_a2 = document.exitFullscreen) == null ? void 0 : _a2.call(document));
                     setIsFullscreen(false);
                   } else {
-                    void ((_b = el.requestFullscreen) == null ? void 0 : _b.call(el));
+                    void ((_b2 = el.requestFullscreen) == null ? void 0 : _b2.call(el));
                     setIsFullscreen(true);
                   }
                 } catch {
@@ -51681,88 +52442,18 @@ function createBoardroom3DComponent(ctx) {
             {
               type: "button",
               className: "of-btn",
-              "data-variant": "ghost",
-              style: { fontSize: "11px", padding: "3px 8px" },
+              style: { background: "rgba(18, 20, 26, 0.88)" },
+              title: "Enquadrar a Sala de Reunião 3D",
               onClick: () => setFitTick((n) => n + 1)
             },
-            "⤢ Enquadrar"
+            "⤢ Fit"
           )
         )
       ),
       h(
         "div",
-        {
-          style: {
-            position: "relative",
-            width: "100%",
-            ...props.fullHeight && !isFullscreen ? { flex: 1, minHeight: "360px" } : { height: isFullscreen ? "calc(100vh - 88px)" : "380px" }
-          }
-        },
-        h("div", {
-          ref: mountRef,
-          style: { width: "100%", height: "100%", background: "var(--background)" }
-        }),
-        hoveredSeat && h(
-          "div",
-          {
-            style: {
-              position: "absolute",
-              top: "12px",
-              left: "12px",
-              pointerEvents: "none",
-              padding: "7px 11px",
-              borderRadius: "8px",
-              border: "1px solid var(--primary-border)",
-              background: "rgba(15, 17, 22, 0.92)",
-              backdropFilter: "blur(8px)",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "8px",
-              fontSize: "11.5px",
-              boxShadow: "0 8px 22px rgba(0,0,0,0.45)"
-            }
-          },
-          h("span", {
-            className: "of-dot",
-            "data-tone": hoveredSeat.status === "working" ? "running" : hoveredSeat.status === "active" ? "done" : "idle"
-          }),
-          h("strong", null, hoveredSeat.label),
-          h("span", { className: "of-muted" }, `· ${hoveredSeat.role}`),
-          hoveredSeat.onClick && h("span", { style: { color: "var(--primary-text)", fontSize: "10.5px" } }, "Clique para abrir ↗")
-        )
-      ),
-      h(
-        "div",
-        {
-          style: {
-            display: "flex",
-            flexWrap: "wrap",
-            gap: "6px",
-            padding: "8px 12px",
-            borderTop: "1px solid var(--border)",
-            background: "var(--panel)"
-          }
-        },
-        seats.map(
-          (s) => h(
-            "button",
-            {
-              key: s.id,
-              type: "button",
-              className: "of-chip",
-              onClick: s.onClick,
-              onMouseEnter: () => setHoveredSeat(s),
-              onMouseLeave: () => setHoveredSeat((cur) => (cur == null ? void 0 : cur.id) === s.id ? null : cur),
-              title: `${s.label} — ${s.role}`
-            },
-            h("span", {
-              className: "of-dot",
-              "data-tone": s.status === "working" ? "running" : s.status === "active" ? "done" : "idle"
-            }),
-            h("span", null, s.label),
-            h("span", { className: "of-muted", style: { fontSize: "10px" } }, `· ${s.role}`)
-          )
-        )
+        { className: "of-muted", style: { textAlign: "center", fontSize: "11px" } },
+        `Conselho da Holding (board) · ${inBuzzCount}/${enrichedSeats.length} no Buzz · ${workingNowCount} respondendo agora · Sala de Reunião 3D`
       )
     );
   };
@@ -57716,197 +58407,6 @@ function renderFactorySecondaryPage(props) {
     )
   );
 }
-function resolveBuzzNavigationScope(ctx) {
-  var _a, _b, _c, _d, _e, _f;
-  try {
-    const navSnap = typeof ((_a = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a.snapshot) === "function" ? ctx.navigation.snapshot() : null;
-    const navScope = (_c = (_b = navSnap == null ? void 0 : navSnap.entry) == null ? void 0 : _b.target) == null ? void 0 : _c.scope;
-    if ((navScope == null ? void 0 : navScope.viewer) && (navScope == null ? void 0 : navScope.communityOrigin)) {
-      return { viewer: String(navScope.viewer), communityOrigin: String(navScope.communityOrigin) };
-    }
-  } catch {
-  }
-  try {
-    const relaySnap = typeof ((_d = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _d.snapshot) === "function" ? ctx.relay.snapshot() : null;
-    const viewer = (relaySnap == null ? void 0 : relaySnap.viewer) ? String(relaySnap.viewer) : ((_e = relaySnap == null ? void 0 : relaySnap.session) == null ? void 0 : _e.viewer) ? String(relaySnap.session.viewer) : "";
-    let communityOrigin = (relaySnap == null ? void 0 : relaySnap.origin) ? String(relaySnap.origin) : "";
-    if (!communityOrigin && viewer && typeof (relaySnap == null ? void 0 : relaySnap.scope) === "string" && relaySnap.scope.endsWith(`:${viewer}`)) {
-      communityOrigin = relaySnap.scope.slice(0, -(viewer.length + 1));
-    }
-    if (!communityOrigin && viewer && typeof ((_f = relaySnap == null ? void 0 : relaySnap.session) == null ? void 0 : _f.scope) === "string" && relaySnap.session.scope.endsWith(`:${viewer}`)) {
-      communityOrigin = relaySnap.session.scope.slice(0, -(viewer.length + 1));
-    }
-    if (viewer && communityOrigin) {
-      return { viewer, communityOrigin };
-    }
-  } catch {
-  }
-  return null;
-}
-async function loadBuzzChannelLiveInfo(ctx, channelId) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
-  if (!channelId) return null;
-  try {
-    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
-    if (!session) return null;
-    const listSnap = typeof ((_d = session.channels) == null ? void 0 : _d.list) === "function" ? session.channels.list() : null;
-    const allChannels = Array.isArray(listSnap == null ? void 0 : listSnap.channels) ? listSnap.channels : [];
-    const summary = (typeof ((_e = session.channels) == null ? void 0 : _e.get) === "function" ? session.channels.get(channelId) : void 0) || allChannels.find((ch) => String((ch == null ? void 0 : ch.id) || "") === channelId) || null;
-    let details = null;
-    if (((_f = session.channelDetails) == null ? void 0 : _f.available) && typeof session.channelDetails.load === "function") {
-      try {
-        details = await session.channelDetails.load(channelId);
-      } catch {
-      }
-    }
-    const rawMembers = Array.isArray(summary == null ? void 0 : summary.members) ? summary.members : Array.isArray(summary == null ? void 0 : summary.participants) ? summary.participants : [];
-    const uniqueMembers = Array.from(new Set(rawMembers.map((m) => String(m || "").toLowerCase()).filter(Boolean)));
-    let unreadCount = null;
-    let attentionCount = null;
-    try {
-      if (typeof ((_g = session.unread) == null ? void 0 : _g.snapshot) === "function") {
-        const uSnap = session.unread.snapshot({ kind: "channel", channelId });
-        if (uSnap && typeof uSnap === "object") {
-          if (typeof uSnap.observedCount === "number") unreadCount = uSnap.observedCount;
-          if (typeof uSnap.attentionCount === "number") attentionCount = uSnap.attentionCount;
-        }
-      }
-    } catch {
-    }
-    let liveStatus2 = "unknown";
-    try {
-      const lSnap = (_i = (_h = session.live) == null ? void 0 : _h.snapshot) == null ? void 0 : _i.call(_h);
-      if (lSnap == null ? void 0 : lSnap.status) liveStatus2 = String(lSnap.status);
-    } catch {
-    }
-    const visibility = (details == null ? void 0 : details.visibility) === "private" || (summary == null ? void 0 : summary.visibility) === "private" || (summary == null ? void 0 : summary.private) === true ? "private" : (details == null ? void 0 : details.visibility) === "public" || (summary == null ? void 0 : summary.visibility) === "public" ? "public" : "unknown";
-    return {
-      available: Boolean(summary || details),
-      channelId,
-      name: String((details == null ? void 0 : details.name) || (summary == null ? void 0 : summary.name) || "Canal"),
-      description: String((details == null ? void 0 : details.description) ?? (summary == null ? void 0 : summary.description) ?? ""),
-      visibility,
-      channelType: String((summary == null ? void 0 : summary.channelType) || "stream"),
-      viewerRole: (summary == null ? void 0 : summary.viewerRole) ? String(summary.viewerRole) : void 0,
-      archived: Boolean(summary == null ? void 0 : summary.archived),
-      memberPubkeys: uniqueMembers,
-      memberCount: uniqueMembers.length,
-      labels: Array.isArray(details == null ? void 0 : details.labels) ? details.labels.map(String) : Array.isArray(summary == null ? void 0 : summary.labels) ? summary.labels.map(String) : [],
-      canEdit: Boolean((details == null ? void 0 : details.canEdit) && ((_j = session.channelDetails) == null ? void 0 : _j.available) && typeof session.channelDetails.save === "function"),
-      detailsBase: details || void 0,
-      unreadCount,
-      attentionCount,
-      liveStatus: liveStatus2,
-      rosterTotalChannels: allChannels.length,
-      lastActivityAt: typeof (summary == null ? void 0 : summary.lastActivityAt) === "number" ? summary.lastActivityAt : void 0
-    };
-  } catch {
-    return null;
-  }
-}
-async function saveBuzzChannelDetailsLive(ctx, detailsBase, patch) {
-  var _a, _b, _c, _d;
-  try {
-    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
-    if (!((_d = session == null ? void 0 : session.channelDetails) == null ? void 0 : _d.available) || typeof session.channelDetails.save !== "function") {
-      return { ok: false, error: "API session.channelDetails.save indisponível nesta versão do Buzz." };
-    }
-    if (!detailsBase) {
-      return { ok: false, error: "Metadados base do canal ainda não carregados." };
-    }
-    const draft = {
-      name: patch.name !== void 0 ? patch.name.trim() : String(detailsBase.name || ""),
-      description: patch.description !== void 0 ? patch.description.trim() : String(detailsBase.description || ""),
-      visibility: patch.visibility || (detailsBase.visibility === "public" ? "public" : "private"),
-      ...detailsBase.joinRole ? { joinRole: detailsBase.joinRole } : {},
-      ...typeof detailsBase.ttlSeconds === "number" ? { ttlSeconds: detailsBase.ttlSeconds } : {},
-      ...Array.isArray(detailsBase.labels) ? { labels: detailsBase.labels } : {}
-    };
-    await session.channelDetails.save(detailsBase, draft);
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: (err == null ? void 0 : err.message) || String(err) };
-  }
-}
-async function runBuzzChannelDiagnosticAction(ctx, channelId, action) {
-  var _a, _b, _c, _d, _e, _f, _g, _h;
-  try {
-    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
-    if (!session) return { ok: false, message: "Sessão do relay Buzz indisponível." };
-    if (action === "markRead") {
-      if (typeof ((_d = session.unread) == null ? void 0 : _d.markChannelRead) === "function") {
-        await session.unread.markChannelRead(channelId);
-        return { ok: true, message: "Canal marcado como lido no Buzz." };
-      }
-      return { ok: false, message: "markChannelRead indisponível." };
-    }
-    if (action === "markUnread") {
-      if (typeof ((_e = session.unread) == null ? void 0 : _e.markUnreadLocal) === "function") {
-        await session.unread.markUnreadLocal({ kind: "channel", channelId });
-        return { ok: true, message: "Canal marcado como não lido." };
-      }
-      return { ok: false, message: "markUnreadLocal indisponível." };
-    }
-    if (typeof ((_f = session.channels) == null ? void 0 : _f.refreshList) === "function") {
-      session.channels.refreshList();
-    }
-    if (typeof ((_g = session.channels) == null ? void 0 : _g.refreshRoster) === "function") {
-      await session.channels.refreshRoster(channelId).catch(() => {
-      });
-    }
-    if (typeof ((_h = session.channels) == null ? void 0 : _h.refresh) === "function") {
-      session.channels.refresh(channelId);
-    }
-    return { ok: true, message: "Lista de canais e roster atualizados via Buzz relay." };
-  } catch (err) {
-    return { ok: false, message: (err == null ? void 0 : err.message) || String(err) };
-  }
-}
-async function navigateToBuzzChannel(ctx, channelId, options) {
-  var _a, _b;
-  if (!channelId) return { ok: false, mode: "none" };
-  const scope = resolveBuzzNavigationScope(ctx);
-  if ((options == null ? void 0 : options.preferFullPage) && scope && typeof ((_a = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a.open) === "function") {
-    try {
-      const target = {
-        version: 1,
-        kind: "conversation",
-        scope,
-        channelId
-      };
-      if (options.panel) target.panel = options.panel;
-      const res = await ctx.navigation.open(target);
-      if (!res || res.status === "opened") {
-        return { ok: true, mode: "navigation" };
-      }
-    } catch {
-    }
-  }
-  if (options == null ? void 0 : options.sideTabOpener) {
-    try {
-      const opened = options.sideTabOpener({ channelId }, { keep: true });
-      if (opened) return { ok: true, mode: "sidetab" };
-    } catch {
-    }
-  }
-  if (scope && typeof ((_b = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _b.open) === "function") {
-    try {
-      const target = {
-        version: 1,
-        kind: "conversation",
-        scope,
-        channelId
-      };
-      if (options == null ? void 0 : options.panel) target.panel = options.panel;
-      const res = await ctx.navigation.open(target);
-      if (!res || res.status === "opened") {
-        return { ok: true, mode: "navigation" };
-      }
-    } catch {
-    }
-  }
-  return { ok: false, mode: "none" };
-}
 const SESSION_LIMIT = 5;
 function projectHue(slug) {
   let acc = 0;
@@ -59413,7 +59913,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
     React.useEffect(() => {
       var _a2, _b2, _c2;
       let cancelled = false;
-      const canal = ((_a2 = status.tenantManifest) == null ? void 0 : _a2.canal) || ((_b2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _b2.canal) || null;
+      const canal = ((_a2 = status.tenantManifest) == null ? void 0 : _a2.canal) || ((_b2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _b2.canal) || (tenant === "board" ? findBuzzChannelIdByName(ctx, ["Conselho", "Board", "Conselho da Holding"]) : null);
       const dtag = ((_c2 = status.tenantManifest) == null ? void 0 : _c2.repoId) || tenant;
       readBuzzChannelCanvasDetailed(ctx, canal).then((st) => {
         if (!cancelled) {
@@ -59639,9 +60139,17 @@ function createFactoryAppComponent(ctx, opts = {}) {
       },
       [tenant, liveRepo, status.tenantManifest, notify2]
     );
+    const resolveActiveChannelId = React.useCallback(
+      (targetSlug) => {
+        var _a2;
+        const slug = typeof targetSlug === "string" && targetSlug ? targetSlug : tenant;
+        const emp = holding == null ? void 0 : holding.empresas.find((e) => e.slug === slug);
+        return (slug === tenant ? (_a2 = status.tenantManifest) == null ? void 0 : _a2.canal : null) || (emp == null ? void 0 : emp.canal) || (slug === "board" ? findBuzzChannelIdByName(ctx, ["Conselho", "Board", "Conselho da Holding"]) : null);
+      },
+      [tenant, status.tenantManifest, holding]
+    );
     const handleSaveCanvas = React.useCallback(async () => {
-      var _a2, _b2;
-      const canal = ((_a2 = status.tenantManifest) == null ? void 0 : _a2.canal) || ((_b2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _b2.canal) || null;
+      const canal = resolveActiveChannelId();
       setCanvasSaving(true);
       const res = await saveBuzzChannelCanvas(ctx, canal, canvasDraft, canvasEventId);
       setCanvasSaving(false);
@@ -59655,10 +60163,9 @@ function createFactoryAppComponent(ctx, opts = {}) {
       } else {
         notify2(`Falha ao salvar Canvas: ${res.error || "indisponível"}`);
       }
-    }, [status.tenantManifest, holding, tenant, canvasDraft, canvasEventId, notify2]);
+    }, [resolveActiveChannelId, canvasDraft, canvasEventId, notify2]);
     const handleReloadCanvas = React.useCallback(async () => {
-      var _a2, _b2;
-      const canal = ((_a2 = status.tenantManifest) == null ? void 0 : _a2.canal) || ((_b2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _b2.canal) || null;
+      const canal = resolveActiveChannelId();
       const [st, hist] = await Promise.all([
         readBuzzChannelCanvasDetailed(ctx, canal, { strong: true }),
         readBuzzChannelCanvasHistory(ctx, canal)
@@ -59669,10 +60176,9 @@ function createFactoryAppComponent(ctx, opts = {}) {
       setCanvasWritable(st.writable);
       setCanvasHistory(hist);
       notify2("Canvas recarregado ao vivo do canal no Buzz.");
-    }, [status.tenantManifest, holding, tenant, notify2]);
+    }, [resolveActiveChannelId, notify2]);
     const handleSaveChannelDetails = React.useCallback(async () => {
-      var _a2, _b2;
-      const canal = ((_a2 = status.tenantManifest) == null ? void 0 : _a2.canal) || ((_b2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _b2.canal) || null;
+      const canal = resolveActiveChannelId();
       setSavingChannelDetails(true);
       const res = await saveBuzzChannelDetailsLive(ctx, channelInfo == null ? void 0 : channelInfo.detailsBase, channelDetailsDraft);
       setSavingChannelDetails(false);
@@ -59684,10 +60190,9 @@ function createFactoryAppComponent(ctx, opts = {}) {
       } else {
         notify2(`Falha ao salvar canal: ${res.error || "indisponível"}`);
       }
-    }, [status.tenantManifest, holding, tenant, channelInfo, channelDetailsDraft, notify2]);
+    }, [resolveActiveChannelId, channelInfo, channelDetailsDraft, notify2]);
     const handleChannelDiagnostic = React.useCallback(async (action) => {
-      var _a2, _b2;
-      const canal = ((_a2 = status.tenantManifest) == null ? void 0 : _a2.canal) || ((_b2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _b2.canal) || null;
+      const canal = resolveActiveChannelId();
       if (!canal) {
         notify2("Canal da empresa não configurado.");
         return;
@@ -59730,10 +60235,8 @@ function createFactoryAppComponent(ctx, opts = {}) {
     }, [liveRepo, status.tenantManifest, tenant, notify2]);
     const resolveBuzzScope = React.useCallback(() => resolveBuzzNavigationScope(ctx), []);
     const handleOpenChannelInBuzz = React.useCallback(async (targetSlug) => {
-      var _a2;
       const slug = typeof targetSlug === "string" && targetSlug ? targetSlug : tenant;
-      const emp = holding == null ? void 0 : holding.empresas.find((e) => e.slug === slug);
-      const canal = (slug === tenant ? (_a2 = status.tenantManifest) == null ? void 0 : _a2.canal : null) || (emp == null ? void 0 : emp.canal);
+      const canal = resolveActiveChannelId(slug);
       if (!canal) {
         notify2(`Canal não configurado no manifesto de ${slug}.`);
         return;
@@ -59744,11 +60247,9 @@ function createFactoryAppComponent(ctx, opts = {}) {
       } else {
         notify2(`Não foi possível abrir o canal ${canal.slice(0, 8)}… no Buzz (verifique a conexão do relay).`);
       }
-    }, [holding, status.tenantManifest, tenant, notify2]);
+    }, [resolveActiveChannelId, tenant, notify2]);
     const handleOpenChannelFullPage = React.useCallback(async (opts2) => {
-      var _a2;
-      const emp = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant);
-      const canal = ((_a2 = status.tenantManifest) == null ? void 0 : _a2.canal) || (emp == null ? void 0 : emp.canal);
+      const canal = resolveActiveChannelId(tenant);
       if (!canal) {
         notify2(`Canal não configurado no manifesto de ${tenant}.`);
         return;
@@ -60656,31 +61157,35 @@ Nota: ${evidence.note}`
     const boardroomSeats = React.useMemo(() => {
       var _a2, _b2, _c2;
       const boardAreas = (holding == null ? void 0 : holding.conselho) || [];
-      const resolvePk = (name) => {
-        var _a3;
-        return ((_a3 = liveCrew.find((c) => c.name.toLowerCase() === name.toLowerCase())) == null ? void 0 : _a3.pubkey) || "";
-      };
+      const resolveCrew = (name) => liveCrew.find((c) => c.name.toLowerCase() === name.toLowerCase()) || null;
+      const irisName = ((_a2 = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _a2.nome) || "OrgFy Iris";
+      const irisCrew = resolveCrew(irisName);
+      const irisPk = ((_b2 = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _b2.pubkey) || (irisCrew == null ? void 0 : irisCrew.pubkey) || "";
       return [
         {
           id: "bestie-iris",
-          label: ((_a2 = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _a2.nome) || "OrgFy Iris",
+          label: irisName,
           role: "Bestie · Orquestradora Buzz",
-          status: ((_b2 = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _b2.pubkey) && ((_c2 = telemetry.byPubkey) == null ? void 0 : _c2[holding.ceoHolding.pubkey.toLowerCase()]) ? "working" : "active",
-          onClick: () => {
-            var _a3, _b3;
-            return handleOpenAgentDmInBuzz({ name: ((_a3 = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _a3.nome) || "OrgFy Iris", pubkey: ((_b3 = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _b3.pubkey) || "" });
-          }
+          agentName: irisName,
+          agentKey: (irisCrew == null ? void 0 : irisCrew.key) || "orgfy-iris",
+          pubkey: irisPk,
+          status: irisPk && ((_c2 = telemetry.byPubkey) == null ? void 0 : _c2[irisPk.toLowerCase()]) ? "working" : "active",
+          onClick: () => handleOpenAgentDmInBuzz({ key: irisCrew == null ? void 0 : irisCrew.key, name: irisName, pubkey: irisPk })
         },
         ...boardAreas.map((area) => {
           var _a3;
-          const pk = resolvePk(area.responsavel);
+          const crewMatch = resolveCrew(area.responsavel);
+          const pk = area.pubkey || (crewMatch == null ? void 0 : crewMatch.pubkey) || "";
           const isWorking = Boolean(pk && ((_a3 = telemetry.byPubkey) == null ? void 0 : _a3[pk.toLowerCase()]));
           return {
             id: area.id,
             label: area.area,
             role: area.responsavel,
+            agentName: area.responsavel,
+            agentKey: (crewMatch == null ? void 0 : crewMatch.key) || area.id,
+            pubkey: pk,
             status: area.status !== "ativo" ? "planned" : isWorking ? "working" : "active",
-            onClick: pk ? () => handleOpenAgentDmInBuzz({ name: area.responsavel, pubkey: pk }) : void 0
+            onClick: pk ? () => handleOpenAgentDmInBuzz({ key: crewMatch == null ? void 0 : crewMatch.key, name: area.responsavel, pubkey: pk }) : void 0
           };
         })
       ];

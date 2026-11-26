@@ -3,6 +3,7 @@ import type { Context } from "@buzz/author";
 import { FABRICA_STATUS_SCRIPT_PATH, getControlePath } from "../config";
 import { fetchKpisEsteira } from "../services/kpi-service";
 import { fetchLiveKanbanCards, readOrgfyJson, readOrgfyText } from "../services/orgfy-bridge";
+import { findBuzzChannelIdByName } from "../services/buzz-channel-live";
 
 export type AutonomyMode = "manual" | "assisted" | "software_factory" | "dark_factory";
 export type FactoryLoopState = "idle" | "discovering" | "building" | "verifying" | "paused" | "stopped" | "draining";
@@ -429,11 +430,11 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
           for (const c of conselhoList) {
             const resp = String(c?.responsavel || "").trim();
             if (!resp || out[resp]) continue;
-            const roleKey = String(c?.id || c?.cargo || "conselheiro").toLowerCase();
+            const roleKey = String(c?.sigla || c?.id || "conselheiro").toLowerCase();
             out[resp] = {
               papel: roleKey,
-              funcaoCustom: `${c?.cargo || "Conselheiro"} · ${c?.area || "Conselho"}`,
-              pubkey: "",
+              funcaoCustom: `${c?.sigla || "Board"} · ${c?.area || "Conselho"}`,
+              pubkey: typeof c?.pubkey === "string" ? c.pubkey : "",
               model: c?.status === "ativo" ? "claude-sonnet-5-5" : "planejado",
               provider: "nexusmind_anthropic",
               parallelism: 1,
@@ -508,6 +509,12 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
     });
   }
 
+  const resolvedBoardChannel = isBoardSlug
+    ? (typeof boardJson?.canal === "string" && boardJson.canal.trim()
+        ? boardJson.canal.trim()
+        : findBuzzChannelIdByName(ctx, [String(boardJson?.canal_nome || "Conselho"), "Conselho", "Board", "Conselho da Holding"]))
+    : null;
+
   const tenantManifest: TenantManifestInfo = {
     slug,
     nome: isBoardSlug
@@ -515,7 +522,7 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
       : String(empresaJson?.hierarquia?.workspace_buzz || empresaJson?.empresa || slug),
     repoId: isBoardSlug ? "board" : String(empresaJson?.repo_id || slug),
     nivel: isBoardSlug ? "holding" : String(empresaJson?.hierarquia?.nivel || "subsidiaria"),
-    canal: typeof empresaJson?.canal === "string" ? empresaJson.canal : null,
+    canal: isBoardSlug ? resolvedBoardChannel : (typeof empresaJson?.canal === "string" ? empresaJson.canal : null),
     ceoEmpresa: isBoardSlug
       ? String(boardJson?.ceo_holding?.nome || "OrgFy Iris")
       : String(empresaJson?.hierarquia?.ceo_empresa || empresaJson?.papeis?.ceo_empresa || "OrgFy Iris"),

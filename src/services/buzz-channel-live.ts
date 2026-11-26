@@ -49,6 +49,38 @@ export function resolveBuzzNavigationScope(ctx: Context): { viewer: string; comm
   return null;
 }
 
+/** Localiza dinamicamente um canal no Buzz Desktop pelo nome (ex.: "Conselho", "Board") via session.channels.list(). */
+export function findBuzzChannelIdByName(ctx: Context, candidateNames: string[]): string | null {
+  try {
+    const session = (ctx as any)?.relay?.snapshot?.()?.session;
+    const listSnap = typeof session?.channels?.list === "function" ? session.channels.list() : null;
+    const allChannels: any[] = Array.isArray(listSnap?.channels) ? listSnap.channels : [];
+    const normalizedTargets = candidateNames.map((n) => n.trim().toLowerCase()).filter(Boolean);
+    if (normalizedTargets.length === 0) return null;
+    for (const target of normalizedTargets) {
+      const exact = allChannels.find(
+        (ch) =>
+          ch?.id &&
+          ch?.channelType !== "dm" &&
+          ch?.channelType !== "solo" &&
+          String(ch?.name || "").trim().toLowerCase() === target
+      );
+      if (exact?.id) return String(exact.id);
+    }
+    for (const target of normalizedTargets) {
+      const partial = allChannels.find(
+        (ch) =>
+          ch?.id &&
+          ch?.channelType !== "dm" &&
+          ch?.channelType !== "solo" &&
+          String(ch?.name || "").trim().toLowerCase().includes(target)
+      );
+      if (partial?.id) return String(partial.id);
+    }
+  } catch {}
+  return null;
+}
+
 export async function loadBuzzChannelLiveInfo(
   ctx: Context,
   channelId: string | null | undefined
