@@ -113,9 +113,20 @@ import {
   buildHandoffPack,
   runOneShotDecisionDispatch,
   cleanupAttentionOnStageChange,
+  emitOrgfyPipelineEvent,
   getOrgfyPipelineEvents,
   resetPresenceStateForTests,
 } from "./services/presence-dispatcher";
+import {
+  createOrgfyPipelineAttentionSource,
+  formatOrgfyAttentionText,
+} from "./services/orgfy-attention-source";
+import { parseOrgfyMessageContext } from "./components/OrgfyMessageActionModal";
+import {
+  buildBuzzEntityUri,
+  insertOrgfyPickerEntry,
+  ORGFY_GATE_SNIPPETS,
+} from "./components/OrgfyComposerPicker";
 
 export {
   checkMentionTargetIdentity,
@@ -134,8 +145,15 @@ export {
   buildHandoffPack,
   runOneShotDecisionDispatch,
   cleanupAttentionOnStageChange,
+  emitOrgfyPipelineEvent,
   getOrgfyPipelineEvents,
   resetPresenceStateForTests,
+  createOrgfyPipelineAttentionSource,
+  formatOrgfyAttentionText,
+  parseOrgfyMessageContext,
+  buildBuzzEntityUri,
+  insertOrgfyPickerEntry,
+  ORGFY_GATE_SNIPPETS,
   buildUnifiedOrgfyTools,
   registerBuzzNativeIntegrations,
   getBuzzNativeState,

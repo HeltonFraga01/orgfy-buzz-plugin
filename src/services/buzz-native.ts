@@ -12,10 +12,14 @@
 import type { Context } from "@buzz/author";
 import { recordGenAISpan } from "./telemetry-otel";
 import { createAgentOrgfyTabComponent } from "../components/AgentOrgfyTab";
+import { createOrgfyPipelineAttentionSource } from "./orgfy-attention-source";
+import { createOrgfyMessageActionComponent } from "../components/OrgfyMessageActionModal";
+import { createOrgfyComposerPickerComponent } from "../components/OrgfyComposerPicker";
 
 export interface BuzzNativeState {
   relayConnected: boolean;
   conversationRegistered: boolean;
+  composerToolRegistered: boolean;
   sidebarRegistered: boolean;
   shortcutsRegistered: boolean;
   attentionSourceRegistered: boolean;
@@ -26,6 +30,7 @@ export interface BuzzNativeState {
 let lastNativeState: BuzzNativeState = {
   relayConnected: false,
   conversationRegistered: false,
+  composerToolRegistered: false,
   sidebarRegistered: false,
   shortcutsRegistered: false,
   attentionSourceRegistered: false,
@@ -109,6 +114,7 @@ export function registerBuzzNativeIntegrations(ctx: Context | any): BuzzNativeSt
   const state: BuzzNativeState = {
     relayConnected: false,
     conversationRegistered: false,
+    composerToolRegistered: false,
     sidebarRegistered: false,
     shortcutsRegistered: false,
     attentionSourceRegistered: false,
@@ -226,25 +232,47 @@ export function registerBuzzNativeIntegrations(ctx: Context | any): BuzzNativeSt
     }
 
     if (conv?.registerMessageAction) {
-      const OpenControlRoomAction = (props: any) => {
-        React?.useEffect?.(() => {
-          try {
-            if (ctx?.navigation?.open) {
-              ctx.navigation.open({ version: 1, kind: "page", pluginId: "digital.cortexx.orgfy", pageId: "orgfy" });
-            } else if (ctx?.navigation?.navigate) {
-              ctx.navigation.navigate("orgfy");
-            }
-          } catch {}
-          props?.close?.();
-        }, []);
-        return null;
-      };
+      const h = React?.createElement;
+      const OrgfyActionIcon = () =>
+        h
+          ? h(
+              "svg",
+              {
+                viewBox: "0 0 24 24",
+                width: 16,
+                height: 16,
+                fill: "none",
+                stroke: "currentColor",
+                strokeWidth: 1.85,
+                strokeLinecap: "round",
+                strokeLinejoin: "round",
+                "aria-hidden": "true",
+              },
+              h("polygon", { points: "12 2 20 6.5 20 17.5 12 22 4 17.5 4 6.5 12 2" }),
+              h("polyline", { points: "4 6.5 12 11.5 20 6.5" }),
+              h("line", { x1: 12, y1: 11.5, x2: 12, y2: 22 })
+            )
+          : null;
+      const OrgfyMessageActionModal = createOrgfyMessageActionComponent(ctx);
       conv.registerMessageAction({
-        id: "orgfy-open-control-room",
-        title: "Abrir no OrgFy Control Room",
-        matches: () => true,
-        component: OpenControlRoomAction,
+        id: "orgfy-message-actions",
+        title: "Ações OrgFy",
+        icon: OrgfyActionIcon,
+        matches: (message: any) => Boolean(message && typeof message.content === "string"),
+        component: OrgfyMessageActionModal,
       });
+      state.conversationRegistered = true;
+    }
+
+    if (conv?.registerTool) {
+      const OrgfyComposerPicker = createOrgfyComposerPickerComponent(ctx);
+      conv.registerTool({
+        id: "orgfy-picker",
+        title: "OrgFy: Cards, Issues, Specs e Gates",
+        order: 25,
+        component: OrgfyComposerPicker,
+      });
+      state.composerToolRegistered = true;
       state.conversationRegistered = true;
     }
   } catch (err) {
@@ -319,29 +347,11 @@ export function registerBuzzNativeIntegrations(ctx: Context | any): BuzzNativeSt
     console.warn("[ORGFY v13] Falha ao registrar shortcuts:", err);
   }
 
-  // 5. NATIVE BUZZ ATTENTION SOURCE PRODUCER (`orgfy.pipeline` — inclui run(input) obrigatório)
+  // 5. NATIVE BUZZ ATTENTION SOURCE PRODUCER (`orgfy.pipeline` — eventos reais + polling dedup)
   try {
     const agents = ctx?.agents;
     if (agents?.addAttentionSource) {
-      agents.addAttentionSource({
-        id: "orgfy.pipeline",
-        description:
-          "Emite eventos estruturados da esteira OrgFy (card.ready_for_review, gate.rejected_dsap, loop.detected, budget.80pct) compatíveis com classifier pré-LLM.",
-        configExample: { empresa: "orgfy" },
-        present: (watch: any, title: string) => ({
-          type: "OrgFy Esteira",
-          target: String(watch?.config?.empresa || "orgfy"),
-          subtitle: title || "Monitoramento determinístico de cards, PRs e loops",
-        }),
-        run: (input: any) =>
-          new Promise<void>((resolve) => {
-            if (input?.signal?.aborted) {
-              resolve();
-              return;
-            }
-            input?.signal?.addEventListener?.("abort", () => resolve(), { once: true });
-          }),
-      });
+      agents.addAttentionSource(createOrgfyPipelineAttentionSource(ctx));
       state.attentionSourceRegistered = true;
     }
   } catch (err) {
