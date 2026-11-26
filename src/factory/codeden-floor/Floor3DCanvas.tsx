@@ -24,11 +24,12 @@ import { readPalette } from "./floor/palette";
 import { FloorStage, type ScreenFigure } from "./floor/stage";
 
 function toCodeDenStage(item: OrgfyWorkItem): ViewStageId {
-  if (item.stage === "merged") return "merged";
-  if (item.step === "merge" || item.stage === "watching") return "merge";
-  if (item.stage === "verifying" || String(item.step).includes("review")) return "reviewing";
-  if (item.stage === "building") return "building";
-  if (item.stage === "candidate" || item.step === "intake") return "type";
+  const st = String(item.stage || "");
+  if (st === "merged") return "merged";
+  if (item.step === "merge" || st === "watching") return "merge";
+  if (st === "verifying" || String(item.step).includes("review")) return "reviewing";
+  if (st === "building" || st === "in_progress") return "building";
+  if (st === "candidate" || item.step === "intake") return "type";
   return "intake";
 }
 
@@ -97,7 +98,12 @@ function adaptStatusFor3D(
   const backlog = status.backlog.map(mapItem);
   const inProgress = status.inProgress.map(mapItem);
   const recent = status.recent.map(mapItem);
-  const allOrgfy = [...status.backlog, ...status.inProgress, ...status.recent];
+  // Limita a amostra no palco 3D para manter fluidez e leitura clara das caixas e bancadas
+  const allOrgfy = [
+    ...status.backlog.slice(0, 12),
+    ...status.inProgress.slice(0, 16),
+    ...status.recent.slice(0, 8),
+  ];
 
   const stages: Record<ViewStageId, ViewCard[]> = {
     intake: [],
@@ -112,12 +118,19 @@ function adaptStatusFor3D(
   for (const raw of allOrgfy) {
     const item = mapItem(raw);
     const place = toCodeDenStage(raw);
-    const isFailed = raw.stage === "failed" || raw.stage === "reverted";
-    const isPerson = raw.stage === "escalated";
+    const stageStr = String(raw.stage || "");
+    const isFailed = stageStr === "failed" || stageStr === "reverted";
+    const isPerson = stageStr === "escalated";
     const card: ViewCard = {
       item,
       place: isFailed || isPerson ? "needs_you" : place,
-      state: isFailed ? "failed" : isPerson ? "person" : raw.stage === "building" || raw.stage === "verifying" ? "running" : "idle",
+      state: isFailed
+        ? "failed"
+        : isPerson
+        ? "person"
+        : stageStr === "building" || stageStr === "in_progress" || stageStr === "verifying"
+        ? "running"
+        : "idle",
       need: isFailed
         ? { kind: "retry", label: "Retry" }
         : isPerson
@@ -218,6 +231,8 @@ interface SpeechBubbleEntry {
   picture?: string;
   kind: "working" | "error" | "done";
   turn: LiveAgentTurn;
+  /** Todos os turnos simultâneos deste agente (evita empilhar vários balões no mesmo bonequinho) */
+  turns: LiveAgentTurn[];
   finishedAt?: number;
 }
 
@@ -332,7 +347,7 @@ export function createFloor3DComponent(ctx: Context) {
       }
     }, [telemetry]);
 
-    // Posiciona os balões HTML diretamente sobre a cabeça de cada bonequinho 3D (60fps sem re-render React)
+    // Posiciona os balões HTML sobre a cabeça dos bonequinhos 3D com anti-colisão entre agentes vizinhos (60fps)
     const positionBubbles = React.useCallback((figures: readonly ScreenFigure[]) => {
       const host = hostRef.current;
       if (!host) return;
@@ -340,6 +355,8 @@ export function createFloor3DComponent(ctx: Context) {
       const hostH = host.clientHeight || 1;
       const byKey = new Map<string, ScreenFigure>();
       for (const f of figures) byKey.set(f.key, f);
+
+      const candidates: Array<{ node: HTMLDivElement; cx: number; bottom: number; w: number; h: number }> = [];
       for (const [figKey, node] of bubbleNodesRef.current.entries()) {
         const fig = byKey.get(figKey);
         if (!fig || !fig.head.inView) {
@@ -347,11 +364,45 @@ export function createFloor3DComponent(ctx: Context) {
           node.style.pointerEvents = "none";
           continue;
         }
-        const clampedX = Math.max(124, Math.min(hostW - 124, fig.head.x));
-        const clampedY = Math.max(92, Math.min(hostH - 22, fig.head.y - 16));
-        node.style.transform = `translate3d(${Math.round(clampedX)}px, ${Math.round(clampedY)}px, 0) translate(-50%, -100%)`;
-        node.style.opacity = "1";
-        node.style.pointerEvents = "auto";
+        const w = node.offsetWidth || 228;
+        const h = node.offsetHeight || 88;
+        const halfW = w / 2 + 8;
+        const cx = Math.max(halfW, Math.min(hostW - halfW, fig.head.x));
+        const bottom = Math.max(h + 12, Math.min(hostH - 20, fig.head.y - 16));
+        candidates.push({ node, cx, bottom, w, h });
+      }
+
+      // Ordena da esquerda para a direita e resolve sobreposição de bounding boxes entre balões vizinhos
+      candidates.sort((a, b) => a.cx - b.cx || b.bottom - a.bottom);
+      const placed: Array<{ left: number; right: number; top: number; bottom: number }> = [];
+      const PAD = 10;
+      for (const c of candidates) {
+        let cx = c.cx;
+        let bottom = c.bottom;
+        const halfW = c.w / 2;
+        for (let guard = 0; guard < 6; guard++) {
+          const left = cx - halfW;
+          const right = cx + halfW;
+          const top = bottom - c.h;
+          const hit = placed.find(
+            (p) => left < p.right + PAD && right > p.left - PAD && top < p.bottom + PAD && bottom > p.top - PAD
+          );
+          if (!hit) break;
+          const nextBottom = hit.top - PAD;
+          if (nextBottom - c.h >= 12) {
+            bottom = nextBottom;
+          } else {
+            const shiftRight = hit.right + PAD + halfW;
+            const shiftLeft = hit.left - PAD - halfW;
+            if (shiftRight + halfW <= hostW - 8) cx = shiftRight;
+            else if (shiftLeft - halfW >= 8) cx = shiftLeft;
+            else bottom = Math.max(c.h + 12, nextBottom);
+          }
+        }
+        placed.push({ left: cx - halfW, right: cx + halfW, top: bottom - c.h, bottom });
+        c.node.style.transform = `translate3d(${Math.round(cx)}px, ${Math.round(bottom)}px, 0) translate(-50%, -100%)`;
+        c.node.style.opacity = "1";
+        c.node.style.pointerEvents = "auto";
       }
     }, []);
 
@@ -460,7 +511,13 @@ export function createFloor3DComponent(ctx: Context) {
       for (const ag of tenantAgents) {
         const pk = (ag.pubkey || "").toLowerCase();
         if (!pk) continue;
-        const liveTurn = telemetry?.byPubkey?.[pk] || null;
+        const liveTurnsList: LiveAgentTurn[] =
+          telemetry?.turnsByPubkey?.[pk]?.length
+            ? telemetry.turnsByPubkey[pk]
+            : telemetry?.byPubkey?.[pk]
+            ? [telemetry.byPubkey[pk]]
+            : [];
+        const liveTurn = liveTurnsList[0] || null;
         const doneRec = completedTurns[pk];
         const hasFreshDone = Boolean(doneRec && !doneRec.dismissed && now - doneRec.finishedAt < COMPLETED_BUBBLE_TTL_MS);
         if (!liveTurn && !hasFreshDone) continue;
@@ -470,14 +527,16 @@ export function createFloor3DComponent(ctx: Context) {
         usedFigures.add(figureKey);
         const liveMatch = liveCrew.find((c) => c.key === ag.agentKey || (c.pubkey && c.pubkey.toLowerCase() === pk));
         if (liveTurn) {
+          const hasError = liveTurnsList.some((t) => t.state === "error");
           entries.push({
             figureKey,
             agentKey: ag.agentKey,
             agentPubkey: pk,
             agentName: ag.name,
             picture: liveMatch?.picture,
-            kind: liveTurn.state === "error" ? "error" : "working",
+            kind: hasError ? "error" : "working",
             turn: liveTurn,
+            turns: liveTurnsList,
           });
         } else if (doneRec) {
           entries.push({
@@ -488,6 +547,7 @@ export function createFloor3DComponent(ctx: Context) {
             picture: liveMatch?.picture,
             kind: "done",
             turn: doneRec.turn,
+            turns: [doneRec.turn],
             finishedAt: doneRec.finishedAt,
           });
         }
@@ -841,21 +901,90 @@ export function createFloor3DComponent(ctx: Context) {
                       "×"
                     )
                 ),
-                h(
-                  "div",
-                  {
-                    style: {
-                      fontSize: "11px",
-                      color: isErr ? "#fca5a5" : "rgba(229, 231, 235, 0.88)",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                      lineHeight: 1.35,
-                    },
-                    title: b.turn.stepLabel,
-                  },
-                  isDone ? "Resposta pronta no chat do Buzz" : b.turn.stepLabel || "Pensando..."
-                ),
+                !isDone && b.turns.length > 1
+                  ? h(
+                      "div",
+                      {
+                        "data-floor3d-multi-session": String(b.turns.length),
+                        style: { display: "flex", flexDirection: "column", gap: "4px" },
+                      },
+                      h(
+                        "div",
+                        { style: { fontSize: "9.5px", color: accentColor, fontWeight: 600 } },
+                        `${b.turns.length} sessões simultâneas`
+                      ),
+                      ...b.turns.slice(0, 3).map((t, idx) =>
+                        h(
+                          "div",
+                          {
+                            key: `${t.channelId}:${t.threadRootId || t.messageId || idx}`,
+                            style: {
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "5px",
+                              padding: "3px 6px",
+                              borderRadius: "6px",
+                              background: "rgba(255,255,255,0.04)",
+                              fontSize: "10.5px",
+                            },
+                          },
+                          h(
+                            "span",
+                            {
+                              style: {
+                                flex: 1,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                                color: t.state === "error" ? "#fca5a5" : "rgba(229, 231, 235, 0.9)",
+                              },
+                              title: t.stepLabel,
+                            },
+                            t.stepLabel || "Pensando..."
+                          ),
+                          h("span", { className: "of-mono of-muted", style: { fontSize: "9px", flexShrink: 0 } }, formatBubbleClock(t.startedAt)),
+                          h(
+                            "button",
+                            {
+                              type: "button",
+                              onClick: (ev: any) => {
+                                ev.stopPropagation();
+                                if (t.channelId && onOpenTurnInSideChat) onOpenTurnInSideChat(t);
+                                else if (onOpenAgentDm) onOpenAgentDm({ key: b.agentKey, pubkey: b.agentPubkey, name: b.agentName });
+                              },
+                              style: {
+                                border: "none",
+                                background: "transparent",
+                                color: accentColor,
+                                cursor: "pointer",
+                                padding: 0,
+                                fontSize: "9.5px",
+                                fontWeight: 600,
+                                flexShrink: 0,
+                              },
+                            },
+                            "Ver ↗"
+                          )
+                        )
+                      ),
+                      b.turns.length > 3 &&
+                        h("span", { className: "of-muted", style: { fontSize: "9.5px" } }, `+${b.turns.length - 3} sessões ativas`)
+                    )
+                  : h(
+                      "div",
+                      {
+                        style: {
+                          fontSize: "11px",
+                          color: isErr ? "#fca5a5" : "rgba(229, 231, 235, 0.88)",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          lineHeight: 1.35,
+                        },
+                        title: b.turn.stepLabel,
+                      },
+                      isDone ? "Resposta pronta no chat do Buzz" : b.turn.stepLabel || "Pensando..."
+                    ),
                 isDone
                   ? h(
                       "button",
@@ -876,7 +1005,8 @@ export function createFloor3DComponent(ctx: Context) {
                       },
                       "Abrir resposta ↗"
                     )
-                  : h(
+                  : b.turns.length <= 1 &&
+                    h(
                       "div",
                       {
                         style: {

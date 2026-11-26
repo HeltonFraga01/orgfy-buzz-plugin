@@ -105,8 +105,8 @@ export async function sendBuzzChatMessageOrWake(
           // usa channelMeta já carregado
         }
       }
-      const isDmOrSolo = channelMeta?.channelType === "dm" || channelMeta?.channelType === "solo";
-      const validRoot = !isDmOrSolo && isHex64(opts.threadRoot) ? opts.threadRoot.trim().toLowerCase() : undefined;
+      // session.messages.reply funciona tanto em canais quanto em DMs (verificado em buzz-app/src/features/relay/messages-dm-agent.test.ts)
+      const validRoot = isHex64(opts.threadRoot) ? opts.threadRoot.trim().toLowerCase() : undefined;
 
       // Valida menções conforme session.ts validateMentions (em DM 1:1 withDmAgents já inclui o agente automaticamente)
       let mentions: string[] = [];

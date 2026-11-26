@@ -41,10 +41,11 @@ function bucketStep(item: FactoryWorkItem, lane: "bug" | "feature" | "docs"): st
 }
 
 function toneOfItem(item: FactoryWorkItem): "running" | "waiting" | "done" | "failed" | "idle" {
-  if (item.stage === "failed" || item.stage === "reverted") return "failed";
-  if (item.stage === "escalated" || item.stage === "verifying") return "waiting";
-  if (item.stage === "building" || item.stage === "watching") return "running";
-  if (item.stage === "merged") return "done";
+  const stageStr = String(item.stage || "");
+  if (stageStr === "failed" || stageStr === "reverted") return "failed";
+  if (stageStr === "escalated" || stageStr === "verifying") return "waiting";
+  if (stageStr === "building" || stageStr === "in_progress" || stageStr === "watching") return "running";
+  if (stageStr === "merged") return "done";
   return "idle";
 }
 
@@ -56,7 +57,6 @@ export function renderPipelineDiagram(props: PipelineDiagramProps) {
     ...status.recent.filter((w) => w.stage === "escalated"),
   ];
   const mergeItems = live.filter((w) => w.step === "merge" || w.stage === "watching");
-  const recentMerged = status.recent.filter((w) => w.stage === "merged").slice(0, 4);
 
   const laneBuckets: Record<string, FactoryWorkItem[]> = {
     reproduce: [],
@@ -419,12 +419,16 @@ export function renderPipelineDiagram(props: PipelineDiagramProps) {
           badge: status.limits.autoMerge ? "Auto-merge" : "Humano",
           title: PT_BR.pipelines.mergeLabel,
           help: PT_BR.pipelines.mergeHelp,
-          items: mergeItems.length > 0 ? mergeItems : recentMerged,
+          items: mergeItems,
           width: "126px",
           footer: h(
             "span",
             { className: "of-muted", style: { fontSize: "10px" } },
-            status.limits.autoMerge ? "quando checks passam" : "pronto para GATE"
+            mergeItems.length > 0
+              ? status.limits.autoMerge
+                ? "quando checks passam"
+                : "pronto para GATE"
+              : "fila de merge vazia"
           ),
         })
       )

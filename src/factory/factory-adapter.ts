@@ -281,7 +281,8 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
   const base = buildEmptyFactoryStatus(slug);
   const host = (ctx as any)?.host;
 
-  const [kpiRes, cards, empresaJson, boardJson, evalMd, projectMd, agentsMd, regrasJson] = await Promise.all([
+  const stateRelPath = slug === "orgfy" ? ".esteira/estado/esteira-minima-state.json" : `.esteira/estado/esteira-minima-${slug}-state.json`;
+  const [kpiRes, cards, empresaJson, boardJson, evalMd, projectMd, agentsMd, regrasJson, esteiraState] = await Promise.all([
     fetchKpisEsteira(ctx).catch(() => ({ kpis: null, history: [], error: null })),
     fetchLiveKanbanCards(ctx, { empresa: slug }).catch(() => []),
     readOrgfyJson<any>(ctx, `empresas/${slug}.json`, null).catch(() => null),
@@ -290,6 +291,7 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
     readOrgfyText(ctx, "PROJECT.md").catch(() => null),
     readOrgfyText(ctx, "AGENTS.md").catch(() => null),
     readOrgfyJson<any>(ctx, ".esteira/estado/regras-probatorias.json", null).catch(() => null),
+    readOrgfyJson<any>(ctx, stateRelPath, null).catch(() => null),
   ]);
 
   let controle: Record<string, any> | null = null;
@@ -416,9 +418,84 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
     updatedAt: Date.now(),
   });
 
-  const backlog = cards.filter((c) => c.stage === "triagem").map(toWorkItem);
-  const inProgress = cards.filter((c) => c.stage === "despachado" || c.stage === "execucao" || c.stage === "revisao").map(toWorkItem);
+  const kanbanBacklog = cards.filter((c) => c.stage === "triagem").map(toWorkItem);
+  const kanbanInProgress = cards.filter((c) => c.stage === "despachado" || c.stage === "execucao" || c.stage === "revisao").map(toWorkItem);
   const recent = cards.filter((c) => c.stage === "feito").slice(0, 20).map(toWorkItem);
+
+  // Mescla snapshot real do coordenador (esteira-minima-state.json) para refletir open_prs e open_issues reais no 3D e no WIP
+  const boardSnap = esteiraState?.board_snapshot && typeof esteiraState.board_snapshot === "object" ? esteiraState.board_snapshot : null;
+  const openPrsRaw: any[] = Array.isArray(boardSnap?.open_prs) ? boardSnap.open_prs : [];
+  const openIssuesRaw: any[] = Array.isArray(boardSnap?.open_issues) ? boardSnap.open_issues : [];
+  const seenIds = new Set<string>([...kanbanBacklog, ...kanbanInProgress].map((w) => w.id));
+  const prWorkItems: FactoryWorkItem[] = openPrsRaw
+    .filter((p) => p?.id && !seenIds.has(String(p.id)))
+    .map((p) => {
+      const pid = String(p.id);
+      const title = String(p.title || `PR ${pid.slice(0, 8)}`);
+      return {
+        id: pid,
+        title,
+        workKey: `pr:${pid.slice(0, 12)}`,
+        stage: p.quarentena ? "escalated" : "verifying",
+        step: p.quarentena ? "quarantine" : "review",
+        type: /fix|bug|hotfix/i.test(title) ? "bug" : /doc|readme|prd/i.test(title) ? "docs" : "feature",
+        attempts: 1,
+        sessionId: null,
+        activeSessionId: null,
+        reason: p.quarentena ? "PR em quarentena no coordenador" : null,
+        note: p.branch ? `PR aberto · ${p.branch}` : "PR aberto aguardando revisão/GATE",
+        updatedAt: typeof p.created_at === "number" ? (p.created_at < 1e12 ? p.created_at * 1000 : p.created_at) : Date.now(),
+      };
+    });
+  const issueBacklogItems: FactoryWorkItem[] = openIssuesRaw
+    .filter((i) => i?.id && !i.assigned && !seenIds.has(String(i.id)))
+    .map((i) => {
+      const iid = String(i.id);
+      const title = String(i.title || `Issue ${iid.slice(0, 8)}`);
+      return {
+        id: iid,
+        title,
+        workKey: `issue:${iid.slice(0, 12)}`,
+        stage: "backlog",
+        step: "intake",
+        type: /fix|bug|hotfix/i.test(title) ? "bug" : /doc|readme|prd/i.test(title) ? "docs" : "feature",
+        attempts: 0,
+        sessionId: null,
+        activeSessionId: null,
+        reason: null,
+        note: null,
+        updatedAt: typeof i.created_at === "number" ? (i.created_at < 1e12 ? i.created_at * 1000 : i.created_at) : Date.now(),
+      };
+    });
+  const issueActiveItems: FactoryWorkItem[] = openIssuesRaw
+    .filter((i) => i?.id && i.assigned && !seenIds.has(String(i.id)))
+    .map((i) => {
+      const iid = String(i.id);
+      const title = String(i.title || `Issue ${iid.slice(0, 8)}`);
+      return {
+        id: iid,
+        title,
+        workKey: `issue:${iid.slice(0, 12)}`,
+        stage: "building",
+        step: "implement",
+        type: /fix|bug|hotfix/i.test(title) ? "bug" : /doc|readme|prd/i.test(title) ? "docs" : "feature",
+        attempts: 1,
+        sessionId: null,
+        activeSessionId: null,
+        reason: null,
+        note: "Issue atribuída no coordenador",
+        updatedAt: typeof i.created_at === "number" ? (i.created_at < 1e12 ? i.created_at * 1000 : i.created_at) : Date.now(),
+      };
+    });
+
+  const backlog = kanbanBacklog.length > 0 ? kanbanBacklog : issueBacklogItems;
+  const inProgress = [...kanbanInProgress, ...prWorkItems, ...(kanbanInProgress.length === 0 ? issueActiveItems.slice(0, 12) : [])];
+  const wipLimit = Number(controle?.limits?.prsAbertos ?? 6);
+  const realOpenPrs = openPrsRaw.length > 0 ? openPrsRaw.length : inProgress.length;
+  const wipHolding = realOpenPrs >= wipLimit;
+  const wipNote = wipHolding
+    ? `WIP bloqueando novos despachos: ${realOpenPrs} PRs abertos (limite configurado: ${wipLimit})`
+    : null;
 
   const kpis = kpiRes.kpis;
   const killSwitch = Boolean(controle?.killSwitch);
@@ -454,12 +531,14 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
     },
     activeSessions: tenantAgents.filter((a) => a.running).length,
     wip: {
-      openPrs: inProgress.length,
-      limit: Number(controle?.limits?.prsAbertos ?? 6),
-      holding: inProgress.length >= Number(controle?.limits?.prsAbertos ?? 6),
+      openPrs: realOpenPrs,
+      limit: wipLimit,
+      holding: wipHolding,
       waitingOnProvider: 0,
-      note: null,
+      note: wipNote,
     },
+    pullRequests: openPrsRaw,
+    quarentenaCount: esteiraState?.quarentena && typeof esteiraState.quarentena === "object" ? Object.keys(esteiraState.quarentena).length : 0,
     backlog,
     inProgress,
     recent,
