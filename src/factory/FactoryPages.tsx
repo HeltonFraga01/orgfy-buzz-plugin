@@ -947,43 +947,6 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
     return h(
       "div",
       { style: { display: "flex", flexDirection: "column", gap: "14px" } },
-      h(
-        "div",
-        { className: "of-card-pad", style: { display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "10px" } },
-        h(
-          "div",
-          null,
-          h("div", { style: { fontSize: "14.5px", fontWeight: 700 } }, `Canvas, Visão & Regras Injetadas · ${status.tenantManifest?.nome || tenant}`),
-          h(
-            "div",
-            { className: "of-muted", style: { marginTop: "2px" } },
-            ch?.available
-              ? `Canal #${ch.name} (${ch.visibility === "private" ? "Privado" : ch.visibility === "public" ? "Público" : "Ativo"} · ${ch.memberCount} membros${ch.description ? ` · ${ch.description}` : ""}) · sincronizado com session.canvas do Buzz.`
-              : "Fontes reais do OrgFy: empresas/board.json (Conselho), PROJECT.md + AGENTS.md + Canvas do canal no Buzz (Workspace) e regras-probatorias.json + ctx.agents.addInstructions (Agentes)."
-          )
-        ),
-        h(
-          "div",
-          { style: { display: "inline-flex", gap: "6px", flexWrap: "wrap" } },
-          props.onOpenChannelInBuzz &&
-            h(
-              "button",
-              { type: "button", className: "of-btn", onClick: props.onOpenChannelInBuzz },
-              "Chat Lateral #"
-            ),
-          (props.onOpenChannelFullPage || props.onOpenChannelInBuzz) &&
-            h(
-              "button",
-              {
-                type: "button",
-                className: "of-btn",
-                "data-variant": "primary",
-                onClick: () => (props.onOpenChannelFullPage ? props.onOpenChannelFullPage() : props.onOpenChannelInBuzz?.()),
-              },
-              "Abrir Canvas / Canal no Buzz ↗"
-            )
-        )
-      ),
       renderBuzzCanvasViewer({
         h,
         tenant,

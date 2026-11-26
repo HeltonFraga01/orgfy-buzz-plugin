@@ -44710,7 +44710,7 @@ function renderBuzzCanvasViewer(props) {
         { style: { display: "inline-flex", alignItems: "center", gap: "14px", flexWrap: "wrap" } },
         h(
           "div",
-          { style: { display: "inline-flex", alignItems: "center", gap: "6px" } },
+          { style: { display: "inline-flex", alignItems: "center", gap: "14px" } },
           [
             { id: "view", label: "Visualizar" },
             { id: "edit", label: isDirty ? "Editar •" : "Editar" },
@@ -44725,11 +44725,17 @@ function renderBuzzCanvasViewer(props) {
                 style: {
                   background: "transparent",
                   border: "none",
+                  borderRadius: 0,
+                  boxShadow: "none",
+                  outline: "none",
+                  appearance: "none",
+                  WebkitAppearance: "none",
                   borderBottom: mode === t.id ? "2px solid var(--foreground)" : "2px solid transparent",
                   color: mode === t.id ? "var(--foreground)" : "var(--muted-foreground)",
                   fontWeight: mode === t.id ? 600 : 500,
                   fontSize: "12.5px",
-                  padding: "4px 6px 6px",
+                  padding: "4px 2px 8px",
+                  marginBottom: "-9px",
                   cursor: "pointer"
                 }
               },
@@ -44930,7 +44936,7 @@ function fmtTokens(n) {
   return String(n);
 }
 function renderFactorySecondaryPage(props) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u, _v;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u;
   const {
     h,
     tab,
@@ -45709,47 +45715,11 @@ function renderFactorySecondaryPage(props) {
     return h(
       "div",
       { style: { display: "flex", flexDirection: "column", gap: "14px" } },
-      h(
-        "div",
-        { className: "of-card-pad", style: { display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "10px" } },
-        h(
-          "div",
-          null,
-          h("div", { style: { fontSize: "14.5px", fontWeight: 700 } }, `Canvas, Visão & Regras Injetadas · ${((_q = status.tenantManifest) == null ? void 0 : _q.nome) || tenant}`),
-          h(
-            "div",
-            { className: "of-muted", style: { marginTop: "2px" } },
-            (ch == null ? void 0 : ch.available) ? `Canal #${ch.name} (${ch.visibility === "private" ? "Privado" : ch.visibility === "public" ? "Público" : "Ativo"} · ${ch.memberCount} membros${ch.description ? ` · ${ch.description}` : ""}) · sincronizado com session.canvas do Buzz.` : "Fontes reais do OrgFy: empresas/board.json (Conselho), PROJECT.md + AGENTS.md + Canvas do canal no Buzz (Workspace) e regras-probatorias.json + ctx.agents.addInstructions (Agentes)."
-          )
-        ),
-        h(
-          "div",
-          { style: { display: "inline-flex", gap: "6px", flexWrap: "wrap" } },
-          props.onOpenChannelInBuzz && h(
-            "button",
-            { type: "button", className: "of-btn", onClick: props.onOpenChannelInBuzz },
-            "Chat Lateral #"
-          ),
-          (props.onOpenChannelFullPage || props.onOpenChannelInBuzz) && h(
-            "button",
-            {
-              type: "button",
-              className: "of-btn",
-              "data-variant": "primary",
-              onClick: () => {
-                var _a2;
-                return props.onOpenChannelFullPage ? props.onOpenChannelFullPage() : (_a2 = props.onOpenChannelInBuzz) == null ? void 0 : _a2.call(props);
-              }
-            },
-            "Abrir Canvas / Canal no Buzz ↗"
-          )
-        )
-      ),
       renderBuzzCanvasViewer({
         h,
         tenant,
-        channelName: (ch == null ? void 0 : ch.name) || ((_r = status.tenantManifest) == null ? void 0 : _r.nome) || tenant,
-        channelId: (ch == null ? void 0 : ch.channelId) || ((_s = status.tenantManifest) == null ? void 0 : _s.canal) || null,
+        channelName: (ch == null ? void 0 : ch.name) || ((_q = status.tenantManifest) == null ? void 0 : _q.nome) || tenant,
+        channelId: (ch == null ? void 0 : ch.channelId) || ((_r = status.tenantManifest) == null ? void 0 : _r.canal) || null,
         content: props.channelCanvas ?? null,
         draft: props.canvasDraft ?? props.channelCanvas ?? "",
         onChangeDraft: (v2) => {
@@ -45812,7 +45782,7 @@ function renderFactorySecondaryPage(props) {
         h(
           "section",
           { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-          h("div", { className: "of-meter-label" }, `2. Workspace & Arquivos de Contexto (${((_t = status.tenantManifest) == null ? void 0 : _t.nome) || tenant})`),
+          h("div", { className: "of-meter-label" }, `2. Workspace & Arquivos de Contexto (${((_s = status.tenantManifest) == null ? void 0 : _s.nome) || tenant})`),
           papeis.length > 0 && h(
             "div",
             { style: { display: "flex", flexWrap: "wrap", gap: "6px" } },
@@ -45887,7 +45857,7 @@ function renderFactorySecondaryPage(props) {
         h(
           "div",
           null,
-          h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Canal da Empresa no Buzz · #${(chInfo == null ? void 0 : chInfo.name) || ((_u = status.tenantManifest) == null ? void 0 : _u.nome) || tenant}`),
+          h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Canal da Empresa no Buzz · #${(chInfo == null ? void 0 : chInfo.name) || ((_t = status.tenantManifest) == null ? void 0 : _t.nome) || tenant}`),
           h(
             "div",
             { className: "of-muted", style: { marginTop: "2px" } },
@@ -46027,7 +45997,7 @@ function renderFactorySecondaryPage(props) {
     h(
       "div",
       { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-      h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Modo de autonomia · ${((_v = status.tenantManifest) == null ? void 0 : _v.nome) || tenant}`),
+      h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Modo de autonomia · ${((_u = status.tenantManifest) == null ? void 0 : _u.nome) || tenant}`),
       h("div", { className: "of-muted" }, "Suba um degrau por vez. Áreas protegidas e regra L-01 sempre permanecem ativas."),
       h(
         "div",

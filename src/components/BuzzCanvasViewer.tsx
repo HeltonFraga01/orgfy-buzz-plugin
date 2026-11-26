@@ -342,7 +342,7 @@ export function renderBuzzCanvasViewer(props: BuzzCanvasViewerProps) {
         { style: { display: "inline-flex", alignItems: "center", gap: "14px", flexWrap: "wrap" } },
         h(
           "div",
-          { style: { display: "inline-flex", alignItems: "center", gap: "6px" } },
+          { style: { display: "inline-flex", alignItems: "center", gap: "14px" } },
           ([
             { id: "view", label: "Visualizar" },
             { id: "edit", label: isDirty ? "Editar •" : "Editar" },
@@ -357,11 +357,17 @@ export function renderBuzzCanvasViewer(props: BuzzCanvasViewerProps) {
                 style: {
                   background: "transparent",
                   border: "none",
+                  borderRadius: 0,
+                  boxShadow: "none",
+                  outline: "none",
+                  appearance: "none",
+                  WebkitAppearance: "none",
                   borderBottom: mode === t.id ? "2px solid var(--foreground)" : "2px solid transparent",
                   color: mode === t.id ? "var(--foreground)" : "var(--muted-foreground)",
                   fontWeight: mode === t.id ? 600 : 500,
                   fontSize: "12.5px",
-                  padding: "4px 6px 6px",
+                  padding: "4px 2px 8px",
+                  marginBottom: "-9px",
                   cursor: "pointer",
                 },
               },
