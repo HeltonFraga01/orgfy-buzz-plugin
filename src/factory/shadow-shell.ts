@@ -52,6 +52,15 @@ export const FACTORY_SHADOW_CSS = `
   -webkit-font-smoothing: antialiased;
 }
 
+:host button, :host input, :host select, :host textarea,
+[data-orgfy-factory-root="true"] button,
+[data-orgfy-factory-root="true"] input,
+[data-orgfy-factory-root="true"] select,
+[data-orgfy-factory-root="true"] textarea {
+  font-family: inherit;
+  font-size: inherit;
+}
+
 @keyframes of-rise {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: none; }

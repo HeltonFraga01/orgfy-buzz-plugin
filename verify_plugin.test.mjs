@@ -2377,4 +2377,11 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     assert.ok(bundle.includes("RESULTADOS DE AUTOMAÇÃO"), "Grupo Resultados de Automação deve estar no bundle");
     assert.ok(bundle.includes("Digest da Fábrica"), "Card Digest da Fábrica deve estar no bundle");
   });
+
+  test("v18.4: Herança estrita da fonte padrão do Buzz em botões/inputs + fix de abertura segura de Thread vs Canal em AGORA", () => {
+    const css = orgfyMod.FACTORY_SHADOW_CSS;
+    assert.ok(css.includes('[data-orgfy-factory-root="true"] button'), "CSS deve forçar font-family/font-size inherit em botões");
+    const appSrc = fs.readFileSync(path.resolve(__dirname, "src", "factory", "FactoryApp.tsx"), "utf8");
+    assert.ok(appSrc.includes("verifiedThreadId"), "handleOpenTurnInSideChat deve validar threadRootId antes de abrir aba Thread");
+  });
 }

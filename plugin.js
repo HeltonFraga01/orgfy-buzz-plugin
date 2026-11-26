@@ -13123,6 +13123,15 @@ const FACTORY_SHADOW_CSS = `
   -webkit-font-smoothing: antialiased;
 }
 
+:host button, :host input, :host select, :host textarea,
+[data-orgfy-factory-root="true"] button,
+[data-orgfy-factory-root="true"] input,
+[data-orgfy-factory-root="true"] select,
+[data-orgfy-factory-root="true"] textarea {
+  font-family: inherit;
+  font-size: inherit;
+}
+
 @keyframes of-rise {
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: none; }
@@ -15966,6 +15975,8 @@ function renderFactoryOverviewPanel(props) {
                         border: "none",
                         background: "transparent",
                         color: "var(--foreground)",
+                        fontFamily: "inherit",
+                        fontSize: "12px",
                         cursor: "pointer"
                       }
                     },
@@ -16023,6 +16034,8 @@ function renderFactoryOverviewPanel(props) {
                           border: "none",
                           background: "transparent",
                           color: "var(--foreground)",
+                          fontFamily: "inherit",
+                          fontSize: "12px",
                           cursor: "pointer",
                           padding: 0
                         }
@@ -58053,9 +58066,23 @@ function createFactoryAppComponent(ctx, opts = {}) {
     );
     const handleOpenTurnInSideChat = React.useCallback(
       (turn) => {
+        var _a2, _b2, _c2, _d2, _e2, _f3, _g2;
         if (turn.channelId && openSideTabRef.current) {
+          const relaySession = (_c2 = (_b2 = (_a2 = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a2.snapshot) == null ? void 0 : _b2.call(_a2)) == null ? void 0 : _c2.session;
+          const rawThread = typeof turn.threadRootId === "string" ? turn.threadRootId.trim() : "";
+          const isHexEventId = /^[0-9a-f]{64}$/i.test(rawThread);
+          let verifiedThreadId = void 0;
+          if (isHexEventId && relaySession) {
+            try {
+              const chMsgs = (typeof ((_d2 = relaySession.messages) == null ? void 0 : _d2.snapshot) === "function" ? (_e2 = relaySession.messages.snapshot(turn.channelId)) == null ? void 0 : _e2.messages : null) || (typeof ((_f3 = relaySession.messages) == null ? void 0 : _f3.list) === "function" ? (_g2 = relaySession.messages.list(turn.channelId)) == null ? void 0 : _g2.messages : null);
+              if (Array.isArray(chMsgs) && chMsgs.some((m) => String((m == null ? void 0 : m.id) || "").toLowerCase() === rawThread.toLowerCase())) {
+                verifiedThreadId = rawThread;
+              }
+            } catch {
+            }
+          }
           const ok2 = openSideTabRef.current(
-            { channelId: turn.channelId, threadId: turn.threadRootId, messageId: turn.messageId },
+            verifiedThreadId ? { channelId: turn.channelId, threadId: verifiedThreadId, messageId: turn.messageId } : { channelId: turn.channelId },
             { keep: true }
           );
           if (ok2) {
