@@ -16,6 +16,7 @@ export interface FactoryOverviewProps {
   liveCrew?: LiveCrewAgent[];
   telemetry?: BuzzLiveTelemetrySnapshot;
   workingNowCount?: number;
+  otherTenantChannels?: string[];
   onOpenTurnInSideChat?: (turn: LiveAgentTurn) => void;
   onInterruptTurn?: (turn: LiveAgentTurn) => void;
   onOpenAgentDm?: (agent: { key?: string; pubkey?: string; name?: string }) => void;
@@ -131,7 +132,19 @@ export function renderFactoryOverviewPanel(props: FactoryOverviewProps) {
   const modelos = status.modelos || [];
   const porModelo = Array.isArray(economia?.por_modelo) ? economia.por_modelo : [];
   const tenantAgents = status.tenantManifest?.agentes || [];
-  const activeTurns = telemetry?.activeTurns || [];
+  const rawActiveTurns = telemetry?.activeTurns || [];
+  const tenantPubkeys = new Set(tenantAgents.map((a) => (a.pubkey || "").toLowerCase()).filter(Boolean));
+  const tenantNames = new Set(tenantAgents.map((a) => (a.name || "").trim().toLowerCase()).filter(Boolean));
+  const tenantChannelId = (status.tenantManifest?.canal || "").trim().toLowerCase();
+  const excludedChannels = new Set((props.otherTenantChannels || []).map((c) => c.trim().toLowerCase()).filter((c) => c && c !== tenantChannelId));
+  const activeTurns = rawActiveTurns.filter((t) => {
+    const turnCh = (t.channelId || "").trim().toLowerCase();
+    if (turnCh && excludedChannels.has(turnCh)) return false;
+    if (tenantChannelId && turnCh === tenantChannelId) return true;
+    const pk = (t.agentPubkey || "").toLowerCase();
+    const nm = (t.agentName || "").trim().toLowerCase();
+    return (pk && tenantPubkeys.has(pk)) || (nm && tenantNames.has(nm));
+  });
   const openPrs = status.pullRequests || [];
   const topModelName = porModelo[0]?.modelo ? String(porModelo[0].modelo) : (tenantAgents[0]?.model || PT_BR.labels.unavailable);
 

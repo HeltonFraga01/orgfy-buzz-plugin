@@ -16187,7 +16187,7 @@ function Meter(h, props) {
   );
 }
 function renderFactoryOverviewPanel(props) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o;
   const {
     h,
     tenant,
@@ -16224,9 +16224,21 @@ function renderFactoryOverviewPanel(props) {
   const modelos = status.modelos || [];
   const porModelo = Array.isArray(economia == null ? void 0 : economia.por_modelo) ? economia.por_modelo : [];
   const tenantAgents = ((_d = status.tenantManifest) == null ? void 0 : _d.agentes) || [];
-  const activeTurns = (telemetry == null ? void 0 : telemetry.activeTurns) || [];
+  const rawActiveTurns = (telemetry == null ? void 0 : telemetry.activeTurns) || [];
+  const tenantPubkeys = new Set(tenantAgents.map((a) => (a.pubkey || "").toLowerCase()).filter(Boolean));
+  const tenantNames = new Set(tenantAgents.map((a) => (a.name || "").trim().toLowerCase()).filter(Boolean));
+  const tenantChannelId = (((_e = status.tenantManifest) == null ? void 0 : _e.canal) || "").trim().toLowerCase();
+  const excludedChannels = new Set((props.otherTenantChannels || []).map((c) => c.trim().toLowerCase()).filter((c) => c && c !== tenantChannelId));
+  const activeTurns = rawActiveTurns.filter((t) => {
+    const turnCh = (t.channelId || "").trim().toLowerCase();
+    if (turnCh && excludedChannels.has(turnCh)) return false;
+    if (tenantChannelId && turnCh === tenantChannelId) return true;
+    const pk = (t.agentPubkey || "").toLowerCase();
+    const nm = (t.agentName || "").trim().toLowerCase();
+    return pk && tenantPubkeys.has(pk) || nm && tenantNames.has(nm);
+  });
   const openPrs = status.pullRequests || [];
-  const topModelName = ((_e = porModelo[0]) == null ? void 0 : _e.modelo) ? String(porModelo[0].modelo) : ((_f = tenantAgents[0]) == null ? void 0 : _f.model) || PT_BR.labels.unavailable;
+  const topModelName = ((_f = porModelo[0]) == null ? void 0 : _f.modelo) ? String(porModelo[0].modelo) : ((_g = tenantAgents[0]) == null ? void 0 : _g.model) || PT_BR.labels.unavailable;
   const nowRunningCount = activeTurns.length + status.inProgress.length;
   const queuedCount = status.backlog.length;
   const nextScheduleRows = [
@@ -16244,8 +16256,8 @@ function renderFactoryOverviewPanel(props) {
     },
     {
       id: "ci-runner",
-      title: `CI & Probes (${((_g = status.tenantManifest) == null ? void 0 : _g.ciModo) || "local"})`,
-      when: ((_h = status.tenantManifest) == null ? void 0 : _h.probesObrigatorios) ? `${status.tenantManifest.probesCount} probes` : "sob PR",
+      title: `CI & Probes (${((_h = status.tenantManifest) == null ? void 0 : _h.ciModo) || "local"})`,
+      when: ((_i = status.tenantManifest) == null ? void 0 : _i.probesObrigatorios) ? `${status.tenantManifest.probesCount} probes` : "sob PR",
       action: () => onNavigateTab == null ? void 0 : onNavigateTab("automations")
     },
     ...status.backlog.slice(0, 2).map((b) => ({
@@ -16616,14 +16628,14 @@ function renderFactoryOverviewPanel(props) {
         "div",
         { className: "of-panel-body" },
         // Alerta de Kill Switch / Pausa / Esteira Parada
-        (status.globalKillSwitch || status.pausedReason || ((_i = status.wip) == null ? void 0 : _i.holding) && ((_j = status.wip) == null ? void 0 : _j.note)) && h(
+        (status.globalKillSwitch || status.pausedReason || ((_j = status.wip) == null ? void 0 : _j.holding) && ((_k = status.wip) == null ? void 0 : _k.note)) && h(
           "div",
           { className: "of-alert-banner" },
           h("span", { style: { color: "var(--status-waiting)", fontWeight: 700 } }, "⚠"),
           h(
             "span",
             { style: { flex: 1 } },
-            status.globalKillSwitch ? "Kill switch global ativado: nenhuma fábrica da Holding está rodando." : status.pausedReason ? `Pausado: ${status.pausedReason}` : (_k = status.wip) == null ? void 0 : _k.note
+            status.globalKillSwitch ? "Kill switch global ativado: nenhuma fábrica da Holding está rodando." : status.pausedReason ? `Pausado: ${status.pausedReason}` : (_l = status.wip) == null ? void 0 : _l.note
           )
         ),
         // Pipelines ao vivo
@@ -17498,10 +17510,10 @@ function renderFactoryOverviewPanel(props) {
           },
           {
             id: "ci-probes",
-            name: `CI Runner & Probes (${((_l = status.tenantManifest) == null ? void 0 : _l.ciModo) || "local"})`,
-            desc: ((_m2 = status.tenantManifest) == null ? void 0 : _m2.ciCmd) || "ferramentas/ci.sh com isolamento de segredos e GATE humano",
+            name: `CI Runner & Probes (${((_m2 = status.tenantManifest) == null ? void 0 : _m2.ciModo) || "local"})`,
+            desc: ((_n = status.tenantManifest) == null ? void 0 : _n.ciCmd) || "ferramentas/ci.sh com isolamento de segredos e GATE humano",
             tone: "done",
-            badge: ((_n = status.tenantManifest) == null ? void 0 : _n.probesObrigatorios) ? `${status.tenantManifest.probesCount} probes` : "Habilitado"
+            badge: ((_o = status.tenantManifest) == null ? void 0 : _o.probesObrigatorios) ? `${status.tenantManifest.probesCount} probes` : "Habilitado"
           }
         ].map(
           (auto) => h(
@@ -65789,10 +65801,28 @@ Nota: ${evidence.note}`
     const abaixoMinimoCount = (status.modelos || []).filter((m) => m.abaixo_minimo).length;
     const founderEscalatedItems = [...status.inProgress, ...status.recent].filter((i) => i.stage === "escalated");
     const inboxCount = pendingQuestionCardsCount + status.held.length + founderEscalatedItems.length;
-    const activeWorkingTurnsCount = telemetry.activeTurns.filter((t) => t.state !== "error").length;
-    const tenantWorkingNowCount = tenantAgents.filter((a) => {
-      const turn = a.pubkey ? telemetry.byPubkey[a.pubkey.toLowerCase()] : void 0;
-      return Boolean(turn && turn.state !== "error");
+    const activeTenantChannelId = (resolveActiveChannelId(tenant) || "").trim().toLowerCase();
+    const otherTenantChannels = React.useMemo(() => {
+      const set = /* @__PURE__ */ new Set();
+      const boardCh = ((holding == null ? void 0 : holding.boardCanal) || "80529b52-ee97-40d4-ab4c-aa9d13b9bcee").trim().toLowerCase();
+      if (tenant !== "board" && boardCh && boardCh !== activeTenantChannelId) set.add(boardCh);
+      for (const e of (holding == null ? void 0 : holding.empresas) || []) {
+        const ch = (e.canal || "").trim().toLowerCase();
+        if (e.slug !== tenant && ch && ch !== activeTenantChannelId) set.add(ch);
+      }
+      return Array.from(set);
+    }, [holding, tenant, activeTenantChannelId]);
+    const otherTenantChannelSet = React.useMemo(() => new Set(otherTenantChannels), [otherTenantChannels]);
+    const tenantPubkeySet = React.useMemo(() => new Set(tenantAgents.map((a) => (a.pubkey || "").toLowerCase()).filter(Boolean)), [tenantAgents]);
+    const tenantNameSet = React.useMemo(() => new Set(tenantAgents.map((a) => (a.name || "").trim().toLowerCase()).filter(Boolean)), [tenantAgents]);
+    const tenantWorkingNowCount = telemetry.activeTurns.filter((t) => {
+      if (t.state === "error") return false;
+      const turnCh = (t.channelId || "").trim().toLowerCase();
+      if (turnCh && otherTenantChannelSet.has(turnCh)) return false;
+      if (activeTenantChannelId && turnCh === activeTenantChannelId) return true;
+      const pk = (t.agentPubkey || "").toLowerCase();
+      const nm = (t.agentName || "").trim().toLowerCase();
+      return pk && tenantPubkeySet.has(pk) || nm && tenantNameSet.has(nm);
     }).length;
     const tenantTotalAgentsCount = tenantAgents.length;
     const boardCount = status.backlog.length + status.inProgress.length;
@@ -65963,10 +65993,10 @@ Nota: ${evidence.note}`
                 { className: "of-pill", "data-tone": status.killSwitch ? "failed" : "done" },
                 status.killSwitch ? "Kill Switch ativo" : PT_BR.modes[status.mode] || status.mode
               ),
-              activeWorkingTurnsCount > 0 && h(
+              tenantWorkingNowCount > 0 && h(
                 "span",
-                { className: "of-pill", "data-tone": "running", title: "Turnos ativos em tempo real via session.agentActivity" },
-                `⚡ ${activeWorkingTurnsCount} respondendo`
+                { className: "of-pill", "data-tone": "running", title: `Turnos ativos em tempo real de ${empresaNome} via session.agentActivity` },
+                `⚡ ${tenantWorkingNowCount} respondendo`
               ),
               focusState.active && h(
                 "span",
@@ -66091,6 +66121,7 @@ Nota: ${evidence.note}`
                 liveCrew,
                 telemetry,
                 workingNowCount: tenantWorkingNowCount,
+                otherTenantChannels,
                 onOpenTurnInSideChat: handleOpenTurnInSideChat,
                 onInterruptTurn: handleInterruptTurn,
                 onOpenAgentDm: handleOpenAgentDmInBuzz,

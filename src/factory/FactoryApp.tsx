@@ -2101,11 +2101,31 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     const founderEscalatedItems = [...status.inProgress, ...status.recent].filter((i) => i.stage === "escalated");
     const inboxCount = pendingQuestionCardsCount + status.held.length + founderEscalatedItems.length;
 
-    // Contagem REAL de agentes respondendo agora nesta empresa (excluindo turnos em erro)
-    const activeWorkingTurnsCount = telemetry.activeTurns.filter((t) => t.state !== "error").length;
-    const tenantWorkingNowCount = tenantAgents.filter((a) => {
-      const turn = a.pubkey ? telemetry.byPubkey[a.pubkey.toLowerCase()] : undefined;
-      return Boolean(turn && turn.state !== "error");
+    // Canais de outras empresas (para isolar agentes compartilhados como Iris/Bento por empresa)
+    const activeTenantChannelId = (resolveActiveChannelId(tenant) || "").trim().toLowerCase();
+    const otherTenantChannels = React.useMemo(() => {
+      const set = new Set<string>();
+      const boardCh = (holding?.boardCanal || "80529b52-ee97-40d4-ab4c-aa9d13b9bcee").trim().toLowerCase();
+      if (tenant !== "board" && boardCh && boardCh !== activeTenantChannelId) set.add(boardCh);
+      for (const e of holding?.empresas || []) {
+        const ch = (e.canal || "").trim().toLowerCase();
+        if (e.slug !== tenant && ch && ch !== activeTenantChannelId) set.add(ch);
+      }
+      return Array.from(set);
+    }, [holding, tenant, activeTenantChannelId]);
+    const otherTenantChannelSet = React.useMemo(() => new Set(otherTenantChannels), [otherTenantChannels]);
+    const tenantPubkeySet = React.useMemo(() => new Set(tenantAgents.map((a) => (a.pubkey || "").toLowerCase()).filter(Boolean)), [tenantAgents]);
+    const tenantNameSet = React.useMemo(() => new Set(tenantAgents.map((a) => (a.name || "").trim().toLowerCase()).filter(Boolean)), [tenantAgents]);
+
+    // Contagem REAL de agentes respondendo agora SOMENTE nesta empresa (excluindo turnos em erro e canais de outras empresas)
+    const tenantWorkingNowCount = telemetry.activeTurns.filter((t) => {
+      if (t.state === "error") return false;
+      const turnCh = (t.channelId || "").trim().toLowerCase();
+      if (turnCh && otherTenantChannelSet.has(turnCh)) return false;
+      if (activeTenantChannelId && turnCh === activeTenantChannelId) return true;
+      const pk = (t.agentPubkey || "").toLowerCase();
+      const nm = (t.agentName || "").trim().toLowerCase();
+      return (pk && tenantPubkeySet.has(pk)) || (nm && tenantNameSet.has(nm));
     }).length;
     const tenantTotalAgentsCount = tenantAgents.length;
     const boardCount = status.backlog.length + status.inProgress.length;
@@ -2307,11 +2327,11 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                     { className: "of-pill", "data-tone": status.killSwitch ? "failed" : "done" },
                     status.killSwitch ? "Kill Switch ativo" : PT_BR.modes[status.mode] || status.mode
                   ),
-                  activeWorkingTurnsCount > 0 &&
+                  tenantWorkingNowCount > 0 &&
                     h(
                       "span",
-                      { className: "of-pill", "data-tone": "running", title: "Turnos ativos em tempo real via session.agentActivity" },
-                      `⚡ ${activeWorkingTurnsCount} respondendo`
+                      { className: "of-pill", "data-tone": "running", title: `Turnos ativos em tempo real de ${empresaNome} via session.agentActivity` },
+                      `⚡ ${tenantWorkingNowCount} respondendo`
                     ),
                   focusState.active &&
                     h(
@@ -2443,6 +2463,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                     liveCrew,
                     telemetry,
                     workingNowCount: tenantWorkingNowCount,
+                    otherTenantChannels,
                     onOpenTurnInSideChat: handleOpenTurnInSideChat,
                     onInterruptTurn: handleInterruptTurn,
                     onOpenAgentDm: handleOpenAgentDmInBuzz,
