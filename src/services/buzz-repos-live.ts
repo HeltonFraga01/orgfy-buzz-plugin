@@ -361,3 +361,178 @@ export function resolveBuzzIdentityName(
   if (fallbackMap?.has(pk)) return fallbackMap.get(pk)!;
   return /^[0-9a-f]{64}$/i.test(pk) ? `#${pk.slice(0, 8)}` : pk;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BUZZ REPOS GIT API (session.projectGit.read) + PARSER DE DIFF UNIFICADO
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface BuzzGitCommit {
+  hash: string;
+  author: string;
+  date: number;
+  subject: string;
+}
+
+export interface BuzzGitFileEntry {
+  path: string;
+  hash: string;
+  size: number;
+}
+
+export interface BuzzGitSnapshot {
+  head: string | null;
+  commits: BuzzGitCommit[];
+  files: BuzzGitFileEntry[];
+  readme: string | null;
+  file: { path: string; content: string | null; size: number } | null;
+  diff: string | null;
+}
+
+export interface ParsedDiffLine {
+  type: "add" | "del" | "ctx";
+  oldLine: number | null;
+  newLine: number | null;
+  text: string;
+}
+
+export interface ParsedDiffHunk {
+  header: string;
+  lines: ParsedDiffLine[];
+}
+
+export interface ParsedDiffFile {
+  path: string;
+  previousPath?: string;
+  status: "added" | "modified" | "deleted" | "renamed";
+  additions: number;
+  deletions: number;
+  hunks: ParsedDiffHunk[];
+}
+
+export async function readBuzzProjectGit(
+  ctx: Context | any,
+  opts: { owner?: string; dtag?: string; commit?: string; path?: string }
+): Promise<BuzzGitSnapshot | null> {
+  const session = typeof ctx?.relay?.snapshot === "function" ? ctx.relay.snapshot()?.session : null;
+  if (!session?.projectGit || typeof session.projectGit.read !== "function") return null;
+
+  const owner = /^[0-9a-f]{64}$/i.test(String(opts.owner || ""))
+    ? String(opts.owner).toLowerCase()
+    : DEFAULT_ORGFY_REPO_OWNER;
+  const dtag = String(opts.dtag || "orgfy").trim() || "orgfy";
+
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 9000);
+  try {
+    const input: Record<string, string> = { owner, dtag };
+    if (opts.commit && /^[0-9a-f]{7,40}$/i.test(opts.commit)) input.commit = opts.commit.toLowerCase();
+    if (opts.path && opts.path.trim()) input.path = opts.path.trim();
+    const res = await session.projectGit.read(input, ac.signal);
+    if (!res || typeof res !== "object") return null;
+    return {
+      head: typeof res.head === "string" ? res.head : null,
+      commits: Array.isArray(res.commits) ? res.commits : [],
+      files: Array.isArray(res.files) ? res.files : [],
+      readme: typeof res.readme === "string" ? res.readme : null,
+      file: res.file && typeof res.file === "object" ? res.file : null,
+      diff: typeof res.diff === "string" ? res.diff : null,
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export function parseUnifiedDiff(rawDiff: string | null | undefined): ParsedDiffFile[] {
+  if (!rawDiff || !rawDiff.trim()) return [];
+  const lines = rawDiff.replace(/\r\n/g, "\n").split("\n");
+  const files: ParsedDiffFile[] = [];
+  let current: ParsedDiffFile | null = null;
+  let currentHunk: ParsedDiffHunk | null = null;
+  let oldNum = 0;
+  let newNum = 0;
+
+  for (const line of lines) {
+    if (line.startsWith("diff --git ")) {
+      if (current) files.push(current);
+      const match = /^diff --git a\/(.+?) b\/(.+)$/.exec(line);
+      const aPath = match ? match[1] : "arquivo";
+      const bPath = match ? match[2] : aPath;
+      current = {
+        path: bPath,
+        previousPath: aPath !== bPath ? aPath : undefined,
+        status: aPath !== bPath ? "renamed" : "modified",
+        additions: 0,
+        deletions: 0,
+        hunks: [],
+      };
+      currentHunk = null;
+      continue;
+    }
+
+    if (!current) {
+      if (line.startsWith("+++ b/")) {
+        current = {
+          path: line.slice(6).trim() || "patch",
+          status: "modified",
+          additions: 0,
+          deletions: 0,
+          hunks: [],
+        };
+      }
+      continue;
+    }
+
+    if (line.startsWith("new file mode")) {
+      current.status = "added";
+      continue;
+    }
+    if (line.startsWith("deleted file mode")) {
+      current.status = "deleted";
+      continue;
+    }
+    if (line.startsWith("rename from ")) {
+      current.previousPath = line.slice(12).trim();
+      current.status = "renamed";
+      continue;
+    }
+    if (line.startsWith("rename to ")) {
+      current.path = line.slice(10).trim();
+      current.status = "renamed";
+      continue;
+    }
+    if (line.startsWith("--- ") || line.startsWith("+++ ") || line.startsWith("index ")) {
+      continue;
+    }
+
+    if (line.startsWith("@@ ")) {
+      const m = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+      oldNum = m ? Number(m[1]) : 1;
+      newNum = m ? Number(m[2]) : 1;
+      currentHunk = { header: line, lines: [] };
+      current.hunks.push(currentHunk);
+      continue;
+    }
+
+    if (currentHunk) {
+      if (line.startsWith("+")) {
+        current.additions += 1;
+        currentHunk.lines.push({ type: "add", oldLine: null, newLine: newNum++, text: line.slice(1) });
+      } else if (line.startsWith("-")) {
+        current.deletions += 1;
+        currentHunk.lines.push({ type: "del", oldLine: oldNum++, newLine: null, text: line.slice(1) });
+      } else if (line.startsWith(" ") || line === "") {
+        currentHunk.lines.push({
+          type: "ctx",
+          oldLine: oldNum++,
+          newLine: newNum++,
+          text: line.startsWith(" ") ? line.slice(1) : "",
+        });
+      }
+    }
+  }
+
+  if (current) files.push(current);
+  return files;
+}

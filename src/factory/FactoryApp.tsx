@@ -13,7 +13,8 @@ import {
 } from "./factory-adapter";
 import { attachFactoryShadowStyles, FACTORY_SHADOW_CSS } from "./shadow-shell";
 import { renderFactoryOverviewPanel } from "./FactoryOverviewPanel";
-import { renderAgentProfileDrawer, renderFactoryBoardAndFloor, renderItemSheetDrawer, type LiveCrewAgent } from "./FactoryBoardAndFloor";
+import { renderAgentProfileDrawer, renderFactoryBoardAndFloor, type LiveCrewAgent } from "./FactoryBoardAndFloor";
+import { createCodeDenInspectorDrawer } from "../components/CodeDenInspectorDrawer";
 import { createFloor3DComponent } from "./codeden-floor/Floor3DCanvas";
 import { createBoardroom3DComponent } from "./Boardroom3DCanvas";
 import { renderFactorySecondaryPage } from "./FactoryPages";
@@ -32,6 +33,7 @@ import {
   loadLiveRepoEntityDetail,
   loadLiveRepoSnapshot,
   openBuzzRepoEntity,
+  openPrInBuzz,
   openRepoTabInBuzz,
   resolveBuzzIdentityName,
   type LiveRepoEntityDetail,
@@ -79,6 +81,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
   const h = React.createElement;
   const Floor3D = createFloor3DComponent(ctx);
   const Boardroom3D = createBoardroom3DComponent(ctx);
+  const CodeDenInspectorDrawer = createCodeDenInspectorDrawer(React);
 
   return function OrgFyFactoryApp() {
     const [tenant, setTenant] = React.useState<string>("orgfy");
@@ -1221,20 +1224,35 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
           )
         )
       ),
-      renderItemSheetDrawer({
-        h,
+      h(CodeDenInspectorDrawer, {
+        ctx,
         item: selectedItem,
         tenant,
+        repoOwner: liveRepo?.owner || DEFAULT_ORGFY_REPO_OWNER,
+        repoDtag: liveRepo?.dtag || tenant,
         repoDetail: selectedItemDetail,
         repoLoading: selectedItemDetailLoading,
+        linkedPr: selectedItem && liveRepo?.prs?.length
+          ? liveRepo.prs.find((pr) =>
+              pr.id === selectedItem.id ||
+              (selectedItem.workKey && pr.title.toLowerCase().includes(selectedItem.workKey.toLowerCase())) ||
+              pr.title.toLowerCase().includes(selectedItem.title.slice(0, 24).toLowerCase())
+            ) || null
+          : null,
+        liveCrew,
+        liveTurnsByPubkey: telemetry.byPubkey,
         resolveAuthor: (pk: string) => resolveBuzzIdentityName(ctx, pk, nameByPubkey),
         EmbeddedThread: (ctx as any)?.conversation?.ui?.Thread,
         threadChannelId: status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === tenant)?.canal || null,
         relaySession: relaySnap?.session,
         relayScope: typeof relaySnap?.scope === "string" ? relaySnap.scope : null,
-        onOpenCommitInBuzz: handleOpenCommitInBuzz,
-        onClose: () => setSelectedItem(null),
         onOpenInBuzz: handleOpenInBuzz,
+        onOpenPrInBuzz: (pr: any) => void openPrInBuzz(ctx, pr),
+        onOpenRepoPrsInBuzz: () => void openRepoTabInBuzz(ctx, { owner: liveRepo?.owner, dtag: liveRepo?.dtag || tenant, tab: "prs" }),
+        onOpenCommitInBuzz: handleOpenCommitInBuzz,
+        onOpenAgentDm: handleOpenAgentDmInBuzz,
+        onSessionAction: handleAgentSessionAction,
+        onClose: () => setSelectedItem(null),
       }),
       renderAgentProfileDrawer({
         h,
