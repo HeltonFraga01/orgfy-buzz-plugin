@@ -679,8 +679,29 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     const handleOpenTurnInSideChat = React.useCallback(
       (turn: LiveAgentTurn) => {
         if (turn.channelId && openSideTabRef.current) {
+          const relaySession = (ctx as any)?.relay?.snapshot?.()?.session;
+          const rawThread = typeof turn.threadRootId === "string" ? turn.threadRootId.trim() : "";
+          const isHexEventId = /^[0-9a-f]{64}$/i.test(rawThread);
+          let verifiedThreadId: string | undefined = undefined;
+          if (isHexEventId && relaySession) {
+            try {
+              // Só abre como Thread se a mensagem raiz realmente existir no canal; evita "This message isn't available." em wakes/workflows
+              const chMsgs =
+                (typeof relaySession.messages?.snapshot === "function"
+                  ? relaySession.messages.snapshot(turn.channelId)?.messages
+                  : null) ||
+                (typeof relaySession.messages?.list === "function"
+                  ? relaySession.messages.list(turn.channelId)?.messages
+                  : null);
+              if (Array.isArray(chMsgs) && chMsgs.some((m: any) => String(m?.id || "").toLowerCase() === rawThread.toLowerCase())) {
+                verifiedThreadId = rawThread;
+              }
+            } catch {}
+          }
           const ok = openSideTabRef.current(
-            { channelId: turn.channelId, threadId: turn.threadRootId, messageId: turn.messageId },
+            verifiedThreadId
+              ? { channelId: turn.channelId, threadId: verifiedThreadId, messageId: turn.messageId }
+              : { channelId: turn.channelId },
             { keep: true }
           );
           if (ok) {
