@@ -314,6 +314,11 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     const [evalFilter, setEvalFilter] = React.useState<"all" | "attention" | "approved">("all");
     const [mcpSearch, setMcpSearch] = React.useState<string>("");
     const [mcpCategory, setMcpCategory] = React.useState<string>("all");
+    const [usageDimension, setUsageDimension] = React.useState<"provider" | "model" | "project" | "role" | "source">("model");
+    const [usageMetric, setUsageMetric] = React.useState<"cost" | "tokens">("cost");
+    const [usageHoverDay, setUsageHoverDay] = React.useState<number | null>(null);
+    const [usageFilterModel, setUsageFilterModel] = React.useState<string | null>(null);
+    const [pricesOpen, setPricesOpen] = React.useState<boolean>(false);
 
     const [settingsForm, setSettingsFormState] = React.useState<{
       mode: AutonomyMode;
@@ -1988,6 +1993,17 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                     onMigrateSingleAgentModel: async (agentKey: string, target: { provider: string; model: string }) => {
                       await handleSaveAgentProfile(agentKey, { provider: target.provider, model: target.model });
                     },
+                    usageDimension,
+                    setUsageDimension,
+                    usageMetric,
+                    setUsageMetric,
+                    usageHoverDay,
+                    setUsageHoverDay,
+                    usageFilterModel,
+                    setUsageFilterModel,
+                    pricesOpen,
+                    setPricesOpen,
+                    onOpenSettings: () => setTab("settings"),
                   })
             )
           )

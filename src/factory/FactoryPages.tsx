@@ -19,6 +19,7 @@ import type { BuzzNativeUsageSnapshot } from "../services/buzz-usage-live";
 import type { BuzzFocusState } from "../services/buzz-focus";
 import type { CommandIntegrityAuditSummary } from "../services/command-integrity";
 import { PT_BR } from "../i18n/pt-BR";
+import { renderFactoryUsageAndCostPage, type UsageDimension, type UsageMetric } from "./FactoryUsageAndCostPage";
 
 export interface FactorySecondaryPagesProps {
   h: any;
@@ -133,6 +134,17 @@ export interface FactorySecondaryPagesProps {
   setMcpCategory?: (v: string) => void;
   onOpenAgentProfile?: (target: { key?: string; pubkey?: string; name?: string } | string) => void;
   onMigrateSingleAgentModel?: (agentKey: string, target: { provider: string; model: string }) => Promise<void> | void;
+  usageDimension?: UsageDimension;
+  setUsageDimension?: (d: UsageDimension) => void;
+  usageMetric?: UsageMetric;
+  setUsageMetric?: (m: UsageMetric) => void;
+  usageHoverDay?: number | null;
+  setUsageHoverDay?: (i: number | null) => void;
+  usageFilterModel?: string | null;
+  setUsageFilterModel?: (m: string | null) => void;
+  pricesOpen?: boolean;
+  setPricesOpen?: (v: boolean) => void;
+  onOpenSettings?: () => void;
 }
 
 const CHART_COLORS = ["var(--chart-2)", "var(--chart-1)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"];
@@ -627,220 +639,31 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
     );
   }
 
-  // ── 3. USO & CUSTOS (1:1 CodeDen Usage & Cost adaptado a kpis-esteira.json + orçamento por empresa) ──
+  // ── 3. USO & CUSTOS (1:1 CodeDen Usage & Cost via FactoryUsageAndCostPage.tsx) ──
   if (tab === "costs") {
-    const economia = status.kpis?.economia || null;
-    const qualidade = status.kpis?.qualidade || null;
-    const porModelo = Array.isArray(economia?.por_modelo) ? economia.por_modelo : [];
-    const totalCost = porModelo.reduce((acc: number, r: any) => acc + Number(r.custo_usd || 0), 0);
-    const maxCost = Math.max(0.01, ...porModelo.map((r: any) => Number(r.custo_usd || 0)));
-    const empresas = holding?.empresas || [];
-
-    return h(
-      "div",
-      { style: { display: "flex", flexDirection: "column", gap: "14px" } },
-      h(
-        "div",
-        { style: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" } },
-        h(
-          "div",
-          { style: { display: "inline-flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
-          h(
-            "div",
-            { className: "of-segmented" },
-            (["7d", "30d", "90d"] as const).map((r) =>
-              h(
-                "button",
-                {
-                  key: r,
-                  type: "button",
-                  className: "of-seg-btn",
-                  "data-active": costRange === r ? "true" : "false",
-                  onClick: () => setCostRange(r),
-                },
-                r
-              )
-            )
-          ),
-          h("span", { className: "of-pill", "data-tone": "done" }, `Empresa em foco: ${status.tenantManifest?.nome || tenant}`)
-        ),
-        h("span", { className: "of-muted" }, `Fonte real: kpis-esteira.json (${status.kpis?.gerado_em || PT_BR.labels.unavailable})`)
-      ),
-      h(
-        "div",
-        { className: "of-surface", style: { padding: "8px 12px", fontSize: "11.5px", color: "var(--muted-foreground)" } },
-        "Custos equivalentes de API calculados a partir de kpis-esteira.json (sem dados sintéticos; modelos gratuitos/assinatura aparecem com $0.00 quando sem cobrança por token)."
-      ),
-      // 5 KPIs principais (UsageTotals do CodeDen)
-      h(
-        "div",
-        { className: "of-stats-6" },
-        [
-          {
-            label: "Custo equivalente API",
-            val: typeof economia?.custo_usd_total_amostra === "number" ? `$${economia.custo_usd_total_amostra.toFixed(2)}` : PT_BR.labels.unavailable,
-            sub: `gasto hoje: $${status.spendToday.usd.toFixed(2)}`,
-          },
-          {
-            label: "Tokens (7d)",
-            val: fmtTokens(economia?.tokens_7d),
-            sub: `orçamento/dia: ${fmtTokens(status.tenantManifest?.budgetTokensDiario)}`,
-          },
-          {
-            label: "Cache hit rate",
-            val: typeof economia?.cache_hit_ratio_pct === "number" ? `${economia.cache_hit_ratio_pct.toFixed(1)}%` : PT_BR.labels.unavailable,
-            sub: "reaproveitamento de contexto",
-          },
-          {
-            label: "Merges (7d)",
-            val: String(status.stats.merged7d),
-            sub: `hoje: ${status.mergesToday}`,
-          },
-          {
-            label: "FPY real",
-            val: typeof qualidade?.fpy_real_pct === "number" ? `${qualidade.fpy_real_pct.toFixed(1)}%` : PT_BR.labels.unavailable,
-            sub: `CPI mín: ${status.tenantManifest?.cpiMinimo ?? 0.85}`,
-          },
-        ].map((k) =>
-          h(
-            "div",
-            { key: k.label, className: "of-card-pad", style: { padding: "11px 13px" } },
-            h("div", { className: "of-meter-label" }, k.label),
-            h("div", { className: "of-num", style: { fontSize: "20px", fontWeight: 700, marginTop: "4px" } }, k.val),
-            h("div", { className: "of-muted", style: { fontSize: "10.5px", marginTop: "2px" } }, k.sub)
-          )
-        )
-      ),
-      // Telemetria nativa do Buzz (bundled/usage · ctx.agents.types()[...].usage)
-      h(
-        "div",
-        { className: "of-card-pad", "data-buzz-native-usage": "true", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-        h(
-          "div",
-          { style: { display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" } },
-          h(
-            "div",
-            null,
-            h("div", { style: { fontSize: "13.5px", fontWeight: 700 } }, "Telemetria Nativa do Buzz (bundled/usage · tempo real)"),
-            h("div", { className: "of-muted", style: { fontSize: "11px" } }, props.nativeUsage?.available ? `${props.nativeUsage.sessionsCount} sessões em ${props.nativeUsage.agentsCount} agentes locais · hoje: ${fmtTokens(props.nativeUsage.tokensToday)} tok · ${costRange}: ${fmtTokens(props.nativeUsage.tokensPeriod)} tok${props.nativeUsage.cacheHitPct !== null ? ` · cache ${props.nativeUsage.cacheHitPct}%` : ""}` : "Aguardando leitura de sessões locais via ctx.agents.types().usage...")
-          ),
-          props.onRefreshNativeUsage &&
-            h("button", { type: "button", className: "of-btn", style: { fontSize: "11px", padding: "4px 9px" }, onClick: props.onRefreshNativeUsage }, "Atualizar uso Buzz")
-        ),
-        props.nativeUsage?.available && props.nativeUsage.byAgent.length > 0 &&
-          h(
-            "table",
-            { className: "of-table" },
-            h("thead", null, h("tr", null, h("th", null, "Agente (Buzz)"), h("th", null, "Harness"), h("th", null, "Sessões"), h("th", null, "Hoje"), h("th", null, `Período (${props.nativeUsage.days}d)`), h("th", null, "Cache"))),
-            h(
-              "tbody",
-              null,
-              props.nativeUsage.byAgent.slice(0, 10).map((row) =>
-                h(
-                  "tr",
-                  { key: row.agentKey || row.name },
-                  h("td", { style: { fontWeight: 600 } }, row.name),
-                  h("td", { className: "of-mono of-muted" }, row.harness),
-                  h("td", { className: "of-mono" }, String(row.sessions)),
-                  h("td", { className: "of-mono" }, fmtTokens(row.tokensToday)),
-                  h("td", { className: "of-mono" }, fmtTokens(row.tokensPeriod)),
-                  h("td", { className: "of-mono" }, row.cacheHitPct !== null ? `${row.cacheHitPct}%` : "—")
-                )
-              )
-            )
-          )
-      ),
-      // Barra empilhada visual de participação por modelo + Tabela Breakdown (1:1 CodeDen SpendCard)
-      h(
-        "div",
-        { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "12px" } },
-        h(
-          "div",
-          { style: { display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" } },
-          h("div", { style: { fontSize: "13.5px", fontWeight: 700 } }, "Distribuição de gasto por modelo (kpis-esteira.json)"),
-          h("span", { className: "of-muted" }, `${porModelo.length} modelos na amostra`)
-        ),
-        porModelo.length > 0 &&
-          h(
-            "div",
-            { style: { display: "flex", height: "14px", borderRadius: "6px", overflow: "hidden", background: "var(--muted)", gap: "1px" } },
-            porModelo.slice(0, 8).map((row: any, idx: number) => {
-              const usd = Number(row.custo_usd || 0);
-              const pct = totalCost > 0 ? Math.max(1, (usd / totalCost) * 100) : 100 / Math.max(1, porModelo.length);
-              return h("div", {
-                key: `${row.modelo || idx}`,
-                title: `${row.modelo}: $${usd.toFixed(3)} (${pct.toFixed(1)}%)`,
-                style: { width: `${pct}%`, background: CHART_COLORS[idx % CHART_COLORS.length] },
-              });
-            })
-          ),
-        porModelo.length === 0
-          ? h("div", { className: "of-muted" }, PT_BR.labels.unavailable)
-          : h(
-              "table",
-              { className: "of-table" },
-              h(
-                "thead",
-                null,
-                h("tr", null, h("th", null, "Modelo"), h("th", null, "Participação"), h("th", null, "%"), h("th", null, "Custo USD"), h("th", null, "Chamadas"), h("th", null, "Cache"))
-              ),
-              h(
-                "tbody",
-                null,
-                porModelo.slice(0, 15).map((row: any, idx: number) => {
-                  const usd = Number(row.custo_usd || 0);
-                  const w = Math.min(100, (usd / maxCost) * 100);
-                  const sharePct = totalCost > 0 ? (usd / totalCost) * 100 : 0;
-                  const color = CHART_COLORS[idx % CHART_COLORS.length];
-                  return h(
-                    "tr",
-                    { key: `${row.modelo || idx}` },
-                    h(
-                      "td",
-                      { className: "of-mono", style: { display: "flex", alignItems: "center", gap: "7px" } },
-                      h("span", { style: { width: "8px", height: "8px", borderRadius: "2px", background: color, flexShrink: 0 } }),
-                      String(row.modelo || PT_BR.labels.unavailable)
-                    ),
-                    h(
-                      "td",
-                      { style: { width: "170px" } },
-                      h("div", { className: "of-bar-track", style: { marginTop: 0, height: "6px" } }, h("div", { className: "of-bar-fill", style: { width: `${w}%`, background: color } }))
-                    ),
-                    h("td", { className: "of-mono of-num of-muted" }, sharePct > 0 && sharePct < 1 ? "<1%" : `${Math.round(sharePct)}%`),
-                    h("td", { className: "of-mono of-num" }, typeof row.custo_usd === "number" ? `$${usd.toFixed(2)}` : PT_BR.labels.unavailable),
-                    h("td", { className: "of-mono of-num" }, String(row.requisicoes ?? row.chamadas ?? PT_BR.labels.unavailable)),
-                    h("td", { className: "of-mono of-num" }, typeof row.cache_hit_pct === "number" ? `${row.cache_hit_pct.toFixed(1)}%` : PT_BR.labels.unavailable)
-                  );
-                })
-              )
-            )
-      ),
-      empresas.length > 0 &&
-        h(
-          "div",
-          { className: "of-card-pad" },
-          h("div", { style: { fontSize: "13px", fontWeight: 700, marginBottom: "8px" } }, "Tetos de orçamento por empresa (empresas/*.json)"),
-          h(
-            "table",
-            { className: "of-table" },
-            h("thead", null, h("tr", null, h("th", null, "Empresa"), h("th", null, "Estágio"), h("th", null, "Agentes"), h("th", null, "Teto diário de tokens"))),
-            h(
-              "tbody",
-              null,
-              empresas.map((e) =>
-                h(
-                  "tr",
-                  { key: e.slug },
-                  h("td", { style: { fontWeight: 600 } }, e.workspaceBuzz || e.nome),
-                  h("td", null, h("span", { className: "of-pill", "data-tone": e.estagio === "operacional" ? "done" : "idle" }, e.estagio)),
-                  h("td", { className: "of-mono" }, `${e.agentesProntos}/${e.agentesTotal}`),
-                  h("td", { className: "of-mono" }, `${fmtTokens(e.budgetTokensDiario)} tokens/dia`)
-                )
-              )
-            )
-          )
-        )
-    );
+    return renderFactoryUsageAndCostPage({
+      h,
+      tenant,
+      status,
+      holding,
+      nativeUsage: props.nativeUsage,
+      onRefreshNativeUsage: props.onRefreshNativeUsage,
+      automations: props.automations,
+      costRange,
+      setCostRange,
+      usageDimension: props.usageDimension || "model",
+      setUsageDimension: props.setUsageDimension || (() => {}),
+      usageMetric: props.usageMetric || "cost",
+      setUsageMetric: props.setUsageMetric || (() => {}),
+      usageHoverDay: props.usageHoverDay ?? null,
+      setUsageHoverDay: props.setUsageHoverDay || (() => {}),
+      usageFilterModel: props.usageFilterModel ?? null,
+      setUsageFilterModel: props.setUsageFilterModel || (() => {}),
+      pricesOpen: Boolean(props.pricesOpen),
+      setPricesOpen: props.setPricesOpen || (() => {}),
+      onOpenSettings: props.onOpenSettings,
+      onCopyText: props.onCopyText,
+    });
   }
 
   // ── 4. AUTOMAÇÕES 1:1 CODEDEN (Automações | Execuções | Templates + Editor em 2 colunas) ──

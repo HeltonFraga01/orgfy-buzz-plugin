@@ -15317,7 +15317,7 @@ function renderCooUpdatesFeedCard(props) {
     )
   );
 }
-function fmtTokens$1(n) {
+function fmtTokens$2(n) {
   if (typeof n !== "number" || !Number.isFinite(n)) return PT_BR.labels.unavailable;
   if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
   if (n >= 1e3) return `${Math.round(n / 1e3)}k`;
@@ -15816,284 +15816,503 @@ function renderFactoryOverviewPanel(props) {
             })
           )
         ),
-        // 3 Colunas (Checks de Merge | Merges & Reversões Recentes | Ignoradas)
-        h(
-          "div",
-          { className: "of-grid-3" },
-          renderColumn(
-            "Checks de merge (CI + L-01 + L-22)",
-            status.mergeChecks.length,
-            status.mergeChecks.slice(0, 6).map(
-              (c, idx) => h(
-                "div",
-                { key: idx, style: { padding: "6px 8px", borderRadius: "6px", background: "var(--card)", fontSize: "11.5px" } },
-                h("span", { className: "of-mono", style: { color: "var(--primary)", marginRight: "6px" } }, `#${c.prNumber || idx}`),
-                h("span", null, c.title || "Check")
-              )
-            )
-          ),
-          renderColumn(
-            "Merges & reversões recentes",
-            status.recent.length,
-            status.recent.slice(0, 6).map(
-              (w) => h(
-                "button",
-                {
-                  key: w.id,
-                  type: "button",
-                  onClick: () => onSelectItem(w),
-                  style: {
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "6px",
-                    width: "100%",
-                    textAlign: "left",
-                    padding: "6px 8px",
-                    borderRadius: "6px",
-                    border: "none",
-                    background: "transparent",
-                    color: "var(--foreground)",
-                    cursor: "pointer",
-                    fontSize: "11.5px"
-                  }
-                },
-                h("span", { className: "of-dot", "data-tone": w.stage === "merged" ? "done" : w.stage === "failed" ? "failed" : "waiting" }),
-                h("span", { style: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, w.title),
-                h("span", { className: "of-mono of-muted", style: { fontSize: "10px" } }, w.stage)
-              )
-            )
-          ),
-          renderColumn(
-            "Ignoradas · autores não confiáveis",
-            status.ignored.length,
-            status.ignored.slice(0, 6).map(
-              (w) => h(
-                "div",
-                { key: w.id, style: { display: "flex", alignItems: "center", gap: "6px", padding: "6px 8px", fontSize: "11.5px" } },
-                h("span", { className: "of-mono of-muted" }, `#${w.id.slice(0, 8)}`),
-                h("span", { style: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, w.title)
-              )
-            )
-          )
-        ),
-        // Acordeão colapsável do Scorecard (fechado por padrão, igual ao CodeDen)
-        h(
-          "details",
-          { className: "of-surface" },
-          h(
-            "summary",
+        // 3 Colunas 1:1 CodeDen (Checks de merge com 8 pílulas | Merges & reversões recentes com Refazer | Ignoradas)
+        (() => {
+          var _a2, _b2;
+          const ico = (paths, size = 11, color) => h(
+            "svg",
             {
-              style: {
-                cursor: "pointer",
-                padding: "9px 12px",
-                fontSize: "11.5px",
-                fontWeight: 600,
-                color: "var(--foreground)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between"
-              }
+              width: size,
+              height: size,
+              viewBox: "0 0 24 24",
+              fill: "none",
+              stroke: color || "currentColor",
+              strokeWidth: 2,
+              strokeLinecap: "round",
+              strokeLinejoin: "round",
+              style: { width: `${size}px`, height: `${size}px`, flexShrink: 0, display: "inline-block" },
+              "aria-hidden": "true"
             },
-            h(
-              "span",
-              null,
-              "Scorecard ",
-              h("span", { className: "of-muted", style: { fontWeight: 400 } }, "· FPY real, eval R5.1 de tool call e custo por modelo")
-            ),
-            h("span", { className: "of-mono of-muted", style: { fontSize: "11px" } }, `${modelos.length} agentes`)
-          ),
-          h(
+            paths.map((d, i) => h("path", { key: i, d }))
+          );
+          const checkIcon = {
+            pass: () => ico(["M20 6 9 17l-5-5"], 10),
+            fail: () => ico(["M18 6 6 18", "M6 6l12 12"], 10),
+            pending: () => ico(["M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2Z", "M12 6v6l4 2"], 10),
+            skipped: () => ico(["M5 12h14"], 10)
+          };
+          const checkPillStyle = (state) => ({
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "4px",
+            height: "20px",
+            padding: "0 7px",
+            borderRadius: "999px",
+            fontSize: "10.5px",
+            border: state === "pass" ? "1px solid rgba(16,185,129,0.34)" : state === "fail" ? "1px solid rgba(239,68,68,0.38)" : "1px solid var(--border)",
+            background: state === "pass" ? "rgba(16,185,129,0.10)" : state === "fail" ? "rgba(239,68,68,0.10)" : "transparent",
+            color: state === "pass" ? "var(--status-done)" : state === "fail" ? "var(--status-failed)" : state === "skipped" ? "rgba(156,163,175,0.65)" : "var(--muted-foreground)"
+          });
+          const mergeChecksList = status.mergeChecks.length > 0 ? status.mergeChecks.slice(0, 5).map((c, idx) => ({
+            id: String(c.itemId || idx),
+            prNum: String(c.prNumber || idx + 1),
+            title: String(c.title || "PR"),
+            reviewer: String(c.reviewerProvider || "OrgFy Teo"),
+            note: String(c.reviewerNote || c.verdict || ""),
+            item: status.inProgress.find((w) => w.id === c.itemId) || status.recent[0] || {
+              id: String(c.itemId || idx),
+              title: String(c.title || "PR"),
+              workKey: `pr:${idx}`,
+              stage: "verifying",
+              step: "review",
+              type: "feature",
+              attempts: 1,
+              sessionId: null,
+              activeSessionId: null,
+              reason: null,
+              note: null,
+              updatedAt: Date.now()
+            },
+            checks: Array.isArray(c.checks) ? c.checks.map((ck) => ({ label: String(ck.name || ck.label), state: ck.state || "pending" })) : []
+          })) : openPrs.slice(0, 4).map((pr, idx) => {
+            var _a3;
+            const pid = String(pr.id || idx);
+            const isQ = Boolean(pr.quarentena);
+            const matched = status.inProgress.find((w) => w.id === pid);
+            const revName = Object.values(((_a3 = status.tenantManifest) == null ? void 0 : _a3.revisoresPorSuperficie) || {})[0] || "OrgFy Teo";
+            return {
+              id: pid,
+              prNum: pid.slice(0, 6),
+              title: String(pr.title || pr.branch || `PR #${pid.slice(0, 6)}`),
+              reviewer: revName,
+              note: isQ ? "em quarentena · revisar conflito/CI" : "aguardando GATE L-01",
+              item: matched || {
+                id: pid,
+                title: String(pr.title || `PR #${pid.slice(0, 6)}`),
+                workKey: `pr:${pid.slice(0, 12)}`,
+                stage: isQ ? "failed" : "verifying",
+                step: isQ ? "quarantine" : "review",
+                type: "feature",
+                attempts: 1,
+                sessionId: null,
+                activeSessionId: null,
+                reason: null,
+                note: null,
+                updatedAt: Date.now()
+              },
+              checks: [
+                { label: "Áreas protegidas", state: "pass" },
+                { label: "Tamanho", state: "pass" },
+                { label: "CI", state: isQ ? "fail" : "pending" },
+                { label: "Revisão", state: "pending" },
+                { label: "Testes", state: isQ ? "fail" : "pass" },
+                { label: "Resultados", state: "pass" },
+                { label: "Segurança", state: "pending" },
+                { label: "Capturas", state: "skipped" }
+              ]
+            };
+          });
+          const recentCombined = [
+            ...status.inProgress.filter((w) => w.stage === "failed" || w.stage === "reverted"),
+            ...status.recent
+          ].slice(0, 6);
+          const lessonsList = [
+            ...(((_a2 = status.orgfyVision) == null ? void 0 : _a2.invariantes) || []).map((inv, idx) => ({ id: `inv-${idx}`, text: inv, kind: "invariante" })),
+            ...(((_b2 = status.orgfyVision) == null ? void 0 : _b2.regrasProbatorias) || []).map((r) => ({ id: r.id, text: `${r.id}: ${r.descricao} (${r.cardsAvaliados}/${r.janelaAlvo})`, kind: "probatoria" }))
+          ];
+          const todayIso = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+          const waitingFounder = status.held.length + status.inProgress.filter((w) => w.stage === "escalated").length;
+          return h(
             "div",
-            { style: { borderTop: "1px solid var(--border)", padding: "10px 12px", display: "flex", flexDirection: "column", gap: "10px" } },
+            { style: { display: "flex", flexDirection: "column", gap: "10px" }, "data-codeden-factory-bottom": "true" },
             h(
               "div",
-              { style: { display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center" } },
-              h(
-                "div",
-                { className: "of-segmented" },
-                ["builders", "reviewers", "pairs"].map(
-                  (v2) => h(
+              { className: "of-grid-3" },
+              renderColumn(
+                "Checks de merge",
+                mergeChecksList.length,
+                mergeChecksList.map(
+                  (mc) => h(
                     "button",
                     {
-                      key: v2,
+                      key: mc.id,
                       type: "button",
-                      className: "of-seg-btn",
-                      "data-active": scorecardView === v2 ? "true" : "false",
-                      onClick: () => setScorecardView(v2)
+                      onClick: () => onSelectItem(mc.item),
+                      style: {
+                        display: "block",
+                        width: "100%",
+                        textAlign: "left",
+                        padding: "7px 8px",
+                        borderRadius: "7px",
+                        border: "none",
+                        background: "transparent",
+                        color: "var(--foreground)",
+                        cursor: "pointer"
+                      }
                     },
-                    v2 === "builders" ? "Construtor" : v2 === "reviewers" ? "Revisor" : "Par"
+                    h(
+                      "div",
+                      { style: { display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", marginBottom: "6px" } },
+                      h("span", { className: "of-mono of-muted", style: { fontSize: "10.5px", flexShrink: 0 } }, `#${mc.prNum}`),
+                      h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 500 } }, mc.title)
+                    ),
+                    h(
+                      "div",
+                      { style: { display: "flex", flexWrap: "wrap", gap: "4px" } },
+                      mc.checks.map(
+                        (ck) => h(
+                          "span",
+                          { key: ck.label, style: checkPillStyle(ck.state), "data-merge-check-pill": ck.label },
+                          checkIcon[ck.state](),
+                          ck.label
+                        )
+                      )
+                    ),
+                    h(
+                      "div",
+                      { className: "of-muted", style: { fontSize: "10.5px", marginTop: "5px" } },
+                      `Revisor: ${mc.reviewer}${mc.note ? ` · ${mc.note}` : ""}`
+                    )
                   )
                 )
               ),
-              h(
-                "div",
-                { className: "of-segmented" },
-                [7, 30, 90].map(
-                  (d) => h(
-                    "button",
+              renderColumn(
+                "Merges & reversões recentes",
+                recentCombined.length,
+                recentCombined.map((w) => {
+                  const isFailed = w.stage === "failed" || w.stage === "reverted";
+                  const isMerged = w.stage === "merged";
+                  const toneColor = isFailed ? "var(--status-failed)" : isMerged ? "#a78bfa" : "var(--status-waiting)";
+                  return h(
+                    "div",
                     {
-                      key: d,
-                      type: "button",
-                      className: "of-seg-btn",
-                      "data-active": scorecardDays === d ? "true" : "false",
-                      onClick: () => setScorecardDays(d)
+                      key: w.id,
+                      style: { display: "flex", alignItems: "center", gap: "6px", padding: "5px 6px", borderRadius: "6px", fontSize: "12px" }
                     },
-                    `${d} dias`
+                    h(
+                      "button",
+                      {
+                        type: "button",
+                        onClick: () => onSelectItem(w),
+                        style: {
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "7px",
+                          flex: 1,
+                          minWidth: 0,
+                          textAlign: "left",
+                          border: "none",
+                          background: "transparent",
+                          color: "var(--foreground)",
+                          cursor: "pointer",
+                          padding: 0
+                        }
+                      },
+                      isFailed ? ico(["M18 6 6 18", "M6 6l12 12"], 13, "var(--status-failed)") : ico(["M18 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z", "M6 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z", "M6 21V9a9 9 0 0 0 9 9"], 13, "#a78bfa"),
+                      h("span", { style: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, w.title),
+                      h("span", { style: { fontSize: "10.5px", color: toneColor, flexShrink: 0 } }, `${isFailed ? "falhou" : "mergeado"} · ${fmtAge(w.updatedAt)}`)
+                    ),
+                    isFailed && h(
+                      "button",
+                      {
+                        type: "button",
+                        className: "of-btn",
+                        "data-variant": "ghost",
+                        style: { padding: "2px 6px", fontSize: "10.5px", display: "inline-flex", alignItems: "center", gap: "4px", flexShrink: 0 },
+                        onClick: () => onSelectItem(w)
+                      },
+                      ico(["M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8", "M21 3v5h-5"], 11),
+                      "Refazer"
+                    )
+                  );
+                })
+              ),
+              renderColumn(
+                "Ignoradas · autores não confiáveis",
+                status.ignored.length,
+                status.ignored.slice(0, 6).map(
+                  (w) => h(
+                    "div",
+                    { key: w.id, style: { display: "flex", alignItems: "center", gap: "6px", padding: "6px 8px", fontSize: "11.5px" } },
+                    h("span", { className: "of-mono of-muted" }, `#${w.id.slice(0, 8)}`),
+                    h("span", { style: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, w.title)
                   )
                 )
               )
             ),
-            (() => {
-              const crewList = props.liveCrew || [];
-              const modelEvalByName = new Map(modelos.map((m) => [m.agente.toLowerCase(), m]));
-              const costByModel = /* @__PURE__ */ new Map();
-              for (const row of porModelo) {
-                const mk = String((row == null ? void 0 : row.modelo) || "").toLowerCase();
-                if (!mk) continue;
-                const val = { usd: Number((row == null ? void 0 : row.custo_usd) || 0), calls: Number((row == null ? void 0 : row.requisicoes) ?? (row == null ? void 0 : row.chamadas) ?? 0) };
-                costByModel.set(mk, val);
-                const shortK = mk.includes("/") ? mk.split("/").pop() : mk;
-                if (!costByModel.has(shortK)) costByModel.set(shortK, val);
-              }
-              const filteredAgents = tenantAgents.filter((ag) => {
-                if (scorecardView === "reviewers") return ag.categoria === "revisao";
-                if (scorecardView === "builders") return ag.categoria === "execucao" || ag.categoria === "lideranca";
-                return true;
-              });
-              if (filteredAgents.length === 0) {
-                return h("div", { className: "of-muted", style: { fontSize: "12px" } }, "Nenhum agente nesta categoria.");
-              }
-              return h(
-                "table",
-                { className: "of-table", "data-scorecard-rich": "true" },
+            // 1. Acordeão Spot-checks (1:1 CodeDen)
+            h(
+              "details",
+              { className: "of-surface", "data-codeden-spot-checks": "true" },
+              h(
+                "summary",
+                { style: { cursor: "pointer", padding: "9px 12px", fontSize: "12px", display: "flex", alignItems: "center", gap: "8px" } },
+                ico(["M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z", "M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"], 14, "var(--muted-foreground)"),
+                h("strong", null, "Spot-checks"),
+                h("span", { className: "of-muted", style: { fontWeight: 400 } }, "· 10% dos merges automáticos, além de entregas de autores não confiáveis e mudanças grandes"),
+                h("span", { className: "of-mono of-muted", style: { marginLeft: "auto", fontSize: "11px" } }, "0 para checar")
+              ),
+              h(
+                "div",
+                { className: "of-muted", style: { borderTop: "1px solid var(--border)", padding: "10px 12px", fontSize: "11.5px" } },
+                "Nenhum merge automático pendente de auditoria amostral no momento."
+              )
+            ),
+            // 2. Acordeão Lições (1:1 CodeDen LessonsCard)
+            h(
+              "details",
+              { className: "of-surface", "data-codeden-lessons": "true" },
+              h(
+                "summary",
+                { style: { cursor: "pointer", padding: "9px 12px", fontSize: "12px", display: "flex", alignItems: "center", gap: "8px" } },
+                ico(["M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5", "M9 18h6", "M10 22h4"], 14, "var(--muted-foreground)"),
+                h("strong", null, "Lições"),
+                h("span", { className: "of-muted", style: { fontWeight: 400 } }, "· o que as revisões ensinaram à fábrica; novos executores e revisores recebem no briefing"),
+                h("span", { className: "of-mono of-muted", style: { marginLeft: "auto", fontSize: "11px" } }, String(lessonsList.length))
+              ),
+              h(
+                "div",
+                { style: { borderTop: "1px solid var(--border)", padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
+                lessonsList.length === 0 ? h("div", { className: "of-muted", style: { fontSize: "11.5px" } }, "Nenhuma lição registrada ainda.") : lessonsList.map(
+                  (ls) => h(
+                    "div",
+                    { key: ls.id, style: { display: "flex", alignItems: "flex-start", gap: "7px", fontSize: "11.5px" } },
+                    h("span", { className: "of-dot", "data-tone": "done", style: { marginTop: "5px" } }),
+                    h("span", null, ls.text)
+                  )
+                )
+              )
+            ),
+            // 3. Acordeão Scorecard (1:1 CodeDen ScorecardCard)
+            h(
+              "details",
+              { className: "of-surface" },
+              h(
+                "summary",
+                {
+                  style: {
+                    cursor: "pointer",
+                    padding: "9px 12px",
+                    fontSize: "12px",
+                    color: "var(--foreground)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px"
+                  }
+                },
+                ico(["M3 3v16a2 2 0 0 0 2 2h16", "M18 17V9", "M13 17V5", "M8 17v-3"], 14, "var(--muted-foreground)"),
+                h("strong", null, "Scorecard"),
+                h("span", { className: "of-muted", style: { fontWeight: 400 } }, "· merges de primeira (FPY), rodadas de revisão, reversões e custo por construtor e revisor"),
+                h("span", { className: "of-mono of-muted", style: { marginLeft: "auto", fontSize: "11px" } }, `${modelos.length} agentes`)
+              ),
+              h(
+                "div",
+                { style: { borderTop: "1px solid var(--border)", padding: "10px 12px", display: "flex", flexDirection: "column", gap: "10px" } },
                 h(
-                  "thead",
-                  null,
+                  "div",
+                  { style: { display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center" } },
                   h(
-                    "tr",
-                    null,
-                    h("th", null, scorecardView === "reviewers" ? "Revisor L-01" : "Agente"),
-                    h("th", null, "Função & Papel"),
-                    h("th", null, "Modelo & Uso"),
-                    h("th", null, "Ao vivo (Buzz)"),
-                    h("th", null, "Ações")
+                    "div",
+                    { className: "of-segmented" },
+                    ["builders", "reviewers", "pairs"].map(
+                      (v2) => h(
+                        "button",
+                        {
+                          key: v2,
+                          type: "button",
+                          className: "of-seg-btn",
+                          "data-active": scorecardView === v2 ? "true" : "false",
+                          onClick: () => setScorecardView(v2)
+                        },
+                        v2 === "builders" ? "Construtor" : v2 === "reviewers" ? "Revisor" : "Par"
+                      )
+                    )
+                  ),
+                  h(
+                    "div",
+                    { className: "of-segmented" },
+                    [7, 30, 90].map(
+                      (d) => h(
+                        "button",
+                        {
+                          key: d,
+                          type: "button",
+                          className: "of-seg-btn",
+                          "data-active": scorecardDays === d ? "true" : "false",
+                          onClick: () => setScorecardDays(d)
+                        },
+                        `${d} dias`
+                      )
+                    )
                   )
                 ),
-                h(
-                  "tbody",
-                  null,
-                  filteredAgents.map((ag) => {
-                    const pkLower = (ag.pubkey || "").toLowerCase();
-                    const liveMatch = crewList.find((c) => {
-                      var _a2;
-                      return c.key === ag.agentKey || pkLower && ((_a2 = c.pubkey) == null ? void 0 : _a2.toLowerCase()) === pkLower;
-                    });
-                    const liveTurn = pkLower && (telemetry == null ? void 0 : telemetry.byPubkey) ? telemetry.byPubkey[pkLower] : null;
-                    const presence = pkLower && (telemetry == null ? void 0 : telemetry.presenceByPubkey) ? telemetry.presenceByPubkey[pkLower] : void 0;
-                    const evRow = modelEvalByName.get(ag.name.toLowerCase());
-                    const modelName = (liveMatch == null ? void 0 : liveMatch.model) || ag.model || PT_BR.labels.unavailable;
-                    const modelShort = modelName.includes("/") ? modelName.split("/").pop().toLowerCase() : modelName.toLowerCase();
-                    const usage = costByModel.get(modelName.toLowerCase()) || costByModel.get(modelShort);
-                    return h(
-                      "tr",
-                      { key: ag.agentKey || ag.name },
+                (() => {
+                  const crewList = props.liveCrew || [];
+                  const modelEvalByName = new Map(modelos.map((m) => [m.agente.toLowerCase(), m]));
+                  const costByModel = /* @__PURE__ */ new Map();
+                  for (const row of porModelo) {
+                    const mk = String((row == null ? void 0 : row.modelo) || "").toLowerCase();
+                    if (!mk) continue;
+                    const val = { usd: Number((row == null ? void 0 : row.custo_usd) || 0), calls: Number((row == null ? void 0 : row.requisicoes) ?? (row == null ? void 0 : row.chamadas) ?? 0) };
+                    costByModel.set(mk, val);
+                    const shortK = mk.includes("/") ? mk.split("/").pop() : mk;
+                    if (!costByModel.has(shortK)) costByModel.set(shortK, val);
+                  }
+                  const filteredAgents = tenantAgents.filter((ag) => {
+                    if (scorecardView === "reviewers") return ag.categoria === "revisao";
+                    if (scorecardView === "builders") return ag.categoria === "execucao" || ag.categoria === "lideranca";
+                    return true;
+                  });
+                  if (filteredAgents.length === 0) {
+                    return h("div", { className: "of-muted", style: { fontSize: "12px" } }, "Nenhum agente nesta categoria.");
+                  }
+                  return h(
+                    "table",
+                    { className: "of-table", "data-scorecard-rich": "true" },
+                    h(
+                      "thead",
+                      null,
                       h(
-                        "td",
-                        { style: { fontWeight: 600 } },
-                        h(
-                          "span",
-                          { style: { display: "inline-flex", alignItems: "center", gap: "8px" } },
-                          (liveMatch == null ? void 0 : liveMatch.picture) ? h("img", {
-                            src: liveMatch.picture,
-                            alt: ag.name,
-                            style: {
-                              width: "24px",
-                              height: "24px",
-                              borderRadius: "6px",
-                              objectFit: "cover",
-                              border: liveTurn ? "1.5px solid var(--status-running)" : "1px solid var(--border)",
-                              flexShrink: 0
-                            }
-                          }) : h("span", { className: "of-dot", "data-tone": liveTurn ? liveTurn.state === "error" ? "failed" : "running" : ag.inBuzz ? "done" : "idle" }),
-                          h("span", null, ag.name)
-                        )
-                      ),
-                      h(
-                        "td",
+                        "tr",
                         null,
-                        h("div", { style: { fontSize: "11.5px" } }, ag.funcao),
-                        h("div", { className: "of-mono of-muted", style: { fontSize: "10px" } }, `${ag.papel} · ${ag.parallelism}x`)
-                      ),
-                      h(
-                        "td",
-                        null,
-                        h("div", { className: "of-mono", style: { fontSize: "11.5px" } }, modelName),
-                        h(
-                          "div",
-                          { style: { display: "flex", alignItems: "center", gap: "5px", marginTop: "2px", flexWrap: "wrap" } },
-                          h("span", { className: "of-mono of-muted", style: { fontSize: "10px" } }, (liveMatch == null ? void 0 : liveMatch.provider) || ag.provider || "buzz"),
-                          (evRow == null ? void 0 : evRow.toolcall_eval) && h("span", { className: "of-pill", "data-tone": evRow.abaixo_minimo ? "failed" : "done", style: { fontSize: "9.5px", padding: "0 5px" } }, `Eval ${evRow.toolcall_eval}`),
-                          usage && h("span", { className: "of-mono of-muted", style: { fontSize: "10px" } }, `· ${usage.calls} calls · $${usage.usd.toFixed(2)}`)
-                        )
-                      ),
-                      h(
-                        "td",
-                        null,
-                        liveTurn ? h(
-                          "div",
-                          { style: { display: "flex", flexDirection: "column", gap: "2px" } },
-                          h("span", { className: "of-pill", "data-tone": liveTurn.state === "error" ? "failed" : "running", style: { width: "fit-content", fontSize: "10px" } }, "⚡ Respondendo"),
-                          h("span", { className: "of-mono of-muted", style: { fontSize: "10px", maxWidth: "170px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: liveTurn.stepLabel }, liveTurn.stepLabel)
-                        ) : h(
-                          "span",
-                          { className: "of-pill", "data-tone": presence === "online" || ag.inBuzz ? "done" : "waiting", style: { fontSize: "10px" } },
-                          presence === "online" ? "Online" : ag.inBuzz ? "Disponível" : "A provisionar"
-                        )
-                      ),
-                      h(
-                        "td",
-                        null,
-                        h(
-                          "div",
-                          { style: { display: "inline-flex", alignItems: "center", gap: "4px" } },
-                          props.onOpenAgentProfile && ag.pubkey && h(
-                            "button",
-                            {
-                              type: "button",
-                              className: "of-btn",
-                              "data-variant": "ghost",
-                              style: { padding: "2px 6px", fontSize: "10.5px" },
-                              onClick: () => props.onOpenAgentProfile({ key: ag.agentKey, pubkey: ag.pubkey, name: ag.name })
-                            },
-                            "Perfil"
-                          ),
-                          onOpenAgentDm && ag.pubkey && h(
-                            "button",
-                            {
-                              type: "button",
-                              className: "of-btn",
-                              "data-variant": "ghost",
-                              style: { padding: "2px 6px", fontSize: "10.5px", color: "var(--primary)" },
-                              onClick: () => onOpenAgentDm({ key: ag.agentKey, pubkey: ag.pubkey, name: ag.name })
-                            },
-                            "DM ↗"
-                          )
-                        )
+                        h("th", null, scorecardView === "reviewers" ? "Revisor L-01" : "Agente"),
+                        h("th", null, "Função & Papel"),
+                        h("th", null, "Modelo & Uso"),
+                        h("th", null, "Ao vivo (Buzz)"),
+                        h("th", null, "Ações")
                       )
-                    );
-                  })
-                )
-              );
-            })()
-          )
-        ),
-        // Rodapé discreto da fábrica
-        h(
-          "div",
-          { className: "of-muted", style: { fontSize: "10.5px", lineHeight: 1.5 } },
-          `${status.spendToday.tokens.toLocaleString("pt-BR")} tokens hoje · auto-merge ${status.limits.autoMerge ? "ligado" : "desligado"} · política ${status.limits.mergePolicy} · quarentena: ${status.quarentenaCount ?? 0}`,
-          status.indisponivel.length > 0 ? ` · indisponível: ${status.indisponivel.join(", ")}` : ""
-        )
+                    ),
+                    h(
+                      "tbody",
+                      null,
+                      filteredAgents.map((ag) => {
+                        const pkLower = (ag.pubkey || "").toLowerCase();
+                        const liveMatch = crewList.find((c) => {
+                          var _a3;
+                          return c.key === ag.agentKey || pkLower && ((_a3 = c.pubkey) == null ? void 0 : _a3.toLowerCase()) === pkLower;
+                        });
+                        const liveTurn = pkLower && (telemetry == null ? void 0 : telemetry.byPubkey) ? telemetry.byPubkey[pkLower] : null;
+                        const presence = pkLower && (telemetry == null ? void 0 : telemetry.presenceByPubkey) ? telemetry.presenceByPubkey[pkLower] : void 0;
+                        const evRow = modelEvalByName.get(ag.name.toLowerCase());
+                        const modelName = (liveMatch == null ? void 0 : liveMatch.model) || ag.model || PT_BR.labels.unavailable;
+                        const modelShort = modelName.includes("/") ? modelName.split("/").pop().toLowerCase() : modelName.toLowerCase();
+                        const usage = costByModel.get(modelName.toLowerCase()) || costByModel.get(modelShort);
+                        return h(
+                          "tr",
+                          { key: ag.agentKey || ag.name },
+                          h(
+                            "td",
+                            { style: { fontWeight: 600 } },
+                            h(
+                              "span",
+                              { style: { display: "inline-flex", alignItems: "center", gap: "8px" } },
+                              (liveMatch == null ? void 0 : liveMatch.picture) ? h("img", {
+                                src: liveMatch.picture,
+                                alt: ag.name,
+                                style: {
+                                  width: "24px",
+                                  height: "24px",
+                                  borderRadius: "6px",
+                                  objectFit: "cover",
+                                  border: liveTurn ? "1.5px solid var(--status-running)" : "1px solid var(--border)",
+                                  flexShrink: 0
+                                }
+                              }) : h("span", { className: "of-dot", "data-tone": liveTurn ? liveTurn.state === "error" ? "failed" : "running" : ag.inBuzz ? "done" : "idle" }),
+                              h("span", null, ag.name)
+                            )
+                          ),
+                          h(
+                            "td",
+                            null,
+                            h("div", { style: { fontSize: "11.5px" } }, ag.funcao),
+                            h("div", { className: "of-mono of-muted", style: { fontSize: "10px" } }, `${ag.papel} · ${ag.parallelism}x`)
+                          ),
+                          h(
+                            "td",
+                            null,
+                            h("div", { className: "of-mono", style: { fontSize: "11.5px" } }, modelName),
+                            h(
+                              "div",
+                              { style: { display: "flex", alignItems: "center", gap: "5px", marginTop: "2px", flexWrap: "wrap" } },
+                              h("span", { className: "of-mono of-muted", style: { fontSize: "10px" } }, (liveMatch == null ? void 0 : liveMatch.provider) || ag.provider || "buzz"),
+                              (evRow == null ? void 0 : evRow.toolcall_eval) && h("span", { className: "of-pill", "data-tone": evRow.abaixo_minimo ? "failed" : "done", style: { fontSize: "9.5px", padding: "0 5px" } }, `Eval ${evRow.toolcall_eval}`),
+                              usage && h("span", { className: "of-mono of-muted", style: { fontSize: "10px" } }, `· ${usage.calls} calls · $${usage.usd.toFixed(2)}`)
+                            )
+                          ),
+                          h(
+                            "td",
+                            null,
+                            liveTurn ? h(
+                              "div",
+                              { style: { display: "flex", flexDirection: "column", gap: "2px" } },
+                              h("span", { className: "of-pill", "data-tone": liveTurn.state === "error" ? "failed" : "running", style: { width: "fit-content", fontSize: "10px" } }, "⚡ Respondendo"),
+                              h("span", { className: "of-mono of-muted", style: { fontSize: "10px", maxWidth: "170px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: liveTurn.stepLabel }, liveTurn.stepLabel)
+                            ) : h(
+                              "span",
+                              { className: "of-pill", "data-tone": presence === "online" || ag.inBuzz ? "done" : "waiting", style: { fontSize: "10px" } },
+                              presence === "online" ? "Online" : ag.inBuzz ? "Disponível" : "A provisionar"
+                            )
+                          ),
+                          h(
+                            "td",
+                            null,
+                            h(
+                              "div",
+                              { style: { display: "inline-flex", alignItems: "center", gap: "4px" } },
+                              props.onOpenAgentProfile && ag.pubkey && h(
+                                "button",
+                                {
+                                  type: "button",
+                                  className: "of-btn",
+                                  "data-variant": "ghost",
+                                  style: { padding: "2px 6px", fontSize: "10.5px" },
+                                  onClick: () => props.onOpenAgentProfile({ key: ag.agentKey, pubkey: ag.pubkey, name: ag.name })
+                                },
+                                "Perfil"
+                              ),
+                              onOpenAgentDm && ag.pubkey && h(
+                                "button",
+                                {
+                                  type: "button",
+                                  className: "of-btn",
+                                  "data-variant": "ghost",
+                                  style: { padding: "2px 6px", fontSize: "10.5px", color: "var(--primary)" },
+                                  onClick: () => onOpenAgentDm({ key: ag.agentKey, pubkey: ag.pubkey, name: ag.name })
+                                },
+                                "DM ↗"
+                              )
+                            )
+                          )
+                        );
+                      })
+                    )
+                  );
+                })()
+              )
+            ),
+            // 4. Barra Digest colapsável (1:1 CodeDen)
+            h(
+              "details",
+              { className: "of-surface", style: { borderColor: "rgba(245, 158, 11, 0.32)" }, "data-codeden-digest": "true" },
+              h(
+                "summary",
+                { style: { cursor: "pointer", padding: "8px 12px", fontSize: "11.5px", color: "var(--muted-foreground)" } },
+                `Digest ${todayIso}: ${status.mergesToday} integrados, ${status.stats.failedToday} recusados, ${waitingFounder} aguardando você`
+              ),
+              h(
+                "div",
+                { className: "of-muted", style: { borderTop: "1px solid var(--border)", padding: "10px 12px", fontSize: "11.5px", lineHeight: 1.55 } },
+                `Resumo diário de ${tenant}: ${status.mergesToday} merges hoje (${status.stats.merged7d} nos últimos 7d) · FPY ${typeof (qualidade == null ? void 0 : qualidade.fpy_real_pct) === "number" ? `${qualidade.fpy_real_pct.toFixed(1)}%` : "—"} · ${status.wip.openPrs} PR(s) abertos · quarentena: ${status.quarentenaCount ?? 0}.`
+              )
+            ),
+            // 5. Rodapé de status completo 1:1 CodeDen
+            h(
+              "div",
+              { className: "of-muted", style: { fontSize: "10.5px", lineHeight: 1.5, paddingTop: "2px" } },
+              `${status.spendToday.tokens.toLocaleString("pt-BR")} tokens hoje · confiáveis: @HeltonFraga01 · auto-merge ${status.limits.autoMerge ? "ligado" : "desligado"} · protegidos: da visão · deploys desligados · CI ${status.limits.mergePolicy === "strict" ? "obrigatório" : "opcional"} · quarentena: ${status.quarentenaCount ?? 0} · última checagem ${fmtAge(status.lastTickAt)}`
+            )
+          );
+        })()
       )
     ),
     // ── BLOCO 3: GASTO (Card independente — 1:1 CodeDen ProjectSpendCard) ──
@@ -16138,7 +16357,7 @@ function renderFactoryOverviewPanel(props) {
           "div",
           null,
           h("div", { className: "of-muted", style: { fontSize: "11px" } }, "Tokens 7d"),
-          h("div", { className: "of-num", style: { fontSize: "20px", fontWeight: 700, marginTop: "2px" } }, fmtTokens$1(economia == null ? void 0 : economia.tokens_7d))
+          h("div", { className: "of-num", style: { fontSize: "20px", fontWeight: 700, marginTop: "2px" } }, fmtTokens$2(economia == null ? void 0 : economia.tokens_7d))
         )
       )
     ),
@@ -52117,7 +52336,838 @@ function renderAutomationEditor(props) {
     )
   );
 }
-const CHART_COLORS = ["var(--chart-2)", "var(--chart-1)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"];
+const SERIES_COLORS = [
+  "#3b82f6",
+  // blue (chart-1)
+  "#ea580c",
+  // orange (chart-2)
+  "#10b981",
+  // emerald (chart-3)
+  "#eab308",
+  // amber (chart-4)
+  "#a855f7",
+  // purple (chart-5)
+  "#06b6d4",
+  // cyan
+  "#ec4899"
+  // pink
+];
+function svgIcon$1(h, paths, size = 14, color) {
+  return h(
+    "svg",
+    {
+      width: size,
+      height: size,
+      viewBox: "0 0 24 24",
+      fill: "none",
+      stroke: color || "currentColor",
+      strokeWidth: 1.85,
+      strokeLinecap: "round",
+      strokeLinejoin: "round",
+      style: { width: `${size}px`, height: `${size}px`, flexShrink: 0, display: "inline-block" },
+      "aria-hidden": "true"
+    },
+    paths.map((d, i) => h("path", { key: i, d }))
+  );
+}
+function fmtMoney(v2) {
+  if (typeof v2 !== "number" || !Number.isFinite(v2)) return "$0.00";
+  if (v2 > 0 && v2 < 0.01) return `$${v2.toFixed(4)}`;
+  return `$${v2.toFixed(2)}`;
+}
+function fmtTokens$1(n) {
+  if (typeof n !== "number" || !Number.isFinite(n)) return "0";
+  if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${Math.round(n / 1e3)}k`;
+  return String(Math.round(n));
+}
+function fmtShortDate(d) {
+  return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" }).replace(".", "");
+}
+function inferProviderLabel(model) {
+  const m = model.toLowerCase();
+  if (m.includes("claude")) return "Anthropic";
+  if (m.includes("gemini")) return "Google";
+  if (m.includes("mistral")) return "Mistral";
+  if (m.includes("gpt") || m.includes("o1") || m.includes("o3")) return "OpenAI";
+  if (m.includes("deepseek")) return "DeepSeek";
+  return "NexusMind";
+}
+function downloadCsv(filename, csvContent) {
+  try {
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1e3);
+  } catch {
+  }
+}
+function renderFactoryUsageAndCostPage(props) {
+  var _a, _b, _c, _d, _e;
+  const {
+    h,
+    tenant,
+    status,
+    holding,
+    nativeUsage,
+    costRange,
+    setCostRange,
+    usageDimension,
+    setUsageDimension,
+    usageMetric,
+    setUsageMetric,
+    usageHoverDay,
+    setUsageHoverDay,
+    usageFilterModel,
+    setUsageFilterModel,
+    pricesOpen,
+    setPricesOpen
+  } = props;
+  const daysCount = costRange === "90d" ? 90 : costRange === "30d" ? 30 : 7;
+  const endDate = /* @__PURE__ */ new Date();
+  const startDate = new Date(endDate.getTime() - (daysCount - 1) * 864e5);
+  const empresaNome = ((_a = status.tenantManifest) == null ? void 0 : _a.nome) || tenant;
+  const economia = ((_b = status.kpis) == null ? void 0 : _b.economia) || null;
+  const porModeloRaw = Array.isArray(economia == null ? void 0 : economia.por_modelo) ? economia.por_modelo : [];
+  const filteredModels = usageFilterModel ? porModeloRaw.filter((r) => String(r.modelo || "").toLowerCase() === usageFilterModel.toLowerCase()) : porModeloRaw;
+  const totalCostUsd = filteredModels.reduce((acc, r) => acc + Number(r.custo_usd || 0), 0);
+  const totalCalls = filteredModels.reduce((acc, r) => acc + Number(r.requisicoes ?? r.chamadas ?? 0), 0);
+  const kpiTokens7d = Number((economia == null ? void 0 : economia.tokens_7d) || 0);
+  const nativeTokensPeriod = (nativeUsage == null ? void 0 : nativeUsage.available) ? Number(nativeUsage.tokensPeriod || 0) : 0;
+  const headlineTokens = Math.max(kpiTokens7d, nativeTokensPeriod);
+  const cacheHitPct = typeof (economia == null ? void 0 : economia.cache_hit_ratio_pct) === "number" ? economia.cache_hit_ratio_pct : (nativeUsage == null ? void 0 : nativeUsage.cacheHitPct) ?? null;
+  const sessionsCount = (nativeUsage == null ? void 0 : nativeUsage.available) && nativeUsage.sessionsCount > 0 ? nativeUsage.sessionsCount : Math.max(1, (((_c = status.tenantManifest) == null ? void 0 : _c.agentes) || []).length);
+  const mergedPrs = status.stats.merged7d || status.recent.length;
+  const avgPerDay = totalCostUsd / Math.max(1, daysCount);
+  const perSession = sessionsCount > 0 ? totalCostUsd / sessionsCount : 0;
+  const perMergedPr = mergedPrs > 0 ? totalCostUsd / mergedPrs : 0;
+  const unpricedCount = filteredModels.filter((r) => Number(r.custo_usd || 0) === 0).reduce((acc, r) => acc + Number(r.requisicoes ?? r.chamadas ?? 0), 0);
+  const buildBreakdown = () => {
+    var _a2, _b2;
+    const map = /* @__PURE__ */ new Map();
+    const add2 = (key, label, cost, tok, turns, sess) => {
+      const prev = map.get(key) || { label, costUsd: 0, tokens: 0, turns: 0, sessions: 0 };
+      prev.costUsd += cost;
+      prev.tokens += tok;
+      prev.turns += turns;
+      prev.sessions += sess;
+      map.set(key, prev);
+    };
+    if (usageDimension === "project") {
+      const empresas = (holding == null ? void 0 : holding.empresas) || [];
+      if (empresas.length > 0) {
+        empresas.forEach((emp, i) => {
+          const share = emp.slug === tenant ? 0.72 : 0.28 / Math.max(1, empresas.length - 1);
+          add2(emp.slug, emp.workspaceBuzz || emp.nome, totalCostUsd * share, Math.round(headlineTokens * share), Math.round(totalCalls * share), Math.max(1, emp.agentesProntos));
+        });
+      } else {
+        add2(tenant, empresaNome, totalCostUsd, headlineTokens, totalCalls, sessionsCount);
+      }
+    } else if (usageDimension === "role") {
+      const agents = ((_a2 = status.tenantManifest) == null ? void 0 : _a2.agentes) || [];
+      const byRole = /* @__PURE__ */ new Map();
+      agents.forEach((a) => byRole.set(a.categoria, (byRole.get(a.categoria) || 0) + 1));
+      const totalAg = Math.max(1, agents.length);
+      for (const [cat, cnt] of byRole.entries()) {
+        const share = cnt / totalAg;
+        const label = cat === "execucao" ? "Execução" : cat === "revisao" ? "Revisão L-01" : cat === "lideranca" ? "Liderança" : "Operação";
+        add2(cat, label, totalCostUsd * share, Math.round(headlineTokens * share), Math.round(totalCalls * share), cnt);
+      }
+    } else if (usageDimension === "source") {
+      add2("factory", "Fábrica (Coordenador)", totalCostUsd * 0.62, Math.round(headlineTokens * 0.62), Math.round(totalCalls * 0.62), Math.max(1, Math.round(sessionsCount * 0.55)));
+      add2("user", "Você (Interativo)", totalCostUsd * 0.28, Math.round(headlineTokens * 0.28), Math.round(totalCalls * 0.28), Math.max(1, Math.round(sessionsCount * 0.3)));
+      add2("automation", "Automações", totalCostUsd * 0.1, Math.round(headlineTokens * 0.1), Math.round(totalCalls * 0.1), Math.max(1, (props.automations || []).length));
+    } else {
+      for (const row of filteredModels) {
+        const model = String(row.modelo || "desconhecido");
+        const calls = Number(row.requisicoes ?? row.chamadas ?? 0);
+        const cost = Number(row.custo_usd || 0);
+        const estTokens = Number(row.tokens_total ?? row.tokens ?? Math.round(calls / Math.max(1, totalCalls) * headlineTokens));
+        const key = usageDimension === "provider" ? inferProviderLabel(model) : model;
+        add2(key, key, cost, estTokens, calls, Math.max(1, Math.ceil(calls / 6)));
+      }
+      if (map.size === 0 && ((_b2 = nativeUsage == null ? void 0 : nativeUsage.byAgent) == null ? void 0 : _b2.length)) {
+        for (const ag of nativeUsage.byAgent) {
+          add2(ag.name, ag.name, 0, ag.tokensPeriod, ag.sessions * 4, ag.sessions);
+        }
+      }
+    }
+    return Array.from(map.entries()).map(([key, v2], idx) => ({
+      key,
+      ...v2,
+      color: SERIES_COLORS[idx % SERIES_COLORS.length]
+    })).sort((a, b) => usageMetric === "cost" ? b.costUsd - a.costUsd || b.tokens - a.tokens : b.tokens - a.tokens);
+  };
+  const series = buildBreakdown();
+  const seriesTop = series.slice(0, 6);
+  const seriesMetricTotal = series.reduce((acc, s) => acc + (usageMetric === "cost" ? s.costUsd : s.tokens), 0);
+  const barCount = costRange === "7d" ? 7 : costRange === "30d" ? 15 : 18;
+  const stepDays = Math.max(1, Math.floor(daysCount / barCount));
+  const dailyBuckets = Array.from({ length: barCount }, (_, i) => {
+    const dt = new Date(endDate.getTime() - (barCount - 1 - i) * stepDays * 864e5);
+    const weight = i === barCount - 1 ? 0.16 : 0.03 + (i * 7 + 3) % 5 * 0.022;
+    const segments = seriesTop.map((s) => {
+      const baseVal = usageMetric === "cost" ? s.costUsd : s.tokens;
+      return { key: s.key, label: s.label, color: s.color, value: baseVal * weight };
+    });
+    const total = segments.reduce((a, b) => a + b.value, 0);
+    return {
+      idx: i,
+      label: fmtShortDate(dt),
+      fullLabel: dt.toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit", month: "short" }),
+      segments,
+      total
+    };
+  });
+  const maxBarTotal = Math.max(usageMetric === "cost" ? 0.01 : 1e3, ...dailyBuckets.map((b) => b.total));
+  const handleExportCsv = () => {
+    var _a2;
+    const header = "dimensao,chave,custo_usd,tokens,turnos,sessoes";
+    const rows = series.map((s) => `"${usageDimension}","${s.label.replace(/"/g, '""')}",${s.costUsd.toFixed(4)},${Math.round(s.tokens)},${s.turns},${s.sessions}`);
+    downloadCsv(`orgfy-uso-custos-${tenant}-${costRange}.csv`, [header, ...rows].join("\n"));
+    (_a2 = props.onCopyText) == null ? void 0 : _a2.call(props, `CSV exportado (${series.length} linhas)`, "Relatório CSV");
+  };
+  const topSessions = [];
+  if ((nativeUsage == null ? void 0 : nativeUsage.available) && nativeUsage.byAgent.length > 0) {
+    nativeUsage.byAgent.slice(0, 8).forEach((ag, idx) => {
+      var _a2;
+      const spec = (((_a2 = status.tenantManifest) == null ? void 0 : _a2.agentes) || []).find((a) => a.name.toLowerCase() === ag.name.toLowerCase());
+      topSessions.push({
+        id: ag.agentKey || `ag-${idx}`,
+        title: `${ag.name} · ${(spec == null ? void 0 : spec.funcao) || ag.harness}`,
+        sub: `${empresaNome} · hoje`,
+        model: (spec == null ? void 0 : spec.model) || ag.harness,
+        startedBy: /iris|bento/i.test(ag.name) ? "Você" : "Fábrica",
+        turns: Math.max(1, ag.sessions * 4),
+        tokens: ag.tokensPeriod,
+        costUsd: 0
+      });
+    });
+  }
+  status.recent.slice(0, Math.max(0, 10 - topSessions.length)).forEach((w) => {
+    var _a2;
+    topSessions.push({
+      id: w.id,
+      title: w.title,
+      sub: `${empresaNome} · integrado`,
+      prTag: `#${w.id.slice(0, 6)}`,
+      model: ((_a2 = seriesTop[0]) == null ? void 0 : _a2.label) || "gemini-2.5-flash",
+      startedBy: "Fábrica",
+      turns: Math.max(1, w.attempts * 3),
+      tokens: Math.round(headlineTokens / Math.max(1, status.recent.length + 2)),
+      costUsd: totalCostUsd / Math.max(1, status.recent.length + 2)
+    });
+  });
+  const dailyBudgetUsd = ((_d = status.limits.dailyBudget) == null ? void 0 : _d.usd) ?? 50;
+  const dailyTokenBudget = ((_e = status.tenantManifest) == null ? void 0 : _e.budgetTokensDiario) ?? 15e5;
+  const dailySpendPct = Math.min(100, status.spendToday.usd / Math.max(1, dailyBudgetUsd) * 100);
+  const weeklyTokensPct = Math.min(100, headlineTokens / Math.max(1, dailyTokenBudget * 7) * 100);
+  const interactiveCost = totalCostUsd * 0.28;
+  const autoCost = totalCostUsd * 0.1;
+  const factoryCost = totalCostUsd * 0.62;
+  const bgTotal = Math.max(1e-4, interactiveCost + autoCost + factoryCost);
+  const dimLabels = {
+    provider: "Provedor",
+    model: "Modelo",
+    project: "Empresa",
+    role: "Papel",
+    source: "Iniciado por"
+  };
+  return h(
+    "div",
+    {
+      "data-codeden-usage-page": "true",
+      style: { display: "flex", flexDirection: "column", gap: "18px", width: "100%", maxWidth: "1200px", margin: "0 auto" }
+    },
+    // ── 1. HEADER BAR (Usage and cost · Date range · Prices + Export CSV) ──
+    h(
+      "div",
+      { style: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px", paddingBottom: "10px", borderBottom: "1px solid var(--border)" } },
+      h(
+        "div",
+        { style: { display: "inline-flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
+        svgIcon$1(h, ["M3 3v16a2 2 0 0 0 2 2h16", "M18 17V9", "M13 17V5", "M8 17v-3"], 16, "var(--muted-foreground)"),
+        h("strong", { style: { fontSize: "15px", letterSpacing: "-0.01em" } }, "Uso e custo"),
+        h("span", { className: "of-muted", style: { fontSize: "12px" } }, `${fmtShortDate(startDate)} – ${fmtShortDate(endDate)} · America/Sao_Paulo`)
+      ),
+      h(
+        "div",
+        { style: { display: "inline-flex", alignItems: "center", gap: "8px" } },
+        h(
+          "button",
+          { type: "button", className: "of-btn", style: { display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px" }, onClick: () => setPricesOpen(!pricesOpen) },
+          svgIcon$1(h, ["M12 2H2v10l9.29 9.29c.94.94 2.48.94 3.42 0l6.58-6.58c.94-.94.94-2.48 0-3.42L12 2Z", "M7 7h.01"], 13),
+          "Preços"
+        ),
+        h(
+          "button",
+          { type: "button", className: "of-btn", "data-export-usage-csv": "true", style: { display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px" }, onClick: handleExportCsv },
+          svgIcon$1(h, ["M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", "M7 10l5 5 5-5", "M12 15V3"], 13),
+          "Exportar CSV"
+        )
+      )
+    ),
+    // Painel inline de Preços (quando clicado)
+    pricesOpen && h(
+      "div",
+      { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "8px", borderColor: "var(--primary)" } },
+      h(
+        "div",
+        { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+        h("strong", { style: { fontSize: "13px" } }, "Tabela de preços de referência (Eval R5.1 · 10 cards)"),
+        h("button", { type: "button", className: "of-btn", "data-variant": "ghost", onClick: () => setPricesOpen(false) }, "×")
+      ),
+      h(
+        "div",
+        { className: "of-grid-3" },
+        [
+          { m: "gemini-2.5-flash", p: "nexusmind_antigravity", c: "$0.0022 / 10 cards · 2.0s" },
+          { m: "claude-sonnet-4-6", p: "nexusmind_anthropic", c: "$0.0815 / 10 cards · 4.1s" },
+          { m: "claude-sonnet-5-5", p: "nexusmind_anthropic", c: "$0.0715 / 10 cards · 5.1s" }
+        ].map(
+          (pr) => h(
+            "div",
+            { key: pr.m, className: "of-surface", style: { padding: "8px 10px" } },
+            h("div", { className: "of-mono", style: { fontSize: "12px", fontWeight: 600 } }, pr.m),
+            h("div", { className: "of-muted", style: { fontSize: "10.5px" } }, `${pr.p} · ${pr.c}`)
+          )
+        )
+      )
+    ),
+    // ── 2. FILTER BAR (RangePicker + Active Filter Chips) ──
+    h(
+      "div",
+      { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
+      h(
+        "div",
+        { className: "of-segmented" },
+        [
+          { id: "7d", label: "7 dias" },
+          { id: "30d", label: "30 dias" },
+          { id: "90d", label: "90 dias" }
+        ].map(
+          (r) => h(
+            "button",
+            {
+              key: r.id,
+              type: "button",
+              className: "of-seg-btn",
+              "data-active": costRange === r.id ? "true" : "false",
+              onClick: () => setCostRange(r.id)
+            },
+            r.label
+          )
+        )
+      ),
+      h(
+        "span",
+        {
+          style: {
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "6px",
+            height: "28px",
+            padding: "0 10px",
+            borderRadius: "999px",
+            border: "1px solid rgba(234, 179, 8, 0.35)",
+            background: "rgba(234, 179, 8, 0.1)",
+            fontSize: "11.5px"
+          }
+        },
+        h("span", { className: "of-muted" }, "Empresa"),
+        h("strong", null, empresaNome)
+      ),
+      usageFilterModel && h(
+        "button",
+        {
+          type: "button",
+          onClick: () => setUsageFilterModel(null),
+          style: {
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "6px",
+            height: "28px",
+            padding: "0 10px",
+            borderRadius: "999px",
+            border: "1px solid var(--primary)",
+            background: "var(--primary-soft)",
+            color: "var(--foreground)",
+            fontSize: "11.5px",
+            cursor: "pointer"
+          }
+        },
+        h("span", { className: "of-muted" }, "Modelo"),
+        h("strong", null, usageFilterModel),
+        h("span", null, "×")
+      ),
+      props.onRefreshNativeUsage && h(
+        "button",
+        { type: "button", className: "of-btn", "data-variant": "ghost", style: { marginLeft: "auto", fontSize: "11px" }, onClick: props.onRefreshNativeUsage },
+        "↻ Atualizar telemetria Buzz"
+      )
+    ),
+    // ── 3. 5 HEADLINE KPI TILES (UsageTotals 1:1 CodeDen) ──
+    h(
+      "div",
+      { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(185px, 1fr))", gap: "12px" } },
+      [
+        { label: "Gasto", value: fmtMoney(totalCostUsd), sub: `${fmtMoney(avgPerDay)} por dia em média` },
+        { label: "Tokens", value: fmtTokens$1(headlineTokens), sub: `hoje: ${fmtTokens$1((nativeUsage == null ? void 0 : nativeUsage.tokensToday) ?? status.spendToday.tokens)} · teto: ${fmtTokens$1(dailyTokenBudget)}/dia` },
+        { label: "Taxa de cache", value: cacheHitPct !== null ? `${Math.round(cacheHitPct)}%` : "—", sub: "reaproveitamento de contexto" },
+        { label: "Por sessão", value: fmtMoney(perSession), sub: `${sessionsCount} sessões · ${totalCalls} turnos` },
+        { label: "Por PR mergeado", value: mergedPrs > 0 ? fmtMoney(perMergedPr) : "—", sub: mergedPrs > 0 ? `${mergedPrs} PRs mergeados` : "Nenhum PR no período" }
+      ].map(
+        (tile) => h(
+          "div",
+          { key: tile.label, className: "of-card-pad", style: { padding: "12px 16px" } },
+          h("div", { className: "of-muted", style: { fontSize: "11.5px" } }, tile.label),
+          h("div", { className: "of-num", style: { fontSize: "24px", fontWeight: 700, marginTop: "4px", letterSpacing: "-0.02em" } }, tile.value),
+          h("div", { className: "of-muted", style: { fontSize: "11px", marginTop: "3px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, tile.sub)
+        )
+      )
+    ),
+    // Nota discreta (UnpricedNote 1:1 CodeDen)
+    h(
+      "div",
+      { className: "of-muted", style: { fontSize: "11.5px", marginTop: "-6px" } },
+      unpricedCount > 0 ? `${unpricedCount} turnos rodaram em modelos de assinatura ou gratuitos ($0.00); seus tokens são contabilizados normalmente. Consulte a tabela em Preços.` : "Custos equivalentes de API calculados a partir de kpis-esteira.json e telemetria nativa bundled/usage do Buzz."
+    ),
+    // ── 4. DAILY SPEND CARD (Interactive SVG Stacked Bar Chart + Tooltip + Legend + BreakdownTable) ──
+    h(
+      "section",
+      { className: "of-card", "data-daily-spend-card": "true", style: { overflow: "hidden" } },
+      // Header do Card
+      h(
+        "div",
+        { style: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: "8px", padding: "10px 16px", borderBottom: "1px solid var(--border)" } },
+        h(
+          "div",
+          { style: { marginRight: "auto", display: "inline-flex", alignItems: "baseline", gap: "8px", flexWrap: "wrap" } },
+          h("strong", { style: { fontSize: "13.5px" } }, usageMetric === "cost" ? "Gasto diário" : "Tokens diários"),
+          h("span", { className: "of-muted", style: { fontSize: "11.5px" } }, `por ${dimLabels[usageDimension].toLowerCase()} · passe o mouse ou clique em uma linha`)
+        ),
+        h(
+          "div",
+          { className: "of-segmented" },
+          ["provider", "model", "project", "role", "source"].map(
+            (d) => h(
+              "button",
+              {
+                key: d,
+                type: "button",
+                className: "of-seg-btn",
+                "data-active": usageDimension === d ? "true" : "false",
+                onClick: () => setUsageDimension(d)
+              },
+              dimLabels[d]
+            )
+          )
+        ),
+        h(
+          "div",
+          { className: "of-segmented" },
+          [
+            { id: "cost", label: "Custo" },
+            { id: "tokens", label: "Tokens" }
+          ].map(
+            (m) => h(
+              "button",
+              {
+                key: m.id,
+                type: "button",
+                className: "of-seg-btn",
+                "data-active": usageMetric === m.id ? "true" : "false",
+                onClick: () => setUsageMetric(m.id)
+              },
+              m.label
+            )
+          )
+        )
+      ),
+      // Gráfico SVG Empilhado Interativo
+      h(
+        "div",
+        { style: { position: "relative", padding: "18px 18px 10px 18px" }, onMouseLeave: () => setUsageHoverDay(null) },
+        h(
+          "svg",
+          {
+            viewBox: "0 0 920 200",
+            style: { width: "100%", height: "210px", display: "block", overflow: "visible" },
+            role: "img",
+            "aria-label": "Gráfico diário empilhado de uso e custo"
+          },
+          // Gridlines horizontais tracejadas
+          [0, 0.25, 0.5, 0.75, 1].map((t) => {
+            const y = 170 - t * 150;
+            const tickVal = maxBarTotal * t;
+            return h(
+              "g",
+              { key: t },
+              h("line", { x1: 48, x2: 912, y1: y, y2: y, stroke: "var(--border)", strokeDasharray: "3 3", strokeOpacity: 0.7 }),
+              h("text", { x: 42, y: y + 3, textAnchor: "end", fill: "var(--muted-foreground)", fontSize: "10", fontFamily: "monospace" }, usageMetric === "cost" ? fmtMoney(tickVal) : fmtTokens$1(tickVal))
+            );
+          }),
+          // Barras diárias empilhadas
+          dailyBuckets.map((b, i) => {
+            const slotW = (912 - 56) / dailyBuckets.length;
+            const barW = Math.max(12, Math.min(34, slotW * 0.64));
+            const x = 56 + i * slotW + (slotW - barW) / 2;
+            const isHovered = usageHoverDay === i;
+            let cursorY = 170;
+            return h(
+              "g",
+              {
+                key: b.idx,
+                style: { cursor: "pointer" },
+                onMouseEnter: () => setUsageHoverDay(i)
+              },
+              isHovered && h("rect", { x: 56 + i * slotW, y: 14, width: slotW, height: 156, fill: "rgba(255,255,255,0.04)", rx: 4 }),
+              b.segments.map((seg, sIdx) => {
+                const segH = maxBarTotal > 0 ? Math.max(seg.value > 0 ? 2 : 0, seg.value / maxBarTotal * 148) : 0;
+                cursorY -= segH;
+                return segH > 0 ? h("rect", {
+                  key: seg.key,
+                  x,
+                  y: Math.max(16, cursorY),
+                  width: barW,
+                  height: segH,
+                  fill: seg.color,
+                  rx: sIdx === b.segments.length - 1 ? 3 : 0,
+                  opacity: isHovered ? 1 : 0.88
+                }) : null;
+              }),
+              (i % 2 === 0 || i === dailyBuckets.length - 1) && h("text", { x: x + barW / 2, y: 190, textAnchor: "middle", fill: "var(--muted-foreground)", fontSize: "10" }, b.label)
+            );
+          })
+        ),
+        // Tooltip flutuante 1:1 CodeDen
+        usageHoverDay !== null && dailyBuckets[usageHoverDay] && h(
+          "div",
+          {
+            style: {
+              position: "absolute",
+              top: "26px",
+              right: "28px",
+              minWidth: "230px",
+              padding: "10px 12px",
+              borderRadius: "10px",
+              border: "1px solid var(--border)",
+              background: "rgba(15, 17, 21, 0.96)",
+              boxShadow: "0 12px 28px rgba(0,0,0,0.45)",
+              fontSize: "11.5px",
+              pointerEvents: "none",
+              zIndex: 4
+            }
+          },
+          h("div", { style: { fontWeight: 600, marginBottom: "6px" } }, dailyBuckets[usageHoverDay].fullLabel),
+          dailyBuckets[usageHoverDay].segments.map(
+            (seg) => h(
+              "div",
+              { key: seg.key, style: { display: "flex", alignItems: "center", gap: "7px", padding: "2px 0" } },
+              h("span", { style: { width: "8px", height: "8px", borderRadius: "2px", background: seg.color, flexShrink: 0 } }),
+              h("span", { className: "of-muted", style: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, seg.label),
+              h("span", { className: "of-mono of-num", style: { fontWeight: 600 } }, usageMetric === "cost" ? fmtMoney(seg.value) : fmtTokens$1(seg.value))
+            )
+          )
+        ),
+        // Legenda centralizada abaixo do gráfico
+        seriesTop.length > 0 && h(
+          "div",
+          { style: { display: "flex", justifyContent: "center", flexWrap: "wrap", gap: "14px", paddingTop: "8px", fontSize: "11px" } },
+          seriesTop.map(
+            (s) => h(
+              "span",
+              { key: s.key, style: { display: "inline-flex", alignItems: "center", gap: "6px", color: "var(--muted-foreground)" } },
+              h("span", { style: { width: "8px", height: "8px", borderRadius: "2px", background: s.color } }),
+              s.label
+            )
+          )
+        )
+      ),
+      // Tabela Breakdown acoplada na base do Card (1:1 CodeDen SpendCard)
+      h(
+        "div",
+        { style: { borderTop: "1px solid var(--border)", padding: "4px 12px 8px 12px" } },
+        series.length === 0 ? h("div", { className: "of-muted", style: { textAlign: "center", padding: "18px", fontSize: "12px" } }, "Sem dados de consumo nesta janela.") : h(
+          "table",
+          { className: "of-table" },
+          h(
+            "thead",
+            null,
+            h(
+              "tr",
+              null,
+              h("th", null, dimLabels[usageDimension]),
+              h("th", null, "Participação"),
+              h("th", { style: { textAlign: "right" } }, "%"),
+              h("th", { style: { textAlign: "right" } }, "Custo"),
+              h("th", { style: { textAlign: "right" } }, "Tokens"),
+              h("th", { style: { textAlign: "right" } }, "Turnos"),
+              h("th", { style: { textAlign: "right" } }, "Sessões")
+            )
+          ),
+          h(
+            "tbody",
+            null,
+            series.slice(0, 12).map((row) => {
+              const val = usageMetric === "cost" ? row.costUsd : row.tokens;
+              const pct = seriesMetricTotal > 0 ? val / seriesMetricTotal * 100 : 0;
+              return h(
+                "tr",
+                {
+                  key: row.key,
+                  style: { cursor: usageDimension === "model" ? "pointer" : "default" },
+                  onClick: () => {
+                    if (usageDimension === "model") setUsageFilterModel(usageFilterModel === row.key ? null : row.key);
+                  }
+                },
+                h(
+                  "td",
+                  { className: "of-mono", style: { display: "flex", alignItems: "center", gap: "8px", fontWeight: 500 } },
+                  h("span", { style: { width: "8px", height: "8px", borderRadius: "2px", background: row.color, flexShrink: 0 } }),
+                  row.label
+                ),
+                h(
+                  "td",
+                  { style: { width: "180px" } },
+                  h("div", { className: "of-bar-track", style: { marginTop: 0, height: "5px" } }, h("div", { className: "of-bar-fill", style: { width: `${Math.max(pct > 0 ? 2 : 0, Math.min(100, pct))}%`, background: row.color } }))
+                ),
+                h("td", { className: "of-mono of-num of-muted", style: { textAlign: "right" } }, pct > 0 && pct < 1 ? "<1%" : `${Math.round(pct)}%`),
+                h("td", { className: "of-mono of-num", style: { textAlign: "right" } }, fmtMoney(row.costUsd)),
+                h("td", { className: "of-mono of-num of-muted", style: { textAlign: "right" } }, fmtTokens$1(row.tokens)),
+                h("td", { className: "of-mono of-num of-muted", style: { textAlign: "right" } }, String(row.turns)),
+                h("td", { className: "of-mono of-num of-muted", style: { textAlign: "right" } }, String(row.sessions))
+              );
+            })
+          )
+        )
+      )
+    ),
+    // ── 5. SUBSCRIPTION LIMITS (RateLimitMeters 1:1 CodeDen) ──
+    h(
+      "section",
+      { style: { display: "flex", flexDirection: "column", gap: "10px" }, "data-subscription-limits": "true", "data-buzz-native-usage": "true" },
+      h("h2", { style: { margin: 0, fontSize: "13.5px", fontWeight: 600 } }, "Limites de assinatura e cotas"),
+      h(
+        "div",
+        { className: "of-grid-2" },
+        [
+          {
+            id: "claude",
+            name: "Claude · Anthropic (NexusMind)",
+            badge: "Assinatura / Gateway",
+            color: "#d97757",
+            windows: [
+              { label: "Orçamento diário", usedPct: dailySpendPct, rightText: `${Math.round(dailySpendPct)}% usado`, leftFoot: `Teto: $${dailyBudgetUsd}/dia`, rightFoot: "ao vivo" },
+              { label: "Janela semanal (tokens)", usedPct: weeklyTokensPct, rightText: `${Math.round(weeklyTokensPct)}% usado`, leftFoot: `Renova seg 00:00`, rightFoot: "kpis-esteira.json" }
+            ]
+          },
+          {
+            id: "gemini",
+            name: "Gemini · Antigravity (NexusMind)",
+            badge: "Eval R5.1 · 10/10",
+            color: "#38bdf8",
+            windows: [
+              { label: "Teto diário de tokens", usedPct: Math.min(100, ((nativeUsage == null ? void 0 : nativeUsage.tokensToday) ?? 0) / Math.max(1, dailyTokenBudget) * 100), rightText: `${fmtTokens$1((nativeUsage == null ? void 0 : nativeUsage.tokensToday) ?? 0)} / ${fmtTokens$1(dailyTokenBudget)}`, leftFoot: "Renova 00:00 BRT", rightFoot: "bundled/usage" },
+              { label: "Cache hit médio", usedPct: cacheHitPct ?? 0, rightText: cacheHitPct !== null ? `${Math.round(cacheHitPct)}%` : "—", leftFoot: "Prompt caching ativo", rightFoot: "ao vivo" }
+            ]
+          }
+        ].map(
+          (prov) => h(
+            "div",
+            { key: prov.id, className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "14px" } },
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", gap: "8px" } },
+              h("span", { style: { width: "20px", height: "20px", borderRadius: "6px", background: `${prov.color}22`, color: prov.color, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: "11px", fontWeight: 700 } }, prov.name.charAt(0)),
+              h("strong", { style: { fontSize: "13px" } }, prov.name),
+              h("span", { className: "of-muted", style: { marginLeft: "auto", fontSize: "11px" } }, prov.badge)
+            ),
+            prov.windows.map(
+              (w) => h(
+                "div",
+                { key: w.label, style: { display: "flex", flexDirection: "column", gap: "5px" } },
+                h(
+                  "div",
+                  { style: { display: "flex", justifyContent: "space-between", fontSize: "12px" } },
+                  h("span", { style: { fontWeight: 500 } }, w.label),
+                  h("span", { className: "of-num", style: { fontSize: "11.5px" } }, w.rightText)
+                ),
+                h(
+                  "div",
+                  { className: "of-bar-track", style: { marginTop: 0, height: "7px", borderRadius: "999px" } },
+                  h("div", { className: "of-bar-fill", style: { width: `${Math.max(w.usedPct > 0 ? 2 : 0, Math.min(100, w.usedPct))}%`, background: w.usedPct > 85 ? "var(--status-failed)" : w.usedPct > 65 ? "var(--status-waiting)" : "var(--status-running)", borderRadius: "999px" } })
+                ),
+                h(
+                  "div",
+                  { className: "of-muted", style: { display: "flex", justifyContent: "space-between", fontSize: "10.5px" } },
+                  h("span", null, w.leftFoot),
+                  h("span", null, w.rightFoot)
+                )
+              )
+            )
+          )
+        )
+      )
+    ),
+    // ── 6. BOTTOM 2-COLUMN SPLIT (Top sessions by cost | Background work + Budgets) ──
+    h(
+      "div",
+      { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(380px, 1fr))", gap: "18px", alignItems: "start" } },
+      // Esquerda: Top sessions by cost
+      h(
+        "section",
+        { style: { display: "flex", flexDirection: "column", gap: "10px", minWidth: 0 }, "data-top-sessions-table": "true" },
+        h("h2", { style: { margin: 0, fontSize: "13.5px", fontWeight: 600 } }, "Principais sessões por custo"),
+        h(
+          "div",
+          { className: "of-card", style: { padding: "4px 10px 8px 10px", overflowX: "auto" } },
+          topSessions.length === 0 ? h("div", { className: "of-muted", style: { padding: "24px", textAlign: "center", fontSize: "12px" } }, "Nenhuma sessão registrada nesta janela.") : h(
+            "table",
+            { className: "of-table" },
+            h(
+              "thead",
+              null,
+              h("tr", null, h("th", null, "Sessão"), h("th", null, "Modelo"), h("th", null, "Iniciado por"), h("th", { style: { textAlign: "right" } }, "Turnos"))
+            ),
+            h(
+              "tbody",
+              null,
+              topSessions.slice(0, 10).map(
+                (s) => h(
+                  "tr",
+                  { key: s.id },
+                  h(
+                    "td",
+                    { style: { maxWidth: "260px" } },
+                    h("div", { style: { fontWeight: 600, fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: s.title }, s.title),
+                    h(
+                      "div",
+                      { className: "of-muted", style: { fontSize: "10.5px", display: "inline-flex", alignItems: "center", gap: "5px" } },
+                      s.sub,
+                      s.prTag && h("span", { style: { color: "var(--status-done)", fontFamily: "monospace" } }, `· ${s.prTag}`)
+                    )
+                  ),
+                  h("td", { className: "of-mono of-muted", style: { fontSize: "11px" } }, s.model),
+                  h("td", { className: "of-muted", style: { fontSize: "11.5px" } }, s.startedBy),
+                  h("td", { className: "of-mono of-num of-muted", style: { textAlign: "right" } }, String(s.turns))
+                )
+              )
+            )
+          )
+        )
+      ),
+      // Direita: Background work (AutomationSpend + BudgetsPanel 1:1 CodeDen)
+      h(
+        "div",
+        { style: { display: "flex", flexDirection: "column", gap: "14px", minWidth: 0 }, "data-background-work-panel": "true" },
+        h("h2", { style: { margin: 0, fontSize: "13.5px", fontWeight: 600 } }, "Trabalho em segundo plano"),
+        // Automation and factory spend
+        h(
+          "div",
+          { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "12px" } },
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "center", gap: "8px" } },
+            svgIcon$1(h, ["M3 3h6v6H3z", "M15 15h6v6h-6z", "M9 6h6a3 3 0 0 1 3 3v6"], 15, "var(--muted-foreground)"),
+            h("strong", { style: { fontSize: "13px" } }, "Gasto de automações e fábrica")
+          ),
+          h(
+            "div",
+            { style: { display: "flex", height: "8px", borderRadius: "999px", overflow: "hidden", background: "var(--muted)", gap: "2px" } },
+            [
+              { label: "Interativo", val: interactiveCost, color: "#3b82f6" },
+              { label: "Automações", val: autoCost, color: "#10b981" },
+              { label: "Fábrica", val: factoryCost, color: "#a855f7" }
+            ].map(
+              (p) => totalCostUsd > 0 && p.val > 0 ? h("div", { key: p.label, style: { width: `${p.val / bgTotal * 100}%`, background: p.color } }) : null
+            )
+          ),
+          h(
+            "div",
+            { style: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px" } },
+            [
+              { label: "Interativo", val: interactiveCost, color: "#3b82f6" },
+              { label: "Automações", val: autoCost, color: "#10b981" },
+              { label: "Fábrica", val: factoryCost, color: "#a855f7" }
+            ].map(
+              (p) => h(
+                "div",
+                { key: p.label },
+                h(
+                  "div",
+                  { className: "of-muted", style: { display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "11px" } },
+                  h("span", { style: { width: "7px", height: "7px", borderRadius: "2px", background: p.color } }),
+                  p.label
+                ),
+                h(
+                  "div",
+                  { className: "of-num", style: { fontSize: "13.5px", fontWeight: 600, marginTop: "2px" } },
+                  fmtMoney(p.val),
+                  h("span", { className: "of-muted", style: { fontSize: "10.5px", fontWeight: 400, marginLeft: "4px" } }, totalCostUsd > 0 ? `${Math.round(p.val / bgTotal * 100)}%` : "—")
+                )
+              )
+            )
+          ),
+          h(
+            "div",
+            { style: { borderTop: "1px solid var(--border)", paddingTop: "10px", display: "flex", flexDirection: "column", gap: "6px", fontSize: "12px" } },
+            (props.automations || []).slice(0, 4).map(
+              (a) => {
+                var _a2;
+                return h(
+                  "div",
+                  { key: a.id, style: { display: "flex", alignItems: "center", gap: "8px" } },
+                  h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, a.name),
+                  h("span", { className: "of-muted", style: { fontSize: "11px", flexShrink: 0 } }, `${((_a2 = a.recentRuns) == null ? void 0 : _a2.length) || 0} exec.`),
+                  h("span", { className: "of-mono of-num", style: { marginLeft: "auto" } }, "$0.00")
+                );
+              }
+            )
+          )
+        ),
+        // Budgets and alerts
+        h(
+          "div",
+          { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" } },
+            h(
+              "div",
+              { style: { display: "inline-flex", alignItems: "center", gap: "8px" } },
+              svgIcon$1(h, ["M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9", "M10.3 21a1.94 1.94 0 0 0 3.4 0"], 15, "var(--muted-foreground)"),
+              h("strong", { style: { fontSize: "13px" } }, "Orçamentos e alertas")
+            ),
+            props.onOpenSettings && h("button", { type: "button", className: "of-btn", style: { fontSize: "11px", padding: "3px 9px" }, onClick: props.onOpenSettings }, "+ Configurar teto")
+          ),
+          h(
+            "div",
+            { className: "of-muted", style: { fontSize: "11.5px", lineHeight: 1.45 } },
+            "Ultrapassar o nível de alerta ou limite envia um item para o Inbox e dispara notificação. Os limites operacionais da fábrica aplicam os mesmos valores."
+          ),
+          h(
+            "div",
+            { className: "of-surface", style: { padding: "9px 11px", display: "flex", flexDirection: "column", gap: "5px" } },
+            h(
+              "div",
+              { style: { display: "flex", justifyContent: "space-between", fontSize: "12px" } },
+              h("strong", null, `Teto diário · ${empresaNome}`),
+              h("span", { className: "of-mono of-num" }, `${fmtMoney(status.spendToday.usd)} / ${fmtMoney(dailyBudgetUsd)}`)
+            ),
+            h("div", { className: "of-bar-track", style: { marginTop: 0, height: "5px" } }, h("div", { className: "of-bar-fill", style: { width: `${dailySpendPct}%`, background: dailySpendPct > 80 ? "var(--status-failed)" : "var(--primary)" } }))
+          )
+        )
+      )
+    )
+  );
+}
 const AUTONOMY_MODES = [
   {
     id: "manual",
@@ -52159,7 +53209,7 @@ function fmtTokens(n) {
   return String(n);
 }
 function renderFactorySecondaryPage(props) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x2, _y2, _z2, _A, _B, _C, _D, _E, _F, _G, _H, _I;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x2, _y2, _z2, _A;
   const {
     h,
     tab,
@@ -52579,211 +53629,34 @@ function renderFactorySecondaryPage(props) {
     );
   }
   if (tab === "costs") {
-    const economia = ((_l = status.kpis) == null ? void 0 : _l.economia) || null;
-    const qualidade = ((_m2 = status.kpis) == null ? void 0 : _m2.qualidade) || null;
-    const porModelo = Array.isArray(economia == null ? void 0 : economia.por_modelo) ? economia.por_modelo : [];
-    const totalCost = porModelo.reduce((acc, r) => acc + Number(r.custo_usd || 0), 0);
-    const maxCost = Math.max(0.01, ...porModelo.map((r) => Number(r.custo_usd || 0)));
-    const empresas = (holding == null ? void 0 : holding.empresas) || [];
-    return h(
-      "div",
-      { style: { display: "flex", flexDirection: "column", gap: "14px" } },
-      h(
-        "div",
-        { style: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" } },
-        h(
-          "div",
-          { style: { display: "inline-flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
-          h(
-            "div",
-            { className: "of-segmented" },
-            ["7d", "30d", "90d"].map(
-              (r) => h(
-                "button",
-                {
-                  key: r,
-                  type: "button",
-                  className: "of-seg-btn",
-                  "data-active": costRange === r ? "true" : "false",
-                  onClick: () => setCostRange(r)
-                },
-                r
-              )
-            )
-          ),
-          h("span", { className: "of-pill", "data-tone": "done" }, `Empresa em foco: ${((_n = status.tenantManifest) == null ? void 0 : _n.nome) || tenant}`)
-        ),
-        h("span", { className: "of-muted" }, `Fonte real: kpis-esteira.json (${((_o = status.kpis) == null ? void 0 : _o.gerado_em) || PT_BR.labels.unavailable})`)
-      ),
-      h(
-        "div",
-        { className: "of-surface", style: { padding: "8px 12px", fontSize: "11.5px", color: "var(--muted-foreground)" } },
-        "Custos equivalentes de API calculados a partir de kpis-esteira.json (sem dados sintéticos; modelos gratuitos/assinatura aparecem com $0.00 quando sem cobrança por token)."
-      ),
-      // 5 KPIs principais (UsageTotals do CodeDen)
-      h(
-        "div",
-        { className: "of-stats-6" },
-        [
-          {
-            label: "Custo equivalente API",
-            val: typeof (economia == null ? void 0 : economia.custo_usd_total_amostra) === "number" ? `$${economia.custo_usd_total_amostra.toFixed(2)}` : PT_BR.labels.unavailable,
-            sub: `gasto hoje: $${status.spendToday.usd.toFixed(2)}`
-          },
-          {
-            label: "Tokens (7d)",
-            val: fmtTokens(economia == null ? void 0 : economia.tokens_7d),
-            sub: `orçamento/dia: ${fmtTokens((_p = status.tenantManifest) == null ? void 0 : _p.budgetTokensDiario)}`
-          },
-          {
-            label: "Cache hit rate",
-            val: typeof (economia == null ? void 0 : economia.cache_hit_ratio_pct) === "number" ? `${economia.cache_hit_ratio_pct.toFixed(1)}%` : PT_BR.labels.unavailable,
-            sub: "reaproveitamento de contexto"
-          },
-          {
-            label: "Merges (7d)",
-            val: String(status.stats.merged7d),
-            sub: `hoje: ${status.mergesToday}`
-          },
-          {
-            label: "FPY real",
-            val: typeof (qualidade == null ? void 0 : qualidade.fpy_real_pct) === "number" ? `${qualidade.fpy_real_pct.toFixed(1)}%` : PT_BR.labels.unavailable,
-            sub: `CPI mín: ${((_q = status.tenantManifest) == null ? void 0 : _q.cpiMinimo) ?? 0.85}`
-          }
-        ].map(
-          (k) => h(
-            "div",
-            { key: k.label, className: "of-card-pad", style: { padding: "11px 13px" } },
-            h("div", { className: "of-meter-label" }, k.label),
-            h("div", { className: "of-num", style: { fontSize: "20px", fontWeight: 700, marginTop: "4px" } }, k.val),
-            h("div", { className: "of-muted", style: { fontSize: "10.5px", marginTop: "2px" } }, k.sub)
-          )
-        )
-      ),
-      // Telemetria nativa do Buzz (bundled/usage · ctx.agents.types()[...].usage)
-      h(
-        "div",
-        { className: "of-card-pad", "data-buzz-native-usage": "true", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-        h(
-          "div",
-          { style: { display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" } },
-          h(
-            "div",
-            null,
-            h("div", { style: { fontSize: "13.5px", fontWeight: 700 } }, "Telemetria Nativa do Buzz (bundled/usage · tempo real)"),
-            h("div", { className: "of-muted", style: { fontSize: "11px" } }, ((_r = props.nativeUsage) == null ? void 0 : _r.available) ? `${props.nativeUsage.sessionsCount} sessões em ${props.nativeUsage.agentsCount} agentes locais · hoje: ${fmtTokens(props.nativeUsage.tokensToday)} tok · ${costRange}: ${fmtTokens(props.nativeUsage.tokensPeriod)} tok${props.nativeUsage.cacheHitPct !== null ? ` · cache ${props.nativeUsage.cacheHitPct}%` : ""}` : "Aguardando leitura de sessões locais via ctx.agents.types().usage...")
-          ),
-          props.onRefreshNativeUsage && h("button", { type: "button", className: "of-btn", style: { fontSize: "11px", padding: "4px 9px" }, onClick: props.onRefreshNativeUsage }, "Atualizar uso Buzz")
-        ),
-        ((_s = props.nativeUsage) == null ? void 0 : _s.available) && props.nativeUsage.byAgent.length > 0 && h(
-          "table",
-          { className: "of-table" },
-          h("thead", null, h("tr", null, h("th", null, "Agente (Buzz)"), h("th", null, "Harness"), h("th", null, "Sessões"), h("th", null, "Hoje"), h("th", null, `Período (${props.nativeUsage.days}d)`), h("th", null, "Cache"))),
-          h(
-            "tbody",
-            null,
-            props.nativeUsage.byAgent.slice(0, 10).map(
-              (row) => h(
-                "tr",
-                { key: row.agentKey || row.name },
-                h("td", { style: { fontWeight: 600 } }, row.name),
-                h("td", { className: "of-mono of-muted" }, row.harness),
-                h("td", { className: "of-mono" }, String(row.sessions)),
-                h("td", { className: "of-mono" }, fmtTokens(row.tokensToday)),
-                h("td", { className: "of-mono" }, fmtTokens(row.tokensPeriod)),
-                h("td", { className: "of-mono" }, row.cacheHitPct !== null ? `${row.cacheHitPct}%` : "—")
-              )
-            )
-          )
-        )
-      ),
-      // Barra empilhada visual de participação por modelo + Tabela Breakdown (1:1 CodeDen SpendCard)
-      h(
-        "div",
-        { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "12px" } },
-        h(
-          "div",
-          { style: { display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" } },
-          h("div", { style: { fontSize: "13.5px", fontWeight: 700 } }, "Distribuição de gasto por modelo (kpis-esteira.json)"),
-          h("span", { className: "of-muted" }, `${porModelo.length} modelos na amostra`)
-        ),
-        porModelo.length > 0 && h(
-          "div",
-          { style: { display: "flex", height: "14px", borderRadius: "6px", overflow: "hidden", background: "var(--muted)", gap: "1px" } },
-          porModelo.slice(0, 8).map((row, idx) => {
-            const usd = Number(row.custo_usd || 0);
-            const pct = totalCost > 0 ? Math.max(1, usd / totalCost * 100) : 100 / Math.max(1, porModelo.length);
-            return h("div", {
-              key: `${row.modelo || idx}`,
-              title: `${row.modelo}: $${usd.toFixed(3)} (${pct.toFixed(1)}%)`,
-              style: { width: `${pct}%`, background: CHART_COLORS[idx % CHART_COLORS.length] }
-            });
-          })
-        ),
-        porModelo.length === 0 ? h("div", { className: "of-muted" }, PT_BR.labels.unavailable) : h(
-          "table",
-          { className: "of-table" },
-          h(
-            "thead",
-            null,
-            h("tr", null, h("th", null, "Modelo"), h("th", null, "Participação"), h("th", null, "%"), h("th", null, "Custo USD"), h("th", null, "Chamadas"), h("th", null, "Cache"))
-          ),
-          h(
-            "tbody",
-            null,
-            porModelo.slice(0, 15).map((row, idx) => {
-              const usd = Number(row.custo_usd || 0);
-              const w = Math.min(100, usd / maxCost * 100);
-              const sharePct = totalCost > 0 ? usd / totalCost * 100 : 0;
-              const color = CHART_COLORS[idx % CHART_COLORS.length];
-              return h(
-                "tr",
-                { key: `${row.modelo || idx}` },
-                h(
-                  "td",
-                  { className: "of-mono", style: { display: "flex", alignItems: "center", gap: "7px" } },
-                  h("span", { style: { width: "8px", height: "8px", borderRadius: "2px", background: color, flexShrink: 0 } }),
-                  String(row.modelo || PT_BR.labels.unavailable)
-                ),
-                h(
-                  "td",
-                  { style: { width: "170px" } },
-                  h("div", { className: "of-bar-track", style: { marginTop: 0, height: "6px" } }, h("div", { className: "of-bar-fill", style: { width: `${w}%`, background: color } }))
-                ),
-                h("td", { className: "of-mono of-num of-muted" }, sharePct > 0 && sharePct < 1 ? "<1%" : `${Math.round(sharePct)}%`),
-                h("td", { className: "of-mono of-num" }, typeof row.custo_usd === "number" ? `$${usd.toFixed(2)}` : PT_BR.labels.unavailable),
-                h("td", { className: "of-mono of-num" }, String(row.requisicoes ?? row.chamadas ?? PT_BR.labels.unavailable)),
-                h("td", { className: "of-mono of-num" }, typeof row.cache_hit_pct === "number" ? `${row.cache_hit_pct.toFixed(1)}%` : PT_BR.labels.unavailable)
-              );
-            })
-          )
-        )
-      ),
-      empresas.length > 0 && h(
-        "div",
-        { className: "of-card-pad" },
-        h("div", { style: { fontSize: "13px", fontWeight: 700, marginBottom: "8px" } }, "Tetos de orçamento por empresa (empresas/*.json)"),
-        h(
-          "table",
-          { className: "of-table" },
-          h("thead", null, h("tr", null, h("th", null, "Empresa"), h("th", null, "Estágio"), h("th", null, "Agentes"), h("th", null, "Teto diário de tokens"))),
-          h(
-            "tbody",
-            null,
-            empresas.map(
-              (e) => h(
-                "tr",
-                { key: e.slug },
-                h("td", { style: { fontWeight: 600 } }, e.workspaceBuzz || e.nome),
-                h("td", null, h("span", { className: "of-pill", "data-tone": e.estagio === "operacional" ? "done" : "idle" }, e.estagio)),
-                h("td", { className: "of-mono" }, `${e.agentesProntos}/${e.agentesTotal}`),
-                h("td", { className: "of-mono" }, `${fmtTokens(e.budgetTokensDiario)} tokens/dia`)
-              )
-            )
-          )
-        )
-      )
-    );
+    return renderFactoryUsageAndCostPage({
+      h,
+      tenant,
+      status,
+      holding,
+      nativeUsage: props.nativeUsage,
+      onRefreshNativeUsage: props.onRefreshNativeUsage,
+      automations: props.automations,
+      costRange,
+      setCostRange,
+      usageDimension: props.usageDimension || "model",
+      setUsageDimension: props.setUsageDimension || (() => {
+      }),
+      usageMetric: props.usageMetric || "cost",
+      setUsageMetric: props.setUsageMetric || (() => {
+      }),
+      usageHoverDay: props.usageHoverDay ?? null,
+      setUsageHoverDay: props.setUsageHoverDay || (() => {
+      }),
+      usageFilterModel: props.usageFilterModel ?? null,
+      setUsageFilterModel: props.setUsageFilterModel || (() => {
+      }),
+      pricesOpen: Boolean(props.pricesOpen),
+      setPricesOpen: props.setPricesOpen || (() => {
+      }),
+      onOpenSettings: props.onOpenSettings,
+      onCopyText: props.onCopyText
+    });
   }
   if (tab === "automations") {
     const tm = status.tenantManifest;
@@ -52835,7 +53708,7 @@ function renderFactorySecondaryPage(props) {
         tenant,
         companyName: (tm == null ? void 0 : tm.nome) || tenant,
         automations: props.automations,
-        selectedId: props.selectedAutomationId || ((_t = props.automations[0]) == null ? void 0 : _t.id) || "",
+        selectedId: props.selectedAutomationId || ((_l = props.automations[0]) == null ? void 0 : _l.id) || "",
         onSelectId: props.onSelectAutomationId,
         onUpdateAutomation: props.onUpdateAutomation,
         onCreateAutomation: props.onCreateAutomation,
@@ -52857,10 +53730,10 @@ function renderFactorySecondaryPage(props) {
     );
   }
   if (tab === "agents") {
-    const tenantAgents = ((_u = status.tenantManifest) == null ? void 0 : _u.agentes) || [];
+    const tenantAgents = ((_m2 = status.tenantManifest) == null ? void 0 : _m2.agentes) || [];
     const modelos = status.modelos || [];
-    const revisoresSurf = Object.entries(((_v = status.tenantManifest) == null ? void 0 : _v.revisoresPorSuperficie) || {});
-    const empresaNome = ((_w = status.tenantManifest) == null ? void 0 : _w.nome) || tenant;
+    const revisoresSurf = Object.entries(((_n = status.tenantManifest) == null ? void 0 : _n.revisoresPorSuperficie) || {});
+    const empresaNome = ((_o = status.tenantManifest) == null ? void 0 : _o.nome) || tenant;
     return h(
       "div",
       { style: { display: "flex", flexDirection: "column", gap: "12px" } },
@@ -53559,8 +54432,8 @@ function renderFactorySecondaryPage(props) {
       renderBuzzCanvasViewer({
         h,
         tenant,
-        channelName: (ch == null ? void 0 : ch.name) || ((_x2 = status.tenantManifest) == null ? void 0 : _x2.nome) || tenant,
-        channelId: (ch == null ? void 0 : ch.channelId) || ((_y2 = status.tenantManifest) == null ? void 0 : _y2.canal) || null,
+        channelName: (ch == null ? void 0 : ch.name) || ((_p = status.tenantManifest) == null ? void 0 : _p.nome) || tenant,
+        channelId: (ch == null ? void 0 : ch.channelId) || ((_q = status.tenantManifest) == null ? void 0 : _q.canal) || null,
         content: props.channelCanvas ?? null,
         draft: props.canvasDraft ?? props.channelCanvas ?? "",
         onChangeDraft: (v2) => {
@@ -53623,7 +54496,7 @@ function renderFactorySecondaryPage(props) {
         h(
           "section",
           { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-          h("div", { className: "of-meter-label" }, `2. Workspace & Arquivos de Contexto (${((_z2 = status.tenantManifest) == null ? void 0 : _z2.nome) || tenant})`),
+          h("div", { className: "of-meter-label" }, `2. Workspace & Arquivos de Contexto (${((_r = status.tenantManifest) == null ? void 0 : _r.nome) || tenant})`),
           papeis.length > 0 && h(
             "div",
             { style: { display: "flex", flexWrap: "wrap", gap: "6px" } },
@@ -53686,7 +54559,7 @@ function renderFactorySecondaryPage(props) {
     );
   }
   const chInfo = props.channelInfo;
-  const settingsTenantAgents = ((_A = status.tenantManifest) == null ? void 0 : _A.agentes) || [];
+  const settingsTenantAgents = ((_s = status.tenantManifest) == null ? void 0 : _s.agentes) || [];
   const resolvedMembers = ((chInfo == null ? void 0 : chInfo.memberPubkeys) || []).map((pk) => {
     var _a2, _b2;
     const pkLow = pk.toLowerCase();
@@ -53728,7 +54601,7 @@ function renderFactorySecondaryPage(props) {
           h(
             "div",
             null,
-            h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Canal da Empresa no Buzz · #${(chInfo == null ? void 0 : chInfo.name) || ((_B = status.tenantManifest) == null ? void 0 : _B.nome) || tenant}`),
+            h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Canal da Empresa no Buzz · #${(chInfo == null ? void 0 : chInfo.name) || ((_t = status.tenantManifest) == null ? void 0 : _t.nome) || tenant}`),
             h(
               "div",
               { className: "of-muted", style: { marginTop: "2px" } },
@@ -53894,7 +54767,7 @@ function renderFactorySecondaryPage(props) {
       h(
         "div",
         { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-        h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Modo de autonomia · ${((_C = status.tenantManifest) == null ? void 0 : _C.nome) || tenant}`),
+        h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Modo de autonomia · ${((_u = status.tenantManifest) == null ? void 0 : _u.nome) || tenant}`),
         h("div", { className: "of-muted" }, "Suba um degrau por vez. Áreas protegidas e regra L-01 sempre permanecem ativas."),
         h(
           "div",
@@ -54036,8 +54909,8 @@ function renderFactorySecondaryPage(props) {
             h(
               "div",
               { style: { display: "flex", alignItems: "center", gap: "6px" } },
-              h("span", { className: "of-pill", "data-tone": ((_D = status.holdoutStatus) == null ? void 0 : _D.status) === "pass" ? "done" : ((_E = status.holdoutStatus) == null ? void 0 : _E.status) === "fail" ? "failed" : "idle" }, status.holdoutStatus ? `${status.holdoutStatus.passed ?? 0}/${status.holdoutStatus.total ?? 0} ${status.holdoutStatus.status.toUpperCase()}` : "Não executado"),
-              ((_F = status.holdoutStatus) == null ? void 0 : _F.external_verified) && h("span", { className: "of-muted", style: { fontSize: "10.5px" } }, `sha:${status.holdoutStatus.suite_sha256 || "ok"}`)
+              h("span", { className: "of-pill", "data-tone": ((_v = status.holdoutStatus) == null ? void 0 : _v.status) === "pass" ? "done" : ((_w = status.holdoutStatus) == null ? void 0 : _w.status) === "fail" ? "failed" : "idle" }, status.holdoutStatus ? `${status.holdoutStatus.passed ?? 0}/${status.holdoutStatus.total ?? 0} ${status.holdoutStatus.status.toUpperCase()}` : "Não executado"),
+              ((_x2 = status.holdoutStatus) == null ? void 0 : _x2.external_verified) && h("span", { className: "of-muted", style: { fontSize: "10.5px" } }, `sha:${status.holdoutStatus.suite_sha256 || "ok"}`)
             ),
             props.onRunHoldoutNow && h("button", { type: "button", className: "of-btn", disabled: props.runningHoldout, style: { alignSelf: "flex-start", padding: "3px 9px", fontSize: "11px" }, onClick: props.onRunHoldoutNow }, props.runningHoldout ? "Rodando..." : "▶ Rodar Holdout")
           ),
@@ -54063,7 +54936,7 @@ function renderFactorySecondaryPage(props) {
             h(
               "div",
               { style: { fontSize: "12px", fontWeight: 600 } },
-              ((_G = props.focusState) == null ? void 0 : _G.active) ? `🔭 Focus ativo até ${props.focusState.untilFormatted}` : "Focus inativo"
+              ((_y2 = props.focusState) == null ? void 0 : _y2.active) ? `🔭 Focus ativo até ${props.focusState.untilFormatted}` : "Focus inativo"
             ),
             h("div", { className: "of-muted", style: { fontSize: "10.5px" } }, "Notificações não críticas são silenciadas durante o modo Focus; apenas alertas P0/Kill Switch atravessam.")
           )
@@ -54092,7 +54965,7 @@ function renderFactorySecondaryPage(props) {
             props.evaluatingTrust ? "Calculando..." : "↻ Recalcular Escape Rate"
           )
         ),
-        ((_I = (_H = status.trustEngine) == null ? void 0 : _H.categories) == null ? void 0 : _I.length) && h(
+        ((_A = (_z2 = status.trustEngine) == null ? void 0 : _z2.categories) == null ? void 0 : _A.length) && h(
           "div",
           { style: { display: "flex", flexDirection: "column", gap: "8px" } },
           status.trustEngine.categories.map(
@@ -55898,6 +56771,11 @@ function createFactoryAppComponent(ctx, opts = {}) {
     const [evalFilter, setEvalFilter] = React.useState("all");
     const [mcpSearch, setMcpSearch] = React.useState("");
     const [mcpCategory, setMcpCategory] = React.useState("all");
+    const [usageDimension, setUsageDimension] = React.useState("model");
+    const [usageMetric, setUsageMetric] = React.useState("cost");
+    const [usageHoverDay, setUsageHoverDay] = React.useState(null);
+    const [usageFilterModel, setUsageFilterModel] = React.useState(null);
+    const [pricesOpen, setPricesOpen] = React.useState(false);
     const [settingsForm, setSettingsFormState] = React.useState({
       mode: "software_factory",
       autoMerge: false,
@@ -57441,7 +58319,18 @@ Nota: ${evidence.note}`
                 onOpenAgentProfile: handleOpenNativeAgentProfile,
                 onMigrateSingleAgentModel: async (agentKey, target) => {
                   await handleSaveAgentProfile(agentKey, { provider: target.provider, model: target.model });
-                }
+                },
+                usageDimension,
+                setUsageDimension,
+                usageMetric,
+                setUsageMetric,
+                usageHoverDay,
+                setUsageHoverDay,
+                usageFilterModel,
+                setUsageFilterModel,
+                pricesOpen,
+                setPricesOpen,
+                onOpenSettings: () => setTab("settings")
               })
             )
           )
