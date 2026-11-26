@@ -12,6 +12,7 @@ export type OrgfyCrdtRecordKind =
   | "question_card"
   | "visual_evidence"
   | "council_decision"
+  | "distributed_lock"
   | "control_sync"
   | "automation_sync";
 
@@ -60,6 +61,34 @@ export interface OrgfyVisualEvidence {
   updatedAt: string;
 }
 
+export interface OrgfyCouncilDeliberation {
+  id: string;
+  kind: "council_decision";
+  tenant: string;
+  title: string;
+  summary: string;
+  proposedBy: string;
+  status: "pendente" | "aprovada" | "recusada";
+  decidedBy?: string;
+  decisionNote?: string;
+  createdAt: string;
+  updatedAt: string;
+  decidedAt?: string;
+}
+
+export interface OrgfyDistributedLock {
+  id: string;
+  kind: "distributed_lock";
+  tenant: string;
+  resourceKey: string;
+  owner: string;
+  reason?: string;
+  status: "active" | "released";
+  acquiredAt: string;
+  expiresAt: string;
+  updatedAt: string;
+}
+
 export interface OrgfySyncedDocument {
   id: string;
   kind: "council_decision" | "control_sync" | "automation_sync";
@@ -71,6 +100,8 @@ export interface OrgfySyncedDocument {
 export type OrgfyCrdtRecord =
   | OrgfyQuestionCard
   | OrgfyVisualEvidence
+  | OrgfyCouncilDeliberation
+  | OrgfyDistributedLock
   | OrgfySyncedDocument;
 
 export interface CrdtBackendInfo {
@@ -397,6 +428,106 @@ export class OrgfyCrdtStore {
   async listVisualEvidence(tenant?: string, itemId?: string): Promise<OrgfyVisualEvidence[]> {
     const list = await this.listByKind<OrgfyVisualEvidence>("visual_evidence", tenant);
     return itemId ? list.filter((v) => v.itemId === itemId) : list;
+  }
+
+  // ── Deliberações do Conselho (CRDT Sync · Onda 3 v17.7) ──
+  async createCouncilDeliberation(input: {
+    tenant?: string;
+    title: string;
+    summary: string;
+    proposedBy?: string;
+  }): Promise<OrgfyCouncilDeliberation> {
+    const nowIso = new Date().toISOString();
+    const rec: OrgfyCouncilDeliberation = {
+      id: `cdel-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+      kind: "council_decision",
+      tenant: String(input.tenant || "orgfy").trim() || "orgfy",
+      title: String(input.title || "Deliberação do Conselho").trim(),
+      summary: String(input.summary || "").trim(),
+      proposedBy: String(input.proposedBy || "Fundador").trim(),
+      status: "pendente",
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+    await this.putRecord(rec);
+    return rec;
+  }
+
+  async voteCouncilDeliberation(
+    id: string,
+    decision: "aprovada" | "recusada",
+    decidedBy = "Fundador",
+    note?: string
+  ): Promise<OrgfyCouncilDeliberation | null> {
+    const existing = await this.getRecord(id);
+    if (!existing || existing.kind !== "council_decision" || !("title" in existing)) return null;
+    const nowIso = new Date().toISOString();
+    const updated: OrgfyCouncilDeliberation = {
+      ...existing,
+      status: decision,
+      decidedBy,
+      decisionNote: note ? String(note).trim() : undefined,
+      decidedAt: nowIso,
+      updatedAt: nowIso,
+    };
+    await this.putRecord(updated);
+    return updated;
+  }
+
+  async listCouncilDeliberations(tenant?: string): Promise<OrgfyCouncilDeliberation[]> {
+    const raw = await this.listByKind<any>("council_decision", tenant);
+    return raw.filter((r) => r && typeof r.title === "string") as OrgfyCouncilDeliberation[];
+  }
+
+  // ── Locks Distribuídos (CRDT Sync · Onda 3 v17.7) ──
+  async acquireDistributedLock(input: {
+    tenant?: string;
+    resourceKey: string;
+    owner: string;
+    reason?: string;
+    ttlMinutes?: number;
+  }): Promise<OrgfyDistributedLock> {
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const ttlMs = Math.max(1, Number(input.ttlMinutes || 30)) * 60_000;
+    const safeKey = String(input.resourceKey || "default").trim().replace(/[^a-zA-Z0-9:_-]+/g, "_");
+    const rec: OrgfyDistributedLock = {
+      id: `lock:${input.tenant || "orgfy"}:${safeKey}`,
+      kind: "distributed_lock",
+      tenant: String(input.tenant || "orgfy").trim() || "orgfy",
+      resourceKey: String(input.resourceKey || "default").trim(),
+      owner: String(input.owner || "OrgFy").trim(),
+      reason: input.reason ? String(input.reason).trim() : undefined,
+      status: "active",
+      acquiredAt: nowIso,
+      expiresAt: new Date(now.getTime() + ttlMs).toISOString(),
+      updatedAt: nowIso,
+    };
+    await this.putRecord(rec);
+    return rec;
+  }
+
+  async releaseDistributedLock(id: string): Promise<OrgfyDistributedLock | null> {
+    const existing = await this.getRecord(id);
+    if (!existing || existing.kind !== "distributed_lock") return null;
+    const updated: OrgfyDistributedLock = {
+      ...existing,
+      status: "released",
+      updatedAt: new Date().toISOString(),
+    };
+    await this.putRecord(updated);
+    return updated;
+  }
+
+  async listDistributedLocks(tenant?: string, onlyActive = true): Promise<OrgfyDistributedLock[]> {
+    const all = await this.listByKind<OrgfyDistributedLock>("distributed_lock", tenant);
+    const nowMs = Date.now();
+    return all.filter((l) => {
+      if (!onlyActive) return true;
+      if (l.status !== "active") return false;
+      const exp = Date.parse(l.expiresAt || "");
+      return !Number.isFinite(exp) || exp > nowMs;
+    });
   }
 
   async syncDocument(

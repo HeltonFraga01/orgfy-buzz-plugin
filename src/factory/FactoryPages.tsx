@@ -8,7 +8,16 @@ import type { HoldingControlPlaneSnapshot } from "../services/holding-service";
 import type { BuzzChannelLiveInfo } from "../services/buzz-channel-live";
 import { renderBuzzCanvasViewer } from "../components/BuzzCanvasViewer";
 import { renderAutomationEditor, type OrgfyAutomation } from "./AutomationEditor";
-import type { CrdtBackendInfo, OrgfyQuestionCard, QuestionCardAnswer } from "../services/orgfy-crdt-store";
+import type {
+  CrdtBackendInfo,
+  OrgfyCouncilDeliberation,
+  OrgfyDistributedLock,
+  OrgfyQuestionCard,
+  QuestionCardAnswer,
+} from "../services/orgfy-crdt-store";
+import type { BuzzNativeUsageSnapshot } from "../services/buzz-usage-live";
+import type { BuzzFocusState } from "../services/buzz-focus";
+import type { CommandIntegrityAuditSummary } from "../services/command-integrity";
 import { PT_BR } from "../i18n/pt-BR";
 
 export interface FactorySecondaryPagesProps {
@@ -96,6 +105,19 @@ export interface FactorySecondaryPagesProps {
   crdtBackendInfo?: CrdtBackendInfo;
   onAnswerQuestionCard?: (card: OrgfyQuestionCard, answer: QuestionCardAnswer) => Promise<void> | void;
   onDismissQuestionCard?: (card: OrgfyQuestionCard) => Promise<void> | void;
+  nativeUsage?: BuzzNativeUsageSnapshot | null;
+  onRefreshNativeUsage?: () => void;
+  focusState?: BuzzFocusState;
+  commandIntegrity?: CommandIntegrityAuditSummary | null;
+  onAuditCommandIntegrity?: () => void;
+  onRunHoldoutNow?: () => void;
+  runningHoldout?: boolean;
+  councilDeliberations?: OrgfyCouncilDeliberation[];
+  distributedLocks?: OrgfyDistributedLock[];
+  onCreateCouncilDeliberation?: (title: string, summary: string) => Promise<void> | void;
+  onVoteCouncilDeliberation?: (id: string, decision: "aprovada" | "recusada") => Promise<void> | void;
+  onReleaseDistributedLock?: (id: string) => Promise<void> | void;
+  onAutomateFromSession?: (input: { agentName: string; stepLabel?: string; sessionTitle?: string }) => void;
 }
 
 const CHART_COLORS = ["var(--chart-2)", "var(--chart-1)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"];
@@ -318,7 +340,84 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
               )
             )
           )
+        ),
+      h(
+        "div",
+        { className: "of-grid-2", "data-orgfy-crdt-council": "true" },
+        h(
+          "div",
+          { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" } },
+            h("div", { className: "of-meter-label" }, "Deliberações do Conselho (CRDT Sync)"),
+            props.onCreateCouncilDeliberation &&
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "of-btn",
+                  style: { padding: "3px 8px", fontSize: "11px" },
+                  onClick: () => {
+                    const title = window.prompt("Título da deliberação do Conselho:");
+                    if (!title || !title.trim()) return;
+                    const summary = window.prompt("Resumo / decisão proposta:") || "";
+                    void props.onCreateCouncilDeliberation!(title.trim(), summary.trim());
+                  },
+                },
+                "+ Nova deliberação"
+              )
+          ),
+          (props.councilDeliberations || []).length === 0
+            ? h("div", { className: "of-muted", style: { fontSize: "11.5px" } }, "Nenhuma deliberação registrada no CRDT ainda. Decisões criadas aqui sincronizam entre Mac e Buzz Mobile.")
+            : (props.councilDeliberations || []).slice(0, 8).map((del) =>
+                h(
+                  "div",
+                  { key: del.id, className: "of-surface", style: { padding: "8px 10px", display: "flex", flexDirection: "column", gap: "5px" } },
+                  h(
+                    "div",
+                    { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "6px" } },
+                    h("strong", { style: { fontSize: "12px" } }, del.title),
+                    h("span", { className: "of-pill", "data-tone": del.status === "aprovada" ? "done" : del.status === "recusada" ? "failed" : "waiting" }, del.status.toUpperCase())
+                  ),
+                  del.summary && h("div", { className: "of-muted", style: { fontSize: "11px" } }, del.summary),
+                  del.status === "pendente" && props.onVoteCouncilDeliberation &&
+                    h(
+                      "div",
+                      { style: { display: "flex", gap: "6px", marginTop: "2px" } },
+                      h("button", { type: "button", className: "of-btn", "data-variant": "primary", style: { padding: "2px 8px", fontSize: "10.5px" }, onClick: () => props.onVoteCouncilDeliberation!(del.id, "aprovada") }, "Aprovar ✓"),
+                      h("button", { type: "button", className: "of-btn", style: { padding: "2px 8px", fontSize: "10.5px" }, onClick: () => props.onVoteCouncilDeliberation!(del.id, "recusada") }, "Recusar")
+                    )
+                )
+              )
+        ),
+        h(
+          "div",
+          { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" } },
+            h("div", { className: "of-meter-label" }, "Locks Distribuídos Ativos (CRDT Sync)"),
+            h("span", { className: "of-pill", "data-tone": props.crdtBackendInfo?.mode === "buzz_artifact_collection" ? "done" : "idle" }, props.crdtBackendInfo?.mode === "buzz_artifact_collection" ? "Relay CRDT" : "Cache local")
+          ),
+          (props.distributedLocks || []).length === 0
+            ? h("div", { className: "of-muted", style: { fontSize: "11.5px" } }, "Nenhum lock distribuído ativo no momento.")
+            : (props.distributedLocks || []).map((lk) =>
+                h(
+                  "div",
+                  { key: lk.id, className: "of-surface", style: { padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" } },
+                  h(
+                    "div",
+                    null,
+                    h("div", { className: "of-mono", style: { fontSize: "11.5px", fontWeight: 600 } }, lk.resourceKey),
+                    h("div", { className: "of-muted", style: { fontSize: "10.5px" } }, `Dono: ${lk.owner}${lk.reason ? ` · ${lk.reason}` : ""}`)
+                  ),
+                  props.onReleaseDistributedLock &&
+                    h("button", { type: "button", className: "of-btn", style: { padding: "2px 8px", fontSize: "10.5px" }, onClick: () => props.onReleaseDistributedLock!(lk.id) }, "Liberar")
+                )
+              )
         )
+      )
     );
   }
 
@@ -487,6 +586,45 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
             h("div", { className: "of-muted", style: { fontSize: "10.5px", marginTop: "2px" } }, k.sub)
           )
         )
+      ),
+      // Telemetria nativa do Buzz (bundled/usage · ctx.agents.types()[...].usage)
+      h(
+        "div",
+        { className: "of-card-pad", "data-buzz-native-usage": "true", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+        h(
+          "div",
+          { style: { display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" } },
+          h(
+            "div",
+            null,
+            h("div", { style: { fontSize: "13.5px", fontWeight: 700 } }, "Telemetria Nativa do Buzz (bundled/usage · tempo real)"),
+            h("div", { className: "of-muted", style: { fontSize: "11px" } }, props.nativeUsage?.available ? `${props.nativeUsage.sessionsCount} sessões em ${props.nativeUsage.agentsCount} agentes locais · hoje: ${fmtTokens(props.nativeUsage.tokensToday)} tok · ${costRange}: ${fmtTokens(props.nativeUsage.tokensPeriod)} tok${props.nativeUsage.cacheHitPct !== null ? ` · cache ${props.nativeUsage.cacheHitPct}%` : ""}` : "Aguardando leitura de sessões locais via ctx.agents.types().usage...")
+          ),
+          props.onRefreshNativeUsage &&
+            h("button", { type: "button", className: "of-btn", style: { fontSize: "11px", padding: "4px 9px" }, onClick: props.onRefreshNativeUsage }, "Atualizar uso Buzz")
+        ),
+        props.nativeUsage?.available && props.nativeUsage.byAgent.length > 0 &&
+          h(
+            "table",
+            { className: "of-table" },
+            h("thead", null, h("tr", null, h("th", null, "Agente (Buzz)"), h("th", null, "Harness"), h("th", null, "Sessões"), h("th", null, "Hoje"), h("th", null, `Período (${props.nativeUsage.days}d)`), h("th", null, "Cache"))),
+            h(
+              "tbody",
+              null,
+              props.nativeUsage.byAgent.slice(0, 10).map((row) =>
+                h(
+                  "tr",
+                  { key: row.agentKey || row.name },
+                  h("td", { style: { fontWeight: 600 } }, row.name),
+                  h("td", { className: "of-mono of-muted" }, row.harness),
+                  h("td", { className: "of-mono" }, String(row.sessions)),
+                  h("td", { className: "of-mono" }, fmtTokens(row.tokensToday)),
+                  h("td", { className: "of-mono" }, fmtTokens(row.tokensPeriod)),
+                  h("td", { className: "of-mono" }, row.cacheHitPct !== null ? `${row.cacheHitPct}%` : "—")
+                )
+              )
+            )
+          )
       ),
       // Barra empilhada visual de participação por modelo + Tabela Breakdown (1:1 CodeDen SpendCard)
       h(
@@ -858,6 +996,20 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                                   onClick: () => props.onAgentSessionAction!(a.agentKey, "new"),
                                 },
                                 "Nova"
+                              ),
+                            props.onAutomateFromSession &&
+                              h(
+                                "button",
+                                {
+                                  type: "button",
+                                  className: "of-btn",
+                                  "data-variant": "ghost",
+                                  "data-automate-from-session": a.name,
+                                  style: { padding: "3px 6px", fontSize: "10.5px" },
+                                  title: "Converter sessão deste agente em Automação recorrente (1 clique)",
+                                  onClick: () => props.onAutomateFromSession!({ agentName: a.name, stepLabel: liveTurn?.stepLabel }),
+                                },
+                                "⚡ Automatizar"
                               ),
                             props.onAgentSessionAction && liveTurn && a.agentKey &&
                               h(
@@ -1367,6 +1519,56 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
         { style: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px", paddingTop: "6px", borderTop: "1px solid var(--border)" } },
         h("span", { className: "of-muted" }, `Persistido diretamente em estado/controle-${tenant}.json e lido pelo coordenador.`),
         h("button", { type: "button", className: "of-btn", "data-variant": "primary", onClick: onSaveSettings }, "Salvar configurações")
+      )
+    ),
+    // ── SEGURANÇA & GOVERNANÇA v17.7 (Holdout Sensor + SHA-256 host.commands + Modo Focus) ──
+    h(
+      "div",
+      { className: "of-card-pad", "data-orgfy-security-v177": "true", style: { display: "flex", flexDirection: "column", gap: "12px" } },
+      h("div", { style: { fontSize: "14px", fontWeight: 700 } }, "Segurança & Sensor Independente (Onda 3 · v17.7)"),
+      h(
+        "div",
+        { className: "of-grid-3" },
+        h(
+          "div",
+          { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
+          h("div", { className: "of-meter-label" }, "Holdout Scenarios (fora do repo)"),
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "center", gap: "6px" } },
+            h("span", { className: "of-pill", "data-tone": status.holdoutStatus?.status === "pass" ? "done" : status.holdoutStatus?.status === "fail" ? "failed" : "idle" }, status.holdoutStatus ? `${status.holdoutStatus.passed ?? 0}/${status.holdoutStatus.total ?? 0} ${status.holdoutStatus.status.toUpperCase()}` : "Não executado"),
+            status.holdoutStatus?.external_verified && h("span", { className: "of-muted", style: { fontSize: "10.5px" } }, `sha:${status.holdoutStatus.suite_sha256 || "ok"}`)
+          ),
+          props.onRunHoldoutNow &&
+            h("button", { type: "button", className: "of-btn", disabled: props.runningHoldout, style: { alignSelf: "flex-start", padding: "3px 9px", fontSize: "11px" }, onClick: props.onRunHoldoutNow }, props.runningHoldout ? "Rodando..." : "▶ Rodar Holdout")
+        ),
+        h(
+          "div",
+          { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
+          h("div", { className: "of-meter-label" }, "Pinagem SHA-256 (host.commands)"),
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "center", gap: "6px" } },
+            h(
+              "span",
+              { className: "of-pill", "data-tone": props.commandIntegrity ? (props.commandIntegrity.mismatches > 0 ? "failed" : props.commandIntegrity.verified > 0 ? "done" : "idle") : "idle" },
+              props.commandIntegrity ? `${props.commandIntegrity.verified}/${props.commandIntegrity.total} íntegros` : "Aguardando auditoria"
+            )
+          ),
+          props.onAuditCommandIntegrity &&
+            h("button", { type: "button", className: "of-btn", style: { alignSelf: "flex-start", padding: "3px 9px", fontSize: "11px" }, onClick: props.onAuditCommandIntegrity }, "Auditar SHA-256")
+        ),
+        h(
+          "div",
+          { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
+          h("div", { className: "of-meter-label" }, "Modo Focus do Fundador (Buzz)"),
+          h(
+            "div",
+            { style: { fontSize: "12px", fontWeight: 600 } },
+            props.focusState?.active ? `🔭 Focus ativo até ${props.focusState.untilFormatted}` : "Focus inativo"
+          ),
+          h("div", { className: "of-muted", style: { fontSize: "10.5px" } }, "Notificações não críticas são silenciadas durante o modo Focus; apenas alertas P0/Kill Switch atravessam.")
+        )
       )
     )
   );

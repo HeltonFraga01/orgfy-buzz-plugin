@@ -2194,4 +2194,112 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     assert.ok(bundle.includes("data-scorecard-rich"), "Scorecard deve exibir versão rica com avatares, função, uso e ações");
     assert.ok(bundle.includes("data-now-two-rows"), "Seção AGORA deve usar layout em 2 filas");
   });
+
+  test("v17.12 (Pacote v17.7 completo · 100% Ondas 2 + 3): Automation-from-Session, bundled/usage, Modo Focus, SHA-256 host.commands, Holdout e CRDT Conselho/Locks", async () => {
+    const bundle = fs.readFileSync(path.resolve(__dirname, "plugin.js"), "utf8");
+    const manifest = JSON.parse(fs.readFileSync(path.resolve(__dirname, "manifest.json"), "utf8"));
+
+    // 1. manifest.json declara orgfy-holdout + UI exibe blocos v17.7
+    assert.ok((manifest.host?.commands || []).some((c) => c.id === "orgfy-holdout"), "manifest.json deve declarar comando orgfy-holdout");
+    assert.ok(bundle.includes("data-automate-from-session"), "Botão Automation-from-Session deve estar no bundle");
+    assert.ok(bundle.includes("data-buzz-native-usage"), "Card de Telemetria Nativa (bundled/usage) deve estar no bundle");
+    assert.ok(bundle.includes("data-orgfy-crdt-council"), "Deliberações do Conselho e Locks CRDT devem estar no bundle");
+    assert.ok(bundle.includes("data-orgfy-security-v177"), "Card de Segurança v17.7 (Holdout + SHA-256 + Focus) deve estar no bundle");
+
+    // 2. Automation-from-Session (Onda 2 · 5/5)
+    const fromSess = orgfyMod.buildAutomationFromSession({
+      tenant: "orgfy",
+      companyName: "OrgFy Core",
+      agentName: "OrgFy Otto",
+      stepLabel: "rodar pytest",
+    });
+    assert.ok(fromSess.name && fromSess.name.includes("rodar pytest"));
+    assert.equal(fromSess.targetAgent, "OrgFy Otto");
+    assert.equal(fromSess.triggerKind, "schedule");
+    assert.ok(fromSess.prompt && fromSess.prompt.includes("OrgFy Otto"));
+
+    // 3. Telemetria nativa do Buzz (bundled/usage · ctx.agents.types()[...].usage)
+    const nowSec = Math.floor(Date.now() / 1000);
+    const usageSnap = await orgfyMod.collectBuzzNativeUsage({
+      agents: {
+        types: () => [
+          {
+            key: "buzz.pi/pi",
+            usage: async () => [
+              {
+                id: "s1",
+                observations: [
+                  { input: 1200, output: 300, cacheRead: 800, at: nowSec, model: "claude-sonnet-5-5" },
+                ],
+              },
+            ],
+          },
+        ],
+        snapshot: () => ({
+          agents: [
+            { key: "local:orgfy-bento", pubkey: "11".repeat(32), name: "OrgFy Bento", type: "buzz.pi/pi", place: "here" },
+          ],
+        }),
+      },
+    }, 7);
+    assert.equal(usageSnap.available, true);
+    assert.equal(usageSnap.sessionsCount, 1);
+    assert.equal(usageSnap.tokensToday, 2300);
+    assert.equal(usageSnap.tokensPeriod, 2300);
+    assert.equal(usageSnap.byAgent[0]?.name, "OrgFy Bento");
+
+    // 4. Modo Focus (buzz-focus.v1) silencia notificações normais e libera críticas
+    orgfyMod.clearDeferredFocusNotices();
+    const fakeFocusMap = new Map();
+    const fakeStorage = {
+      getItem: (k) => fakeFocusMap.get(k) ?? null,
+      setItem: (k, v) => fakeFocusMap.set(k, v),
+      removeItem: (k) => fakeFocusMap.delete(k),
+    };
+    fakeStorage.setItem(orgfyMod.BUZZ_FOCUS_STORAGE_KEY, JSON.stringify({ until: nowSec + 3600 }));
+    const fState = orgfyMod.readBuzzFocusState(Date.now(), fakeStorage);
+    assert.equal(fState.active, true);
+    const delivered = [];
+    const notifCtx = { notifications: { notify: (p) => delivered.push(p) } };
+    const rNormal = orgfyMod.notifyRespectingFocus(notifCtx, { title: "Info", body: "Não crítico" }, { priority: "normal", storage: fakeStorage });
+    assert.equal(rNormal.delivered, false);
+    assert.equal(rNormal.deferredByFocus, true);
+    assert.equal(orgfyMod.getDeferredFocusNotices().length, 1);
+    const rCrit = orgfyMod.notifyRespectingFocus(notifCtx, { title: "Kill Switch", body: "P0" }, { priority: "critical", storage: fakeStorage });
+    assert.equal(rCrit.delivered, true);
+    assert.equal(delivered.length, 1);
+
+    // 5. Pinagem SHA-256 dos 5 scripts reais em host.commands
+    assert.equal(orgfyMod.PINNED_HOST_COMMANDS.length, 5);
+    const audit = await orgfyMod.auditAllHostCommandsIntegrity({
+      host: {
+        readFile: async (p) => fs.readFileSync(p, "utf8"),
+      },
+    });
+    assert.equal(audit.total, 5);
+    assert.equal(audit.mismatches, 0, `Todos os 5 scripts host.commands devem bater SHA-256: ${JSON.stringify(audit.results)}`);
+    assert.equal(audit.verified, 5);
+
+    // 6. CRDT Conselho & Locks Distribuídos
+    const store = orgfyMod.getOrgfyCrdtStore(null);
+    const del = await store.createCouncilDeliberation({
+      tenant: "orgfy",
+      title: "Aprovar v17.7",
+      summary: "Liberar pacote Ondas 2+3",
+    });
+    assert.equal(del.status, "pendente");
+    const voted = await store.voteCouncilDeliberation(del.id, "aprovada", "Fundador");
+    assert.equal(voted?.status, "aprovada");
+    const lock = await store.acquireDistributedLock({
+      tenant: "orgfy",
+      resourceKey: "card:v17.7",
+      owner: "OrgFy Bento",
+      ttlMinutes: 15,
+    });
+    assert.equal(lock.status, "active");
+    const activeLocks = await store.listDistributedLocks("orgfy", true);
+    assert.ok(activeLocks.some((l) => l.id === lock.id));
+    const rel = await store.releaseDistributedLock(lock.id);
+    assert.equal(rel?.status, "released");
+  });
 }

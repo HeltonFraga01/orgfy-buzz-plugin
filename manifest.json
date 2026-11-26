@@ -80,6 +80,12 @@
         "args": ["ferramentas/esteira/controle_fabrica_write.py"],
         "maxInputBytes": 65536,
         "maxOutputBytes": 16384
+      },
+      {
+        "id": "orgfy-holdout",
+        "program": "python3",
+        "args": ["ferramentas/esteira/holdout_runner.py", "--write-state", "--json"],
+        "maxOutputBytes": 65536
       }
     ]
   }
