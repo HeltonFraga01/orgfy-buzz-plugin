@@ -226,13 +226,8 @@ export function renderFactoryOverviewPanel(props: FactoryOverviewProps) {
                 className: "of-now-cards",
                 "data-now-two-rows": "true",
                 style: {
-                  display: "grid",
-                  gridTemplateRows: nowRunningCount > 2 ? "repeat(2, minmax(78px, auto))" : "auto",
-                  gridAutoFlow: "column",
-                  gridAutoColumns: "minmax(215px, 240px)",
-                  gap: "8px",
-                  overflowX: "auto",
-                  paddingBottom: "4px",
+                  gridTemplateRows: nowRunningCount > 2 ? "repeat(2, 82px)" : "82px",
+                  gridAutoColumns: "256px",
                 },
               },
               activeTurns.map((t) => {
@@ -242,15 +237,19 @@ export function renderFactoryOverviewPanel(props: FactoryOverviewProps) {
                   {
                     key: `turn-${t.agentPubkey}-${t.channelId}-${t.messageId || t.startedAt}`,
                     className: "of-now-card",
+                    style: {
+                      borderColor: t.state === "error" ? "rgba(239, 68, 68, 0.42)" : "rgba(96, 165, 250, 0.34)",
+                      background: t.state === "error" ? "rgba(239, 68, 68, 0.05)" : "rgba(59, 130, 246, 0.05)",
+                    },
                     onClick: () => onOpenTurnInSideChat?.(t),
                   },
                   h(
                     "div",
-                    { style: { display: "flex", alignItems: "center", gap: "7px" } },
+                    { style: { display: "flex", alignItems: "center", gap: "7px", minWidth: 0 } },
                     turnCrew?.picture
                       ? h("img", { src: turnCrew.picture, alt: t.agentName, style: { width: "18px", height: "18px", borderRadius: "5px", objectFit: "cover", border: "1px solid var(--status-running)", flexShrink: 0 } })
                       : h("span", { className: "of-dot", "data-tone": t.state === "error" ? "failed" : "running" }),
-                    h("strong", { style: { fontSize: "12.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 } }, t.agentName),
+                    h("strong", { style: { fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 } }, t.agentName),
                     onInterruptTurn && t.stoppable &&
                       h(
                         "button",
@@ -258,7 +257,7 @@ export function renderFactoryOverviewPanel(props: FactoryOverviewProps) {
                           type: "button",
                           className: "of-btn",
                           "data-variant": "danger",
-                          style: { padding: "1px 6px", fontSize: "10px" },
+                          style: { padding: "1px 6px", fontSize: "10px", flexShrink: 0 },
                           onClick: (e: any) => {
                             e.stopPropagation();
                             onInterruptTurn(t);
@@ -269,41 +268,48 @@ export function renderFactoryOverviewPanel(props: FactoryOverviewProps) {
                   ),
                   h(
                     "div",
-                    { className: "of-muted", style: { fontSize: "11.5px", lineHeight: 1.4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
+                    { className: "of-muted", style: { fontSize: "11px", lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: t.stepLabel },
                     t.stepLabel
                   ),
                   h(
                     "div",
-                    { style: { display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "10.5px", color: "var(--muted-foreground)" } },
-                    h("span", { className: "of-mono" }, "Buzz ao vivo"),
-                    h("span", { className: "of-mono" }, fmtAge(t.startedAt))
+                    { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px", fontSize: "10px", color: "var(--muted-foreground)" } },
+                    h("span", { className: "of-mono", style: { color: "var(--status-running)" } }, "⚡ Buzz ao vivo"),
+                    h("span", { className: "of-mono", style: { flexShrink: 0 } }, fmtAge(t.startedAt))
                   )
                 );
               }),
-              status.inProgress.slice(0, 10).map((item) =>
-                h(
+              status.inProgress.slice(0, 10).map((item) => {
+                const isErr = item.stage === "failed" || item.stage === "reverted";
+                const stageBadge = isErr ? "quarentena" : item.stage === "verifying" ? "revisão L-01" : item.stage === "building" ? "execução" : item.stage;
+                return h(
                   "button",
                   {
                     key: `wip-${item.id}`,
                     type: "button",
                     className: "of-now-card",
+                    style: isErr ? { borderColor: "rgba(239, 68, 68, 0.35)" } : undefined,
                     onClick: () => onSelectItem(item),
                   },
                   h(
                     "div",
-                    { style: { display: "flex", alignItems: "center", gap: "7px" } },
-                    h("span", { className: "of-dot", "data-tone": item.stage === "escalated" ? "waiting" : "running" }),
-                    h("strong", { style: { fontSize: "12.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 } }, item.title)
+                    { style: { display: "flex", alignItems: "center", gap: "7px", minWidth: 0, width: "100%" } },
+                    h("span", { className: "of-dot", "data-tone": isErr ? "failed" : item.stage === "escalated" ? "waiting" : "running" }),
+                    h("strong", { style: { fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }, title: item.title }, item.title)
                   ),
-                  h("div", { className: "of-muted", style: { fontSize: "11px" } }, `${item.step} · ${item.stage}`),
                   h(
                     "div",
-                    { style: { display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "10.5px", color: "var(--muted-foreground)" } },
-                    h("span", { className: "of-mono" }, `#${item.id.slice(0, 8)}`),
-                    h("span", { className: "of-mono" }, fmtAge(item.updatedAt))
+                    { className: "of-muted", style: { fontSize: "11px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", width: "100%" }, title: item.note || stageBadge },
+                    item.note || stageBadge
+                  ),
+                  h(
+                    "div",
+                    { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px", width: "100%", fontSize: "10px", color: "var(--muted-foreground)" } },
+                    h("span", { className: "of-mono", style: { color: isErr ? "var(--status-failed)" : "var(--primary)" } }, `#${item.id.slice(0, 8)} · ${stageBadge}`),
+                    h("span", { className: "of-mono", style: { flexShrink: 0 } }, fmtAge(item.updatedAt))
                   )
-                )
-              )
+                );
+              })
             )
       ),
       // Direita: PRÓXIMOS
