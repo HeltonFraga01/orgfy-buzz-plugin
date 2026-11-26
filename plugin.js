@@ -5582,7 +5582,7 @@ function buildUnifiedOrgfyTools(ctx) {
   }));
 }
 const DEFAULT_ORGFY_REPO_OWNER = "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20";
-function resolveBuzzNavigationScope(ctx) {
+function resolveBuzzNavigationScope$1(ctx) {
   var _a, _b, _c, _d;
   try {
     const navSnap = typeof ((_a = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a.snapshot) === "function" ? ctx.navigation.snapshot() : null;
@@ -5611,7 +5611,7 @@ function resolveBuzzNavigationScope(ctx) {
 }
 async function openBuzzRepoEntity(ctx, route) {
   var _a;
-  const scope = resolveBuzzNavigationScope(ctx);
+  const scope = resolveBuzzNavigationScope$1(ctx);
   if (!scope || typeof ((_a = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a.open) !== "function") {
     return false;
   }
@@ -5945,14 +5945,14 @@ async function readBuzzMainAgentPubkey(ctx) {
   }
   return null;
 }
-async function readBuzzChannelCanvasDetailed(ctx, channelId) {
+async function readBuzzChannelCanvasDetailed(ctx, channelId, opts) {
   var _a, _b, _c, _d, _e;
   if (!channelId) return { content: null, writable: false };
   try {
     const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
     const writable = Boolean(((_d = session == null ? void 0 : session.canvas) == null ? void 0 : _d.available) && typeof session.canvas.save === "function");
     if (((_e = session == null ? void 0 : session.canvas) == null ? void 0 : _e.available) && typeof session.canvas.read === "function") {
-      const ev = await session.canvas.read(channelId);
+      const ev = await session.canvas.read(channelId, (opts == null ? void 0 : opts.strong) ? { strong: true } : void 0);
       if (ev && typeof ev.content === "string") {
         return {
           content: ev.content.trim() ? ev.content : null,
@@ -5987,14 +5987,16 @@ async function readBuzzChannelCanvasHistory(ctx, channelId) {
     const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
     if (!((_d = session == null ? void 0 : session.canvas) == null ? void 0 : _d.available) || typeof session.canvas.history !== "function") return [];
     const page = await session.canvas.history(channelId);
-    const entries = Array.isArray(page == null ? void 0 : page.entries) ? page.entries : Array.isArray(page == null ? void 0 : page.events) ? page.events : Array.isArray(page) ? page : [];
-    return entries.slice(0, 8).map((ev) => {
+    const entries = Array.isArray(page == null ? void 0 : page.revisions) ? page.revisions : Array.isArray(page == null ? void 0 : page.entries) ? page.entries : Array.isArray(page == null ? void 0 : page.events) ? page.events : Array.isArray(page) ? page : [];
+    return entries.slice(0, 15).map((ev) => {
       var _a2, _b2, _c2, _d2;
+      const fullContent = String((ev == null ? void 0 : ev.content) ?? ((_a2 = ev == null ? void 0 : ev.event) == null ? void 0 : _a2.content) ?? "");
       return {
-        id: String((ev == null ? void 0 : ev.id) || ((_a2 = ev == null ? void 0 : ev.event) == null ? void 0 : _a2.id) || ""),
-        createdAt: Number((ev == null ? void 0 : ev.created_at) || ((_b2 = ev == null ? void 0 : ev.event) == null ? void 0 : _b2.created_at) || 0) * 1e3,
-        authorPubkey: String((ev == null ? void 0 : ev.pubkey) || ((_c2 = ev == null ? void 0 : ev.event) == null ? void 0 : _c2.pubkey) || "").toLowerCase(),
-        preview: String((ev == null ? void 0 : ev.content) || ((_d2 = ev == null ? void 0 : ev.event) == null ? void 0 : _d2.content) || "").replace(/\s+/g, " ").slice(0, 100)
+        id: String((ev == null ? void 0 : ev.id) || ((_b2 = ev == null ? void 0 : ev.event) == null ? void 0 : _b2.id) || ""),
+        createdAt: Number((ev == null ? void 0 : ev.created_at) || ((_c2 = ev == null ? void 0 : ev.event) == null ? void 0 : _c2.created_at) || 0) * 1e3,
+        authorPubkey: String((ev == null ? void 0 : ev.pubkey) || ((_d2 = ev == null ? void 0 : ev.event) == null ? void 0 : _d2.pubkey) || "").toLowerCase(),
+        preview: fullContent.replace(/\s+/g, " ").slice(0, 140),
+        fullContent
       };
     });
   } catch {
@@ -44422,6 +44424,467 @@ function createBoardroom3DComponent(ctx) {
     );
   };
 }
+function renderInlineMarkdown(h, text, onOpenBuzzLink) {
+  const nodes = [];
+  const regex = /(\[[^\]]+\]\([^)]+\)|`[^`]+`|\*\*[^*]+\*\*)/g;
+  let lastIndex = 0;
+  let match;
+  let keyIdx = 0;
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      nodes.push(text.slice(lastIndex, match.index));
+    }
+    const token2 = match[0];
+    if (token2.startsWith("[")) {
+      const m = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token2);
+      if (m) {
+        const [, label, href] = m;
+        const isBuzz = /^buzz:\/\//i.test(href);
+        nodes.push(
+          h(
+            "a",
+            {
+              key: `lnk-${keyIdx++}`,
+              href: isBuzz ? "#" : href,
+              target: isBuzz ? void 0 : "_blank",
+              rel: isBuzz ? void 0 : "noreferrer",
+              style: {
+                color: "var(--primary)",
+                textDecoration: "underline",
+                textUnderlineOffset: "2px",
+                cursor: "pointer"
+              },
+              onClick: (e) => {
+                if (isBuzz) {
+                  e.preventDefault();
+                  onOpenBuzzLink == null ? void 0 : onOpenBuzzLink(href);
+                }
+              }
+            },
+            label
+          )
+        );
+      } else {
+        nodes.push(token2);
+      }
+    } else if (token2.startsWith("`")) {
+      nodes.push(
+        h(
+          "code",
+          {
+            key: `code-${keyIdx++}`,
+            className: "of-mono",
+            style: {
+              fontSize: "0.9em",
+              padding: "1px 5px",
+              borderRadius: "4px",
+              background: "var(--muted)",
+              border: "1px solid var(--border)"
+            }
+          },
+          token2.slice(1, -1)
+        )
+      );
+    } else if (token2.startsWith("**")) {
+      nodes.push(h("strong", { key: `b-${keyIdx++}`, style: { fontWeight: 700, color: "var(--foreground)" } }, token2.slice(2, -2)));
+    }
+    lastIndex = regex.lastIndex;
+  }
+  if (lastIndex < text.length) {
+    nodes.push(text.slice(lastIndex));
+  }
+  return nodes;
+}
+function renderMarkdownBlocks(h, markdown, onOpenBuzzLink) {
+  const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+  const blocks = [];
+  let i = 0;
+  let blockKey = 0;
+  while (i < lines.length) {
+    const raw = lines[i];
+    const trimmed = raw.trim();
+    if (!trimmed) {
+      i += 1;
+      continue;
+    }
+    if (trimmed.startsWith("```")) {
+      const codeLines = [];
+      i += 1;
+      while (i < lines.length && !lines[i].trim().startsWith("```")) {
+        codeLines.push(lines[i]);
+        i += 1;
+      }
+      if (i < lines.length) i += 1;
+      blocks.push(
+        h(
+          "pre",
+          {
+            key: `pre-${blockKey++}`,
+            className: "of-mono",
+            style: {
+              margin: "6px 0",
+              padding: "10px 12px",
+              borderRadius: "8px",
+              background: "var(--muted)",
+              border: "1px solid var(--border)",
+              fontSize: "11.5px",
+              overflowX: "auto",
+              lineHeight: 1.5
+            }
+          },
+          codeLines.join("\n")
+        )
+      );
+      continue;
+    }
+    const headingMatch = /^(#{1,4})\s+(.+)$/.exec(trimmed);
+    if (headingMatch) {
+      const level = headingMatch[1].length;
+      const fontSize = level === 1 ? "20px" : level === 2 ? "15.5px" : level === 3 ? "13.5px" : "12.5px";
+      blocks.push(
+        h(
+          `h${level}`,
+          {
+            key: `h-${blockKey++}`,
+            style: {
+              margin: level === 1 ? "4px 0 10px" : "14px 0 6px",
+              fontSize,
+              fontWeight: 700,
+              lineHeight: 1.3,
+              color: "var(--foreground)",
+              letterSpacing: level === 1 ? "-0.015em" : void 0
+            }
+          },
+          ...renderInlineMarkdown(h, headingMatch[2], onOpenBuzzLink)
+        )
+      );
+      i += 1;
+      continue;
+    }
+    if (trimmed.startsWith(">")) {
+      const quoteLines = [];
+      while (i < lines.length && lines[i].trim().startsWith(">")) {
+        quoteLines.push(lines[i].trim().replace(/^>\s?/, ""));
+        i += 1;
+      }
+      blocks.push(
+        h(
+          "blockquote",
+          {
+            key: `bq-${blockKey++}`,
+            style: {
+              margin: "8px 0",
+              padding: "6px 12px",
+              borderLeft: "3px solid var(--border)",
+              color: "var(--muted-foreground)",
+              fontSize: "12.5px",
+              lineHeight: 1.55
+            }
+          },
+          ...renderInlineMarkdown(h, quoteLines.join(" "), onOpenBuzzLink)
+        )
+      );
+      continue;
+    }
+    if (trimmed.startsWith("|") && i + 1 < lines.length && /^\|?[\s:-]+\|/.test(lines[i + 1].trim())) {
+      const parseCells = (row) => row.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+      const headers = parseCells(lines[i]);
+      i += 2;
+      const rows = [];
+      while (i < lines.length && lines[i].trim().startsWith("|")) {
+        rows.push(parseCells(lines[i]));
+        i += 1;
+      }
+      blocks.push(
+        h(
+          "div",
+          {
+            key: `tbl-${blockKey++}`,
+            style: {
+              margin: "8px 0",
+              overflowX: "auto",
+              borderRadius: "8px",
+              border: "1px solid var(--border)",
+              background: "var(--card)"
+            }
+          },
+          h(
+            "table",
+            { className: "of-table", style: { margin: 0, minWidth: "420px" } },
+            h(
+              "thead",
+              null,
+              h(
+                "tr",
+                null,
+                headers.map((col, idx) => h("th", { key: idx, style: { whiteSpace: "nowrap" } }, col))
+              )
+            ),
+            h(
+              "tbody",
+              null,
+              rows.map(
+                (r, rIdx) => h(
+                  "tr",
+                  { key: rIdx },
+                  r.map(
+                    (cell, cIdx) => h("td", { key: cIdx, style: { fontSize: "12px", verticalAlign: "top" } }, ...renderInlineMarkdown(h, cell, onOpenBuzzLink))
+                  )
+                )
+              )
+            )
+          )
+        )
+      );
+      continue;
+    }
+    if (/^[-*•]\s+/.test(trimmed)) {
+      const items = [];
+      while (i < lines.length && /^[-*•]\s+/.test(lines[i].trim())) {
+        items.push(lines[i].trim().replace(/^[-*•]\s+/, ""));
+        i += 1;
+      }
+      blocks.push(
+        h(
+          "ul",
+          {
+            key: `ul-${blockKey++}`,
+            style: { margin: "6px 0", paddingLeft: "20px", display: "flex", flexDirection: "column", gap: "4px", fontSize: "12.5px", lineHeight: 1.5 }
+          },
+          items.map((it, idx) => h("li", { key: idx }, ...renderInlineMarkdown(h, it, onOpenBuzzLink)))
+        )
+      );
+      continue;
+    }
+    if (/^[-*_]{3,}$/.test(trimmed)) {
+      blocks.push(h("div", { key: `hr-${blockKey++}`, style: { height: "1px", background: "var(--border)", margin: "10px 0" } }));
+      i += 1;
+      continue;
+    }
+    const paraLines = [];
+    while (i < lines.length && lines[i].trim() !== "" && !/^(#{1,4}\s|```|>|\||[-*•]\s)/.test(lines[i].trim())) {
+      paraLines.push(lines[i].trim());
+      i += 1;
+    }
+    blocks.push(
+      h(
+        "p",
+        { key: `p-${blockKey++}`, style: { margin: "6px 0", fontSize: "12.5px", lineHeight: 1.55, color: "var(--foreground)" } },
+        ...renderInlineMarkdown(h, paraLines.join(" "), onOpenBuzzLink)
+      )
+    );
+  }
+  return blocks;
+}
+function renderBuzzCanvasViewer(props) {
+  const { h, mode, onChangeMode, content, draft, onChangeDraft, writable, saving, onSave, onReload, history, resolveAuthor } = props;
+  const effectiveContent = content || "";
+  const isDirty = draft !== effectiveContent;
+  return h(
+    "section",
+    {
+      className: "of-card-pad",
+      "data-buzz-canvas-native": "true",
+      "data-canvas-live-editor": "true",
+      style: { display: "flex", flexDirection: "column", gap: "12px" }
+    },
+    // Barra superior estilo Buzz Canvas (View | Edit | History + ações)
+    h(
+      "div",
+      {
+        style: {
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "10px",
+          paddingBottom: "8px",
+          borderBottom: "1px solid var(--border)"
+        }
+      },
+      h(
+        "div",
+        { style: { display: "inline-flex", alignItems: "center", gap: "14px", flexWrap: "wrap" } },
+        h(
+          "div",
+          { style: { display: "inline-flex", alignItems: "center", gap: "6px" } },
+          [
+            { id: "view", label: "Visualizar" },
+            { id: "edit", label: isDirty ? "Editar •" : "Editar" },
+            { id: "history", label: `Histórico (${history.length})` }
+          ].map(
+            (t) => h(
+              "button",
+              {
+                key: t.id,
+                type: "button",
+                onClick: () => onChangeMode(t.id),
+                style: {
+                  background: "transparent",
+                  border: "none",
+                  borderBottom: mode === t.id ? "2px solid var(--foreground)" : "2px solid transparent",
+                  color: mode === t.id ? "var(--foreground)" : "var(--muted-foreground)",
+                  fontWeight: mode === t.id ? 600 : 500,
+                  fontSize: "12.5px",
+                  padding: "4px 6px 6px",
+                  cursor: "pointer"
+                }
+              },
+              t.label
+            )
+          )
+        ),
+        h(
+          "span",
+          { className: "of-mono of-muted", style: { fontSize: "10.5px" } },
+          `Canvas · #${props.channelName || props.tenant}${props.channelId ? ` (${props.channelId.slice(0, 8)}…)` : ""}`
+        )
+      ),
+      h(
+        "div",
+        { style: { display: "inline-flex", alignItems: "center", gap: "6px", flexWrap: "wrap" } },
+        onReload && h(
+          "button",
+          { type: "button", className: "of-btn", style: { padding: "4px 9px", fontSize: "11px" }, onClick: onReload },
+          "Recarregar"
+        ),
+        mode === "edit" && writable && h(
+          "button",
+          {
+            type: "button",
+            className: "of-btn",
+            "data-variant": "primary",
+            disabled: saving || !isDirty,
+            style: { padding: "4px 10px", fontSize: "11px" },
+            onClick: onSave
+          },
+          saving ? "Salvando..." : "Salvar no Buzz"
+        ),
+        props.onOpenChannelInBuzz && h(
+          "button",
+          {
+            type: "button",
+            className: "of-btn",
+            style: { padding: "4px 9px", fontSize: "11px" },
+            onClick: props.onOpenChannelInBuzz
+          },
+          "Abrir no Buzz ↗"
+        )
+      )
+    ),
+    // Conteúdo por modo
+    mode === "view" ? effectiveContent.trim() ? h(
+      "div",
+      {
+        style: {
+          maxHeight: "520px",
+          overflowY: "auto",
+          padding: "4px 2px"
+        }
+      },
+      ...renderMarkdownBlocks(h, effectiveContent, props.onOpenBuzzLink)
+    ) : h(
+      "div",
+      { className: "of-surface", style: { padding: "18px", textAlign: "center" } },
+      h("div", { style: { fontSize: "13px", fontWeight: 600 } }, "Canvas vazio neste canal"),
+      h("div", { className: "of-muted", style: { marginTop: "4px", fontSize: "11.5px" } }, "Clique em Editar para criar o Canvas sincronizado diretamente no canal do Buzz.")
+    ) : mode === "edit" ? h(
+      "div",
+      { style: { display: "flex", flexDirection: "column", gap: "8px" } },
+      h("textarea", {
+        className: "of-textarea of-mono",
+        style: { minHeight: "340px", fontSize: "12px", lineHeight: 1.5, resize: "vertical" },
+        placeholder: "Escreva o Markdown do Canvas do canal no Buzz...",
+        value: draft,
+        onChange: (e) => onChangeDraft(e.target.value)
+      }),
+      h(
+        "div",
+        { style: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" } },
+        h(
+          "span",
+          { className: "of-muted", style: { fontSize: "11px" } },
+          writable ? `${draft.length} caracteres · sincronizado em tempo real via session.canvas.save()` : "Modo somente leitura neste canal (session.canvas.save indisponível)."
+        ),
+        h(
+          "div",
+          { style: { display: "inline-flex", gap: "6px" } },
+          isDirty && h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              style: { padding: "4px 9px", fontSize: "11px" },
+              onClick: () => onChangeDraft(effectiveContent)
+            },
+            "Descartar alterações"
+          ),
+          writable && h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-variant": "primary",
+              disabled: saving || !isDirty,
+              style: { padding: "4px 10px", fontSize: "11px" },
+              onClick: onSave
+            },
+            saving ? "Salvando no Buzz..." : "Salvar Canvas no Buzz"
+          )
+        )
+      )
+    ) : (
+      // History mode
+      history.length === 0 ? h("div", { className: "of-muted", style: { padding: "14px 4px", fontSize: "12px" } }, "Nenhuma revisão anterior encontrada via session.canvas.history().") : h(
+        "div",
+        { style: { display: "flex", flexDirection: "column", gap: "8px", maxHeight: "420px", overflowY: "auto" } },
+        history.map(
+          (rev, idx) => h(
+            "div",
+            {
+              key: rev.id || String(idx),
+              className: "of-surface",
+              style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" }
+            },
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" } },
+              h(
+                "div",
+                { style: { fontSize: "12px" } },
+                h("strong", null, resolveAuthor ? resolveAuthor(rev.authorPubkey) : rev.authorPubkey.slice(0, 10)),
+                h(
+                  "span",
+                  { className: "of-muted", style: { marginLeft: "6px", fontSize: "11px" } },
+                  rev.createdAt ? new Date(rev.createdAt).toLocaleString("pt-BR") : ""
+                ),
+                idx === 0 && h("span", { className: "of-pill", "data-tone": "done", style: { marginLeft: "6px" } }, "Atual")
+              ),
+              writable && rev.fullContent !== void 0 && idx > 0 && h(
+                "button",
+                {
+                  type: "button",
+                  className: "of-btn",
+                  style: { padding: "3px 8px", fontSize: "10.5px" },
+                  onClick: () => {
+                    onChangeDraft(rev.fullContent || "");
+                    onChangeMode("edit");
+                  }
+                },
+                "Restaurar no editor"
+              )
+            ),
+            h(
+              "div",
+              { className: "of-muted", style: { fontSize: "11.5px", lineHeight: 1.45 } },
+              rev.preview || "(sem conteúdo)"
+            )
+          )
+        )
+      )
+    )
+  );
+}
 const CHART_COLORS = ["var(--chart-2)", "var(--chart-1)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"];
 const AUTONOMY_MODES = [
   {
@@ -44464,7 +44927,7 @@ function fmtTokens(n) {
   return String(n);
 }
 function renderFactorySecondaryPage(props) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u, _v;
   const {
     h,
     tab,
@@ -45239,6 +45702,7 @@ function renderFactorySecondaryPage(props) {
     const escalada = Object.entries((ov == null ? void 0 : ov.fluxoEscalada) || {});
     const regras = (ov == null ? void 0 : ov.regrasProbatorias) || [];
     const papeis = Object.entries((ov == null ? void 0 : ov.papeis) || {});
+    const ch = props.channelInfo;
     return h(
       "div",
       { style: { display: "flex", flexDirection: "column", gap: "14px" } },
@@ -45249,14 +45713,66 @@ function renderFactorySecondaryPage(props) {
           "div",
           null,
           h("div", { style: { fontSize: "14.5px", fontWeight: 700 } }, `Canvas, Visão & Regras Injetadas · ${((_q = status.tenantManifest) == null ? void 0 : _q.nome) || tenant}`),
-          h("div", { className: "of-muted", style: { marginTop: "2px" } }, "Fontes reais do OrgFy: empresas/board.json (Conselho), PROJECT.md + AGENTS.md + Canvas do canal no Buzz (Workspace) e regras-probatorias.json + ctx.agents.addInstructions (Agentes).")
+          h(
+            "div",
+            { className: "of-muted", style: { marginTop: "2px" } },
+            (ch == null ? void 0 : ch.available) ? `Canal #${ch.name} (${ch.visibility === "private" ? "Privado" : ch.visibility === "public" ? "Público" : "Ativo"} · ${ch.memberCount} membros${ch.description ? ` · ${ch.description}` : ""}) · sincronizado com session.canvas do Buzz.` : "Fontes reais do OrgFy: empresas/board.json (Conselho), PROJECT.md + AGENTS.md + Canvas do canal no Buzz (Workspace) e regras-probatorias.json + ctx.agents.addInstructions (Agentes)."
+          )
         ),
-        props.onOpenChannelInBuzz && h(
-          "button",
-          { type: "button", className: "of-btn", "data-variant": "primary", onClick: props.onOpenChannelInBuzz },
-          "Abrir Canvas / Canal no Buzz ↗"
+        h(
+          "div",
+          { style: { display: "inline-flex", gap: "6px", flexWrap: "wrap" } },
+          props.onOpenChannelInBuzz && h(
+            "button",
+            { type: "button", className: "of-btn", onClick: props.onOpenChannelInBuzz },
+            "Chat Lateral #"
+          ),
+          (props.onOpenChannelFullPage || props.onOpenChannelInBuzz) && h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-variant": "primary",
+              onClick: () => {
+                var _a2;
+                return props.onOpenChannelFullPage ? props.onOpenChannelFullPage() : (_a2 = props.onOpenChannelInBuzz) == null ? void 0 : _a2.call(props);
+              }
+            },
+            "Abrir Canvas / Canal no Buzz ↗"
+          )
         )
       ),
+      renderBuzzCanvasViewer({
+        h,
+        tenant,
+        channelName: (ch == null ? void 0 : ch.name) || ((_r = status.tenantManifest) == null ? void 0 : _r.nome) || tenant,
+        channelId: (ch == null ? void 0 : ch.channelId) || ((_s = status.tenantManifest) == null ? void 0 : _s.canal) || null,
+        content: props.channelCanvas ?? null,
+        draft: props.canvasDraft ?? props.channelCanvas ?? "",
+        onChangeDraft: (v2) => {
+          var _a2;
+          return (_a2 = props.setCanvasDraft) == null ? void 0 : _a2.call(props, v2);
+        },
+        writable: Boolean(props.canvasWritable),
+        saving: Boolean(props.canvasSaving),
+        onSave: () => {
+          var _a2;
+          return (_a2 = props.onSaveCanvas) == null ? void 0 : _a2.call(props);
+        },
+        onReload: props.onReloadCanvas,
+        history: props.canvasHistory || [],
+        resolveAuthor: props.resolveAuthor,
+        mode: props.canvasMode || "view",
+        onChangeMode: (m) => {
+          var _a2;
+          return (_a2 = props.setCanvasMode) == null ? void 0 : _a2.call(props, m);
+        },
+        onOpenBuzzLink: props.onOpenBuzzLink,
+        onOpenChannelInBuzz: () => {
+          var _a2;
+          return props.onOpenChannelFullPage ? props.onOpenChannelFullPage() : (_a2 = props.onOpenChannelInBuzz) == null ? void 0 : _a2.call(props);
+        }
+      }),
       h(
         "div",
         { className: "of-grid-2" },
@@ -45293,53 +45809,11 @@ function renderFactorySecondaryPage(props) {
         h(
           "section",
           { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-          h("div", { className: "of-meter-label" }, `2. Workspace & Canvas (${((_r = status.tenantManifest) == null ? void 0 : _r.nome) || tenant})`),
+          h("div", { className: "of-meter-label" }, `2. Workspace & Arquivos de Contexto (${((_t = status.tenantManifest) == null ? void 0 : _t.nome) || tenant})`),
           papeis.length > 0 && h(
             "div",
             { style: { display: "flex", flexWrap: "wrap", gap: "6px" } },
             papeis.map(([papel, agente]) => h("span", { key: papel, className: "of-pill" }, `${papel}: ${agente}`))
-          ),
-          h(
-            "div",
-            { className: "of-surface", style: { padding: "10px 12px", borderColor: "var(--primary)", display: "flex", flexDirection: "column", gap: "8px" }, "data-canvas-live-editor": "true" },
-            h(
-              "div",
-              { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" } },
-              h("div", { className: "of-mono", style: { fontSize: "10.5px", color: "var(--primary)" } }, `Canvas ao vivo do canal no Buzz (session.canvas · ${tenant})`),
-              props.canvasWritable && props.onSaveCanvas && h(
-                "button",
-                { type: "button", className: "of-btn", "data-variant": "primary", disabled: props.canvasSaving, style: { padding: "3px 9px", fontSize: "11px" }, onClick: props.onSaveCanvas },
-                props.canvasSaving ? "Salvando..." : "Salvar Canvas no Buzz"
-              )
-            ),
-            props.setCanvasDraft ? h("textarea", {
-              className: "of-textarea",
-              style: { minHeight: "150px", fontSize: "11.5px", lineHeight: 1.45 },
-              placeholder: "Conteúdo do Canvas do canal no Buzz...",
-              value: props.canvasDraft ?? props.channelCanvas ?? "",
-              onChange: (e) => props.setCanvasDraft(e.target.value)
-            }) : h(
-              "pre",
-              { className: "of-muted", style: { margin: 0, whiteSpace: "pre-wrap", fontSize: "11px", maxHeight: "180px", overflowY: "auto", fontFamily: "inherit", lineHeight: 1.45 } },
-              props.channelCanvas || "Canvas vazio neste canal."
-            ),
-            props.canvasHistory && props.canvasHistory.length > 0 && h(
-              "details",
-              null,
-              h("summary", { className: "of-muted", style: { cursor: "pointer", fontSize: "11px" } }, `Histórico de revisões (${props.canvasHistory.length})`),
-              h(
-                "div",
-                { style: { marginTop: "6px", display: "flex", flexDirection: "column", gap: "4px" } },
-                props.canvasHistory.map(
-                  (rev) => h(
-                    "div",
-                    { key: rev.id, style: { fontSize: "10.5px", padding: "4px 6px", borderRadius: "5px", background: "var(--card)" } },
-                    h("strong", null, props.resolveAuthor ? props.resolveAuthor(rev.authorPubkey) : rev.authorPubkey.slice(0, 10)),
-                    h("span", { className: "of-muted" }, ` · ${rev.createdAt ? new Date(rev.createdAt).toLocaleString("pt-BR") : ""} — ${rev.preview}`)
-                  )
-                )
-              )
-            )
           ),
           h(
             "div",
@@ -45397,13 +45871,160 @@ function renderFactorySecondaryPage(props) {
       )
     );
   }
+  const chInfo = props.channelInfo;
   return h(
     "div",
     { style: { display: "flex", flexDirection: "column", gap: "14px", maxWidth: "880px" } },
     h(
       "div",
+      { className: "of-card-pad", "data-buzz-channel-settings": "true", style: { display: "flex", flexDirection: "column", gap: "12px" } },
+      h(
+        "div",
+        { style: { display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "8px" } },
+        h(
+          "div",
+          null,
+          h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Canal da Empresa no Buzz · #${(chInfo == null ? void 0 : chInfo.name) || ((_u = status.tenantManifest) == null ? void 0 : _u.nome) || tenant}`),
+          h(
+            "div",
+            { className: "of-muted", style: { marginTop: "2px" } },
+            (chInfo == null ? void 0 : chInfo.available) ? `Stream: ${chInfo.liveStatus} · Roster: ${chInfo.rosterTotalChannels} canais · Papel: ${chInfo.viewerRole || "member"}` : "Conecte o canal da empresa no Buzz para sincronizar descrição, membros, leitura e diagnósticos."
+          )
+        ),
+        h(
+          "div",
+          { style: { display: "inline-flex", gap: "6px", flexWrap: "wrap" } },
+          props.onOpenChannelFullPage && h(
+            "button",
+            { type: "button", className: "of-btn", "data-variant": "primary", onClick: () => props.onOpenChannelFullPage() },
+            "Abrir Canal no Buzz ↗"
+          ),
+          props.onOpenChannelFullPage && h(
+            "button",
+            { type: "button", className: "of-btn", onClick: () => props.onOpenChannelFullPage({ panel: "members" }) },
+            `Membros (${(chInfo == null ? void 0 : chInfo.memberCount) ?? 0})`
+          )
+        )
+      ),
+      (chInfo == null ? void 0 : chInfo.available) && h(
+        "div",
+        { className: "of-grid-2" },
+        h(
+          "div",
+          { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
+            h("div", { className: "of-meter-label" }, "Descrição do Canal"),
+            chInfo.canEdit && props.setEditingChannelDetails && props.setChannelDetailsDraft && h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                "data-variant": "ghost",
+                style: { padding: "2px 6px", fontSize: "10.5px" },
+                onClick: () => {
+                  if (props.editingChannelDetails) {
+                    props.setEditingChannelDetails(false);
+                  } else {
+                    props.setChannelDetailsDraft({ name: chInfo.name, description: chInfo.description });
+                    props.setEditingChannelDetails(true);
+                  }
+                }
+              },
+              props.editingChannelDetails ? "Cancelar" : "Editar"
+            )
+          ),
+          props.editingChannelDetails && props.channelDetailsDraft && props.setChannelDetailsDraft ? h(
+            "div",
+            { style: { display: "flex", flexDirection: "column", gap: "6px" } },
+            h("input", {
+              className: "of-input",
+              placeholder: "Nome do canal",
+              value: props.channelDetailsDraft.name,
+              onChange: (e) => props.setChannelDetailsDraft({ name: e.target.value })
+            }),
+            h("textarea", {
+              className: "of-textarea",
+              style: { minHeight: "68px", fontSize: "11.5px" },
+              placeholder: "Descrição oficial da empresa/canal no Buzz...",
+              value: props.channelDetailsDraft.description,
+              onChange: (e) => props.setChannelDetailsDraft({ description: e.target.value })
+            }),
+            h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                "data-variant": "primary",
+                disabled: props.savingChannelDetails,
+                style: { alignSelf: "flex-start", padding: "4px 10px", fontSize: "11px" },
+                onClick: () => {
+                  var _a2;
+                  return (_a2 = props.onSaveChannelDetails) == null ? void 0 : _a2.call(props);
+                }
+              },
+              props.savingChannelDetails ? "Salvando..." : "Salvar no Buzz (channelDetails.save)"
+            )
+          ) : h(
+            "div",
+            { style: { fontSize: "12px", color: chInfo.description ? "var(--foreground)" : "var(--muted-foreground)" } },
+            chInfo.description || "Sem descrição cadastrada no canal do Buzz."
+          )
+        ),
+        h(
+          "div",
+          { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
+          h("div", { className: "of-meter-label" }, "Acesso, ID & Leitura"),
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", fontSize: "12px" } },
+            h("span", { className: "of-pill", "data-tone": chInfo.visibility === "private" ? "waiting" : "done" }, chInfo.visibility === "private" ? "Privado" : chInfo.visibility === "public" ? "Público" : "Canal"),
+            h("span", { className: "of-pill" }, `${chInfo.memberCount} membros`),
+            typeof chInfo.unreadCount === "number" && h("span", { className: "of-pill", "data-tone": chInfo.unreadCount > 0 ? "running" : "idle" }, `${chInfo.unreadCount} não lida(s)`)
+          ),
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "center", gap: "6px", marginTop: "2px" } },
+            h("code", { className: "of-mono of-muted", style: { fontSize: "10.5px", wordBreak: "break-all" } }, chInfo.channelId),
+            props.onCopyText && h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                "data-variant": "ghost",
+                style: { padding: "2px 6px", fontSize: "10.5px" },
+                onClick: () => props.onCopyText(chInfo.channelId, "Channel ID")
+              },
+              "Copiar"
+            )
+          )
+        )
+      ),
+      (chInfo == null ? void 0 : chInfo.available) && chInfo.memberPubkeys.length > 0 && h(
+        "div",
+        { className: "of-surface", style: { padding: "9px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
+        h("div", { className: "of-meter-label" }, `Membros no canal (${chInfo.memberCount})`),
+        h(
+          "div",
+          { style: { display: "flex", flexWrap: "wrap", gap: "5px" } },
+          chInfo.memberPubkeys.slice(0, 24).map(
+            (pk) => h("span", { key: pk, className: "of-pill", style: { fontSize: "10.5px" } }, props.resolveAuthor ? props.resolveAuthor(pk) : pk.slice(0, 10))
+          )
+        )
+      ),
+      (chInfo == null ? void 0 : chInfo.available) && props.onChannelDiagnostic && h(
+        "div",
+        { style: { display: "flex", flexWrap: "wrap", gap: "6px", paddingTop: "4px", borderTop: "1px solid var(--border)" } },
+        h("button", { type: "button", className: "of-btn", style: { fontSize: "11px" }, onClick: () => props.onChannelDiagnostic("markRead") }, "Marcar como lido"),
+        h("button", { type: "button", className: "of-btn", style: { fontSize: "11px" }, onClick: () => props.onChannelDiagnostic("markUnread") }, "Marcar como não lido"),
+        h("button", { type: "button", className: "of-btn", style: { fontSize: "11px" }, onClick: () => props.onChannelDiagnostic("refresh") }, "Atualizar canais e roster")
+      )
+    ),
+    h(
+      "div",
       { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-      h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Modo de autonomia · ${((_s = status.tenantManifest) == null ? void 0 : _s.nome) || tenant}`),
+      h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Modo de autonomia · ${((_v = status.tenantManifest) == null ? void 0 : _v.nome) || tenant}`),
       h("div", { className: "of-muted" }, "Suba um degrau por vez. Áreas protegidas e regra L-01 sempre permanecem ativas."),
       h(
         "div",
@@ -45527,6 +46148,197 @@ function renderFactorySecondaryPage(props) {
       )
     )
   );
+}
+function resolveBuzzNavigationScope(ctx) {
+  var _a, _b, _c, _d, _e, _f;
+  try {
+    const navSnap = typeof ((_a = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a.snapshot) === "function" ? ctx.navigation.snapshot() : null;
+    const navScope = (_c = (_b = navSnap == null ? void 0 : navSnap.entry) == null ? void 0 : _b.target) == null ? void 0 : _c.scope;
+    if ((navScope == null ? void 0 : navScope.viewer) && (navScope == null ? void 0 : navScope.communityOrigin)) {
+      return { viewer: String(navScope.viewer), communityOrigin: String(navScope.communityOrigin) };
+    }
+  } catch {
+  }
+  try {
+    const relaySnap = typeof ((_d = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _d.snapshot) === "function" ? ctx.relay.snapshot() : null;
+    const viewer = (relaySnap == null ? void 0 : relaySnap.viewer) ? String(relaySnap.viewer) : ((_e = relaySnap == null ? void 0 : relaySnap.session) == null ? void 0 : _e.viewer) ? String(relaySnap.session.viewer) : "";
+    let communityOrigin = (relaySnap == null ? void 0 : relaySnap.origin) ? String(relaySnap.origin) : "";
+    if (!communityOrigin && viewer && typeof (relaySnap == null ? void 0 : relaySnap.scope) === "string" && relaySnap.scope.endsWith(`:${viewer}`)) {
+      communityOrigin = relaySnap.scope.slice(0, -(viewer.length + 1));
+    }
+    if (!communityOrigin && viewer && typeof ((_f = relaySnap == null ? void 0 : relaySnap.session) == null ? void 0 : _f.scope) === "string" && relaySnap.session.scope.endsWith(`:${viewer}`)) {
+      communityOrigin = relaySnap.session.scope.slice(0, -(viewer.length + 1));
+    }
+    if (viewer && communityOrigin) {
+      return { viewer, communityOrigin };
+    }
+  } catch {
+  }
+  return null;
+}
+async function loadBuzzChannelLiveInfo(ctx, channelId) {
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
+  if (!channelId) return null;
+  try {
+    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+    if (!session) return null;
+    const listSnap = typeof ((_d = session.channels) == null ? void 0 : _d.list) === "function" ? session.channels.list() : null;
+    const allChannels = Array.isArray(listSnap == null ? void 0 : listSnap.channels) ? listSnap.channels : [];
+    const summary = (typeof ((_e = session.channels) == null ? void 0 : _e.get) === "function" ? session.channels.get(channelId) : void 0) || allChannels.find((ch) => String((ch == null ? void 0 : ch.id) || "") === channelId) || null;
+    let details = null;
+    if (((_f = session.channelDetails) == null ? void 0 : _f.available) && typeof session.channelDetails.load === "function") {
+      try {
+        details = await session.channelDetails.load(channelId);
+      } catch {
+      }
+    }
+    const rawMembers = Array.isArray(summary == null ? void 0 : summary.members) ? summary.members : Array.isArray(summary == null ? void 0 : summary.participants) ? summary.participants : [];
+    const uniqueMembers = Array.from(new Set(rawMembers.map((m) => String(m || "").toLowerCase()).filter(Boolean)));
+    let unreadCount = null;
+    let attentionCount = null;
+    try {
+      if (typeof ((_g = session.unread) == null ? void 0 : _g.snapshot) === "function") {
+        const uSnap = session.unread.snapshot({ kind: "channel", channelId });
+        if (uSnap && typeof uSnap === "object") {
+          if (typeof uSnap.observedCount === "number") unreadCount = uSnap.observedCount;
+          if (typeof uSnap.attentionCount === "number") attentionCount = uSnap.attentionCount;
+        }
+      }
+    } catch {
+    }
+    let liveStatus2 = "unknown";
+    try {
+      const lSnap = (_i = (_h = session.live) == null ? void 0 : _h.snapshot) == null ? void 0 : _i.call(_h);
+      if (lSnap == null ? void 0 : lSnap.status) liveStatus2 = String(lSnap.status);
+    } catch {
+    }
+    const visibility = (details == null ? void 0 : details.visibility) === "private" || (summary == null ? void 0 : summary.visibility) === "private" || (summary == null ? void 0 : summary.private) === true ? "private" : (details == null ? void 0 : details.visibility) === "public" || (summary == null ? void 0 : summary.visibility) === "public" ? "public" : "unknown";
+    return {
+      available: Boolean(summary || details),
+      channelId,
+      name: String((details == null ? void 0 : details.name) || (summary == null ? void 0 : summary.name) || "Canal"),
+      description: String((details == null ? void 0 : details.description) ?? (summary == null ? void 0 : summary.description) ?? ""),
+      visibility,
+      channelType: String((summary == null ? void 0 : summary.channelType) || "stream"),
+      viewerRole: (summary == null ? void 0 : summary.viewerRole) ? String(summary.viewerRole) : void 0,
+      archived: Boolean(summary == null ? void 0 : summary.archived),
+      memberPubkeys: uniqueMembers,
+      memberCount: uniqueMembers.length,
+      labels: Array.isArray(details == null ? void 0 : details.labels) ? details.labels.map(String) : Array.isArray(summary == null ? void 0 : summary.labels) ? summary.labels.map(String) : [],
+      canEdit: Boolean((details == null ? void 0 : details.canEdit) && ((_j = session.channelDetails) == null ? void 0 : _j.available) && typeof session.channelDetails.save === "function"),
+      detailsBase: details || void 0,
+      unreadCount,
+      attentionCount,
+      liveStatus: liveStatus2,
+      rosterTotalChannels: allChannels.length,
+      lastActivityAt: typeof (summary == null ? void 0 : summary.lastActivityAt) === "number" ? summary.lastActivityAt : void 0
+    };
+  } catch {
+    return null;
+  }
+}
+async function saveBuzzChannelDetailsLive(ctx, detailsBase, patch) {
+  var _a, _b, _c, _d;
+  try {
+    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+    if (!((_d = session == null ? void 0 : session.channelDetails) == null ? void 0 : _d.available) || typeof session.channelDetails.save !== "function") {
+      return { ok: false, error: "API session.channelDetails.save indisponível nesta versão do Buzz." };
+    }
+    if (!detailsBase) {
+      return { ok: false, error: "Metadados base do canal ainda não carregados." };
+    }
+    const draft = {
+      name: patch.name !== void 0 ? patch.name.trim() : String(detailsBase.name || ""),
+      description: patch.description !== void 0 ? patch.description.trim() : String(detailsBase.description || ""),
+      visibility: patch.visibility || (detailsBase.visibility === "public" ? "public" : "private"),
+      ...detailsBase.joinRole ? { joinRole: detailsBase.joinRole } : {},
+      ...typeof detailsBase.ttlSeconds === "number" ? { ttlSeconds: detailsBase.ttlSeconds } : {},
+      ...Array.isArray(detailsBase.labels) ? { labels: detailsBase.labels } : {}
+    };
+    await session.channelDetails.save(detailsBase, draft);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: (err == null ? void 0 : err.message) || String(err) };
+  }
+}
+async function runBuzzChannelDiagnosticAction(ctx, channelId, action) {
+  var _a, _b, _c, _d, _e, _f, _g, _h;
+  try {
+    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+    if (!session) return { ok: false, message: "Sessão do relay Buzz indisponível." };
+    if (action === "markRead") {
+      if (typeof ((_d = session.unread) == null ? void 0 : _d.markChannelRead) === "function") {
+        await session.unread.markChannelRead(channelId);
+        return { ok: true, message: "Canal marcado como lido no Buzz." };
+      }
+      return { ok: false, message: "markChannelRead indisponível." };
+    }
+    if (action === "markUnread") {
+      if (typeof ((_e = session.unread) == null ? void 0 : _e.markUnreadLocal) === "function") {
+        await session.unread.markUnreadLocal({ kind: "channel", channelId });
+        return { ok: true, message: "Canal marcado como não lido." };
+      }
+      return { ok: false, message: "markUnreadLocal indisponível." };
+    }
+    if (typeof ((_f = session.channels) == null ? void 0 : _f.refreshList) === "function") {
+      session.channels.refreshList();
+    }
+    if (typeof ((_g = session.channels) == null ? void 0 : _g.refreshRoster) === "function") {
+      await session.channels.refreshRoster(channelId).catch(() => {
+      });
+    }
+    if (typeof ((_h = session.channels) == null ? void 0 : _h.refresh) === "function") {
+      session.channels.refresh(channelId);
+    }
+    return { ok: true, message: "Lista de canais e roster atualizados via Buzz relay." };
+  } catch (err) {
+    return { ok: false, message: (err == null ? void 0 : err.message) || String(err) };
+  }
+}
+async function navigateToBuzzChannel(ctx, channelId, options) {
+  var _a, _b;
+  if (!channelId) return { ok: false, mode: "none" };
+  const scope = resolveBuzzNavigationScope(ctx);
+  if ((options == null ? void 0 : options.preferFullPage) && scope && typeof ((_a = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a.open) === "function") {
+    try {
+      const target = {
+        version: 1,
+        kind: "conversation",
+        scope,
+        channelId
+      };
+      if (options.panel) target.panel = options.panel;
+      const res = await ctx.navigation.open(target);
+      if (!res || res.status === "opened") {
+        return { ok: true, mode: "navigation" };
+      }
+    } catch {
+    }
+  }
+  if (options == null ? void 0 : options.sideTabOpener) {
+    try {
+      const opened = options.sideTabOpener({ channelId }, { keep: true });
+      if (opened) return { ok: true, mode: "sidetab" };
+    } catch {
+    }
+  }
+  if (scope && typeof ((_b = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _b.open) === "function") {
+    try {
+      const target = {
+        version: 1,
+        kind: "conversation",
+        scope,
+        channelId
+      };
+      if (options == null ? void 0 : options.panel) target.panel = options.panel;
+      const res = await ctx.navigation.open(target);
+      if (!res || res.status === "opened") {
+        return { ok: true, mode: "navigation" };
+      }
+    } catch {
+    }
+  }
+  return { ok: false, mode: "none" };
 }
 const SESSION_LIMIT = 5;
 function projectHue(slug) {
@@ -46218,10 +47030,18 @@ function createFactoryAppComponent(ctx, opts = {}) {
     const [mainAgentPubkey, setMainAgentPubkey] = React.useState(null);
     const [channelCanvas, setChannelCanvas] = React.useState(null);
     const [canvasDraft, setCanvasDraft] = React.useState("");
+    const [canvasMode, setCanvasMode] = React.useState("view");
     const [canvasEventId, setCanvasEventId] = React.useState(void 0);
     const [canvasWritable, setCanvasWritable] = React.useState(false);
     const [canvasSaving, setCanvasSaving] = React.useState(false);
     const [canvasHistory, setCanvasHistory] = React.useState([]);
+    const [channelInfo, setChannelInfo] = React.useState(null);
+    const [editingChannelDetails, setEditingChannelDetails] = React.useState(false);
+    const [channelDetailsDraft, setChannelDetailsDraftState] = React.useState({ name: "", description: "" });
+    const setChannelDetailsDraft = React.useCallback((patch) => {
+      setChannelDetailsDraftState((prev) => ({ ...prev, ...patch }));
+    }, []);
+    const [savingChannelDetails, setSavingChannelDetails] = React.useState(false);
     const [liveRepo, setLiveRepo] = React.useState(null);
     const [selectedItemDetail, setSelectedItemDetail] = React.useState(null);
     const [selectedItemDetailLoading, setSelectedItemDetailLoading] = React.useState(false);
@@ -46325,6 +47145,10 @@ function createFactoryAppComponent(ctx, opts = {}) {
         if (!cancelled) setCanvasHistory(hist);
       }).catch(() => {
       });
+      loadBuzzChannelLiveInfo(ctx, canal).then((info) => {
+        if (!cancelled) setChannelInfo(info);
+      }).catch(() => {
+      });
       loadLiveRepoSnapshot(ctx, { channelId: canal, dtag }).then((snap) => {
         if (!cancelled && snap.available) setLiveRepo(snap);
       }).catch(() => {
@@ -46332,7 +47156,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
       return () => {
         cancelled = true;
       };
-    }, [tenant, (_a = status.tenantManifest) == null ? void 0 : _a.canal, (_b = status.tenantManifest) == null ? void 0 : _b.repoId, holding, relayTick]);
+    }, [tenant, (_a = status.tenantManifest) == null ? void 0 : _a.canal, (_b = status.tenantManifest) == null ? void 0 : _b.repoId, holding, relayTick, activityTick]);
     React.useEffect(() => {
       var _a2;
       let cancelled = false;
@@ -46483,6 +47307,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
       if (res.ok) {
         setChannelCanvas(canvasDraft);
         if (res.eventId) setCanvasEventId(res.eventId);
+        setCanvasMode("view");
         notify2("Canvas salvo diretamente no canal do Buzz (session.canvas.save).");
         readBuzzChannelCanvasHistory(ctx, canal).then(setCanvasHistory).catch(() => {
         });
@@ -46490,60 +47315,114 @@ function createFactoryAppComponent(ctx, opts = {}) {
         notify2(`Falha ao salvar Canvas: ${res.error || "indisponível"}`);
       }
     }, [status.tenantManifest, holding, tenant, canvasDraft, canvasEventId, notify2]);
-    const resolveBuzzScope = React.useCallback(() => {
-      var _a2, _b2, _c2, _d2;
-      try {
-        const navSnap = typeof ((_a2 = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a2.snapshot) === "function" ? ctx.navigation.snapshot() : null;
-        const navScope = (_c2 = (_b2 = navSnap == null ? void 0 : navSnap.entry) == null ? void 0 : _b2.target) == null ? void 0 : _c2.scope;
-        if ((navScope == null ? void 0 : navScope.viewer) && (navScope == null ? void 0 : navScope.communityOrigin)) {
-          return { viewer: String(navScope.viewer), communityOrigin: String(navScope.communityOrigin) };
-        }
-      } catch {
-      }
-      try {
-        const relaySnap2 = typeof ((_d2 = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _d2.snapshot) === "function" ? ctx.relay.snapshot() : null;
-        if ((relaySnap2 == null ? void 0 : relaySnap2.viewer) && (relaySnap2 == null ? void 0 : relaySnap2.origin)) {
-          return { viewer: String(relaySnap2.viewer), communityOrigin: String(relaySnap2.origin) };
-        }
-      } catch {
-      }
-      return null;
-    }, []);
-    const handleOpenChannelInBuzz = React.useCallback(async (targetSlug) => {
+    const handleReloadCanvas = React.useCallback(async () => {
       var _a2, _b2;
-      const slug = typeof targetSlug === "string" && targetSlug ? targetSlug : tenant;
-      const emp = holding == null ? void 0 : holding.empresas.find((e) => e.slug === slug);
-      const canal = (slug === tenant ? (_a2 = status.tenantManifest) == null ? void 0 : _a2.canal : null) || (emp == null ? void 0 : emp.canal);
-      const scope = resolveBuzzScope();
+      const canal = ((_a2 = status.tenantManifest) == null ? void 0 : _a2.canal) || ((_b2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _b2.canal) || null;
+      const [st, hist] = await Promise.all([
+        readBuzzChannelCanvasDetailed(ctx, canal, { strong: true }),
+        readBuzzChannelCanvasHistory(ctx, canal)
+      ]);
+      setChannelCanvas(st.content);
+      setCanvasDraft(st.content || "");
+      setCanvasEventId(st.eventId);
+      setCanvasWritable(st.writable);
+      setCanvasHistory(hist);
+      notify2("Canvas recarregado ao vivo do canal no Buzz.");
+    }, [status.tenantManifest, holding, tenant, notify2]);
+    const handleSaveChannelDetails = React.useCallback(async () => {
+      var _a2, _b2;
+      const canal = ((_a2 = status.tenantManifest) == null ? void 0 : _a2.canal) || ((_b2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _b2.canal) || null;
+      setSavingChannelDetails(true);
+      const res = await saveBuzzChannelDetailsLive(ctx, channelInfo == null ? void 0 : channelInfo.detailsBase, channelDetailsDraft);
+      setSavingChannelDetails(false);
+      if (res.ok) {
+        setEditingChannelDetails(false);
+        notify2("Detalhes do canal salvos diretamente no Buzz (session.channelDetails.save).");
+        loadBuzzChannelLiveInfo(ctx, canal).then(setChannelInfo).catch(() => {
+        });
+      } else {
+        notify2(`Falha ao salvar canal: ${res.error || "indisponível"}`);
+      }
+    }, [status.tenantManifest, holding, tenant, channelInfo, channelDetailsDraft, notify2]);
+    const handleChannelDiagnostic = React.useCallback(async (action) => {
+      var _a2, _b2;
+      const canal = ((_a2 = status.tenantManifest) == null ? void 0 : _a2.canal) || ((_b2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _b2.canal) || null;
+      if (!canal) {
+        notify2("Canal da empresa não configurado.");
+        return;
+      }
+      const res = await runBuzzChannelDiagnosticAction(ctx, canal, action);
+      notify2(res.message);
+      loadBuzzChannelLiveInfo(ctx, canal).then(setChannelInfo).catch(() => {
+      });
+    }, [status.tenantManifest, holding, tenant, notify2]);
+    const handleCopyText = React.useCallback((text, label) => {
+      var _a2;
       try {
-        if (canal && openSideTabRef.current) {
-          const openedSide = openSideTabRef.current({ channelId: canal }, { keep: true });
-          if (openedSide) {
-            notify2(`Canal de ${tenant} aberto na barra lateral do Buzz.`);
-            return;
-          }
-        }
-        if (canal && scope && ((_b2 = ctx.navigation) == null ? void 0 : _b2.open)) {
-          const res = await ctx.navigation.open({
-            version: 1,
-            kind: "conversation",
-            scope,
-            channelId: canal
+        if (typeof navigator !== "undefined" && ((_a2 = navigator.clipboard) == null ? void 0 : _a2.writeText)) {
+          navigator.clipboard.writeText(text).catch(() => {
           });
-          if (!res || res.status === "opened") {
-            notify2(`Canal do workspace ${tenant} aberto no Buzz.`);
-            return;
-          }
         }
-        if (canal) {
-          await openSystemUri(ctx, `buzz://channel?id=${canal}`);
-          notify2(`Canal do workspace ${tenant} aberto no Buzz.`);
+      } catch {
+      }
+      notify2(`${label} copiado.`);
+    }, [notify2]);
+    const handleOpenBuzzLink = React.useCallback(async (href) => {
+      var _a2;
+      try {
+        const u = new URL(href);
+        const host = u.hostname.toLowerCase();
+        const id = u.searchParams.get("id") || "";
+        const owner = u.searchParams.get("owner") || (liveRepo == null ? void 0 : liveRepo.owner) || DEFAULT_ORGFY_REPO_OWNER;
+        const dtag = u.searchParams.get("d") || (liveRepo == null ? void 0 : liveRepo.dtag) || ((_a2 = status.tenantManifest) == null ? void 0 : _a2.repoId) || tenant;
+        if ((host === "issue" || host === "pr") && /^[0-9a-f]{64}$/i.test(id)) {
+          const ok2 = await openBuzzRepoEntity(ctx, { type: host === "pr" ? "pr" : "issue", owner, dtag, id });
+          if (ok2) return;
+        }
+        if (host === "channel" && id) {
+          await navigateToBuzzChannel(ctx, id, { preferFullPage: true, sideTabOpener: openSideTabRef.current });
           return;
         }
       } catch {
       }
-      notify2(`Workspace ativo: ${tenant}${canal ? ` (canal ${canal.slice(0, 8)}…)` : ""}.`);
-    }, [holding, status.tenantManifest, tenant, resolveBuzzScope, notify2]);
+      notify2(`Link Buzz: ${href}`);
+    }, [liveRepo, status.tenantManifest, tenant, notify2]);
+    const resolveBuzzScope = React.useCallback(() => resolveBuzzNavigationScope(ctx), []);
+    const handleOpenChannelInBuzz = React.useCallback(async (targetSlug) => {
+      var _a2;
+      const slug = typeof targetSlug === "string" && targetSlug ? targetSlug : tenant;
+      const emp = holding == null ? void 0 : holding.empresas.find((e) => e.slug === slug);
+      const canal = (slug === tenant ? (_a2 = status.tenantManifest) == null ? void 0 : _a2.canal : null) || (emp == null ? void 0 : emp.canal);
+      if (!canal) {
+        notify2(`Canal não configurado no manifesto de ${slug}.`);
+        return;
+      }
+      const res = await navigateToBuzzChannel(ctx, canal, { preferFullPage: false, sideTabOpener: openSideTabRef.current });
+      if (res.ok) {
+        notify2(res.mode === "sidetab" ? `Canal de ${slug} aberto no chat lateral.` : `Canal de ${slug} aberto no Buzz.`);
+      } else {
+        notify2(`Não foi possível abrir o canal ${canal.slice(0, 8)}… no Buzz (verifique a conexão do relay).`);
+      }
+    }, [holding, status.tenantManifest, tenant, notify2]);
+    const handleOpenChannelFullPage = React.useCallback(async (opts2) => {
+      var _a2;
+      const emp = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant);
+      const canal = ((_a2 = status.tenantManifest) == null ? void 0 : _a2.canal) || (emp == null ? void 0 : emp.canal);
+      if (!canal) {
+        notify2(`Canal não configurado no manifesto de ${tenant}.`);
+        return;
+      }
+      const res = await navigateToBuzzChannel(ctx, canal, {
+        panel: opts2 == null ? void 0 : opts2.panel,
+        preferFullPage: true,
+        sideTabOpener: openSideTabRef.current
+      });
+      if (res.ok) {
+        notify2(res.mode === "navigation" ? `Canal de ${tenant} aberto no Buzz.` : `Canal de ${tenant} aberto no painel lateral.`);
+      } else {
+        notify2(`Não foi possível navegar para o canal ${canal.slice(0, 8)}… no Buzz.`);
+      }
+    }, [holding, status.tenantManifest, tenant, notify2]);
     const liveCrew = React.useMemo(() => {
       var _a2, _b2;
       try {
@@ -47155,6 +48034,8 @@ function createFactoryAppComponent(ctx, opts = {}) {
                 ),
                 onSelectModeQuick: (mode) => handleControlUpdate({ mode }, `Modo alterado para ${PT_BR.modes[mode]}.`),
                 onOpenChannelInBuzz: handleOpenChannelInBuzz,
+                onOpenChannelFullPage: handleOpenChannelFullPage,
+                onOpenBuzzLink: handleOpenBuzzLink,
                 Boardroom3D,
                 onReconcileAgents: handleReconcileAgentsR51,
                 onAgentSessionAction: handleAgentSessionAction,
@@ -47166,10 +48047,22 @@ function createFactoryAppComponent(ctx, opts = {}) {
                 setAgentEditDraft,
                 canvasDraft,
                 setCanvasDraft,
+                canvasMode,
+                setCanvasMode,
                 canvasWritable,
                 canvasSaving,
                 onSaveCanvas: handleSaveCanvas,
+                onReloadCanvas: handleReloadCanvas,
                 canvasHistory,
+                channelInfo,
+                editingChannelDetails,
+                setEditingChannelDetails,
+                channelDetailsDraft,
+                setChannelDetailsDraft,
+                savingChannelDetails,
+                onSaveChannelDetails: handleSaveChannelDetails,
+                onChannelDiagnostic: handleChannelDiagnostic,
+                onCopyText: handleCopyText,
                 resolveAuthor: (pk) => resolveBuzzIdentityName(ctx, pk, nameByPubkey)
               })
             )

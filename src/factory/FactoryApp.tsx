@@ -38,6 +38,14 @@ import {
   type LiveRepoSnapshot,
 } from "../services/buzz-repos-live";
 import { subscribeRelayUpdates } from "../services/buzz-native";
+import {
+  loadBuzzChannelLiveInfo,
+  navigateToBuzzChannel,
+  resolveBuzzNavigationScope,
+  runBuzzChannelDiagnosticAction,
+  saveBuzzChannelDetailsLive,
+  type BuzzChannelLiveInfo,
+} from "../services/buzz-channel-live";
 import { openIssueInBuzz, openSystemUri } from "../services/orgfy-bridge";
 import { fetchHoldingControlPlane, type HoldingControlPlaneSnapshot } from "../services/holding-service";
 import { renderCommandPalette, renderFactorySidebar, type FactorySidebarProps } from "./FactorySidebar";
@@ -82,10 +90,18 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     const [mainAgentPubkey, setMainAgentPubkey] = React.useState<string | null>(null);
     const [channelCanvas, setChannelCanvas] = React.useState<string | null>(null);
     const [canvasDraft, setCanvasDraft] = React.useState<string>("");
+    const [canvasMode, setCanvasMode] = React.useState<"view" | "edit" | "history">("view");
     const [canvasEventId, setCanvasEventId] = React.useState<string | undefined>(undefined);
     const [canvasWritable, setCanvasWritable] = React.useState<boolean>(false);
     const [canvasSaving, setCanvasSaving] = React.useState<boolean>(false);
     const [canvasHistory, setCanvasHistory] = React.useState<BuzzCanvasHistoryEntry[]>([]);
+    const [channelInfo, setChannelInfo] = React.useState<BuzzChannelLiveInfo | null>(null);
+    const [editingChannelDetails, setEditingChannelDetails] = React.useState<boolean>(false);
+    const [channelDetailsDraft, setChannelDetailsDraftState] = React.useState<{ name: string; description: string }>({ name: "", description: "" });
+    const setChannelDetailsDraft = React.useCallback((patch: Partial<{ name: string; description: string }>) => {
+      setChannelDetailsDraftState((prev) => ({ ...prev, ...patch }));
+    }, []);
+    const [savingChannelDetails, setSavingChannelDetails] = React.useState<boolean>(false);
     const [liveRepo, setLiveRepo] = React.useState<LiveRepoSnapshot | null>(null);
     const [selectedItemDetail, setSelectedItemDetail] = React.useState<LiveRepoEntityDetail | null>(null);
     const [selectedItemDetailLoading, setSelectedItemDetailLoading] = React.useState<boolean>(false);
@@ -168,7 +184,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       };
     }, [relayTick]);
 
-    // Lê Canvas ao vivo + histórico (session.canvas.read/history) e Buzz Repos NIP-34 (session.repositories)
+    // Lê Canvas ao vivo + histórico (session.canvas.read/history), metadados do canal (session.channels/channelDetails) e Buzz Repos NIP-34
     React.useEffect(() => {
       let cancelled = false;
       const canal = status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === tenant)?.canal || null;
@@ -188,6 +204,11 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
           if (!cancelled) setCanvasHistory(hist);
         })
         .catch(() => {});
+      loadBuzzChannelLiveInfo(ctx, canal)
+        .then((info) => {
+          if (!cancelled) setChannelInfo(info);
+        })
+        .catch(() => {});
       loadLiveRepoSnapshot(ctx, { channelId: canal, dtag })
         .then((snap) => {
           if (!cancelled && snap.available) setLiveRepo(snap);
@@ -196,7 +217,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       return () => {
         cancelled = true;
       };
-    }, [tenant, status.tenantManifest?.canal, status.tenantManifest?.repoId, holding, relayTick]);
+    }, [tenant, status.tenantManifest?.canal, status.tenantManifest?.repoId, holding, relayTick, activityTick]);
 
     // Ao abrir um card no ItemSheetDrawer, carrega conteúdo NIP-34, comentários e diff Git via Buzz Repos
     React.useEffect(() => {
@@ -368,6 +389,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       if (res.ok) {
         setChannelCanvas(canvasDraft);
         if (res.eventId) setCanvasEventId(res.eventId);
+        setCanvasMode("view");
         notify("Canvas salvo diretamente no canal do Buzz (session.canvas.save).");
         readBuzzChannelCanvasHistory(ctx, canal).then(setCanvasHistory).catch(() => {});
       } else {
@@ -375,56 +397,109 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       }
     }, [status.tenantManifest, holding, tenant, canvasDraft, canvasEventId, notify]);
 
-    const resolveBuzzScope = React.useCallback((): { viewer: string; communityOrigin: string } | null => {
+    const handleReloadCanvas = React.useCallback(async () => {
+      const canal = status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === tenant)?.canal || null;
+      const [st, hist] = await Promise.all([
+        readBuzzChannelCanvasDetailed(ctx, canal, { strong: true }),
+        readBuzzChannelCanvasHistory(ctx, canal),
+      ]);
+      setChannelCanvas(st.content);
+      setCanvasDraft(st.content || "");
+      setCanvasEventId(st.eventId);
+      setCanvasWritable(st.writable);
+      setCanvasHistory(hist);
+      notify("Canvas recarregado ao vivo do canal no Buzz.");
+    }, [status.tenantManifest, holding, tenant, notify]);
+
+    const handleSaveChannelDetails = React.useCallback(async () => {
+      const canal = status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === tenant)?.canal || null;
+      setSavingChannelDetails(true);
+      const res = await saveBuzzChannelDetailsLive(ctx, channelInfo?.detailsBase, channelDetailsDraft);
+      setSavingChannelDetails(false);
+      if (res.ok) {
+        setEditingChannelDetails(false);
+        notify("Detalhes do canal salvos diretamente no Buzz (session.channelDetails.save).");
+        loadBuzzChannelLiveInfo(ctx, canal).then(setChannelInfo).catch(() => {});
+      } else {
+        notify(`Falha ao salvar canal: ${res.error || "indisponível"}`);
+      }
+    }, [status.tenantManifest, holding, tenant, channelInfo, channelDetailsDraft, notify]);
+
+    const handleChannelDiagnostic = React.useCallback(async (action: "markRead" | "markUnread" | "refresh") => {
+      const canal = status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === tenant)?.canal || null;
+      if (!canal) {
+        notify("Canal da empresa não configurado.");
+        return;
+      }
+      const res = await runBuzzChannelDiagnosticAction(ctx, canal, action);
+      notify(res.message);
+      loadBuzzChannelLiveInfo(ctx, canal).then(setChannelInfo).catch(() => {});
+    }, [status.tenantManifest, holding, tenant, notify]);
+
+    const handleCopyText = React.useCallback((text: string, label: string) => {
       try {
-        const navSnap = typeof (ctx as any)?.navigation?.snapshot === "function" ? (ctx as any).navigation.snapshot() : null;
-        const navScope = navSnap?.entry?.target?.scope;
-        if (navScope?.viewer && navScope?.communityOrigin) {
-          return { viewer: String(navScope.viewer), communityOrigin: String(navScope.communityOrigin) };
+        if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+          navigator.clipboard.writeText(text).catch(() => {});
         }
       } catch {}
+      notify(`${label} copiado.`);
+    }, [notify]);
+
+    const handleOpenBuzzLink = React.useCallback(async (href: string) => {
       try {
-        const relaySnap = typeof (ctx as any)?.relay?.snapshot === "function" ? (ctx as any).relay.snapshot() : null;
-        if (relaySnap?.viewer && relaySnap?.origin) {
-          return { viewer: String(relaySnap.viewer), communityOrigin: String(relaySnap.origin) };
+        const u = new URL(href);
+        const host = u.hostname.toLowerCase();
+        const id = u.searchParams.get("id") || "";
+        const owner = u.searchParams.get("owner") || liveRepo?.owner || DEFAULT_ORGFY_REPO_OWNER;
+        const dtag = u.searchParams.get("d") || liveRepo?.dtag || status.tenantManifest?.repoId || tenant;
+        if ((host === "issue" || host === "pr") && /^[0-9a-f]{64}$/i.test(id)) {
+          const ok = await openBuzzRepoEntity(ctx, { type: host === "pr" ? "pr" : "issue", owner, dtag, id });
+          if (ok) return;
+        }
+        if (host === "channel" && id) {
+          await navigateToBuzzChannel(ctx, id, { preferFullPage: true, sideTabOpener: openSideTabRef.current });
+          return;
         }
       } catch {}
-      return null;
-    }, []);
+      notify(`Link Buzz: ${href}`);
+    }, [liveRepo, status.tenantManifest, tenant, notify]);
+
+    const resolveBuzzScope = React.useCallback(() => resolveBuzzNavigationScope(ctx), []);
 
     const handleOpenChannelInBuzz = React.useCallback(async (targetSlug?: string) => {
       const slug = typeof targetSlug === "string" && targetSlug ? targetSlug : tenant;
       const emp = holding?.empresas.find((e) => e.slug === slug);
       const canal = (slug === tenant ? status.tenantManifest?.canal : null) || emp?.canal;
-      const scope = resolveBuzzScope();
-      try {
-        if (canal && openSideTabRef.current) {
-          const openedSide = openSideTabRef.current({ channelId: canal }, { keep: true });
-          if (openedSide) {
-            notify(`Canal de ${tenant} aberto na barra lateral do Buzz.`);
-            return;
-          }
-        }
-        if (canal && scope && (ctx as any).navigation?.open) {
-          const res = await (ctx as any).navigation.open({
-            version: 1,
-            kind: "conversation",
-            scope,
-            channelId: canal,
-          });
-          if (!res || res.status === "opened") {
-            notify(`Canal do workspace ${tenant} aberto no Buzz.`);
-            return;
-          }
-        }
-        if (canal) {
-          await openSystemUri(ctx, `buzz://channel?id=${canal}`);
-          notify(`Canal do workspace ${tenant} aberto no Buzz.`);
-          return;
-        }
-      } catch {}
-      notify(`Workspace ativo: ${tenant}${canal ? ` (canal ${canal.slice(0, 8)}…)` : ""}.`);
-    }, [holding, status.tenantManifest, tenant, resolveBuzzScope, notify]);
+      if (!canal) {
+        notify(`Canal não configurado no manifesto de ${slug}.`);
+        return;
+      }
+      const res = await navigateToBuzzChannel(ctx, canal, { preferFullPage: false, sideTabOpener: openSideTabRef.current });
+      if (res.ok) {
+        notify(res.mode === "sidetab" ? `Canal de ${slug} aberto no chat lateral.` : `Canal de ${slug} aberto no Buzz.`);
+      } else {
+        notify(`Não foi possível abrir o canal ${canal.slice(0, 8)}… no Buzz (verifique a conexão do relay).`);
+      }
+    }, [holding, status.tenantManifest, tenant, notify]);
+
+    const handleOpenChannelFullPage = React.useCallback(async (opts?: { panel?: "members" }) => {
+      const emp = holding?.empresas.find((e) => e.slug === tenant);
+      const canal = status.tenantManifest?.canal || emp?.canal;
+      if (!canal) {
+        notify(`Canal não configurado no manifesto de ${tenant}.`);
+        return;
+      }
+      const res = await navigateToBuzzChannel(ctx, canal, {
+        panel: opts?.panel,
+        preferFullPage: true,
+        sideTabOpener: openSideTabRef.current,
+      });
+      if (res.ok) {
+        notify(res.mode === "navigation" ? `Canal de ${tenant} aberto no Buzz.` : `Canal de ${tenant} aberto no painel lateral.`);
+      } else {
+        notify(`Não foi possível navegar para o canal ${canal.slice(0, 8)}… no Buzz.`);
+      }
+    }, [holding, status.tenantManifest, tenant, notify]);
 
     const liveCrew: LiveCrewAgent[] = React.useMemo(() => {
       try {
@@ -1104,6 +1179,8 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                     onSelectModeQuick: (mode) =>
                       handleControlUpdate({ mode }, `Modo alterado para ${PT_BR.modes[mode]}.`),
                     onOpenChannelInBuzz: handleOpenChannelInBuzz,
+                    onOpenChannelFullPage: handleOpenChannelFullPage,
+                    onOpenBuzzLink: handleOpenBuzzLink,
                     Boardroom3D,
                     onReconcileAgents: handleReconcileAgentsR51,
                     onAgentSessionAction: handleAgentSessionAction,
@@ -1115,10 +1192,22 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                     setAgentEditDraft,
                     canvasDraft,
                     setCanvasDraft,
+                    canvasMode,
+                    setCanvasMode,
                     canvasWritable,
                     canvasSaving,
                     onSaveCanvas: handleSaveCanvas,
+                    onReloadCanvas: handleReloadCanvas,
                     canvasHistory,
+                    channelInfo,
+                    editingChannelDetails,
+                    setEditingChannelDetails,
+                    channelDetailsDraft,
+                    setChannelDetailsDraft,
+                    savingChannelDetails,
+                    onSaveChannelDetails: handleSaveChannelDetails,
+                    onChannelDiagnostic: handleChannelDiagnostic,
+                    onCopyText: handleCopyText,
                     resolveAuthor: (pk: string) => resolveBuzzIdentityName(ctx, pk, nameByPubkey),
                   })
             )
