@@ -29,11 +29,6 @@
     "mcp": true,
     "processes": [
       {
-        "id": "python",
-        "program": "python3",
-        "args": []
-      },
-      {
         "id": "git",
         "program": "git",
         "args": []
@@ -41,16 +36,6 @@
       {
         "id": "buzz",
         "program": "buzz",
-        "args": []
-      },
-      {
-        "id": "osascript",
-        "program": "osascript",
-        "args": []
-      },
-      {
-        "id": "open",
-        "program": "open",
         "args": []
       }
     ],
@@ -66,6 +51,18 @@
         "program": "python3",
         "args": ["ferramentas/esteira/fabrica_status.py", "--json"],
         "maxOutputBytes": 262144
+      },
+      {
+        "id": "orgfy-kpis",
+        "program": "python3",
+        "args": ["ferramentas/esteira/gerar_kpis_esteira.py"],
+        "maxOutputBytes": 131072
+      },
+      {
+        "id": "orgfy-loop-radar",
+        "program": "python3",
+        "args": ["ferramentas/esteira/goose_loop_radar.py"],
+        "maxOutputBytes": 131072
       }
     ]
   }

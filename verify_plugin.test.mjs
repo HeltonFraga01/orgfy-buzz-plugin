@@ -1529,3 +1529,34 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
 
   console.log("[FASE 2 FACTORY ADAPTER + KILL SWITCH + SHADOW CSS + MIT OK]");
 }
+
+// 26. Bloco D (v17): Segurança do manifest (sem osascript/python irrestrito) e fim da UI antiga
+{
+  const { test } = await import("node:test");
+  test("manifest.json não permite osascript, open ou python irrestrito em host.processes", () => {
+    const manifest = JSON.parse(fs.readFileSync(path.resolve(__dirname, "manifest.json"), "utf8"));
+    const procs = manifest?.host?.processes || [];
+    for (const p of procs) {
+      assert.notEqual(p.program, "osascript", "osascript irrestrito é proibido");
+      assert.notEqual(p.program, "open", "open irrestrito é proibido");
+      if (p.program === "python3" || p.program === "python") {
+        assert.ok(Array.isArray(p.args) && p.args.length > 0, "python irrestrito sem args fixos é proibido");
+      }
+    }
+  });
+
+  test("plugin.js não contém spawn de osascript nem toggle da UI antiga Control Room clássico", () => {
+    const bundle = fs.readFileSync(path.resolve(__dirname, "plugin.js"), "utf8");
+    assert.ok(!bundle.includes('spawn("osascript"'), "plugin.js não deve chamar host.spawn('osascript')");
+    assert.ok(!bundle.includes("Control Room clássico"), "botão da UI antiga deve estar removido");
+    assert.ok(!bundle.includes("orgfy.view.toggle"), "switcher da UI antiga deve estar removido");
+  });
+
+  test("sidebar CodeDen 1:1 recolhível (SidebarRail + Command Palette Cmd+K) presente no bundle", () => {
+    const bundle = fs.readFileSync(path.resolve(__dirname, "plugin.js"), "utf8");
+    assert.ok(bundle.includes("of-sidebar-rail"), "SidebarRail recolhida deve estar no bundle");
+    assert.ok(bundle.includes("Buscar ou executar"), "barra de busca Command Palette deve estar no bundle");
+    assert.ok(bundle.includes("of-sb-tree"), "árvore expansível de empresas estilo CodeDen deve estar no bundle");
+    assert.ok(bundle.includes("of-sb-footer"), "footer com status e 4 utilitários deve estar no bundle");
+  });
+}

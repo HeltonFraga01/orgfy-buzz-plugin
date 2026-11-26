@@ -57,13 +57,10 @@ export async function sendDesktopNotification(ctx: any, title: string, body: str
     }
   }
 
-  // 2. Garante notificação nativa macOS via osascript sem shell intermediário (B1)
-  if (ctx?.host?.spawn) {
+  // 2. Usa API nativa de notificações do Buzz (sem osascript irrestrito — Bloco D v17)
+  if (ctx?.notifications?.notify) {
     try {
-      const script = `display notification ${JSON.stringify(String(body || ""))} with title ${JSON.stringify(String(title || ""))} sound name "Glass"`;
-      await ctx.host.spawn("osascript", {
-        args: ["-e", script],
-      });
+      await ctx.notifications.notify({ title: String(title || ""), body: String(body || "") });
     } catch (_err) {}
   }
 }

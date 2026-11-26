@@ -26,6 +26,7 @@ import {
 import { subscribeRelayUpdates } from "../services/buzz-native";
 import { openIssueInBuzz, openSystemUri } from "../services/orgfy-bridge";
 import { fetchHoldingControlPlane, type HoldingControlPlaneSnapshot } from "../services/holding-service";
+import { renderCommandPalette, renderFactorySidebar, type FactorySidebarProps } from "./FactorySidebar";
 
 type FactoryTab =
   | "holding"
@@ -73,6 +74,38 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     const [activeHelpKey, setActiveHelpKey] = React.useState<string | null>(null);
     const [selectedItem, setSelectedItem] = React.useState<FactoryWorkItem | null>(null);
     const [confirmKill, setConfirmKill] = React.useState<boolean>(false);
+    const [sidebarCollapsed, setSidebarCollapsed] = React.useState<boolean>(() => {
+      try { return localStorage.getItem("orgfy_factory_sidebar_collapsed") === "1"; } catch { return false; }
+    });
+    const [paletteOpen, setPaletteOpen] = React.useState<boolean>(false);
+    const [paletteQuery, setPaletteQuery] = React.useState<string>("");
+    const [compactDensity, setCompactDensity] = React.useState<boolean>(false);
+    const [expandedProjects, setExpandedProjects] = React.useState<Record<string, boolean>>({ orgfy: true });
+    const [showAllByProject, setShowAllByProject] = React.useState<Record<string, boolean>>({});
+
+    const toggleSidebarCollapsed = React.useCallback(() => {
+      setSidebarCollapsed((prev) => {
+        const next = !prev;
+        try { localStorage.setItem("orgfy_factory_sidebar_collapsed", next ? "1" : "0"); } catch {}
+        return next;
+      });
+    }, []);
+
+    React.useEffect(() => {
+      const onKey = (ev: KeyboardEvent) => {
+        if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "b") {
+          ev.preventDefault();
+          toggleSidebarCollapsed();
+        } else if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "k") {
+          ev.preventDefault();
+          setPaletteOpen((v) => !v);
+        } else if (ev.key === "Escape") {
+          setPaletteOpen(false);
+        }
+      };
+      window.addEventListener("keydown", onKey);
+      return () => window.removeEventListener("keydown", onKey);
+    }, [toggleSidebarCollapsed]);
 
     // Ref para o abridor nativo de abas laterais do Buzz (ctx.conversation.ui.Tabs)
     const openSideTabRef = React.useRef<
@@ -250,9 +283,10 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       return null;
     }, []);
 
-    const handleOpenChannelInBuzz = React.useCallback(async () => {
-      const emp = holding?.empresas.find((e) => e.slug === tenant);
-      const canal = status.tenantManifest?.canal || emp?.canal;
+    const handleOpenChannelInBuzz = React.useCallback(async (targetSlug?: string) => {
+      const slug = typeof targetSlug === "string" && targetSlug ? targetSlug : tenant;
+      const emp = holding?.empresas.find((e) => e.slug === slug);
+      const canal = (slug === tenant ? status.tenantManifest?.canal : null) || emp?.canal;
       const scope = resolveBuzzScope();
       try {
         if (canal && openSideTabRef.current) {
@@ -553,114 +587,72 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       h("style", { "data-orgfy-factory-inline-fallback": "true" }, FACTORY_SHADOW_CSS),
       h(
         "div",
-        { className: "of-shell" },
-        h(
-          "aside",
-          { className: "of-sidebar" },
-          h(
-            "div",
-            { className: "of-brand" },
-            h(
-              "span",
-              { className: "of-brand-mark" },
-              h("span", { className: "of-brand-icon" }, "<>"),
-              PT_BR.appTitle
-            ),
-            h("span", { className: "of-dot", "data-tone": status.coordenador === "ativo" ? "done" : "failed", title: `Coordenador: ${status.coordenador}` })
-          ),
-
-          h(
-            "button",
-            {
-              type: "button",
-              className: "of-surface",
-              title: `Abrir chat lateral nativo com ${masterAgentName}`,
-              onClick: () =>
-                handleOpenAgentDmInBuzz(
-                  masterLive || { name: masterAgentName, pubkey: holding?.ceoHolding?.pubkey || "" }
-                ),
-              style: {
-                padding: "8px 10px",
-                display: "flex",
-                flexDirection: "column",
-                gap: "3px",
-                textAlign: "left",
-                cursor: "pointer",
-                width: "100%",
-              },
+        {
+          className: "of-shell",
+          "data-collapsed": sidebarCollapsed ? "true" : "false",
+          "data-density": compactDensity ? "compact" : "default",
+        },
+        renderFactorySidebar(
+          {
+            h,
+            collapsed: sidebarCollapsed,
+            onToggleCollapse: toggleSidebarCollapsed,
+            paletteOpen,
+            onSetPaletteOpen: (open) => {
+              setPaletteOpen(open);
+              if (!open) setPaletteQuery("");
             },
-            h(
-              "div",
-              { style: { display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "10px", color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.06em" } },
-              h("span", null, "CEO Master · Orquestrador"),
-              h("span", { style: { color: "var(--primary)", fontWeight: 600, textTransform: "none", letterSpacing: 0 } }, "DM ↗")
-            ),
-            h(
-              "div",
-              { style: { display: "flex", alignItems: "center", gap: "6px", fontSize: "12.5px", fontWeight: 700, color: "var(--foreground)" } },
-              h("span", { className: "of-dot", "data-tone": masterTurn ? "running" : "done" }),
-              masterAgentName
-            ),
-            h(
-              "div",
-              { className: "of-mono of-muted", style: { fontSize: "10px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
-              masterTurn ? `⚡ ${masterTurn.stepLabel}` : masterLive ? masterLive.model : "Ativa no Buzz"
-            )
-          ),
-
-          h("div", { className: "of-nav-group-label" }, "Holding & Global"),
-          h(
-            "nav",
-            { className: "of-nav" },
-            renderNavBtn("holding", "Conselho (Board)", pendingApprovals > 0 ? String(pendingApprovals) : undefined, pendingApprovals > 0 ? "warn" : undefined),
-            renderNavBtn("inbox", PT_BR.nav.inbox, inboxCount > 0 ? String(inboxCount) : undefined, inboxCount > 0 ? "warn" : undefined),
-            renderNavBtn("costs", "Uso & Custos"),
-            renderNavBtn("automations", PT_BR.nav.automations)
-          ),
-
-          h("div", { className: "of-nav-group-label" }, "Empresas · Workspaces"),
-          h(
-            "nav",
-            { className: "of-nav" },
-            workspaces.map((w) => {
-              const isSelectedEmpresa = !isGlobalView && tenant === w.slug;
-              const unread = w.canal ? telemetry.unreadByChannel[w.canal] || 0 : 0;
-              return h(
-                "button",
-                {
-                  key: w.slug,
-                  type: "button",
-                  className: "of-nav-btn",
-                  "data-active": isSelectedEmpresa ? "true" : "false",
-                  onClick: () => {
-                    setTenant(w.slug);
-                    if (GLOBAL_TABS.has(tab)) setTab("overview");
-                  },
-                },
-                h(
-                  "span",
-                  { style: { display: "inline-flex", alignItems: "center", gap: "7px", overflow: "hidden" } },
-                  h("span", { className: "of-project-tile", style: { width: "18px", height: "18px", fontSize: "10px" } }, w.nome.charAt(0).toUpperCase()),
-                  h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, w.nome)
-                ),
-                unread > 0
-                  ? h("span", { className: "of-nav-badge", "data-tone": "warn", title: `${unread} não lida(s) no canal` }, String(unread))
-                  : w.agentesInfo && h("span", { className: "of-nav-badge" }, w.agentesInfo)
-              );
-            })
-          ),
-
-          opts.onOpenClassicCockpit &&
-            h(
-              "button",
-              {
-                type: "button",
-                className: "of-btn",
-                style: { marginTop: "auto", justifyContent: "center" },
-                onClick: opts.onOpenClassicCockpit,
-              },
-              "Control Room clássico"
-            )
+            tab,
+            onSelectTab: setTab,
+            tenant,
+            onSelectTenant: (slug, targetTab) => {
+              setTenant(slug);
+              if (targetTab) setTab(targetTab);
+              else if (GLOBAL_TABS.has(tab)) setTab("overview");
+            },
+            workspaces,
+            expandedProjects,
+            onToggleProject: (slug) =>
+              setExpandedProjects((prev) => ({ ...prev, [slug]: !(prev[slug] ?? slug === tenant) })),
+            status,
+            telemetry,
+            masterAgentName,
+            masterAgentPubkey: masterLive?.pubkey || holding?.ceoHolding?.pubkey || "",
+            masterTurn,
+            pendingApprovals,
+            inboxCount,
+            urgentInbox: pendingApprovals > 0 || status.held.length > 0,
+            waitingItems: [
+              ...status.held,
+              ...[...status.inProgress, ...status.recent].filter(
+                (i) => i.stage === "escalated" || i.stage === "failed" || i.stage === "reverted"
+              ),
+            ],
+            onOpenMasterDm: () =>
+              handleOpenAgentDmInBuzz(
+                masterLive || { name: masterAgentName, pubkey: holding?.ceoHolding?.pubkey || "" }
+              ),
+            onOpenAgentDm: handleOpenAgentDmInBuzz,
+            onOpenChannelInBuzz: handleOpenChannelInBuzz,
+            onSelectItem: setSelectedItem,
+            onOpenTurnInSideChat: handleOpenTurnInSideChat,
+            onRefresh: () => refresh(tenant),
+            onToggleDrain: () =>
+              handleControlUpdate(
+                { drain: !status.drain },
+                status.drain ? "Dreno cancelado." : "Modo Dreno ativado (finaliza os itens em andamento)."
+              ),
+            onToggleKillSwitch: (next) =>
+              handleControlUpdate(
+                { killSwitch: next, pausedReason: next ? "Kill Switch acionado pelo operador" : null },
+                next ? "Kill Switch ativado imediatamente." : "Kill Switch liberado."
+              ),
+            compactDensity,
+            onToggleDensity: () => setCompactDensity((v) => !v),
+            liveCrew,
+          } as FactorySidebarProps,
+          showAllByProject,
+          (slug) => setShowAllByProject((prev) => ({ ...prev, [slug]: !prev[slug] }))
         ),
 
         h(
@@ -884,7 +876,62 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         tenant,
         onClose: () => setSelectedItem(null),
         onOpenInBuzz: handleOpenInBuzz,
-      })
+      }),
+      renderCommandPalette(
+        {
+          h,
+          collapsed: sidebarCollapsed,
+          onToggleCollapse: toggleSidebarCollapsed,
+          paletteOpen,
+          onSetPaletteOpen: (open) => {
+            setPaletteOpen(open);
+            if (!open) setPaletteQuery("");
+          },
+          tab,
+          onSelectTab: setTab,
+          tenant,
+          onSelectTenant: (slug, targetTab) => {
+            setTenant(slug);
+            if (targetTab) setTab(targetTab);
+          },
+          workspaces,
+          expandedProjects,
+          onToggleProject: () => {},
+          status,
+          telemetry,
+          masterAgentName,
+          masterAgentPubkey: masterLive?.pubkey || holding?.ceoHolding?.pubkey || "",
+          masterTurn,
+          pendingApprovals,
+          inboxCount,
+          urgentInbox: pendingApprovals > 0 || status.held.length > 0,
+          waitingItems: [],
+          onOpenMasterDm: () =>
+            handleOpenAgentDmInBuzz(
+              masterLive || { name: masterAgentName, pubkey: holding?.ceoHolding?.pubkey || "" }
+            ),
+          onOpenAgentDm: handleOpenAgentDmInBuzz,
+          onOpenChannelInBuzz: handleOpenChannelInBuzz,
+          onSelectItem: setSelectedItem,
+          onOpenTurnInSideChat: handleOpenTurnInSideChat,
+          onRefresh: () => refresh(tenant),
+          onToggleDrain: () =>
+            handleControlUpdate(
+              { drain: !status.drain },
+              status.drain ? "Dreno cancelado." : "Modo Dreno ativado (finaliza os itens em andamento)."
+            ),
+          onToggleKillSwitch: (next) =>
+            handleControlUpdate(
+              { killSwitch: next, pausedReason: next ? "Kill Switch acionado pelo operador" : null },
+              next ? "Kill Switch ativado imediatamente." : "Kill Switch liberado."
+            ),
+          compactDensity,
+          onToggleDensity: () => setCompactDensity((v) => !v),
+          liveCrew,
+        } as FactorySidebarProps,
+        paletteQuery,
+        setPaletteQuery
+      )
     );
 
     if (useNativeSideTabs) {
