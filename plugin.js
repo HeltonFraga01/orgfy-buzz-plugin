@@ -12652,7 +12652,7 @@ function describeOrgfyRole(papelRaw) {
   return map[p] || { funcao: p ? `Agente · ${p}` : "Agente da Esteira", categoria: "execucao" };
 }
 async function hydrateFactoryStatusFromFiles(ctx, slug) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x2, _y2, _z2, _A, _B;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x2, _y2, _z2, _A, _B, _C, _D;
   const base = buildEmptyFactoryStatus(slug);
   const host = ctx == null ? void 0 : ctx.host;
   const stateRelPath = slug === "orgfy" ? ".esteira/estado/esteira-minima-state.json" : `.esteira/estado/esteira-minima-${slug}-state.json`;
@@ -12699,14 +12699,41 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
   const evalMap = parseEvalTable(evalMd);
   const modelos = [];
   const tenantAgents = [];
-  const agentesObj = (empresaJson == null ? void 0 : empresaJson.agentes) && typeof empresaJson.agentes === "object" ? empresaJson.agentes : {};
+  const isBoardSlug = slug === "board";
+  const agentesObj = isBoardSlug && boardJson ? (() => {
+    var _a2, _b2;
+    const out = {};
+    const ceoNome = String(((_a2 = boardJson == null ? void 0 : boardJson.ceo_holding) == null ? void 0 : _a2.nome) || "OrgFy Iris");
+    out[ceoNome] = {
+      papel: "ceo_holding",
+      pubkey: ((_b2 = boardJson == null ? void 0 : boardJson.ceo_holding) == null ? void 0 : _b2.pubkey) || "",
+      model: "claude-sonnet-5-5",
+      provider: "nexusmind_anthropic",
+      parallelism: 1
+    };
+    const conselhoList = Array.isArray(boardJson == null ? void 0 : boardJson.conselho) ? boardJson.conselho : [];
+    for (const c of conselhoList) {
+      const resp = String((c == null ? void 0 : c.responsavel) || "").trim();
+      if (!resp || out[resp]) continue;
+      const roleKey = String((c == null ? void 0 : c.id) || (c == null ? void 0 : c.cargo) || "conselheiro").toLowerCase();
+      out[resp] = {
+        papel: roleKey,
+        funcaoCustom: `${(c == null ? void 0 : c.cargo) || "Conselheiro"} · ${(c == null ? void 0 : c.area) || "Conselho"}`,
+        pubkey: "",
+        model: (c == null ? void 0 : c.status) === "ativo" ? "claude-sonnet-5-5" : "planejado",
+        provider: "nexusmind_anthropic",
+        parallelism: 1
+      };
+    }
+    return out;
+  })() : (empresaJson == null ? void 0 : empresaJson.agentes) && typeof empresaJson.agentes === "object" ? empresaJson.agentes : {};
   for (const [agName, info] of Object.entries(agentesObj)) {
     const manifestPk = typeof (info == null ? void 0 : info.pubkey) === "string" ? info.pubkey.trim() : "";
     const live = manifestPk && liveByPubkey.get(manifestPk.toLowerCase()) || liveByName.get(agName.toLowerCase()) || null;
     const modelo = String(((_c = live == null ? void 0 : live.config) == null ? void 0 : _c.model) || (info == null ? void 0 : info.model) || "").trim() || null;
     const provider = String(((_d = live == null ? void 0 : live.config) == null ? void 0 : _d.provider) || (info == null ? void 0 : info.provider) || "").trim() || null;
     const ev = modelo ? evalMap.get(modelo.toLowerCase()) || evalMap.get((modelo.split("/").pop() || "").toLowerCase()) : void 0;
-    const roleMeta = describeOrgfyRole(info == null ? void 0 : info.papel);
+    const roleMeta = (info == null ? void 0 : info.funcaoCustom) ? { funcao: String(info.funcaoCustom), categoria: "lideranca" } : describeOrgfyRole(info == null ? void 0 : info.papel);
     const liveKey = String((live == null ? void 0 : live.key) || "");
     const livePk = String((live == null ? void 0 : live.pubkey) || manifestPk || "");
     const isRunning = Boolean(
@@ -12747,20 +12774,20 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
   }
   const tenantManifest = {
     slug,
-    nome: String(((_e = empresaJson == null ? void 0 : empresaJson.hierarquia) == null ? void 0 : _e.workspace_buzz) || (empresaJson == null ? void 0 : empresaJson.empresa) || slug),
-    repoId: String((empresaJson == null ? void 0 : empresaJson.repo_id) || slug),
-    nivel: String(((_f = empresaJson == null ? void 0 : empresaJson.hierarquia) == null ? void 0 : _f.nivel) || "subsidiaria"),
+    nome: isBoardSlug ? "Conselho da Holding" : String(((_e = empresaJson == null ? void 0 : empresaJson.hierarquia) == null ? void 0 : _e.workspace_buzz) || (empresaJson == null ? void 0 : empresaJson.empresa) || slug),
+    repoId: isBoardSlug ? "board" : String((empresaJson == null ? void 0 : empresaJson.repo_id) || slug),
+    nivel: isBoardSlug ? "holding" : String(((_f = empresaJson == null ? void 0 : empresaJson.hierarquia) == null ? void 0 : _f.nivel) || "subsidiaria"),
     canal: typeof (empresaJson == null ? void 0 : empresaJson.canal) === "string" ? empresaJson.canal : null,
-    ceoEmpresa: String(((_g = empresaJson == null ? void 0 : empresaJson.hierarquia) == null ? void 0 : _g.ceo_empresa) || ((_h = empresaJson == null ? void 0 : empresaJson.papeis) == null ? void 0 : _h.ceo_empresa) || "OrgFy Iris"),
-    coo: String(((_i = empresaJson == null ? void 0 : empresaJson.papeis) == null ? void 0 : _i.coo) || "OrgFy Bento"),
+    ceoEmpresa: isBoardSlug ? String(((_g = boardJson == null ? void 0 : boardJson.ceo_holding) == null ? void 0 : _g.nome) || "OrgFy Iris") : String(((_h = empresaJson == null ? void 0 : empresaJson.hierarquia) == null ? void 0 : _h.ceo_empresa) || ((_i = empresaJson == null ? void 0 : empresaJson.papeis) == null ? void 0 : _i.ceo_empresa) || "OrgFy Iris"),
+    coo: isBoardSlug ? String(((_j = boardJson == null ? void 0 : boardJson.ceo_holding) == null ? void 0 : _j.nome) || "OrgFy Iris") : String(((_k = empresaJson == null ? void 0 : empresaJson.papeis) == null ? void 0 : _k.coo) || "OrgFy Bento"),
     modoExecucao: String((empresaJson == null ? void 0 : empresaJson.modo_execucao_workers) || "efemero_headless"),
-    ciModo: String(((_j = empresaJson == null ? void 0 : empresaJson.ci_runner) == null ? void 0 : _j.modo_padrao) || "local"),
-    ciCmd: Array.isArray((_k = empresaJson == null ? void 0 : empresaJson.ci_runner) == null ? void 0 : _k.cmd) ? empresaJson.ci_runner.cmd.join(" ") : "—",
-    probesObrigatorios: Boolean((_l = empresaJson == null ? void 0 : empresaJson.probes_caixa_preta) == null ? void 0 : _l.obrigatorio_no_gate),
-    probesCount: Array.isArray((_m2 = empresaJson == null ? void 0 : empresaJson.probes_caixa_preta) == null ? void 0 : _m2.probes_padrao) ? empresaJson.probes_caixa_preta.probes_padrao.length : 0,
-    budgetTokensDiario: typeof ((_n = empresaJson == null ? void 0 : empresaJson.governanca_orcamento) == null ? void 0 : _n.budget_tokens_diario) === "number" ? empresaJson.governanca_orcamento.budget_tokens_diario : null,
-    tokensPorCard: typeof ((_o = empresaJson == null ? void 0 : empresaJson.governanca_orcamento) == null ? void 0 : _o.tokens_planejados_por_card) === "number" ? empresaJson.governanca_orcamento.tokens_planejados_por_card : null,
-    cpiMinimo: typeof ((_p = empresaJson == null ? void 0 : empresaJson.governanca_orcamento) == null ? void 0 : _p.cpi_minimo) === "number" ? empresaJson.governanca_orcamento.cpi_minimo : null,
+    ciModo: String(((_l = empresaJson == null ? void 0 : empresaJson.ci_runner) == null ? void 0 : _l.modo_padrao) || "local"),
+    ciCmd: Array.isArray((_m2 = empresaJson == null ? void 0 : empresaJson.ci_runner) == null ? void 0 : _m2.cmd) ? empresaJson.ci_runner.cmd.join(" ") : "—",
+    probesObrigatorios: Boolean((_n = empresaJson == null ? void 0 : empresaJson.probes_caixa_preta) == null ? void 0 : _n.obrigatorio_no_gate),
+    probesCount: Array.isArray((_o = empresaJson == null ? void 0 : empresaJson.probes_caixa_preta) == null ? void 0 : _o.probes_padrao) ? empresaJson.probes_caixa_preta.probes_padrao.length : 0,
+    budgetTokensDiario: typeof ((_p = empresaJson == null ? void 0 : empresaJson.governanca_orcamento) == null ? void 0 : _p.budget_tokens_diario) === "number" ? empresaJson.governanca_orcamento.budget_tokens_diario : null,
+    tokensPorCard: typeof ((_q = empresaJson == null ? void 0 : empresaJson.governanca_orcamento) == null ? void 0 : _q.tokens_planejados_por_card) === "number" ? empresaJson.governanca_orcamento.tokens_planejados_por_card : null,
+    cpiMinimo: typeof ((_r = empresaJson == null ? void 0 : empresaJson.governanca_orcamento) == null ? void 0 : _r.cpi_minimo) === "number" ? empresaJson.governanca_orcamento.cpi_minimo : null,
     revisoresPorSuperficie: (empresaJson == null ? void 0 : empresaJson.revisores_por_superficie) && typeof empresaJson.revisores_por_superficie === "object" ? empresaJson.revisores_por_superficie : {},
     agentes: tenantAgents
   };
@@ -12846,7 +12873,7 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
   });
   const backlog = kanbanBacklog.length > 0 ? kanbanBacklog : issueBacklogItems;
   const inProgress = [...kanbanInProgress, ...prWorkItems, ...kanbanInProgress.length === 0 ? issueActiveItems.slice(0, 12) : []];
-  const wipLimit = Number(((_q = controle == null ? void 0 : controle.limits) == null ? void 0 : _q.prsAbertos) ?? 6);
+  const wipLimit = Number(((_s = controle == null ? void 0 : controle.limits) == null ? void 0 : _s.prsAbertos) ?? 6);
   const realOpenPrs = openPrsRaw.length > 0 ? openPrsRaw.length : inProgress.length;
   const wipHolding = realOpenPrs >= wipLimit;
   const wipNote = wipHolding ? `WIP bloqueando novos despachos: ${realOpenPrs} PRs abertos (limite configurado: ${wipLimit})` : null;
@@ -12862,24 +12889,24 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
     loopState: killSwitch ? "stopped" : drainOn ? "draining" : inProgress.length > 0 || runningList.length > 0 ? "building" : "idle",
     pausedReason: (controle == null ? void 0 : controle.pausedReason) || null,
     limits: {
-      maxConcurrentSessions: Number(((_r = controle == null ? void 0 : controle.limits) == null ? void 0 : _r.agentes) ?? 4),
-      maxMergesPerDay: Number(((_s = controle == null ? void 0 : controle.limits) == null ? void 0 : _s.mergesDia) ?? 20),
-      dailyBudget: { usd: Number(((_t = controle == null ? void 0 : controle.limits) == null ? void 0 : _t.gastoDiaUsd) ?? 50) },
-      pauseAfterConsecutiveFailures: Number(((_u = controle == null ? void 0 : controle.limits) == null ? void 0 : _u.falhasSeguidas) ?? 3),
+      maxConcurrentSessions: Number(((_t = controle == null ? void 0 : controle.limits) == null ? void 0 : _t.agentes) ?? 4),
+      maxMergesPerDay: Number(((_u = controle == null ? void 0 : controle.limits) == null ? void 0 : _u.mergesDia) ?? 20),
+      dailyBudget: { usd: Number(((_v = controle == null ? void 0 : controle.limits) == null ? void 0 : _v.gastoDiaUsd) ?? 50) },
+      pauseAfterConsecutiveFailures: Number(((_w = controle == null ? void 0 : controle.limits) == null ? void 0 : _w.falhasSeguidas) ?? 3),
       autoMerge: Boolean((controle == null ? void 0 : controle.autoMerge) ?? false),
       mergePolicy: (controle == null ? void 0 : controle.mergePolicy) === "fast" ? "fast" : "strict"
     },
     spendToday: {
-      tokens: Number(((_v = kpis == null ? void 0 : kpis.economia) == null ? void 0 : _v.tokens_hoje) ?? 0),
-      usd: Number(((_w = kpis == null ? void 0 : kpis.economia) == null ? void 0 : _w.custo_hoje_usd) ?? 0)
+      tokens: Number(((_x2 = kpis == null ? void 0 : kpis.economia) == null ? void 0 : _x2.tokens_hoje) ?? 0),
+      usd: Number(((_y2 = kpis == null ? void 0 : kpis.economia) == null ? void 0 : _y2.custo_hoje_usd) ?? 0)
     },
-    mergesToday: Number(((_x2 = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _x2.vazao_hoje) ?? 0),
+    mergesToday: Number(((_z2 = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _z2.vazao_hoje) ?? 0),
     stats: {
-      mergedToday: Number(((_y2 = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _y2.vazao_hoje) ?? 0),
+      mergedToday: Number(((_A = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _A.vazao_hoje) ?? 0),
       failedToday: 0,
       revertedToday: 0,
       medianMergeMs7d: null,
-      merged7d: Number(((_z2 = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _z2.vazao_7d) ?? recent.length)
+      merged7d: Number(((_B = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _B.vazao_7d) ?? recent.length)
     },
     activeSessions: tenantAgents.filter((a) => a.running).length,
     wip: {
@@ -12914,8 +12941,8 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
     orgfyVision: {
       projectMd: projectMd ? projectMd.slice(0, 2400) : null,
       agentsMd: agentsMd ? agentsMd.slice(0, 2400) : null,
-      invariantes: Array.isArray((_A = boardJson == null ? void 0 : boardJson.protocolo_governanca) == null ? void 0 : _A.invariantes) ? boardJson.protocolo_governanca.invariantes : [],
-      cadeiaComando: Array.isArray((_B = boardJson == null ? void 0 : boardJson.protocolo_governanca) == null ? void 0 : _B.cadeia_comando) ? boardJson.protocolo_governanca.cadeia_comando : [],
+      invariantes: Array.isArray((_C = boardJson == null ? void 0 : boardJson.protocolo_governanca) == null ? void 0 : _C.invariantes) ? boardJson.protocolo_governanca.invariantes : [],
+      cadeiaComando: Array.isArray((_D = boardJson == null ? void 0 : boardJson.protocolo_governanca) == null ? void 0 : _D.cadeia_comando) ? boardJson.protocolo_governanca.cadeia_comando : [],
       fluxoEscalada: (boardJson == null ? void 0 : boardJson.fluxo_escalada) && typeof boardJson.fluxo_escalada === "object" ? boardJson.fluxo_escalada : {},
       regrasProbatorias: Object.entries((regrasJson == null ? void 0 : regrasJson.regras) || {}).map(([id, r]) => ({
         id,
@@ -14989,6 +15016,175 @@ Na fila aguardando agente livre`,
   const ignored = status.ignored.length;
   const held = status.held.length;
   const isDark = status.mode === "dark_factory";
+  if (props.isBoardTenant) {
+    return h(
+      "div",
+      { className: "of-pd-scroll", "data-council-pipeline": "true" },
+      h(
+        "div",
+        { className: "of-pd-canvas" },
+        h(
+          "div",
+          { className: "of-pd-group" },
+          Node({
+            keyId: "board-subsidiary",
+            kind: "agent",
+            badge: "Subsidiária",
+            title: "COO → CEO",
+            help: "O COO/PM só escala ao CEO da empresa com permissão; o CEO só abre pauta no Conselho quando excede a alçada local.",
+            items: [],
+            width: "116px",
+            footer: h("span", { className: "of-muted", style: { fontSize: "10px" } }, "com permissão")
+          }),
+          Arrow(true),
+          Node({
+            keyId: "board-agenda",
+            kind: "human",
+            badge: "Conselho",
+            title: "Pauta & Escopo",
+            help: "Pautas de orçamento, risco, arquitetura, produto ou novas subsidiárias que sobem ao Conselho.",
+            items: [],
+            queued: status.backlog.slice(0, 3),
+            width: "118px",
+            footer: h("span", { className: "of-muted", style: { fontSize: "10px" } }, "alçada Holding")
+          }),
+          Arrow(true),
+          Node({
+            keyId: "board-triage",
+            kind: "llm",
+            badge: "Bestie",
+            title: "Triagem Iris",
+            help: "OrgFy Iris (Bestie) distribui a pauta para o comitê técnico competente do Conselho.",
+            items: status.backlog.filter((i) => i.step === "intake"),
+            width: "118px"
+          })
+        ),
+        Fan("out"),
+        h(
+          "div",
+          { className: "of-pd-lanes" },
+          Lane(
+            "bug",
+            "ESTRATÉGIA & PRODUTO",
+            "Comitês CPO (Produto & Portfólio) e CTO (Arquitetura) avaliam impacto no ecossistema da Holding.",
+            [
+              Node({
+                keyId: "board-cpo",
+                kind: "agent",
+                badge: "CPO",
+                title: "Portfólio",
+                help: "Avalia roadmap, sinergia entre subsidiárias e prioridade de produto.",
+                items: laneBuckets.reproduce
+              }),
+              Arrow(false),
+              Node({
+                keyId: "board-cto",
+                kind: "workspace",
+                badge: "CTO",
+                title: "Arquitetura",
+                help: "Valida fronteiras técnicas, contratos compartilhados e viabilidade.",
+                items: laneBuckets.fix
+              }),
+              Arrow(false),
+              Node({
+                keyId: "board-quorum-prod",
+                kind: "workspace",
+                badge: "CRDT",
+                title: "Quorum",
+                help: "Votação colegiada registrada em ata CRDT do Conselho.",
+                items: laneBuckets.review_bug
+              })
+            ]
+          ),
+          Lane(
+            "feature",
+            "FINANCEIRO & FINOPS",
+            "Comitê CFO (OrgFy Iris) valida orçamento, CPI/EVM, teto diário de tokens e retorno.",
+            [
+              Node({
+                keyId: "board-cfo",
+                kind: "agent",
+                badge: "CFO",
+                title: "Orçamento EVM",
+                help: "Audita budget diário, custo por card e alocação entre empresas.",
+                items: laneBuckets.analyze
+              }),
+              Arrow(false),
+              Node({
+                keyId: "board-coo",
+                kind: "workspace",
+                badge: "COO / CGO",
+                title: "Operação",
+                help: "Confirma capacidade da fábrica e impacto em distribuição/growth.",
+                items: laneBuckets.implement
+              }),
+              Arrow(false),
+              Node({
+                keyId: "board-quorum-fin",
+                kind: "workspace",
+                badge: "CRDT",
+                title: "Quorum",
+                help: "Aprovação orçamentária registrada no CRDT.",
+                items: laneBuckets.review_feature
+              })
+            ]
+          ),
+          Lane(
+            "docs",
+            "RISCO & COMPLIANCE",
+            "Comitê CRO (OrgFy Vera) audita matérias reservadas, segurança, L-01 e alçadas.",
+            [
+              Node({
+                keyId: "board-cro",
+                kind: "workspace",
+                badge: "CRO",
+                title: "Auditoria",
+                help: "Verifica invariantes L-01/L-22, segurança e riscos regulatórios.",
+                items: laneBuckets.implement_docs
+              }),
+              Arrow(false),
+              Node({
+                keyId: "board-alcadas",
+                kind: "checks",
+                badge: "Alçadas",
+                title: "Checagem",
+                help: "Confirma se a decisão cabe no Conselho ou exige aprovação do Acionista.",
+                items: laneBuckets.checks
+              }),
+              Arrow(false),
+              Node({
+                keyId: "board-quorum-risk",
+                kind: "workspace",
+                badge: "CRDT",
+                title: "Quorum",
+                help: "Emissão de parecer final de compliance.",
+                items: laneBuckets.review_docs
+              })
+            ]
+          )
+        ),
+        Fan("in"),
+        h(
+          "div",
+          { className: "of-pd-group" },
+          Node({
+            keyId: "board-dispatch",
+            kind: "human",
+            badge: "Despacho / Bestie",
+            title: "Decisão Final",
+            help: "Dentro da alçada: volta ao CEO/COO da subsidiária. Acima da alçada: somente a Bestie (OrgFy Iris) envia DM/Question Card ao Fundador.",
+            items: mergeItems,
+            width: "134px",
+            footer: h(
+              "span",
+              { className: "of-muted", style: { fontSize: "10px" } },
+              "Subsidiária ou Iris → DM"
+            )
+          })
+        )
+      )
+    );
+  }
   return h(
     "div",
     { className: "of-pd-scroll" },
@@ -15635,19 +15831,18 @@ function renderFactoryOverviewPanel(props) {
           h(
             "div",
             { style: { display: "flex", alignItems: "center", gap: "7px", flexWrap: "wrap", fontSize: "14px", fontWeight: 600 } },
-            h("span", null, `${PT_BR.modes[status.mode] || status.mode} · ${tenant}`),
-            status.experimental && h("span", { className: "of-exp-badge" }, "experimental"),
+            h("span", null, props.isBoardTenant ? "Pipeline de Gestão · Conselho da Holding" : `${PT_BR.modes[status.mode] || status.mode} · ${tenant}`),
+            !props.isBoardTenant && status.experimental && h("span", { className: "of-exp-badge" }, "experimental"),
             h(
               "span",
               { className: "of-pill", "data-tone": status.coordenador === "ativo" ? "done" : "failed" },
-              status.coordenador === "ativo" ? PT_BR.labels.coordinatorActive : PT_BR.labels.coordinatorStopped
+              props.isBoardTenant ? "Governança ativa" : status.coordenador === "ativo" ? PT_BR.labels.coordinatorActive : PT_BR.labels.coordinatorStopped
             )
           ),
           h(
             "div",
             { className: "of-muted", style: { marginTop: "2px" } },
-            status.mode === "dark_factory" ? "O Oráculo e issues confiáveis alimentam as pipelines; " : "Issues NIP-34 confiáveis alimentam as pipelines; ",
-            status.limits.autoMerge ? "a OrgFy faz merge quando todos os checks passam." : "você e o Revisor L-01 aprovam os PRs."
+            props.isBoardTenant ? "Pautas escaladas pelas subsidiárias (COO → CEO) passam pelos comitês técnicos; apenas a Bestie (OrgFy Iris) aciona o Fundador em DM." : (status.mode === "dark_factory" ? "O Oráculo e issues confiáveis alimentam as pipelines; " : "Issues NIP-34 confiáveis alimentam as pipelines; ") + (status.limits.autoMerge ? "a OrgFy faz merge quando todos os checks passam." : "você e o Revisor L-01 aprovam os PRs.")
           )
         ),
         h(
@@ -15721,7 +15916,7 @@ function renderFactoryOverviewPanel(props) {
               status.drain && !stopped ? h("span", { className: "of-pill", "data-tone": "waiting" }, `Drenando: ${status.drain.inFlight} em andamento`) : h("span", { className: "of-pill", "data-tone": loopTone }, `Loop ${loopLabel.toLowerCase()}`)
             )
           ),
-          renderPipelineDiagram({ h, status, activeHelpKey, onToggleHelp, onSelectItem })
+          renderPipelineDiagram({ h, status, isBoardTenant: props.isBoardTenant, activeHelpKey, onToggleHelp, onSelectItem })
         ),
         // 5 Meters com barras de progresso
         h(
@@ -16663,12 +16858,12 @@ function renderFactoryBoardAndFloor(props) {
       h(
         "div",
         { style: { display: "flex", alignItems: "center", gap: "8px" } },
-        h("span", { className: "of-brand-icon" }, "⚙"),
+        h("span", { className: "of-brand-icon" }, props.isBoardTenant ? "◈" : "⚙"),
         h(
           "div",
           null,
-          h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Visão da Fábrica · ${tenant}`),
-          h("div", { className: "of-muted", style: { fontSize: "11px" } }, PT_BR.modes[status.mode] || status.mode)
+          h("div", { style: { fontSize: "14px", fontWeight: 700 } }, props.isBoardTenant ? "Conselho da Holding · Sala de Reunião & Pautas" : `Visão da Fábrica · ${tenant}`),
+          h("div", { className: "of-muted", style: { fontSize: "11px" } }, props.isBoardTenant ? "Governança · 6 Comitês + Bestie (OrgFy Iris)" : PT_BR.modes[status.mode] || status.mode)
         )
       ),
       h(
@@ -16684,7 +16879,7 @@ function renderFactoryBoardAndFloor(props) {
       h(
         "div",
         { style: { marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
-        viewMode === "floor" && h(
+        viewMode === "floor" && !props.isBoardTenant && h(
           "div",
           { className: "of-segmented", role: "radiogroup", "aria-label": "Andares da fábrica" },
           [
@@ -16716,7 +16911,7 @@ function renderFactoryBoardAndFloor(props) {
               "data-active": viewMode === "board" ? "true" : "false",
               onClick: () => onChangeViewMode("board")
             },
-            "Board"
+            props.isBoardTenant ? "Pautas" : "Board"
           ),
           h(
             "button",
@@ -16726,7 +16921,7 @@ function renderFactoryBoardAndFloor(props) {
               "data-active": viewMode === "floor" ? "true" : "false",
               onClick: () => onChangeViewMode("floor")
             },
-            "Andar"
+            props.isBoardTenant ? "Sala 3D" : "Andar"
           )
         ),
         props.onRunScout && h(
@@ -16900,7 +17095,11 @@ function renderFactoryBoardAndFloor(props) {
           );
         })
       )
-    ) : (
+    ) : props.isBoardTenant && props.Boardroom3D ? h(props.Boardroom3D, {
+      seats: props.boardroomSeats || [],
+      title: "Sala de Reunião do Conselho · Conselheiros & Bestie (OrgFy Iris)",
+      fullHeight: true
+    }) : (
       // Modo Andar (Floor): Motor 3D Three.js 1:1 oficial do CodeDen isolado por empresa (key=tenant)
       props.Floor3D ? h(props.Floor3D, {
         key: tenant,
@@ -51414,7 +51613,11 @@ function createBoardroom3DComponent(ctx) {
         className: "of-card",
         "data-boardroom-3d": "true",
         "data-boardroom-codeden-v2": "true",
-        style: { position: "relative", overflow: "hidden" }
+        style: {
+          position: "relative",
+          overflow: "hidden",
+          ...props.fullHeight ? { flex: 1, minHeight: 0, display: "flex", flexDirection: "column" } : {}
+        }
       },
       h(
         "div",
@@ -51488,7 +51691,13 @@ function createBoardroom3DComponent(ctx) {
       ),
       h(
         "div",
-        { style: { position: "relative", width: "100%", height: isFullscreen ? "calc(100vh - 88px)" : "380px" } },
+        {
+          style: {
+            position: "relative",
+            width: "100%",
+            ...props.fullHeight && !isFullscreen ? { flex: 1, minHeight: "360px" } : { height: isFullscreen ? "calc(100vh - 88px)" : "380px" }
+          }
+        },
         h("div", {
           ref: mountRef,
           style: { width: "100%", height: "100%", background: "var(--background)" }
@@ -55690,14 +55899,14 @@ function renderFactorySecondaryPage(props) {
     const approvals = (holding == null ? void 0 : holding.approvals) || [];
     const deliberations = props.councilDeliberations || [];
     const pendingDelibs = deliberations.filter((d) => d.status === "pendente").length;
-    const approvedDelibs = deliberations.filter((d) => d.status === "aprovada").length;
+    deliberations.filter((d) => d.status === "aprovada").length;
     const pendingApprovals = approvals.filter((a) => a.status === "pendente").length;
     const resolveMemberPubkey = (name) => {
       const low = name.toLowerCase();
       const match = liveCrew.find((c) => c.name.toLowerCase() === low);
       return (match == null ? void 0 : match.pubkey) || "";
     };
-    const boardroomSeats = [
+    [
       {
         id: "bestie-iris",
         label: ((_a = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _a.nome) || "OrgFy Iris",
@@ -55869,88 +56078,6 @@ function renderFactorySecondaryPage(props) {
               onClick: () => props.onScaffoldSubsidiary(props.subsidiaryDraft)
             },
             props.scaffoldingSubsidiary ? "Provisionando..." : "Provisionar Subsidiária em 1 clique"
-          )
-        )
-      ),
-      props.Boardroom3D && h(props.Boardroom3D, { seats: boardroomSeats, title: "Sala de Reunião do Conselho · Conselheiros & Bestie" }),
-      // ── PIPELINE PRÓPRIO DO CONSELHO (Deliberação Técnica & Governança) ──
-      h(
-        "section",
-        { className: "of-card-pad", "data-council-pipeline": "true", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-        h(
-          "div",
-          { style: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" } },
-          h(
-            "div",
-            null,
-            h("div", { style: { fontSize: "13px", fontWeight: 700 } }, "Pipeline de Deliberação do Conselho"),
-            h("div", { className: "of-muted", style: { fontSize: "11px" } }, "Fluxo lógico da Holding: separado da esteira de código das subsidiárias. Somente pautas que excedem a alçada do Conselho sobem para a Bestie (OrgFy Iris).")
-          ),
-          h("span", { className: "of-pill", "data-tone": pendingDelibs + pendingApprovals > 0 ? "waiting" : "done" }, `${pendingDelibs + pendingApprovals} em deliberação · ${approvedDelibs} decidida(s)`)
-        ),
-        h(
-          "div",
-          { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(165px, 1fr))", gap: "8px" } },
-          [
-            {
-              step: "1 · PAUTA",
-              tag: "Subsidiária",
-              title: "Escalonamento COO → CEO",
-              desc: "CEO da empresa abre pauta quando excede orçamento, risco ou escopo local.",
-              active: pendingApprovals > 0
-            },
-            {
-              step: "2 · COMITÊS",
-              tag: "Parecer Técnico",
-              title: "CFO · CTO · CRO · CPO",
-              desc: "Conselheiros analisam viabilidade econômica, arquitetura, risco e produto em paralelo.",
-              active: boardAreas.some((a) => a.status === "ativo")
-            },
-            {
-              step: "3 · QUORUM",
-              tag: "Board CRDT",
-              title: "Votação & Resolução",
-              desc: "Deliberação colegiada registrada em ata CRDT com status DECIDIDO ou RECUSADO.",
-              active: pendingDelibs > 0
-            },
-            {
-              step: "4A · DESPACHO",
-              tag: "Dentro da Alçada",
-              title: "Retorna à Subsidiária",
-              desc: "Ordem volta ao CEO/COO da empresa para virar Spec + Card na fábrica.",
-              active: approvedDelibs > 0
-            },
-            {
-              step: "4B · BESTIE",
-              tag: "Acima da Alçada",
-              title: "OrgFy Iris → DM Fundador",
-              desc: "Apenas a Iris (Bestie) aciona Helton Fraga em DM ou Question Card.",
-              active: pendingApprovals > 0
-            }
-          ].map(
-            (node) => h(
-              "div",
-              {
-                key: node.step,
-                className: "of-surface",
-                style: {
-                  padding: "10px 11px",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "5px",
-                  borderColor: node.active ? "var(--primary-border)" : void 0,
-                  background: node.active ? "var(--primary-soft)" : void 0
-                }
-              },
-              h(
-                "div",
-                { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px" } },
-                h("span", { className: "of-mono", style: { fontSize: "9.5px", fontWeight: 700, color: node.active ? "var(--primary-text)" : "var(--muted-foreground)" } }, node.step),
-                h("span", { className: "of-pill", style: { fontSize: "9px", padding: "0 5px" } }, node.tag)
-              ),
-              h("div", { style: { fontSize: "12px", fontWeight: 700 } }, node.title),
-              h("div", { className: "of-muted", style: { fontSize: "10.5px", lineHeight: 1.4 } }, node.desc)
-            )
           )
         )
       ),
@@ -57864,7 +57991,7 @@ function runnerStatusMeta(status) {
 function renderFactorySidebar(props, showAllByProject, onToggleShowAll) {
   const { h, collapsed } = props;
   const runner = runnerStatusMeta(props.status);
-  const globalTabs = /* @__PURE__ */ new Set(["holding", "inbox", "costs", "automations"]);
+  const globalTabs = /* @__PURE__ */ new Set(["inbox", "costs", "automations"]);
   const renderFooter = (compact) => h(
     "div",
     { className: "of-sb-footer", "data-compact": compact ? "true" : "false" },
@@ -57970,10 +58097,10 @@ function renderFactorySidebar(props, showAllByProject, onToggleShowAll) {
           {
             type: "button",
             className: "of-rail-btn",
-            "data-active": props.tab === "holding" ? "true" : "false",
+            "data-active": !globalTabs.has(props.tab) && props.tenant === "board" ? "true" : "false",
             title: props.pendingApprovals > 0 ? `Conselho (Board) · ${props.pendingApprovals} pendente(s)` : "Conselho (Board)",
             "aria-label": "Conselho (Board)",
-            onClick: () => props.onSelectTab("holding")
+            onClick: () => props.onSelectTenant("board", "overview")
           },
           ICONS.board(h, 15),
           props.pendingApprovals > 0 && h("span", { className: "of-rail-badge" }, String(props.pendingApprovals))
@@ -58108,8 +58235,8 @@ function renderFactorySidebar(props, showAllByProject, onToggleShowAll) {
         {
           type: "button",
           className: "of-nav-btn",
-          "data-active": props.tab === "holding" ? "true" : "false",
-          onClick: () => props.onSelectTab("holding")
+          "data-active": !globalTabs.has(props.tab) && props.tenant === "board" ? "true" : "false",
+          onClick: () => props.onSelectTenant("board", "overview")
         },
         h(
           "span",
@@ -58368,7 +58495,7 @@ function renderCommandPalette(props, query, onQueryChange) {
     { id: "act-refresh", group: "Fábrica", label: "Atualizar snapshot da fábrica agora", hint: "Refresh", run: props.onRefresh },
     { id: "act-drain", group: "Controles", label: props.status.drain ? "Cancelar modo Dreno" : "Ativar modo Dreno", hint: "Drain", run: props.onToggleDrain },
     { id: "act-kill", group: "Controles", label: props.status.killSwitch ? "Liberar Kill Switch" : "Acionar Kill Switch imediatamente", hint: "P0", run: () => props.onToggleKillSwitch(!props.status.killSwitch) },
-    { id: "nav-holding", group: "Navegação", label: "Conselho (Board da Holding)", run: () => props.onSelectTab("holding") },
+    { id: "nav-holding", group: "Navegação", label: "Conselho (Board da Holding)", run: () => props.onSelectTenant("board", "overview") },
     { id: "nav-inbox", group: "Navegação", label: "Inbox de alertas e aprovações", run: () => props.onSelectTab("inbox") },
     { id: "nav-costs", group: "Navegação", label: "Uso & Custos", run: () => props.onSelectTab("costs") },
     { id: "nav-board", group: "Navegação", label: "Fábrica · Board", run: () => props.onSelectTab("board") },
@@ -59131,7 +59258,7 @@ async function auditAllHostCommandsIntegrity(ctx, repoRoot = "/Users/heltonfraga
     results
   };
 }
-const GLOBAL_TABS = /* @__PURE__ */ new Set(["holding", "inbox", "costs", "automations"]);
+const GLOBAL_TABS = /* @__PURE__ */ new Set(["inbox", "costs", "automations"]);
 const DEFAULT_WORKSPACES = [
   { slug: "orgfy", nome: "OrgFy Core", estagio: "operacional", canal: "" },
   { slug: "lumen-iptv", nome: "Lumen IPTV", estagio: "operacional", canal: "" },
@@ -60513,9 +60640,10 @@ Nota: ${evidence.note}`
       canal: e.canal || "",
       agentesInfo: `${e.agentesProntos}/${e.agentesTotal}`
     })) : DEFAULT_WORKSPACES.map((w) => ({ ...w, agentesInfo: "" }));
+    const isBoardTenant = tenant === "board";
     const activeWorkspace = workspaces.find((w) => w.slug === tenant) || workspaces[0];
-    const empresaNome = ((_f = status.tenantManifest) == null ? void 0 : _f.nome) || (activeWorkspace == null ? void 0 : activeWorkspace.nome) || tenant;
-    const empresaRepo = ((_g = status.tenantManifest) == null ? void 0 : _g.repoId) || tenant;
+    const empresaNome = isBoardTenant ? "Conselho da Holding" : ((_f = status.tenantManifest) == null ? void 0 : _f.nome) || (activeWorkspace == null ? void 0 : activeWorkspace.nome) || tenant;
+    const empresaRepo = isBoardTenant ? "holding" : ((_g = status.tenantManifest) == null ? void 0 : _g.repoId) || tenant;
     const isGlobalView = GLOBAL_TABS.has(tab);
     const pendingApprovals = ((holding == null ? void 0 : holding.approvals) || []).filter((a) => a.status === "pendente").length;
     const pendingQuestionCardsCount = questionCards.filter((c) => c.status === "pending").length;
@@ -60525,17 +60653,55 @@ Nota: ${evidence.note}`
     const tenantWorkingNowCount = tenantAgents.filter((a) => Boolean(a.pubkey && telemetry.byPubkey[a.pubkey.toLowerCase()])).length;
     const tenantTotalAgentsCount = tenantAgents.length;
     const boardCount = status.backlog.length + status.inProgress.length;
+    const boardroomSeats = React.useMemo(() => {
+      var _a2, _b2, _c2;
+      const boardAreas = (holding == null ? void 0 : holding.conselho) || [];
+      const resolvePk = (name) => {
+        var _a3;
+        return ((_a3 = liveCrew.find((c) => c.name.toLowerCase() === name.toLowerCase())) == null ? void 0 : _a3.pubkey) || "";
+      };
+      return [
+        {
+          id: "bestie-iris",
+          label: ((_a2 = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _a2.nome) || "OrgFy Iris",
+          role: "Bestie · Orquestradora Buzz",
+          status: ((_b2 = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _b2.pubkey) && ((_c2 = telemetry.byPubkey) == null ? void 0 : _c2[holding.ceoHolding.pubkey.toLowerCase()]) ? "working" : "active",
+          onClick: () => {
+            var _a3, _b3;
+            return handleOpenAgentDmInBuzz({ name: ((_a3 = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _a3.nome) || "OrgFy Iris", pubkey: ((_b3 = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _b3.pubkey) || "" });
+          }
+        },
+        ...boardAreas.map((area) => {
+          var _a3;
+          const pk = resolvePk(area.responsavel);
+          const isWorking = Boolean(pk && ((_a3 = telemetry.byPubkey) == null ? void 0 : _a3[pk.toLowerCase()]));
+          return {
+            id: area.id,
+            label: area.area,
+            role: area.responsavel,
+            status: area.status !== "ativo" ? "planned" : isWorking ? "working" : "active",
+            onClick: pk ? () => handleOpenAgentDmInBuzz({ name: area.responsavel, pubkey: pk }) : void 0
+          };
+        })
+      ];
+    }, [holding, liveCrew, telemetry, handleOpenAgentDmInBuzz]);
     const projectTabs = [
-      { id: "overview", label: PT_BR.nav.overview },
-      { id: "board", label: "Fábrica · Board", badge: String(boardCount) },
+      { id: "overview", label: isBoardTenant ? "Visão Geral & Pipeline de Gestão" : PT_BR.nav.overview },
+      { id: "board", label: isBoardTenant ? "Pautas do Conselho" : "Fábrica · Board", badge: String(boardCount) },
       {
         id: "floor",
-        label: "Andar 3D",
-        badge: tenantWorkingNowCount > 0 ? `${tenantWorkingNowCount}/${tenantTotalAgentsCount}` : String(tenantTotalAgentsCount),
+        label: isBoardTenant ? "Sala de Reunião 3D" : "Andar 3D",
+        badge: isBoardTenant ? String(boardroomSeats.length) : tenantWorkingNowCount > 0 ? `${tenantWorkingNowCount}/${tenantTotalAgentsCount}` : String(tenantTotalAgentsCount),
         tone: tenantWorkingNowCount > 0 ? "warn" : void 0
       },
-      { id: "agents", label: "Agentes", badge: abaixoMinimoCount > 0 ? `⚠ ${abaixoMinimoCount}` : String(tenantTotalAgentsCount), tone: abaixoMinimoCount > 0 ? "danger" : void 0 },
-      { id: "vision", label: "Canvas / Visão" },
+      { id: "agents", label: isBoardTenant ? "Conselheiros" : "Agentes", badge: abaixoMinimoCount > 0 ? `⚠ ${abaixoMinimoCount}` : String(tenantTotalAgentsCount), tone: abaixoMinimoCount > 0 ? "danger" : void 0 },
+      { id: "vision", label: isBoardTenant ? "Estatuto & Regras" : "Canvas / Visão" },
+      ...isBoardTenant ? [{
+        id: "holding",
+        label: "Conselho · Portfólio & Governança",
+        badge: pendingApprovals > 0 ? String(pendingApprovals) : String(((holding == null ? void 0 : holding.empresas) || []).length),
+        tone: pendingApprovals > 0 ? "warn" : void 0
+      }] : [],
       { id: "settings", label: PT_BR.nav.settings }
     ];
     const NativeTabs = (_i = (_h = ctx == null ? void 0 : ctx.conversation) == null ? void 0 : _h.ui) == null ? void 0 : _i.Tabs;
@@ -60669,6 +60835,7 @@ Nota: ${evidence.note}`
                   floor: ["M12 2 3 7l9 5 9-5-9-5z", "M3 12l9 5 9-5", "M3 17l9 5 9-5"],
                   agents: ["M12 8V4H8", "M4 8h16v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z", "M9 13h.01", "M15 13h.01"],
                   vision: ["M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z", "M14 2v6h6", "M8 13h8", "M8 17h5"],
+                  holding: ["M3 21h18", "M5 21V7l7-4 7 4v14", "M9 21v-6h6v6", "M9 10h.01", "M15 10h.01"],
                   settings: ["M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z", "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.08a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.08a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"]
                 };
                 const paths = tabIconPaths[pt.id] || tabIconPaths.overview;
@@ -60770,6 +60937,7 @@ Nota: ${evidence.note}`
               tab === "overview" ? renderFactoryOverviewPanel({
                 h,
                 tenant,
+                isBoardTenant,
                 status,
                 liveCrew,
                 telemetry,
@@ -60830,7 +60998,10 @@ Nota: ${evidence.note}`
                 ),
                 onRefresh: () => refresh(tenant, false, false),
                 loading,
-                Floor3D
+                Floor3D,
+                isBoardTenant,
+                Boardroom3D,
+                boardroomSeats
               }) : renderFactorySecondaryPage({
                 h,
                 tab,

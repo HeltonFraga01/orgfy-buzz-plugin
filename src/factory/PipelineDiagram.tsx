@@ -7,6 +7,7 @@ import { PT_BR } from "../i18n/pt-BR";
 export interface PipelineDiagramProps {
   h: any;
   status: FactoryStatusPayload;
+  isBoardTenant?: boolean;
   activeHelpKey: string | null;
   onToggleHelp: (key: string | null) => void;
   onSelectItem: (item: FactoryWorkItem) => void;
@@ -230,6 +231,180 @@ export function renderPipelineDiagram(props: PipelineDiagramProps) {
   const ignored = status.ignored.length;
   const held = status.held.length;
   const isDark = status.mode === "dark_factory";
+
+  if (props.isBoardTenant) {
+    return h(
+      "div",
+      { className: "of-pd-scroll", "data-council-pipeline": "true" },
+      h(
+        "div",
+        { className: "of-pd-canvas" },
+        h(
+          "div",
+          { className: "of-pd-group" },
+          Node({
+            keyId: "board-subsidiary",
+            kind: "agent",
+            badge: "Subsidiária",
+            title: "COO → CEO",
+            help: "O COO/PM só escala ao CEO da empresa com permissão; o CEO só abre pauta no Conselho quando excede a alçada local.",
+            items: [],
+            width: "116px",
+            footer: h("span", { className: "of-muted", style: { fontSize: "10px" } }, "com permissão"),
+          }),
+          Arrow(true),
+          Node({
+            keyId: "board-agenda",
+            kind: "human",
+            badge: "Conselho",
+            title: "Pauta & Escopo",
+            help: "Pautas de orçamento, risco, arquitetura, produto ou novas subsidiárias que sobem ao Conselho.",
+            items: [],
+            queued: status.backlog.slice(0, 3),
+            width: "118px",
+            footer: h("span", { className: "of-muted", style: { fontSize: "10px" } }, "alçada Holding"),
+          }),
+          Arrow(true),
+          Node({
+            keyId: "board-triage",
+            kind: "llm",
+            badge: "Bestie",
+            title: "Triagem Iris",
+            help: "OrgFy Iris (Bestie) distribui a pauta para o comitê técnico competente do Conselho.",
+            items: status.backlog.filter((i) => i.step === "intake"),
+            width: "118px",
+          })
+        ),
+
+        Fan("out"),
+
+        h(
+          "div",
+          { className: "of-pd-lanes" },
+          Lane(
+            "bug",
+            "ESTRATÉGIA & PRODUTO",
+            "Comitês CPO (Produto & Portfólio) e CTO (Arquitetura) avaliam impacto no ecossistema da Holding.",
+            [
+              Node({
+                keyId: "board-cpo",
+                kind: "agent",
+                badge: "CPO",
+                title: "Portfólio",
+                help: "Avalia roadmap, sinergia entre subsidiárias e prioridade de produto.",
+                items: laneBuckets.reproduce,
+              }),
+              Arrow(false),
+              Node({
+                keyId: "board-cto",
+                kind: "workspace",
+                badge: "CTO",
+                title: "Arquitetura",
+                help: "Valida fronteiras técnicas, contratos compartilhados e viabilidade.",
+                items: laneBuckets.fix,
+              }),
+              Arrow(false),
+              Node({
+                keyId: "board-quorum-prod",
+                kind: "workspace",
+                badge: "CRDT",
+                title: "Quorum",
+                help: "Votação colegiada registrada em ata CRDT do Conselho.",
+                items: laneBuckets.review_bug,
+              }),
+            ]
+          ),
+          Lane(
+            "feature",
+            "FINANCEIRO & FINOPS",
+            "Comitê CFO (OrgFy Iris) valida orçamento, CPI/EVM, teto diário de tokens e retorno.",
+            [
+              Node({
+                keyId: "board-cfo",
+                kind: "agent",
+                badge: "CFO",
+                title: "Orçamento EVM",
+                help: "Audita budget diário, custo por card e alocação entre empresas.",
+                items: laneBuckets.analyze,
+              }),
+              Arrow(false),
+              Node({
+                keyId: "board-coo",
+                kind: "workspace",
+                badge: "COO / CGO",
+                title: "Operação",
+                help: "Confirma capacidade da fábrica e impacto em distribuição/growth.",
+                items: laneBuckets.implement,
+              }),
+              Arrow(false),
+              Node({
+                keyId: "board-quorum-fin",
+                kind: "workspace",
+                badge: "CRDT",
+                title: "Quorum",
+                help: "Aprovação orçamentária registrada no CRDT.",
+                items: laneBuckets.review_feature,
+              }),
+            ]
+          ),
+          Lane(
+            "docs",
+            "RISCO & COMPLIANCE",
+            "Comitê CRO (OrgFy Vera) audita matérias reservadas, segurança, L-01 e alçadas.",
+            [
+              Node({
+                keyId: "board-cro",
+                kind: "workspace",
+                badge: "CRO",
+                title: "Auditoria",
+                help: "Verifica invariantes L-01/L-22, segurança e riscos regulatórios.",
+                items: laneBuckets.implement_docs,
+              }),
+              Arrow(false),
+              Node({
+                keyId: "board-alcadas",
+                kind: "checks",
+                badge: "Alçadas",
+                title: "Checagem",
+                help: "Confirma se a decisão cabe no Conselho ou exige aprovação do Acionista.",
+                items: laneBuckets.checks,
+              }),
+              Arrow(false),
+              Node({
+                keyId: "board-quorum-risk",
+                kind: "workspace",
+                badge: "CRDT",
+                title: "Quorum",
+                help: "Emissão de parecer final de compliance.",
+                items: laneBuckets.review_docs,
+              }),
+            ]
+          )
+        ),
+
+        Fan("in"),
+
+        h(
+          "div",
+          { className: "of-pd-group" },
+          Node({
+            keyId: "board-dispatch",
+            kind: "human",
+            badge: "Despacho / Bestie",
+            title: "Decisão Final",
+            help: "Dentro da alçada: volta ao CEO/COO da subsidiária. Acima da alçada: somente a Bestie (OrgFy Iris) envia DM/Question Card ao Fundador.",
+            items: mergeItems,
+            width: "134px",
+            footer: h(
+              "span",
+              { className: "of-muted", style: { fontSize: "10px" } },
+              "Subsidiária ou Iris → DM"
+            ),
+          })
+        )
+      )
+    );
+  }
 
   return h(
     "div",

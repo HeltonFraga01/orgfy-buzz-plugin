@@ -157,7 +157,7 @@ export function renderFactorySidebar(
 ) {
   const { h, collapsed } = props;
   const runner = runnerStatusMeta(props.status);
-  const globalTabs = new Set<FactorySidebarTab>(["holding", "inbox", "costs", "automations"]);
+  const globalTabs = new Set<FactorySidebarTab>(["inbox", "costs", "automations"]);
 
   const renderFooter = (compact: boolean) =>
     h(
@@ -269,10 +269,10 @@ export function renderFactorySidebar(
           {
             type: "button",
             className: "of-rail-btn",
-            "data-active": props.tab === "holding" ? "true" : "false",
+            "data-active": (!globalTabs.has(props.tab) && props.tenant === "board") ? "true" : "false",
             title: props.pendingApprovals > 0 ? `Conselho (Board) · ${props.pendingApprovals} pendente(s)` : "Conselho (Board)",
             "aria-label": "Conselho (Board)",
-            onClick: () => props.onSelectTab("holding"),
+            onClick: () => props.onSelectTenant("board", "overview"),
           },
           ICONS.board(h, 15),
           props.pendingApprovals > 0 && h("span", { className: "of-rail-badge" }, String(props.pendingApprovals))
@@ -411,8 +411,8 @@ export function renderFactorySidebar(
         {
           type: "button",
           className: "of-nav-btn",
-          "data-active": props.tab === "holding" ? "true" : "false",
-          onClick: () => props.onSelectTab("holding"),
+          "data-active": (!globalTabs.has(props.tab) && props.tenant === "board") ? "true" : "false",
+          onClick: () => props.onSelectTenant("board", "overview"),
         },
         h(
           "span",
@@ -711,7 +711,7 @@ export function renderCommandPalette(
     { id: "act-refresh", group: "Fábrica", label: "Atualizar snapshot da fábrica agora", hint: "Refresh", run: props.onRefresh },
     { id: "act-drain", group: "Controles", label: props.status.drain ? "Cancelar modo Dreno" : "Ativar modo Dreno", hint: "Drain", run: props.onToggleDrain },
     { id: "act-kill", group: "Controles", label: props.status.killSwitch ? "Liberar Kill Switch" : "Acionar Kill Switch imediatamente", hint: "P0", run: () => props.onToggleKillSwitch(!props.status.killSwitch) },
-    { id: "nav-holding", group: "Navegação", label: "Conselho (Board da Holding)", run: () => props.onSelectTab("holding") },
+    { id: "nav-holding", group: "Navegação", label: "Conselho (Board da Holding)", run: () => props.onSelectTenant("board", "overview") },
     { id: "nav-inbox", group: "Navegação", label: "Inbox de alertas e aprovações", run: () => props.onSelectTab("inbox") },
     { id: "nav-costs", group: "Navegação", label: "Uso & Custos", run: () => props.onSelectTab("costs") },
     { id: "nav-board", group: "Navegação", label: "Fábrica · Board", run: () => props.onSelectTab("board") },

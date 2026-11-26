@@ -22,6 +22,7 @@ export interface BoardroomSeat {
 export interface Boardroom3DProps {
   seats: BoardroomSeat[];
   title?: string;
+  fullHeight?: boolean;
 }
 
 function rgbToCss([r, g, b]: Rgb, alpha = 1): string {
@@ -1089,7 +1090,11 @@ export function createBoardroom3DComponent(ctx: Context) {
         className: "of-card",
         "data-boardroom-3d": "true",
         "data-boardroom-codeden-v2": "true",
-        style: { position: "relative", overflow: "hidden" },
+        style: {
+          position: "relative",
+          overflow: "hidden",
+          ...(props.fullHeight ? { flex: 1, minHeight: 0, display: "flex", flexDirection: "column" } : {}),
+        },
       },
       h(
         "div",
@@ -1161,7 +1166,15 @@ export function createBoardroom3DComponent(ctx: Context) {
       ),
       h(
         "div",
-        { style: { position: "relative", width: "100%", height: isFullscreen ? "calc(100vh - 88px)" : "380px" } },
+        {
+          style: {
+            position: "relative",
+            width: "100%",
+            ...(props.fullHeight && !isFullscreen
+              ? { flex: 1, minHeight: "360px" }
+              : { height: isFullscreen ? "calc(100vh - 88px)" : "380px" }),
+          },
+        },
         h("div", {
           ref: mountRef,
           style: { width: "100%", height: "100%", background: "var(--background)" },

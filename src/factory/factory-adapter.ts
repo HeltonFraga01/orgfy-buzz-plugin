@@ -412,7 +412,38 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
   const evalMap = parseEvalTable(evalMd);
   const modelos: AgentModelEvalRow[] = [];
   const tenantAgents: TenantAgentSpec[] = [];
-  const agentesObj = empresaJson?.agentes && typeof empresaJson.agentes === "object" ? empresaJson.agentes : {};
+  const isBoardSlug = slug === "board";
+  const agentesObj: Record<string, any> =
+    isBoardSlug && boardJson
+      ? (() => {
+          const out: Record<string, any> = {};
+          const ceoNome = String(boardJson?.ceo_holding?.nome || "OrgFy Iris");
+          out[ceoNome] = {
+            papel: "ceo_holding",
+            pubkey: boardJson?.ceo_holding?.pubkey || "",
+            model: "claude-sonnet-5-5",
+            provider: "nexusmind_anthropic",
+            parallelism: 1,
+          };
+          const conselhoList: any[] = Array.isArray(boardJson?.conselho) ? boardJson.conselho : [];
+          for (const c of conselhoList) {
+            const resp = String(c?.responsavel || "").trim();
+            if (!resp || out[resp]) continue;
+            const roleKey = String(c?.id || c?.cargo || "conselheiro").toLowerCase();
+            out[resp] = {
+              papel: roleKey,
+              funcaoCustom: `${c?.cargo || "Conselheiro"} · ${c?.area || "Conselho"}`,
+              pubkey: "",
+              model: c?.status === "ativo" ? "claude-sonnet-5-5" : "planejado",
+              provider: "nexusmind_anthropic",
+              parallelism: 1,
+            };
+          }
+          return out;
+        })()
+      : empresaJson?.agentes && typeof empresaJson.agentes === "object"
+      ? empresaJson.agentes
+      : {};
   for (const [agName, info] of Object.entries(agentesObj as Record<string, any>)) {
     const manifestPk = typeof info?.pubkey === "string" ? info.pubkey.trim() : "";
     const live =
@@ -422,7 +453,9 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
     const modelo = String(live?.config?.model || info?.model || "").trim() || null;
     const provider = String(live?.config?.provider || info?.provider || "").trim() || null;
     const ev = modelo ? evalMap.get(modelo.toLowerCase()) || evalMap.get((modelo.split("/").pop() || "").toLowerCase()) : undefined;
-    const roleMeta = describeOrgfyRole(info?.papel);
+    const roleMeta = info?.funcaoCustom
+      ? { funcao: String(info.funcaoCustom), categoria: "lideranca" as const }
+      : describeOrgfyRole(info?.papel);
     const liveKey = String(live?.key || "");
     const livePk = String(live?.pubkey || manifestPk || "");
     const isRunning = Boolean(
@@ -477,12 +510,18 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
 
   const tenantManifest: TenantManifestInfo = {
     slug,
-    nome: String(empresaJson?.hierarquia?.workspace_buzz || empresaJson?.empresa || slug),
-    repoId: String(empresaJson?.repo_id || slug),
-    nivel: String(empresaJson?.hierarquia?.nivel || "subsidiaria"),
+    nome: isBoardSlug
+      ? "Conselho da Holding"
+      : String(empresaJson?.hierarquia?.workspace_buzz || empresaJson?.empresa || slug),
+    repoId: isBoardSlug ? "board" : String(empresaJson?.repo_id || slug),
+    nivel: isBoardSlug ? "holding" : String(empresaJson?.hierarquia?.nivel || "subsidiaria"),
     canal: typeof empresaJson?.canal === "string" ? empresaJson.canal : null,
-    ceoEmpresa: String(empresaJson?.hierarquia?.ceo_empresa || empresaJson?.papeis?.ceo_empresa || "OrgFy Iris"),
-    coo: String(empresaJson?.papeis?.coo || "OrgFy Bento"),
+    ceoEmpresa: isBoardSlug
+      ? String(boardJson?.ceo_holding?.nome || "OrgFy Iris")
+      : String(empresaJson?.hierarquia?.ceo_empresa || empresaJson?.papeis?.ceo_empresa || "OrgFy Iris"),
+    coo: isBoardSlug
+      ? String(boardJson?.ceo_holding?.nome || "OrgFy Iris")
+      : String(empresaJson?.papeis?.coo || "OrgFy Bento"),
     modoExecucao: String(empresaJson?.modo_execucao_workers || "efemero_headless"),
     ciModo: String(empresaJson?.ci_runner?.modo_padrao || "local"),
     ciCmd: Array.isArray(empresaJson?.ci_runner?.cmd) ? empresaJson.ci_runner.cmd.join(" ") : "—",

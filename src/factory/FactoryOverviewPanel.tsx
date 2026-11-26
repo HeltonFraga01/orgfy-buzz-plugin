@@ -11,6 +11,7 @@ import { renderCooUpdatesFeedCard, type CooUpdateEntry } from "./FactoryCooUpdat
 export interface FactoryOverviewProps {
   h: any;
   tenant: string;
+  isBoardTenant?: boolean;
   status: FactoryStatusPayload;
   liveCrew?: LiveCrewAgent[];
   telemetry?: BuzzLiveTelemetrySnapshot;
@@ -361,21 +362,23 @@ export function renderFactoryOverviewPanel(props: FactoryOverviewProps) {
           h(
             "div",
             { style: { display: "flex", alignItems: "center", gap: "7px", flexWrap: "wrap", fontSize: "14px", fontWeight: 600 } },
-            h("span", null, `${PT_BR.modes[status.mode] || status.mode} · ${tenant}`),
-            status.experimental && h("span", { className: "of-exp-badge" }, "experimental"),
+            h("span", null, props.isBoardTenant ? "Pipeline de Gestão · Conselho da Holding" : `${PT_BR.modes[status.mode] || status.mode} · ${tenant}`),
+            !props.isBoardTenant && status.experimental && h("span", { className: "of-exp-badge" }, "experimental"),
             h(
               "span",
               { className: "of-pill", "data-tone": status.coordenador === "ativo" ? "done" : "failed" },
-              status.coordenador === "ativo" ? PT_BR.labels.coordinatorActive : PT_BR.labels.coordinatorStopped
+              props.isBoardTenant ? "Governança ativa" : (status.coordenador === "ativo" ? PT_BR.labels.coordinatorActive : PT_BR.labels.coordinatorStopped)
             )
           ),
           h(
             "div",
             { className: "of-muted", style: { marginTop: "2px" } },
-            status.mode === "dark_factory"
-              ? "O Oráculo e issues confiáveis alimentam as pipelines; "
-              : "Issues NIP-34 confiáveis alimentam as pipelines; ",
-            status.limits.autoMerge ? "a OrgFy faz merge quando todos os checks passam." : "você e o Revisor L-01 aprovam os PRs."
+            props.isBoardTenant
+              ? "Pautas escaladas pelas subsidiárias (COO → CEO) passam pelos comitês técnicos; apenas a Bestie (OrgFy Iris) aciona o Fundador em DM."
+              : (status.mode === "dark_factory"
+                  ? "O Oráculo e issues confiáveis alimentam as pipelines; "
+                  : "Issues NIP-34 confiáveis alimentam as pipelines; ") +
+                (status.limits.autoMerge ? "a OrgFy faz merge quando todos os checks passam." : "você e o Revisor L-01 aprovam os PRs.")
           )
         ),
         h(
@@ -460,7 +463,7 @@ export function renderFactoryOverviewPanel(props: FactoryOverviewProps) {
                 : h("span", { className: "of-pill", "data-tone": loopTone }, `Loop ${loopLabel.toLowerCase()}`)
             )
           ),
-          renderPipelineDiagram({ h, status, activeHelpKey, onToggleHelp, onSelectItem })
+          renderPipelineDiagram({ h, status, isBoardTenant: props.isBoardTenant, activeHelpKey, onToggleHelp, onSelectItem })
         ),
 
         // 5 Meters com barras de progresso

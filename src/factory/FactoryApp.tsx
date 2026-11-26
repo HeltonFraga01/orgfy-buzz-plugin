@@ -79,7 +79,7 @@ type FactoryTab =
   | "vision"
   | "settings";
 
-const GLOBAL_TABS = new Set<FactoryTab>(["holding", "inbox", "costs", "automations"]);
+const GLOBAL_TABS = new Set<FactoryTab>(["inbox", "costs", "automations"]);
 
 const DEFAULT_WORKSPACES = [
   { slug: "orgfy", nome: "OrgFy Core", estagio: "operacional", canal: "" },
@@ -1559,9 +1559,10 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
           }))
         : DEFAULT_WORKSPACES.map((w) => ({ ...w, agentesInfo: "" }));
 
+    const isBoardTenant = tenant === "board";
     const activeWorkspace = workspaces.find((w) => w.slug === tenant) || workspaces[0];
-    const empresaNome = status.tenantManifest?.nome || activeWorkspace?.nome || tenant;
-    const empresaRepo = status.tenantManifest?.repoId || tenant;
+    const empresaNome = isBoardTenant ? "Conselho da Holding" : (status.tenantManifest?.nome || activeWorkspace?.nome || tenant);
+    const empresaRepo = isBoardTenant ? "holding" : (status.tenantManifest?.repoId || tenant);
     const isGlobalView = GLOBAL_TABS.has(tab);
 
     const pendingApprovals = (holding?.approvals || []).filter((a) => a.status === "pendente").length;
@@ -1575,6 +1576,32 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     const tenantWorkingNowCount = tenantAgents.filter((a) => Boolean(a.pubkey && telemetry.byPubkey[a.pubkey.toLowerCase()])).length;
     const tenantTotalAgentsCount = tenantAgents.length;
     const boardCount = status.backlog.length + status.inProgress.length;
+
+    // Assentos da Sala de Reunião 3D do Conselho (OrgFy Iris Bestie + 6 Comitês funcionais de board.json)
+    const boardroomSeats = React.useMemo(() => {
+      const boardAreas = holding?.conselho || [];
+      const resolvePk = (name: string) => liveCrew.find((c) => c.name.toLowerCase() === name.toLowerCase())?.pubkey || "";
+      return [
+        {
+          id: "bestie-iris",
+          label: holding?.ceoHolding?.nome || "OrgFy Iris",
+          role: "Bestie · Orquestradora Buzz",
+          status: (holding?.ceoHolding?.pubkey && telemetry.byPubkey?.[holding.ceoHolding.pubkey.toLowerCase()] ? "working" : "active") as "active" | "working" | "planned",
+          onClick: () => handleOpenAgentDmInBuzz({ name: holding?.ceoHolding?.nome || "OrgFy Iris", pubkey: holding?.ceoHolding?.pubkey || "" }),
+        },
+        ...boardAreas.map((area) => {
+          const pk = resolvePk(area.responsavel);
+          const isWorking = Boolean(pk && telemetry.byPubkey?.[pk.toLowerCase()]);
+          return {
+            id: area.id,
+            label: area.area,
+            role: area.responsavel,
+            status: (area.status !== "ativo" ? "planned" : isWorking ? "working" : "active") as "active" | "working" | "planned",
+            onClick: pk ? () => handleOpenAgentDmInBuzz({ name: area.responsavel, pubkey: pk }) : undefined,
+          };
+        }),
+      ];
+    }, [holding, liveCrew, telemetry, handleOpenAgentDmInBuzz]);
 
     const renderNavBtn = (id: FactoryTab, label: string, badge?: string, tone?: "warn" | "danger") =>
       h(
@@ -1591,16 +1618,28 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       );
 
     const projectTabs: Array<{ id: FactoryTab; label: string; badge?: string; tone?: "warn" | "danger" }> = [
-      { id: "overview", label: PT_BR.nav.overview },
-      { id: "board", label: "Fábrica · Board", badge: String(boardCount) },
+      { id: "overview", label: isBoardTenant ? "Visão Geral & Pipeline de Gestão" : PT_BR.nav.overview },
+      { id: "board", label: isBoardTenant ? "Pautas do Conselho" : "Fábrica · Board", badge: String(boardCount) },
       {
         id: "floor",
-        label: "Andar 3D",
-        badge: tenantWorkingNowCount > 0 ? `${tenantWorkingNowCount}/${tenantTotalAgentsCount}` : String(tenantTotalAgentsCount),
+        label: isBoardTenant ? "Sala de Reunião 3D" : "Andar 3D",
+        badge: isBoardTenant
+          ? String(boardroomSeats.length)
+          : tenantWorkingNowCount > 0
+          ? `${tenantWorkingNowCount}/${tenantTotalAgentsCount}`
+          : String(tenantTotalAgentsCount),
         tone: tenantWorkingNowCount > 0 ? "warn" : undefined,
       },
-      { id: "agents", label: "Agentes", badge: abaixoMinimoCount > 0 ? `⚠ ${abaixoMinimoCount}` : String(tenantTotalAgentsCount), tone: abaixoMinimoCount > 0 ? "danger" : undefined },
-      { id: "vision", label: "Canvas / Visão" },
+      { id: "agents", label: isBoardTenant ? "Conselheiros" : "Agentes", badge: abaixoMinimoCount > 0 ? `⚠ ${abaixoMinimoCount}` : String(tenantTotalAgentsCount), tone: abaixoMinimoCount > 0 ? "danger" : undefined },
+      { id: "vision", label: isBoardTenant ? "Estatuto & Regras" : "Canvas / Visão" },
+      ...(isBoardTenant
+        ? [{
+            id: "holding" as FactoryTab,
+            label: "Conselho · Portfólio & Governança",
+            badge: pendingApprovals > 0 ? String(pendingApprovals) : String((holding?.empresas || []).length),
+            tone: pendingApprovals > 0 ? ("warn" as const) : undefined,
+          }]
+        : []),
       { id: "settings", label: PT_BR.nav.settings },
     ];
 
@@ -1747,6 +1786,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                     floor: ["M12 2 3 7l9 5 9-5-9-5z", "M3 12l9 5 9-5", "M3 17l9 5 9-5"],
                     agents: ["M12 8V4H8", "M4 8h16v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z", "M9 13h.01", "M15 13h.01"],
                     vision: ["M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z", "M14 2v6h6", "M8 13h8", "M8 17h5"],
+                    holding: ["M3 21h18", "M5 21V7l7-4 7 4v14", "M9 21v-6h6v6", "M9 10h.01", "M15 10h.01"],
                     settings: ["M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z", "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.08a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.08a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"],
                   };
                   const paths = tabIconPaths[pt.id] || tabIconPaths.overview;
@@ -1853,6 +1893,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                 ? renderFactoryOverviewPanel({
                     h,
                     tenant,
+                    isBoardTenant,
                     status,
                     liveCrew,
                     telemetry,
@@ -1919,6 +1960,9 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                     onRefresh: () => refresh(tenant, false, false),
                     loading,
                     Floor3D,
+                    isBoardTenant,
+                    Boardroom3D,
+                    boardroomSeats,
                   })
                 : renderFactorySecondaryPage({
                     h,

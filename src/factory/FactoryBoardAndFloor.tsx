@@ -42,6 +42,9 @@ export interface BoardAndFloorProps {
   onRefresh: () => void;
   loading: boolean;
   Floor3D?: any;
+  isBoardTenant?: boolean;
+  Boardroom3D?: any;
+  boardroomSeats?: Array<{ id: string; label: string; role: string; status: "active" | "working" | "planned"; onClick?: () => void }>;
 }
 
 const BOARD_STAGES: Array<{ id: string; label: string; hint: string }> = [
@@ -173,12 +176,12 @@ export function renderFactoryBoardAndFloor(props: BoardAndFloorProps) {
       h(
         "div",
         { style: { display: "flex", alignItems: "center", gap: "8px" } },
-        h("span", { className: "of-brand-icon" }, "⚙"),
+        h("span", { className: "of-brand-icon" }, props.isBoardTenant ? "◈" : "⚙"),
         h(
           "div",
           null,
-          h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Visão da Fábrica · ${tenant}`),
-          h("div", { className: "of-muted", style: { fontSize: "11px" } }, PT_BR.modes[status.mode] || status.mode)
+          h("div", { style: { fontSize: "14px", fontWeight: 700 } }, props.isBoardTenant ? "Conselho da Holding · Sala de Reunião & Pautas" : `Visão da Fábrica · ${tenant}`),
+          h("div", { className: "of-muted", style: { fontSize: "11px" } }, props.isBoardTenant ? "Governança · 6 Comitês + Bestie (OrgFy Iris)" : (PT_BR.modes[status.mode] || status.mode))
         )
       ),
       h(
@@ -194,7 +197,7 @@ export function renderFactoryBoardAndFloor(props: BoardAndFloorProps) {
       h(
         "div",
         { style: { marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
-        viewMode === "floor" &&
+        viewMode === "floor" && !props.isBoardTenant &&
           h(
             "div",
             { className: "of-segmented", role: "radiogroup", "aria-label": "Andares da fábrica" },
@@ -227,7 +230,7 @@ export function renderFactoryBoardAndFloor(props: BoardAndFloorProps) {
               "data-active": viewMode === "board" ? "true" : "false",
               onClick: () => onChangeViewMode("board"),
             },
-            "Board"
+            props.isBoardTenant ? "Pautas" : "Board"
           ),
           h(
             "button",
@@ -237,7 +240,7 @@ export function renderFactoryBoardAndFloor(props: BoardAndFloorProps) {
               "data-active": viewMode === "floor" ? "true" : "false",
               onClick: () => onChangeViewMode("floor"),
             },
-            "Andar"
+            props.isBoardTenant ? "Sala 3D" : "Andar"
           )
         ),
         props.onRunScout &&
@@ -424,7 +427,13 @@ export function renderFactoryBoardAndFloor(props: BoardAndFloorProps) {
             })
           )
         )
-      : // Modo Andar (Floor): Motor 3D Three.js 1:1 oficial do CodeDen isolado por empresa (key=tenant)
+      : props.isBoardTenant && props.Boardroom3D
+        ? h(props.Boardroom3D, {
+            seats: props.boardroomSeats || [],
+            title: "Sala de Reunião do Conselho · Conselheiros & Bestie (OrgFy Iris)",
+            fullHeight: true,
+          })
+        : // Modo Andar (Floor): Motor 3D Three.js 1:1 oficial do CodeDen isolado por empresa (key=tenant)
         props.Floor3D
         ? h(props.Floor3D, {
             key: tenant,
