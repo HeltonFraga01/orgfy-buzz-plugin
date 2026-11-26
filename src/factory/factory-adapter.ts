@@ -123,6 +123,17 @@ export interface FactoryStatusPayload {
   coordenador: "ativo" | "parado";
   launchAgent?: string;
   quarentenaCount?: number;
+  holdoutStatus?: {
+    status: "pass" | "fail" | "skipped";
+    tenant?: string;
+    external_verified?: boolean;
+    suite_sha256?: string;
+    passed?: number;
+    failed?: number;
+    total?: number;
+    executed_at?: string;
+    results?: Array<{ id: string; status: string; duration_ms?: number; detail?: string }>;
+  } | null;
   kpis?: {
     disponivel: boolean;
     gerado_em?: string | null;

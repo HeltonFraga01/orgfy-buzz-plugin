@@ -253,6 +253,10 @@ export const inject = [
 
 import { TENANTS, SVG, THEME } from "./ui/theme-icons";
 export { TENANTS, SVG, THEME };
+export { buildAutomationFromSession } from "./factory/AutomationEditor";
+export { collectBuzzNativeUsage } from "./services/buzz-usage-live";
+export { BUZZ_FOCUS_STORAGE_KEY, readBuzzFocusState, notifyRespectingFocus, getDeferredFocusNotices, clearDeferredFocusNotices } from "./services/buzz-focus";
+export { PINNED_HOST_COMMANDS, verifyHostCommandIntegrity, auditAllHostCommandsIntegrity } from "./services/command-integrity";
 
 // Zero-Mock v13: zero cards/regras/agentes hardcoded — dados 100% vivos do Buzz e REPOS/orgfy
 export const INITIAL_PIPELINE_CARDS: PipelineCard[] = [];

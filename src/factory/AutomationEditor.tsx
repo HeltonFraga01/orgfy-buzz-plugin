@@ -334,6 +334,61 @@ export function buildDefaultAutomations(tenant: string, companyName: string): Or
   ];
 }
 
+/**
+ * Automation-from-Session (Onda 2 · 5/5): converte qualquer sessão/turno de agente
+ * em uma Automação recorrente pronta para salvar e exportar como Workflow Kind 30620.
+ */
+export function buildAutomationFromSession(input: {
+  tenant: string;
+  companyName?: string;
+  agentName: string;
+  sessionTitle?: string;
+  stepLabel?: string;
+  promptHint?: string;
+}): Partial<OrgfyAutomation> {
+  const safeAgent = String(input.agentName || "OrgFy Bento").trim();
+  const baseTitle = String(input.sessionTitle || input.stepLabel || `Rotina ${safeAgent}`).trim();
+  const slug = baseTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 28) || "sessao";
+  const promptBody = input.promptHint?.trim()
+    ? input.promptHint.trim()
+    : [
+        `Repita a rotina validada na sessão **${baseTitle}** de {{project.name}} ({{date}}).`,
+        ``,
+        `## 1. Contexto`,
+        `- Empresa: {{tenant}} ({{repo}})`,
+        `- Agente responsável: ${safeAgent}`,
+        input.stepLabel ? `- Última etapa observada: ${input.stepLabel}` : "",
+        ``,
+        `## 2. Critério de entrega`,
+        `- Execute em worktree isolada seguindo L-01 e L-22; se tudo ficar verde, abra PR enxuto ou reporte status objetivo no canal {{channel}}.`,
+      ]
+        .filter(Boolean)
+        .join("\n");
+
+  return {
+    id: `from-session-${slug}-${Date.now().toString(36).slice(-4)}`,
+    name: `Rotina: ${baseTitle}`,
+    description: `Criada em 1 clique a partir de uma sessão de ${safeAgent} em ${input.companyName || input.tenant}.`,
+    scope: "project",
+    enabled: true,
+    source: "pm",
+    workKey: `automation:session:${slug}`,
+    sessionTitle: baseTitle,
+    triggerKind: "schedule",
+    frequency: "weekdays",
+    dayOfWeek: 1,
+    timeHHMM: "09:00",
+    timezone: "America/Sao_Paulo",
+    eventKind: "session_finished",
+    actionKind: "agent_session",
+    targetAgent: safeAgent,
+    autonomy: "supervised",
+    guards: { ...DEFAULT_GUARDS },
+    prompt: promptBody,
+    recentRuns: [],
+  };
+}
+
 export function describeAutomationTrigger(auto: OrgfyAutomation): string {
   if (auto.triggerKind === "manual") return "Apenas manual";
   if (auto.triggerKind === "event") return EVENT_LABELS_PT[auto.eventKind] || `Evento: ${auto.eventKind}`;

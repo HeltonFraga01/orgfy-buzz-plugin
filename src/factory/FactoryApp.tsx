@@ -52,14 +52,19 @@ import { openIssueInBuzz, openSystemUri } from "../services/orgfy-bridge";
 import { fetchHoldingControlPlane, type HoldingControlPlaneSnapshot } from "../services/holding-service";
 import { executeCardProgress } from "../services/card-progress";
 import { renderCommandPalette, renderFactorySidebar, type FactorySidebarProps } from "./FactorySidebar";
-import { buildDefaultAutomations, DEFAULT_GUARDS, exportAutomationToBuzzWorkflowYaml, exportAutomationToMarkdown, ORGFY_AUTOMATION_TEMPLATES, type OrgfyAutomation } from "./AutomationEditor";
+import { buildAutomationFromSession, buildDefaultAutomations, DEFAULT_GUARDS, exportAutomationToBuzzWorkflowYaml, exportAutomationToMarkdown, ORGFY_AUTOMATION_TEMPLATES, type OrgfyAutomation } from "./AutomationEditor";
 import { createQuestionCardsPanel } from "./QuestionCardsPanel";
 import {
   getOrgfyCrdtStore,
+  type OrgfyCouncilDeliberation,
+  type OrgfyDistributedLock,
   type OrgfyQuestionCard,
   type QuestionCardAnswer,
 } from "../services/orgfy-crdt-store";
 import { sendBuzzChatMessageOrWake, type BuzzDispatchResult } from "../services/buzz-chat-dispatch";
+import { collectBuzzNativeUsage, type BuzzNativeUsageSnapshot } from "../services/buzz-usage-live";
+import { notifyRespectingFocus, readBuzzFocusState, subscribeBuzzFocus, type BuzzFocusState } from "../services/buzz-focus";
+import { auditAllHostCommandsIntegrity, type CommandIntegrityAuditSummary } from "../services/command-integrity";
 
 type FactoryTab =
   | "holding"
@@ -147,6 +152,12 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     const [cooUpdatesExpanded, setCooUpdatesExpanded] = React.useState<boolean>(false);
     const [sendingCooUpdates, setSendingCooUpdates] = React.useState<boolean>(false);
     const [questionCards, setQuestionCards] = React.useState<OrgfyQuestionCard[]>([]);
+    const [councilDeliberations, setCouncilDeliberations] = React.useState<OrgfyCouncilDeliberation[]>([]);
+    const [distributedLocks, setDistributedLocks] = React.useState<OrgfyDistributedLock[]>([]);
+    const [nativeUsage, setNativeUsage] = React.useState<BuzzNativeUsageSnapshot | null>(null);
+    const [focusState, setFocusState] = React.useState<BuzzFocusState>(() => readBuzzFocusState());
+    const [commandIntegrity, setCommandIntegrity] = React.useState<CommandIntegrityAuditSummary | null>(null);
+    const [runningHoldout, setRunningHoldout] = React.useState<boolean>(false);
     const [compactDensity, setCompactDensity] = React.useState<boolean>(false);
     const [expandedProjects, setExpandedProjects] = React.useState<Record<string, boolean>>({ orgfy: true });
     const [showAllByProject, setShowAllByProject] = React.useState<Record<string, boolean>>({});
@@ -1164,11 +1175,17 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       [tenant, status.tenantManifest, tenantAgents, liveCrew, wakeAgentInBuzz, notify]
     );
 
-    // Carrega e assina Question Cards via OrgfyCrdtStore (ctx.artifactStorage.open + fallback)
+    // Carrega e assina Question Cards, Deliberações do Conselho e Locks via OrgfyCrdtStore (ctx.artifactStorage.open + fallback)
     const refreshQuestionCards = React.useCallback(async () => {
       try {
-        const list = await crdtStore.listQuestionCards();
-        setQuestionCards(list);
+        const [qList, cList, lList] = await Promise.all([
+          crdtStore.listQuestionCards(),
+          crdtStore.listCouncilDeliberations(),
+          crdtStore.listDistributedLocks(),
+        ]);
+        setQuestionCards(qList);
+        setCouncilDeliberations(cList);
+        setDistributedLocks(lList);
       } catch {}
     }, []);
 
@@ -1178,6 +1195,95 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         void refreshQuestionCards();
       });
     }, [refreshQuestionCards]);
+
+    // Assina modo Focus nativo do Buzz (buzz-focus.v1)
+    React.useEffect(() => subscribeBuzzFocus(setFocusState), []);
+
+    const refreshNativeUsage = React.useCallback(async () => {
+      const days = costRange === "90d" ? 90 : costRange === "30d" ? 30 : 7;
+      const snap = await collectBuzzNativeUsage(ctx, days).catch(() => null);
+      if (snap) setNativeUsage(snap);
+    }, [costRange]);
+
+    React.useEffect(() => {
+      if (tab === "costs") void refreshNativeUsage();
+    }, [tab, refreshNativeUsage]);
+
+    const handleAuditCommandIntegrity = React.useCallback(async () => {
+      const summary = await auditAllHostCommandsIntegrity(ctx);
+      setCommandIntegrity(summary);
+      notify(`Auditoria SHA-256: ${summary.verified}/${summary.total} scripts íntegros.`);
+    }, [notify]);
+
+    React.useEffect(() => {
+      if (tab === "settings" && !commandIntegrity) {
+        void auditAllHostCommandsIntegrity(ctx).then(setCommandIntegrity).catch(() => {});
+      }
+    }, [tab, commandIntegrity]);
+
+    const handleRunHoldoutNow = React.useCallback(async () => {
+      const host = (ctx as any)?.host;
+      if (typeof host?.runCommand !== "function") {
+        notify("ctx.host.runCommand indisponível para rodar Holdout.");
+        return;
+      }
+      setRunningHoldout(true);
+      try {
+        await host.runCommand("orgfy-holdout", "");
+        notifyRespectingFocus(ctx, { title: "OrgFy Holdout Sensor", body: "Suíte Holdout concluída fora do repositório." }, { priority: "normal" });
+        notify("Sensor Holdout executado com sucesso.");
+        await refresh(tenant, false, true);
+      } catch (err: any) {
+        notify(`Falha ao rodar Holdout: ${err?.message || err}`);
+      } finally {
+        setRunningHoldout(false);
+      }
+    }, [tenant, notify, refresh]);
+
+    const handleCreateCouncilDeliberation = React.useCallback(
+      async (title: string, summary: string) => {
+        await crdtStore.createCouncilDeliberation({ tenant, title, summary, proposedBy: "Fundador" });
+        await refreshQuestionCards();
+        notify(`Deliberação "${title}" sincronizada no CRDT.`);
+      },
+      [tenant, refreshQuestionCards, notify]
+    );
+
+    const handleVoteCouncilDeliberation = React.useCallback(
+      async (id: string, decision: "aprovada" | "recusada") => {
+        await crdtStore.voteCouncilDeliberation(id, decision, "Fundador");
+        await refreshQuestionCards();
+        notify(`Deliberação marcada como ${decision} (CRDT Sync).`);
+      },
+      [refreshQuestionCards, notify]
+    );
+
+    const handleReleaseDistributedLock = React.useCallback(
+      async (id: string) => {
+        await crdtStore.releaseDistributedLock(id);
+        await refreshQuestionCards();
+        notify("Lock distribuído liberado no CRDT.");
+      },
+      [refreshQuestionCards, notify]
+    );
+
+    const handleAutomateFromSession = React.useCallback(
+      (input: { agentName: string; stepLabel?: string; sessionTitle?: string }) => {
+        const draft = buildAutomationFromSession({
+          tenant,
+          companyName: status.tenantManifest?.nome || tenant,
+          agentName: input.agentName,
+          stepLabel: input.stepLabel,
+          sessionTitle: input.sessionTitle,
+        });
+        handleCreateAutomation(draft);
+        setTab("automations");
+        setAutoTab("automations");
+        setAutomationView("detail");
+        notify(`Automação criada em 1 clique a partir da sessão de ${input.agentName}.`);
+      },
+      [tenant, status.tenantManifest?.nome, handleCreateAutomation, notify]
+    );
 
     const handleAnswerQuestionCard = React.useCallback(
       async (card: OrgfyQuestionCard, answer: QuestionCardAnswer) => {
@@ -1461,6 +1567,12 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                       "span",
                       { className: "of-pill", "data-tone": "running", title: "Turnos ativos em tempo real via session.agentActivity" },
                       `⚡ ${telemetry.activeTurns.length} respondendo`
+                    ),
+                  focusState.active &&
+                    h(
+                      "span",
+                      { className: "of-pill", "data-tone": "waiting", title: "Modo Focus ativo no Buzz (notificações não críticas silenciadas)" },
+                      `🔭 Focus até ${focusState.untilFormatted}`
                     )
                 ),
             !isGlobalView &&
@@ -1741,6 +1853,19 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                     crdtBackendInfo: crdtStore.getBackendInfo(),
                     onAnswerQuestionCard: handleAnswerQuestionCard,
                     onDismissQuestionCard: handleDismissQuestionCard,
+                    nativeUsage,
+                    onRefreshNativeUsage: () => void refreshNativeUsage(),
+                    focusState,
+                    commandIntegrity,
+                    onAuditCommandIntegrity: () => void handleAuditCommandIntegrity(),
+                    onRunHoldoutNow: () => void handleRunHoldoutNow(),
+                    runningHoldout,
+                    councilDeliberations,
+                    distributedLocks,
+                    onCreateCouncilDeliberation: handleCreateCouncilDeliberation,
+                    onVoteCouncilDeliberation: handleVoteCouncilDeliberation,
+                    onReleaseDistributedLock: handleReleaseDistributedLock,
+                    onAutomateFromSession: handleAutomateFromSession,
                   })
             )
           )

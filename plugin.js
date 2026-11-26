@@ -5128,6 +5128,84 @@ class OrgfyCrdtStore {
     const list = await this.listByKind("visual_evidence", tenant);
     return itemId ? list.filter((v2) => v2.itemId === itemId) : list;
   }
+  // ── Deliberações do Conselho (CRDT Sync · Onda 3 v17.7) ──
+  async createCouncilDeliberation(input) {
+    const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+    const rec = {
+      id: `cdel-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+      kind: "council_decision",
+      tenant: String(input.tenant || "orgfy").trim() || "orgfy",
+      title: String(input.title || "Deliberação do Conselho").trim(),
+      summary: String(input.summary || "").trim(),
+      proposedBy: String(input.proposedBy || "Fundador").trim(),
+      status: "pendente",
+      createdAt: nowIso,
+      updatedAt: nowIso
+    };
+    await this.putRecord(rec);
+    return rec;
+  }
+  async voteCouncilDeliberation(id, decision, decidedBy = "Fundador", note) {
+    const existing = await this.getRecord(id);
+    if (!existing || existing.kind !== "council_decision" || !("title" in existing)) return null;
+    const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+    const updated = {
+      ...existing,
+      status: decision,
+      decidedBy,
+      decisionNote: note ? String(note).trim() : void 0,
+      decidedAt: nowIso,
+      updatedAt: nowIso
+    };
+    await this.putRecord(updated);
+    return updated;
+  }
+  async listCouncilDeliberations(tenant) {
+    const raw = await this.listByKind("council_decision", tenant);
+    return raw.filter((r) => r && typeof r.title === "string");
+  }
+  // ── Locks Distribuídos (CRDT Sync · Onda 3 v17.7) ──
+  async acquireDistributedLock(input) {
+    const now = /* @__PURE__ */ new Date();
+    const nowIso = now.toISOString();
+    const ttlMs = Math.max(1, Number(input.ttlMinutes || 30)) * 6e4;
+    const safeKey = String(input.resourceKey || "default").trim().replace(/[^a-zA-Z0-9:_-]+/g, "_");
+    const rec = {
+      id: `lock:${input.tenant || "orgfy"}:${safeKey}`,
+      kind: "distributed_lock",
+      tenant: String(input.tenant || "orgfy").trim() || "orgfy",
+      resourceKey: String(input.resourceKey || "default").trim(),
+      owner: String(input.owner || "OrgFy").trim(),
+      reason: input.reason ? String(input.reason).trim() : void 0,
+      status: "active",
+      acquiredAt: nowIso,
+      expiresAt: new Date(now.getTime() + ttlMs).toISOString(),
+      updatedAt: nowIso
+    };
+    await this.putRecord(rec);
+    return rec;
+  }
+  async releaseDistributedLock(id) {
+    const existing = await this.getRecord(id);
+    if (!existing || existing.kind !== "distributed_lock") return null;
+    const updated = {
+      ...existing,
+      status: "released",
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    await this.putRecord(updated);
+    return updated;
+  }
+  async listDistributedLocks(tenant, onlyActive = true) {
+    const all = await this.listByKind("distributed_lock", tenant);
+    const nowMs = Date.now();
+    return all.filter((l) => {
+      if (!onlyActive) return true;
+      if (l.status !== "active") return false;
+      const exp = Date.parse(l.expiresAt || "");
+      return !Number.isFinite(exp) || exp > nowMs;
+    });
+  }
   async syncDocument(kind, id, tenant, payload) {
     const rec = {
       id,
@@ -50418,6 +50496,45 @@ Identifique caminhos obsoletos, código morto ou regras em conflito e abra micro
     }
   ];
 }
+function buildAutomationFromSession(input) {
+  var _a;
+  const safeAgent = String(input.agentName || "OrgFy Bento").trim();
+  const baseTitle = String(input.sessionTitle || input.stepLabel || `Rotina ${safeAgent}`).trim();
+  const slug = baseTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 28) || "sessao";
+  const promptBody = ((_a = input.promptHint) == null ? void 0 : _a.trim()) ? input.promptHint.trim() : [
+    `Repita a rotina validada na sessão **${baseTitle}** de {{project.name}} ({{date}}).`,
+    ``,
+    `## 1. Contexto`,
+    `- Empresa: {{tenant}} ({{repo}})`,
+    `- Agente responsável: ${safeAgent}`,
+    input.stepLabel ? `- Última etapa observada: ${input.stepLabel}` : "",
+    ``,
+    `## 2. Critério de entrega`,
+    `- Execute em worktree isolada seguindo L-01 e L-22; se tudo ficar verde, abra PR enxuto ou reporte status objetivo no canal {{channel}}.`
+  ].filter(Boolean).join("\n");
+  return {
+    id: `from-session-${slug}-${Date.now().toString(36).slice(-4)}`,
+    name: `Rotina: ${baseTitle}`,
+    description: `Criada em 1 clique a partir de uma sessão de ${safeAgent} em ${input.companyName || input.tenant}.`,
+    scope: "project",
+    enabled: true,
+    source: "pm",
+    workKey: `automation:session:${slug}`,
+    sessionTitle: baseTitle,
+    triggerKind: "schedule",
+    frequency: "weekdays",
+    dayOfWeek: 1,
+    timeHHMM: "09:00",
+    timezone: "America/Sao_Paulo",
+    eventKind: "session_finished",
+    actionKind: "agent_session",
+    targetAgent: safeAgent,
+    autonomy: "supervised",
+    guards: { ...DEFAULT_GUARDS },
+    prompt: promptBody,
+    recentRuns: []
+  };
+}
 function describeAutomationTrigger(auto) {
   if (auto.triggerKind === "manual") return "Apenas manual";
   if (auto.triggerKind === "event") return EVENT_LABELS_PT[auto.eventKind] || `Evento: ${auto.eventKind}`;
@@ -51981,7 +52098,7 @@ function fmtTokens(n) {
   return String(n);
 }
 function renderFactorySecondaryPage(props) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u, _v;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x2, _y2, _z2, _A, _B, _C, _D;
   const {
     h,
     tab,
@@ -52147,6 +52264,76 @@ function renderFactorySecondaryPage(props) {
             )
           )
         )
+      ),
+      h(
+        "div",
+        { className: "of-grid-2", "data-orgfy-crdt-council": "true" },
+        h(
+          "div",
+          { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" } },
+            h("div", { className: "of-meter-label" }, "Deliberações do Conselho (CRDT Sync)"),
+            props.onCreateCouncilDeliberation && h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                style: { padding: "3px 8px", fontSize: "11px" },
+                onClick: () => {
+                  const title = window.prompt("Título da deliberação do Conselho:");
+                  if (!title || !title.trim()) return;
+                  const summary = window.prompt("Resumo / decisão proposta:") || "";
+                  void props.onCreateCouncilDeliberation(title.trim(), summary.trim());
+                }
+              },
+              "+ Nova deliberação"
+            )
+          ),
+          (props.councilDeliberations || []).length === 0 ? h("div", { className: "of-muted", style: { fontSize: "11.5px" } }, "Nenhuma deliberação registrada no CRDT ainda. Decisões criadas aqui sincronizam entre Mac e Buzz Mobile.") : (props.councilDeliberations || []).slice(0, 8).map(
+            (del) => h(
+              "div",
+              { key: del.id, className: "of-surface", style: { padding: "8px 10px", display: "flex", flexDirection: "column", gap: "5px" } },
+              h(
+                "div",
+                { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "6px" } },
+                h("strong", { style: { fontSize: "12px" } }, del.title),
+                h("span", { className: "of-pill", "data-tone": del.status === "aprovada" ? "done" : del.status === "recusada" ? "failed" : "waiting" }, del.status.toUpperCase())
+              ),
+              del.summary && h("div", { className: "of-muted", style: { fontSize: "11px" } }, del.summary),
+              del.status === "pendente" && props.onVoteCouncilDeliberation && h(
+                "div",
+                { style: { display: "flex", gap: "6px", marginTop: "2px" } },
+                h("button", { type: "button", className: "of-btn", "data-variant": "primary", style: { padding: "2px 8px", fontSize: "10.5px" }, onClick: () => props.onVoteCouncilDeliberation(del.id, "aprovada") }, "Aprovar ✓"),
+                h("button", { type: "button", className: "of-btn", style: { padding: "2px 8px", fontSize: "10.5px" }, onClick: () => props.onVoteCouncilDeliberation(del.id, "recusada") }, "Recusar")
+              )
+            )
+          )
+        ),
+        h(
+          "div",
+          { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" } },
+            h("div", { className: "of-meter-label" }, "Locks Distribuídos Ativos (CRDT Sync)"),
+            h("span", { className: "of-pill", "data-tone": ((_h = props.crdtBackendInfo) == null ? void 0 : _h.mode) === "buzz_artifact_collection" ? "done" : "idle" }, ((_i = props.crdtBackendInfo) == null ? void 0 : _i.mode) === "buzz_artifact_collection" ? "Relay CRDT" : "Cache local")
+          ),
+          (props.distributedLocks || []).length === 0 ? h("div", { className: "of-muted", style: { fontSize: "11.5px" } }, "Nenhum lock distribuído ativo no momento.") : (props.distributedLocks || []).map(
+            (lk) => h(
+              "div",
+              { key: lk.id, className: "of-surface", style: { padding: "8px 10px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" } },
+              h(
+                "div",
+                null,
+                h("div", { className: "of-mono", style: { fontSize: "11.5px", fontWeight: 600 } }, lk.resourceKey),
+                h("div", { className: "of-muted", style: { fontSize: "10.5px" } }, `Dono: ${lk.owner}${lk.reason ? ` · ${lk.reason}` : ""}`)
+              ),
+              props.onReleaseDistributedLock && h("button", { type: "button", className: "of-btn", style: { padding: "2px 8px", fontSize: "10.5px" }, onClick: () => props.onReleaseDistributedLock(lk.id) }, "Liberar")
+            )
+          )
+        )
       )
     );
   }
@@ -52221,8 +52408,8 @@ function renderFactorySecondaryPage(props) {
     );
   }
   if (tab === "costs") {
-    const economia = ((_h = status.kpis) == null ? void 0 : _h.economia) || null;
-    const qualidade = ((_i = status.kpis) == null ? void 0 : _i.qualidade) || null;
+    const economia = ((_j = status.kpis) == null ? void 0 : _j.economia) || null;
+    const qualidade = ((_k = status.kpis) == null ? void 0 : _k.qualidade) || null;
     const porModelo = Array.isArray(economia == null ? void 0 : economia.por_modelo) ? economia.por_modelo : [];
     const totalCost = porModelo.reduce((acc, r) => acc + Number(r.custo_usd || 0), 0);
     const maxCost = Math.max(0.01, ...porModelo.map((r) => Number(r.custo_usd || 0)));
@@ -52253,9 +52440,9 @@ function renderFactorySecondaryPage(props) {
               )
             )
           ),
-          h("span", { className: "of-pill", "data-tone": "done" }, `Empresa em foco: ${((_j = status.tenantManifest) == null ? void 0 : _j.nome) || tenant}`)
+          h("span", { className: "of-pill", "data-tone": "done" }, `Empresa em foco: ${((_l = status.tenantManifest) == null ? void 0 : _l.nome) || tenant}`)
         ),
-        h("span", { className: "of-muted" }, `Fonte real: kpis-esteira.json (${((_k = status.kpis) == null ? void 0 : _k.gerado_em) || PT_BR.labels.unavailable})`)
+        h("span", { className: "of-muted" }, `Fonte real: kpis-esteira.json (${((_m2 = status.kpis) == null ? void 0 : _m2.gerado_em) || PT_BR.labels.unavailable})`)
       ),
       h(
         "div",
@@ -52275,7 +52462,7 @@ function renderFactorySecondaryPage(props) {
           {
             label: "Tokens (7d)",
             val: fmtTokens(economia == null ? void 0 : economia.tokens_7d),
-            sub: `orçamento/dia: ${fmtTokens((_l = status.tenantManifest) == null ? void 0 : _l.budgetTokensDiario)}`
+            sub: `orçamento/dia: ${fmtTokens((_n = status.tenantManifest) == null ? void 0 : _n.budgetTokensDiario)}`
           },
           {
             label: "Cache hit rate",
@@ -52290,7 +52477,7 @@ function renderFactorySecondaryPage(props) {
           {
             label: "FPY real",
             val: typeof (qualidade == null ? void 0 : qualidade.fpy_real_pct) === "number" ? `${qualidade.fpy_real_pct.toFixed(1)}%` : PT_BR.labels.unavailable,
-            sub: `CPI mín: ${((_m2 = status.tenantManifest) == null ? void 0 : _m2.cpiMinimo) ?? 0.85}`
+            sub: `CPI mín: ${((_o = status.tenantManifest) == null ? void 0 : _o.cpiMinimo) ?? 0.85}`
           }
         ].map(
           (k) => h(
@@ -52299,6 +52486,43 @@ function renderFactorySecondaryPage(props) {
             h("div", { className: "of-meter-label" }, k.label),
             h("div", { className: "of-num", style: { fontSize: "20px", fontWeight: 700, marginTop: "4px" } }, k.val),
             h("div", { className: "of-muted", style: { fontSize: "10.5px", marginTop: "2px" } }, k.sub)
+          )
+        )
+      ),
+      // Telemetria nativa do Buzz (bundled/usage · ctx.agents.types()[...].usage)
+      h(
+        "div",
+        { className: "of-card-pad", "data-buzz-native-usage": "true", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+        h(
+          "div",
+          { style: { display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" } },
+          h(
+            "div",
+            null,
+            h("div", { style: { fontSize: "13.5px", fontWeight: 700 } }, "Telemetria Nativa do Buzz (bundled/usage · tempo real)"),
+            h("div", { className: "of-muted", style: { fontSize: "11px" } }, ((_p = props.nativeUsage) == null ? void 0 : _p.available) ? `${props.nativeUsage.sessionsCount} sessões em ${props.nativeUsage.agentsCount} agentes locais · hoje: ${fmtTokens(props.nativeUsage.tokensToday)} tok · ${costRange}: ${fmtTokens(props.nativeUsage.tokensPeriod)} tok${props.nativeUsage.cacheHitPct !== null ? ` · cache ${props.nativeUsage.cacheHitPct}%` : ""}` : "Aguardando leitura de sessões locais via ctx.agents.types().usage...")
+          ),
+          props.onRefreshNativeUsage && h("button", { type: "button", className: "of-btn", style: { fontSize: "11px", padding: "4px 9px" }, onClick: props.onRefreshNativeUsage }, "Atualizar uso Buzz")
+        ),
+        ((_q = props.nativeUsage) == null ? void 0 : _q.available) && props.nativeUsage.byAgent.length > 0 && h(
+          "table",
+          { className: "of-table" },
+          h("thead", null, h("tr", null, h("th", null, "Agente (Buzz)"), h("th", null, "Harness"), h("th", null, "Sessões"), h("th", null, "Hoje"), h("th", null, `Período (${props.nativeUsage.days}d)`), h("th", null, "Cache"))),
+          h(
+            "tbody",
+            null,
+            props.nativeUsage.byAgent.slice(0, 10).map(
+              (row) => h(
+                "tr",
+                { key: row.agentKey || row.name },
+                h("td", { style: { fontWeight: 600 } }, row.name),
+                h("td", { className: "of-mono of-muted" }, row.harness),
+                h("td", { className: "of-mono" }, String(row.sessions)),
+                h("td", { className: "of-mono" }, fmtTokens(row.tokensToday)),
+                h("td", { className: "of-mono" }, fmtTokens(row.tokensPeriod)),
+                h("td", { className: "of-mono" }, row.cacheHitPct !== null ? `${row.cacheHitPct}%` : "—")
+              )
+            )
           )
         )
       ),
@@ -52440,7 +52664,7 @@ function renderFactorySecondaryPage(props) {
         tenant,
         companyName: (tm == null ? void 0 : tm.nome) || tenant,
         automations: props.automations,
-        selectedId: props.selectedAutomationId || ((_n = props.automations[0]) == null ? void 0 : _n.id) || "",
+        selectedId: props.selectedAutomationId || ((_r = props.automations[0]) == null ? void 0 : _r.id) || "",
         onSelectId: props.onSelectAutomationId,
         onUpdateAutomation: props.onUpdateAutomation,
         onCreateAutomation: props.onCreateAutomation,
@@ -52462,10 +52686,10 @@ function renderFactorySecondaryPage(props) {
     );
   }
   if (tab === "agents") {
-    const tenantAgents = ((_o = status.tenantManifest) == null ? void 0 : _o.agentes) || [];
+    const tenantAgents = ((_s = status.tenantManifest) == null ? void 0 : _s.agentes) || [];
     const modelos = status.modelos || [];
-    const revisoresSurf = Object.entries(((_p = status.tenantManifest) == null ? void 0 : _p.revisoresPorSuperficie) || {});
-    const empresaNome = ((_q = status.tenantManifest) == null ? void 0 : _q.nome) || tenant;
+    const revisoresSurf = Object.entries(((_t = status.tenantManifest) == null ? void 0 : _t.revisoresPorSuperficie) || {});
+    const empresaNome = ((_u = status.tenantManifest) == null ? void 0 : _u.nome) || tenant;
     return h(
       "div",
       { style: { display: "flex", flexDirection: "column", gap: "12px" } },
@@ -52667,6 +52891,19 @@ function renderFactorySecondaryPage(props) {
                       },
                       "Nova"
                     ),
+                    props.onAutomateFromSession && h(
+                      "button",
+                      {
+                        type: "button",
+                        className: "of-btn",
+                        "data-variant": "ghost",
+                        "data-automate-from-session": a.name,
+                        style: { padding: "3px 6px", fontSize: "10.5px" },
+                        title: "Converter sessão deste agente em Automação recorrente (1 clique)",
+                        onClick: () => props.onAutomateFromSession({ agentName: a.name, stepLabel: liveTurn == null ? void 0 : liveTurn.stepLabel })
+                      },
+                      "⚡ Automatizar"
+                    ),
                     props.onAgentSessionAction && liveTurn && a.agentKey && h(
                       "button",
                       {
@@ -52757,8 +52994,8 @@ function renderFactorySecondaryPage(props) {
       renderBuzzCanvasViewer({
         h,
         tenant,
-        channelName: (ch == null ? void 0 : ch.name) || ((_r = status.tenantManifest) == null ? void 0 : _r.nome) || tenant,
-        channelId: (ch == null ? void 0 : ch.channelId) || ((_s = status.tenantManifest) == null ? void 0 : _s.canal) || null,
+        channelName: (ch == null ? void 0 : ch.name) || ((_v = status.tenantManifest) == null ? void 0 : _v.nome) || tenant,
+        channelId: (ch == null ? void 0 : ch.channelId) || ((_w = status.tenantManifest) == null ? void 0 : _w.canal) || null,
         content: props.channelCanvas ?? null,
         draft: props.canvasDraft ?? props.channelCanvas ?? "",
         onChangeDraft: (v2) => {
@@ -52821,7 +53058,7 @@ function renderFactorySecondaryPage(props) {
         h(
           "section",
           { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-          h("div", { className: "of-meter-label" }, `2. Workspace & Arquivos de Contexto (${((_t = status.tenantManifest) == null ? void 0 : _t.nome) || tenant})`),
+          h("div", { className: "of-meter-label" }, `2. Workspace & Arquivos de Contexto (${((_x2 = status.tenantManifest) == null ? void 0 : _x2.nome) || tenant})`),
           papeis.length > 0 && h(
             "div",
             { style: { display: "flex", flexWrap: "wrap", gap: "6px" } },
@@ -52896,7 +53133,7 @@ function renderFactorySecondaryPage(props) {
         h(
           "div",
           null,
-          h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Canal da Empresa no Buzz · #${(chInfo == null ? void 0 : chInfo.name) || ((_u = status.tenantManifest) == null ? void 0 : _u.nome) || tenant}`),
+          h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Canal da Empresa no Buzz · #${(chInfo == null ? void 0 : chInfo.name) || ((_y2 = status.tenantManifest) == null ? void 0 : _y2.nome) || tenant}`),
           h(
             "div",
             { className: "of-muted", style: { marginTop: "2px" } },
@@ -53036,7 +53273,7 @@ function renderFactorySecondaryPage(props) {
     h(
       "div",
       { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-      h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Modo de autonomia · ${((_v = status.tenantManifest) == null ? void 0 : _v.nome) || tenant}`),
+      h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Modo de autonomia · ${((_z2 = status.tenantManifest) == null ? void 0 : _z2.nome) || tenant}`),
       h("div", { className: "of-muted" }, "Suba um degrau por vez. Áreas protegidas e regra L-01 sempre permanecem ativas."),
       h(
         "div",
@@ -53157,6 +53394,54 @@ function renderFactorySecondaryPage(props) {
         { style: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px", paddingTop: "6px", borderTop: "1px solid var(--border)" } },
         h("span", { className: "of-muted" }, `Persistido diretamente em estado/controle-${tenant}.json e lido pelo coordenador.`),
         h("button", { type: "button", className: "of-btn", "data-variant": "primary", onClick: onSaveSettings }, "Salvar configurações")
+      )
+    ),
+    // ── SEGURANÇA & GOVERNANÇA v17.7 (Holdout Sensor + SHA-256 host.commands + Modo Focus) ──
+    h(
+      "div",
+      { className: "of-card-pad", "data-orgfy-security-v177": "true", style: { display: "flex", flexDirection: "column", gap: "12px" } },
+      h("div", { style: { fontSize: "14px", fontWeight: 700 } }, "Segurança & Sensor Independente (Onda 3 · v17.7)"),
+      h(
+        "div",
+        { className: "of-grid-3" },
+        h(
+          "div",
+          { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
+          h("div", { className: "of-meter-label" }, "Holdout Scenarios (fora do repo)"),
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "center", gap: "6px" } },
+            h("span", { className: "of-pill", "data-tone": ((_A = status.holdoutStatus) == null ? void 0 : _A.status) === "pass" ? "done" : ((_B = status.holdoutStatus) == null ? void 0 : _B.status) === "fail" ? "failed" : "idle" }, status.holdoutStatus ? `${status.holdoutStatus.passed ?? 0}/${status.holdoutStatus.total ?? 0} ${status.holdoutStatus.status.toUpperCase()}` : "Não executado"),
+            ((_C = status.holdoutStatus) == null ? void 0 : _C.external_verified) && h("span", { className: "of-muted", style: { fontSize: "10.5px" } }, `sha:${status.holdoutStatus.suite_sha256 || "ok"}`)
+          ),
+          props.onRunHoldoutNow && h("button", { type: "button", className: "of-btn", disabled: props.runningHoldout, style: { alignSelf: "flex-start", padding: "3px 9px", fontSize: "11px" }, onClick: props.onRunHoldoutNow }, props.runningHoldout ? "Rodando..." : "▶ Rodar Holdout")
+        ),
+        h(
+          "div",
+          { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
+          h("div", { className: "of-meter-label" }, "Pinagem SHA-256 (host.commands)"),
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "center", gap: "6px" } },
+            h(
+              "span",
+              { className: "of-pill", "data-tone": props.commandIntegrity ? props.commandIntegrity.mismatches > 0 ? "failed" : props.commandIntegrity.verified > 0 ? "done" : "idle" : "idle" },
+              props.commandIntegrity ? `${props.commandIntegrity.verified}/${props.commandIntegrity.total} íntegros` : "Aguardando auditoria"
+            )
+          ),
+          props.onAuditCommandIntegrity && h("button", { type: "button", className: "of-btn", style: { alignSelf: "flex-start", padding: "3px 9px", fontSize: "11px" }, onClick: props.onAuditCommandIntegrity }, "Auditar SHA-256")
+        ),
+        h(
+          "div",
+          { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
+          h("div", { className: "of-meter-label" }, "Modo Focus do Fundador (Buzz)"),
+          h(
+            "div",
+            { style: { fontSize: "12px", fontWeight: 600 } },
+            ((_D = props.focusState) == null ? void 0 : _D.active) ? `🔭 Focus ativo até ${props.focusState.untilFormatted}` : "Focus inativo"
+          ),
+          h("div", { className: "of-muted", style: { fontSize: "10.5px" } }, "Notificações não críticas são silenciadas durante o modo Focus; apenas alertas P0/Kill Switch atravessam.")
+        )
       )
     )
   );
@@ -54384,6 +54669,315 @@ async function sendBuzzChatMessageOrWake(ctx, opts) {
     error: chatError || "session.messages.send e ctx.agents.wake indisponíveis"
   };
 }
+function observationTokens(obs) {
+  var _a, _b, _c, _d;
+  const input = Number((obs == null ? void 0 : obs.input) ?? (obs == null ? void 0 : obs.inputTokens) ?? ((_a = obs == null ? void 0 : obs.tokens) == null ? void 0 : _a.input) ?? 0) || 0;
+  const output = Number((obs == null ? void 0 : obs.output) ?? (obs == null ? void 0 : obs.outputTokens) ?? ((_b = obs == null ? void 0 : obs.tokens) == null ? void 0 : _b.output) ?? 0) || 0;
+  const cacheRead = Number((obs == null ? void 0 : obs.cacheRead) ?? (obs == null ? void 0 : obs.cacheReadTokens) ?? ((_c = obs == null ? void 0 : obs.tokens) == null ? void 0 : _c.cacheRead) ?? 0) || 0;
+  const cacheWrite = Number((obs == null ? void 0 : obs.cacheWrite) ?? (obs == null ? void 0 : obs.cacheCreationTokens) ?? ((_d = obs == null ? void 0 : obs.tokens) == null ? void 0 : _d.cacheWrite) ?? 0) || 0;
+  const rawTs = (obs == null ? void 0 : obs.at) ?? (obs == null ? void 0 : obs.ts) ?? (obs == null ? void 0 : obs.timestamp) ?? 0;
+  const tsMs = typeof rawTs === "number" ? rawTs < 1e12 ? rawTs * 1e3 : rawTs : Date.parse(String(rawTs || "")) || 0;
+  return {
+    input,
+    output,
+    cacheRead,
+    cacheWrite,
+    total: input + output + cacheRead + cacheWrite,
+    tsMs
+  };
+}
+async function collectBuzzNativeUsage(ctx, days = 7, signal) {
+  const nowMs = Date.now();
+  const sinceMs = nowMs - Math.max(1, days) * 24 * 60 * 60 * 1e3;
+  const todayStartMs = (/* @__PURE__ */ new Date(new Date(nowMs).toISOString().slice(0, 10) + "T00:00:00.000Z")).getTime();
+  const empty = {
+    available: false,
+    days,
+    fetchedAt: new Date(nowMs).toISOString(),
+    tokensToday: 0,
+    tokensPeriod: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheHitPct: null,
+    sessionsCount: 0,
+    agentsCount: 0,
+    byAgent: [],
+    failedAgents: []
+  };
+  const agentsApi = ctx == null ? void 0 : ctx.agents;
+  if (!agentsApi || typeof agentsApi.types !== "function" || typeof agentsApi.snapshot !== "function") {
+    return empty;
+  }
+  const types = Array.isArray(agentsApi.types()) ? agentsApi.types() : [];
+  const usageByType = /* @__PURE__ */ new Map();
+  for (const t of types) {
+    if ((t == null ? void 0 : t.key) && typeof t.usage === "function") {
+      usageByType.set(String(t.key), t.usage);
+    }
+  }
+  if (usageByType.size === 0) return empty;
+  const snap = agentsApi.snapshot();
+  const allAgents = Array.isArray(snap == null ? void 0 : snap.agents) ? snap.agents : [];
+  const targets = allAgents.filter(
+    (a) => (!a.place || a.place === "here") && usageByType.has(String(a.type || ""))
+  );
+  if (targets.length === 0) {
+    return { ...empty, available: true };
+  }
+  let totalToday = 0;
+  let totalPeriod = 0;
+  let totalInput = 0;
+  let totalOutput = 0;
+  let totalCacheRead = 0;
+  let totalSessions = 0;
+  const byAgent = [];
+  const failedAgents = [];
+  await Promise.all(
+    targets.map(async (agent) => {
+      const read = usageByType.get(String(agent.type));
+      if (!read) return;
+      try {
+        const sessions = await read(agent, { since: sinceMs, signal });
+        if (!Array.isArray(sessions)) return;
+        let agToday = 0;
+        let agPeriod = 0;
+        let agInput = 0;
+        let agOutput = 0;
+        let agCacheRead = 0;
+        let lastModel;
+        for (const sess of sessions) {
+          const observations = Array.isArray(sess == null ? void 0 : sess.observations) ? sess.observations : [];
+          for (const obs of observations) {
+            const m = observationTokens(obs);
+            if (m.tsMs > 0 && m.tsMs < sinceMs) continue;
+            agPeriod += m.total;
+            agInput += m.input;
+            agOutput += m.output;
+            agCacheRead += m.cacheRead;
+            if (m.tsMs >= todayStartMs) agToday += m.total;
+            if (obs == null ? void 0 : obs.model) lastModel = String(obs.model);
+          }
+        }
+        totalToday += agToday;
+        totalPeriod += agPeriod;
+        totalInput += agInput;
+        totalOutput += agOutput;
+        totalCacheRead += agCacheRead;
+        totalSessions += sessions.length;
+        const denom = agInput + agCacheRead;
+        byAgent.push({
+          agentKey: String(agent.key || ""),
+          pubkey: String(agent.pubkey || ""),
+          name: String(agent.name || agent.key || "Agente"),
+          picture: agent.picture ? String(agent.picture) : void 0,
+          harness: String(agent.type || ""),
+          sessions: sessions.length,
+          tokensToday: agToday,
+          tokensPeriod: agPeriod,
+          inputTokens: agInput,
+          outputTokens: agOutput,
+          cacheReadTokens: agCacheRead,
+          cacheHitPct: denom > 0 ? Math.round(agCacheRead / denom * 1e3) / 10 : null,
+          lastModel
+        });
+      } catch {
+        failedAgents.push(String(agent.name || agent.key || "Agente"));
+      }
+    })
+  );
+  byAgent.sort((a, b) => b.tokensPeriod - a.tokensPeriod);
+  const globalDenom = totalInput + totalCacheRead;
+  return {
+    available: true,
+    days,
+    fetchedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    tokensToday: totalToday,
+    tokensPeriod: totalPeriod,
+    inputTokens: totalInput,
+    outputTokens: totalOutput,
+    cacheReadTokens: totalCacheRead,
+    cacheHitPct: globalDenom > 0 ? Math.round(totalCacheRead / globalDenom * 1e3) / 10 : null,
+    sessionsCount: totalSessions,
+    agentsCount: targets.length,
+    byAgent,
+    failedAgents
+  };
+}
+const BUZZ_FOCUS_STORAGE_KEY = "buzz-focus.v1";
+const queuedNotices = [];
+function readBuzzFocusState(nowMs = Date.now(), storage) {
+  var _a;
+  try {
+    const store = storage ?? (typeof window !== "undefined" ? window.localStorage : void 0);
+    const raw = (_a = store == null ? void 0 : store.getItem) == null ? void 0 : _a.call(store, BUZZ_FOCUS_STORAGE_KEY);
+    if (!raw) return { active: false };
+    const parsed = JSON.parse(raw);
+    const until = Number(parsed == null ? void 0 : parsed.until);
+    const nowSec = Math.floor(nowMs / 1e3);
+    if (Number.isSafeInteger(until) && until > nowSec) {
+      const d = new Date(until * 1e3);
+      const hh = String(d.getHours()).padStart(2, "0");
+      const mm = String(d.getMinutes()).padStart(2, "0");
+      return {
+        active: true,
+        untilUnixSec: until,
+        untilFormatted: `${hh}:${mm}`
+      };
+    }
+  } catch {
+  }
+  return { active: false };
+}
+function subscribeBuzzFocus(listener) {
+  if (typeof window === "undefined") return () => {
+  };
+  const onStorage = (ev) => {
+    if (!ev.key || ev.key === BUZZ_FOCUS_STORAGE_KEY) {
+      listener(readBuzzFocusState());
+    }
+  };
+  window.addEventListener("storage", onStorage);
+  const timer = window.setInterval(() => listener(readBuzzFocusState()), 3e4);
+  return () => {
+    window.removeEventListener("storage", onStorage);
+    window.clearInterval(timer);
+  };
+}
+function getDeferredFocusNotices() {
+  return [...queuedNotices];
+}
+function clearDeferredFocusNotices() {
+  queuedNotices.length = 0;
+}
+function notifyRespectingFocus(ctx, payload, options) {
+  var _a;
+  const priority = (options == null ? void 0 : options.priority) || "normal";
+  const focus = readBuzzFocusState(options == null ? void 0 : options.nowMs, options == null ? void 0 : options.storage);
+  if (focus.active && priority !== "critical") {
+    queuedNotices.unshift({
+      id: `fn-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 5)}`,
+      title: payload.title,
+      body: payload.body,
+      at: new Date((options == null ? void 0 : options.nowMs) ?? Date.now()).toISOString(),
+      priority
+    });
+    if (queuedNotices.length > 30) queuedNotices.length = 30;
+    return { delivered: false, deferredByFocus: true };
+  }
+  try {
+    if ((_a = ctx == null ? void 0 : ctx.notifications) == null ? void 0 : _a.notify) {
+      ctx.notifications.notify(payload);
+      return { delivered: true, deferredByFocus: false };
+    }
+  } catch {
+  }
+  return { delivered: false, deferredByFocus: false };
+}
+const PINNED_HOST_COMMANDS = Object.freeze([
+  {
+    id: "orgfy-status",
+    scriptPath: "ferramentas/esteira/quadro.py",
+    sha256: "eafa9756c2111605fe152083de774ca678a696a70cc037e00c476409c8f54b8d"
+  },
+  {
+    id: "fabrica-status",
+    scriptPath: "ferramentas/esteira/fabrica_status.py",
+    sha256: "9e6dca21e5aa57dd89e771d23fa33f2b691752968f27fd61a4eb140c30fa4ccf"
+  },
+  {
+    id: "orgfy-kpis",
+    scriptPath: "ferramentas/esteira/gerar_kpis_esteira.py",
+    sha256: "2d063aa497b563d4eb8a6a13c0c500e2076fb645020bc17bf370993a0849dc7a"
+  },
+  {
+    id: "orgfy-controle-write",
+    scriptPath: "ferramentas/esteira/controle_fabrica_write.py",
+    sha256: "9289437b3f642f345217703aae1050ffbf1cd6eb846422de4bf5c5d6984a2c4a"
+  },
+  {
+    id: "orgfy-holdout",
+    scriptPath: "ferramentas/esteira/holdout_runner.py",
+    sha256: "730070cb98c5ed6d148f78e806e1a1856841cdca9f9347d73ff50b1954d852a2"
+  }
+]);
+async function computeUtf8Sha256(content) {
+  var _a, _b;
+  const bytes = new TextEncoder().encode(content);
+  if (typeof ((_b = (_a = globalThis.crypto) == null ? void 0 : _a.subtle) == null ? void 0 : _b.digest) === "function") {
+    const hashBuf = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+    return Array.from(new Uint8Array(hashBuf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  throw new Error("Web Crypto subtle.digest indisponível");
+}
+async function verifyHostCommandIntegrity(ctx, commandId, repoRoot = "/Users/heltonfraga/.buzz/REPOS/orgfy") {
+  var _a;
+  const spec = PINNED_HOST_COMMANDS.find((c) => c.id === commandId);
+  if (!spec) {
+    return {
+      id: commandId,
+      scriptPath: "",
+      expectedSha256: "",
+      status: "unreadable",
+      detail: "Comando não listado na tabela de pinagem SHA-256."
+    };
+  }
+  const readFile = (_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.readFile;
+  if (typeof readFile !== "function") {
+    return {
+      id: spec.id,
+      scriptPath: spec.scriptPath,
+      expectedSha256: spec.sha256,
+      status: "unreadable",
+      detail: "ctx.host.readFile indisponível neste host."
+    };
+  }
+  try {
+    const fullPath = `${repoRoot.replace(/\/$/, "")}/${spec.scriptPath}`;
+    const raw = await readFile(fullPath);
+    const text = typeof raw === "string" ? raw : typeof (raw == null ? void 0 : raw.text) === "string" ? raw.text : typeof (raw == null ? void 0 : raw.content) === "string" ? raw.content : null;
+    if (text === null) {
+      return {
+        id: spec.id,
+        scriptPath: spec.scriptPath,
+        expectedSha256: spec.sha256,
+        status: "unreadable",
+        detail: "Leitura retornou conteúdo vazio."
+      };
+    }
+    const actual = await computeUtf8Sha256(text);
+    const ok2 = actual.toLowerCase() === spec.sha256.toLowerCase();
+    return {
+      id: spec.id,
+      scriptPath: spec.scriptPath,
+      expectedSha256: spec.sha256,
+      actualSha256: actual,
+      status: ok2 ? "verified" : "mismatch",
+      detail: ok2 ? "SHA-256 íntegro" : `Drift detectado (${actual.slice(0, 12)} ≠ ${spec.sha256.slice(0, 12)})`
+    };
+  } catch (err) {
+    return {
+      id: spec.id,
+      scriptPath: spec.scriptPath,
+      expectedSha256: spec.sha256,
+      status: "unreadable",
+      detail: (err == null ? void 0 : err.message) ? String(err.message) : "Erro ao ler script"
+    };
+  }
+}
+async function auditAllHostCommandsIntegrity(ctx, repoRoot = "/Users/heltonfraga/.buzz/REPOS/orgfy") {
+  const results = await Promise.all(
+    PINNED_HOST_COMMANDS.map((spec) => verifyHostCommandIntegrity(ctx, spec.id, repoRoot))
+  );
+  return {
+    checkedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    total: results.length,
+    verified: results.filter((r) => r.status === "verified").length,
+    mismatches: results.filter((r) => r.status === "mismatch").length,
+    unreadable: results.filter((r) => r.status === "unreadable").length,
+    results
+  };
+}
 const GLOBAL_TABS = /* @__PURE__ */ new Set(["holding", "inbox", "costs", "automations"]);
 const DEFAULT_WORKSPACES = [
   { slug: "orgfy", nome: "OrgFy Core", estagio: "operacional", canal: "" },
@@ -54399,7 +54993,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
   const QuestionCardsPanel = createQuestionCardsPanel(React);
   const crdtStore = getOrgfyCrdtStore(ctx);
   return function OrgFyFactoryApp() {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u, _v;
     const [tenant, setTenant] = React.useState("orgfy");
     const [tab, setTab] = React.useState("overview");
     const [dmAgentKey, setDmAgentKey] = React.useState("");
@@ -54456,6 +55050,12 @@ function createFactoryAppComponent(ctx, opts = {}) {
     const [cooUpdatesExpanded, setCooUpdatesExpanded] = React.useState(false);
     const [sendingCooUpdates, setSendingCooUpdates] = React.useState(false);
     const [questionCards, setQuestionCards] = React.useState([]);
+    const [councilDeliberations, setCouncilDeliberations] = React.useState([]);
+    const [distributedLocks, setDistributedLocks] = React.useState([]);
+    const [nativeUsage, setNativeUsage] = React.useState(null);
+    const [focusState, setFocusState] = React.useState(() => readBuzzFocusState());
+    const [commandIntegrity, setCommandIntegrity] = React.useState(null);
+    const [runningHoldout, setRunningHoldout] = React.useState(false);
     const [compactDensity, setCompactDensity] = React.useState(false);
     const [expandedProjects, setExpandedProjects] = React.useState({ orgfy: true });
     const [showAllByProject, setShowAllByProject] = React.useState({});
@@ -55399,8 +55999,14 @@ ${body}`
     );
     const refreshQuestionCards = React.useCallback(async () => {
       try {
-        const list = await crdtStore.listQuestionCards();
-        setQuestionCards(list);
+        const [qList, cList, lList] = await Promise.all([
+          crdtStore.listQuestionCards(),
+          crdtStore.listCouncilDeliberations(),
+          crdtStore.listDistributedLocks()
+        ]);
+        setQuestionCards(qList);
+        setCouncilDeliberations(cList);
+        setDistributedLocks(lList);
       } catch {
       }
     }, []);
@@ -55410,6 +56016,86 @@ ${body}`
         void refreshQuestionCards();
       });
     }, [refreshQuestionCards]);
+    React.useEffect(() => subscribeBuzzFocus(setFocusState), []);
+    const refreshNativeUsage = React.useCallback(async () => {
+      const days = costRange === "90d" ? 90 : costRange === "30d" ? 30 : 7;
+      const snap = await collectBuzzNativeUsage(ctx, days).catch(() => null);
+      if (snap) setNativeUsage(snap);
+    }, [costRange]);
+    React.useEffect(() => {
+      if (tab === "costs") void refreshNativeUsage();
+    }, [tab, refreshNativeUsage]);
+    const handleAuditCommandIntegrity = React.useCallback(async () => {
+      const summary = await auditAllHostCommandsIntegrity(ctx);
+      setCommandIntegrity(summary);
+      notify2(`Auditoria SHA-256: ${summary.verified}/${summary.total} scripts íntegros.`);
+    }, [notify2]);
+    React.useEffect(() => {
+      if (tab === "settings" && !commandIntegrity) {
+        void auditAllHostCommandsIntegrity(ctx).then(setCommandIntegrity).catch(() => {
+        });
+      }
+    }, [tab, commandIntegrity]);
+    const handleRunHoldoutNow = React.useCallback(async () => {
+      const host = ctx == null ? void 0 : ctx.host;
+      if (typeof (host == null ? void 0 : host.runCommand) !== "function") {
+        notify2("ctx.host.runCommand indisponível para rodar Holdout.");
+        return;
+      }
+      setRunningHoldout(true);
+      try {
+        await host.runCommand("orgfy-holdout", "");
+        notifyRespectingFocus(ctx, { title: "OrgFy Holdout Sensor", body: "Suíte Holdout concluída fora do repositório." }, { priority: "normal" });
+        notify2("Sensor Holdout executado com sucesso.");
+        await refresh(tenant, false, true);
+      } catch (err) {
+        notify2(`Falha ao rodar Holdout: ${(err == null ? void 0 : err.message) || err}`);
+      } finally {
+        setRunningHoldout(false);
+      }
+    }, [tenant, notify2, refresh]);
+    const handleCreateCouncilDeliberation = React.useCallback(
+      async (title, summary) => {
+        await crdtStore.createCouncilDeliberation({ tenant, title, summary, proposedBy: "Fundador" });
+        await refreshQuestionCards();
+        notify2(`Deliberação "${title}" sincronizada no CRDT.`);
+      },
+      [tenant, refreshQuestionCards, notify2]
+    );
+    const handleVoteCouncilDeliberation = React.useCallback(
+      async (id, decision) => {
+        await crdtStore.voteCouncilDeliberation(id, decision, "Fundador");
+        await refreshQuestionCards();
+        notify2(`Deliberação marcada como ${decision} (CRDT Sync).`);
+      },
+      [refreshQuestionCards, notify2]
+    );
+    const handleReleaseDistributedLock = React.useCallback(
+      async (id) => {
+        await crdtStore.releaseDistributedLock(id);
+        await refreshQuestionCards();
+        notify2("Lock distribuído liberado no CRDT.");
+      },
+      [refreshQuestionCards, notify2]
+    );
+    const handleAutomateFromSession = React.useCallback(
+      (input) => {
+        var _a2;
+        const draft = buildAutomationFromSession({
+          tenant,
+          companyName: ((_a2 = status.tenantManifest) == null ? void 0 : _a2.nome) || tenant,
+          agentName: input.agentName,
+          stepLabel: input.stepLabel,
+          sessionTitle: input.sessionTitle
+        });
+        handleCreateAutomation(draft);
+        setTab("automations");
+        setAutoTab("automations");
+        setAutomationView("detail");
+        notify2(`Automação criada em 1 clique a partir da sessão de ${input.agentName}.`);
+      },
+      [tenant, (_d = status.tenantManifest) == null ? void 0 : _d.nome, handleCreateAutomation, notify2]
+    );
     const handleAnswerQuestionCard = React.useCallback(
       async (card, answer) => {
         const updated = await crdtStore.answerQuestionCard(card.id, answer);
@@ -55504,7 +56190,7 @@ Nota: ${evidence.note}`
       var _a2;
       return ((_a2 = a.pubkey) == null ? void 0 : _a2.toLowerCase()) === mainAgentPubkey;
     }) || liveCrew.find((a) => a.name.toLowerCase().includes("iris")) || liveCrew[0] || null;
-    const masterAgentName = (masterLive == null ? void 0 : masterLive.name) || ((_d = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _d.nome) || "OrgFy Iris";
+    const masterAgentName = (masterLive == null ? void 0 : masterLive.name) || ((_e = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _e.nome) || "OrgFy Iris";
     const masterTurn = (masterLive == null ? void 0 : masterLive.pubkey) ? telemetry.byPubkey[masterLive.pubkey.toLowerCase()] || null : null;
     const workspaces = (holding == null ? void 0 : holding.empresas) && holding.empresas.length > 0 ? holding.empresas.map((e) => ({
       slug: e.slug,
@@ -55514,8 +56200,8 @@ Nota: ${evidence.note}`
       agentesInfo: `${e.agentesProntos}/${e.agentesTotal}`
     })) : DEFAULT_WORKSPACES.map((w) => ({ ...w, agentesInfo: "" }));
     const activeWorkspace = workspaces.find((w) => w.slug === tenant) || workspaces[0];
-    const empresaNome = ((_e = status.tenantManifest) == null ? void 0 : _e.nome) || (activeWorkspace == null ? void 0 : activeWorkspace.nome) || tenant;
-    const empresaRepo = ((_f = status.tenantManifest) == null ? void 0 : _f.repoId) || tenant;
+    const empresaNome = ((_f = status.tenantManifest) == null ? void 0 : _f.nome) || (activeWorkspace == null ? void 0 : activeWorkspace.nome) || tenant;
+    const empresaRepo = ((_g = status.tenantManifest) == null ? void 0 : _g.repoId) || tenant;
     const isGlobalView = GLOBAL_TABS.has(tab);
     const pendingApprovals = ((holding == null ? void 0 : holding.approvals) || []).filter((a) => a.status === "pendente").length;
     const pendingQuestionCardsCount = questionCards.filter((c) => c.status === "pending").length;
@@ -55538,7 +56224,7 @@ Nota: ${evidence.note}`
       { id: "vision", label: "Canvas / Visão" },
       { id: "settings", label: PT_BR.nav.settings }
     ];
-    const NativeTabs = (_h = (_g = ctx == null ? void 0 : ctx.conversation) == null ? void 0 : _g.ui) == null ? void 0 : _h.Tabs;
+    const NativeTabs = (_i = (_h = ctx == null ? void 0 : ctx.conversation) == null ? void 0 : _h.ui) == null ? void 0 : _i.Tabs;
     const relaySnap = React.useMemo(() => {
       var _a2;
       try {
@@ -55548,7 +56234,7 @@ Nota: ${evidence.note}`
       }
     }, [relayTick, status.lastTickAt]);
     const useNativeSideTabs = Boolean(
-      NativeTabs && (relaySnap == null ? void 0 : relaySnap.session) && typeof (relaySnap == null ? void 0 : relaySnap.scope) === "string" && relaySnap.scope.length > 0 && typeof ((_i = relaySnap == null ? void 0 : relaySnap.session) == null ? void 0 : _i.viewer) === "string" && relaySnap.session.viewer.length > 0
+      NativeTabs && (relaySnap == null ? void 0 : relaySnap.session) && typeof (relaySnap == null ? void 0 : relaySnap.scope) === "string" && relaySnap.scope.length > 0 && typeof ((_j = relaySnap == null ? void 0 : relaySnap.session) == null ? void 0 : _j.viewer) === "string" && relaySnap.session.viewer.length > 0
     );
     const pageContent = h(
       "div",
@@ -55594,7 +56280,7 @@ Nota: ${evidence.note}`
             status,
             telemetry,
             masterAgentName,
-            masterAgentPubkey: (masterLive == null ? void 0 : masterLive.pubkey) || ((_j = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _j.pubkey) || "",
+            masterAgentPubkey: (masterLive == null ? void 0 : masterLive.pubkey) || ((_k = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _k.pubkey) || "",
             masterTurn,
             pendingApprovals,
             inboxCount,
@@ -55652,6 +56338,11 @@ Nota: ${evidence.note}`
                 "span",
                 { className: "of-pill", "data-tone": "running", title: "Turnos ativos em tempo real via session.agentActivity" },
                 `⚡ ${telemetry.activeTurns.length} respondendo`
+              ),
+              focusState.active && h(
+                "span",
+                { className: "of-pill", "data-tone": "waiting", title: "Modo Focus ativo no Buzz (notificações não críticas silenciadas)" },
+                `🔭 Focus até ${focusState.untilFormatted}`
               )
             ),
             !isGlobalView && h(
@@ -55747,7 +56438,7 @@ Nota: ${evidence.note}`
                     if (picked) handleOpenAgentDmInBuzz(picked);
                   }
                 },
-                dmPool.length > 0 ? dmPool.map((a) => h("option", { key: a.key, value: a.key }, a.label)) : h("option", { value: "" }, ((_k = status.tenantManifest) == null ? void 0 : _k.coo) || "OrgFy Bento (COO)")
+                dmPool.length > 0 ? dmPool.map((a) => h("option", { key: a.key, value: a.key }, a.label)) : h("option", { value: "" }, ((_l = status.tenantManifest) == null ? void 0 : _l.coo) || "OrgFy Bento (COO)")
               )
             ),
             toast && h("span", { className: "of-pill", "data-tone": "done" }, toast),
@@ -55917,7 +56608,20 @@ Nota: ${evidence.note}`
                 questionCards,
                 crdtBackendInfo: crdtStore.getBackendInfo(),
                 onAnswerQuestionCard: handleAnswerQuestionCard,
-                onDismissQuestionCard: handleDismissQuestionCard
+                onDismissQuestionCard: handleDismissQuestionCard,
+                nativeUsage,
+                onRefreshNativeUsage: () => void refreshNativeUsage(),
+                focusState,
+                commandIntegrity,
+                onAuditCommandIntegrity: () => void handleAuditCommandIntegrity(),
+                onRunHoldoutNow: () => void handleRunHoldoutNow(),
+                runningHoldout,
+                councilDeliberations,
+                distributedLocks,
+                onCreateCouncilDeliberation: handleCreateCouncilDeliberation,
+                onVoteCouncilDeliberation: handleVoteCouncilDeliberation,
+                onReleaseDistributedLock: handleReleaseDistributedLock,
+                onAutomateFromSession: handleAutomateFromSession
               })
             )
           )
@@ -55931,14 +56635,14 @@ Nota: ${evidence.note}`
         repoDtag: (liveRepo == null ? void 0 : liveRepo.dtag) || tenant,
         repoDetail: selectedItemDetail,
         repoLoading: selectedItemDetailLoading,
-        linkedPr: selectedItem && ((_l = liveRepo == null ? void 0 : liveRepo.prs) == null ? void 0 : _l.length) ? liveRepo.prs.find(
+        linkedPr: selectedItem && ((_m2 = liveRepo == null ? void 0 : liveRepo.prs) == null ? void 0 : _m2.length) ? liveRepo.prs.find(
           (pr) => pr.id === selectedItem.id || selectedItem.workKey && pr.title.toLowerCase().includes(selectedItem.workKey.toLowerCase()) || pr.title.toLowerCase().includes(selectedItem.title.slice(0, 24).toLowerCase())
         ) || null : null,
         liveCrew,
         liveTurnsByPubkey: telemetry.byPubkey,
         resolveAuthor: (pk) => resolveBuzzIdentityName(ctx, pk, nameByPubkey),
-        EmbeddedThread: (_n = (_m2 = ctx == null ? void 0 : ctx.conversation) == null ? void 0 : _m2.ui) == null ? void 0 : _n.Thread,
-        threadChannelId: ((_o = status.tenantManifest) == null ? void 0 : _o.canal) || ((_p = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _p.canal) || null,
+        EmbeddedThread: (_o = (_n = ctx == null ? void 0 : ctx.conversation) == null ? void 0 : _n.ui) == null ? void 0 : _o.Thread,
+        threadChannelId: ((_p = status.tenantManifest) == null ? void 0 : _p.canal) || ((_q = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _q.canal) || null,
         relaySession: relaySnap == null ? void 0 : relaySnap.session,
         relayScope: typeof (relaySnap == null ? void 0 : relaySnap.scope) === "string" ? relaySnap.scope : null,
         onOpenInBuzz: handleOpenInBuzz,
@@ -55988,8 +56692,8 @@ Nota: ${evidence.note}`
           const ag = liveCrew.find((a) => a.key === selectedAgentKey);
           return (ag == null ? void 0 : ag.pubkey) ? telemetry.byPubkey[ag.pubkey.toLowerCase()] || null : null;
         })(),
-        TranscriptComponent: (_r = (_q = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _q.ui) == null ? void 0 : _r.Transcript,
-        channelId: ((_s = status.tenantManifest) == null ? void 0 : _s.canal) || ((_t = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _t.canal) || null,
+        TranscriptComponent: (_s = (_r = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _r.ui) == null ? void 0 : _s.Transcript,
+        channelId: ((_t = status.tenantManifest) == null ? void 0 : _t.canal) || ((_u = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _u.canal) || null,
         onOpenDm: handleOpenAgentDmInBuzz,
         onSessionAction: handleAgentSessionAction,
         onClose: () => setSelectedAgentKey(null)
@@ -56018,7 +56722,7 @@ Nota: ${evidence.note}`
           status,
           telemetry,
           masterAgentName,
-          masterAgentPubkey: (masterLive == null ? void 0 : masterLive.pubkey) || ((_u = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _u.pubkey) || "",
+          masterAgentPubkey: (masterLive == null ? void 0 : masterLive.pubkey) || ((_v = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _v.pubkey) || "",
           masterTurn,
           pendingApprovals,
           inboxCount,
@@ -56456,12 +57160,14 @@ REGRAS POR PAPEL (APLIQUE APENAS O SEU):
 }
 export {
   AVAILABLE_AGENTS,
+  BUZZ_FOCUS_STORAGE_KEY,
   FACTORY_SHADOW_CSS,
   INITIAL_PIPELINE_CARDS,
   INITIAL_REGRAS_PROBATORIAS,
   ORGFY_FAILOVER_REQUEST_EVENT,
   ORGFY_GATE_SNIPPETS,
   OrgfyCrdtStore,
+  PINNED_HOST_COMMANDS,
   PT_BR,
   SVG,
   TENANTS,
@@ -56470,6 +57176,8 @@ export {
   apply,
   applyStepUpdateToMarkdown,
   attachFactoryShadowStyles,
+  auditAllHostCommandsIntegrity,
+  buildAutomationFromSession,
   buildBuzzAttentionContract,
   buildBuzzEntityUri,
   buildCooUpdatesFeed,
@@ -56481,6 +57189,8 @@ export {
   checkMentionTargetIdentity,
   checkThreadWakeAntiLoop,
   cleanupAttentionOnStageChange,
+  clearDeferredFocusNotices,
+  collectBuzzNativeUsage,
   computeNextAutomationRuns,
   createCanonicalCard,
   createOrgfyPipelineAttentionSource,
@@ -56491,6 +57201,7 @@ export {
   fetchFactoryStatus,
   formatOrgfyAttentionText,
   getBuzzNativeState,
+  getDeferredFocusNotices,
   getOrgfyCrdtStore,
   getOrgfyPipelineEvents,
   getTelemetrySnapshot,
@@ -56498,11 +57209,13 @@ export {
   inject,
   insertOrgfyPickerEntry,
   isUnsupportedAgentModel,
+  notifyRespectingFocus,
   parseBuzzOrgfyEntityUrl,
   parseCardProgress,
   parseFactoryStatus,
   parseOrgfyCardStructure,
   parseOrgfyMessageContext,
+  readBuzzFocusState,
   reconcileAgentPresenceAndLocks,
   reconcileAgentsViaBuzzApi,
   registerBuzzNativeIntegrations,
@@ -56514,5 +57227,6 @@ export {
   sendBuzzChatMessageOrWake,
   triageCardWithDecisions,
   triageDiffWithDecisions,
+  verifyHostCommandIntegrity,
   writeTenantControl
 };
