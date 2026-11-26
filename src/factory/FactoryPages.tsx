@@ -2,9 +2,11 @@
 // Páginas secundárias 100% adaptadas ao motor OrgFy: Conselho (Board), Inbox, Uso & Custos, Automações, Agentes por Empresa (com papel, modelo vivo e DM ↗), Canvas / Visão e Configurações.
 
 import type { AutonomyMode, FactoryStatusPayload, FactoryWorkItem } from "./factory-adapter";
-import type { BuzzLiveTelemetrySnapshot } from "./buzz-live-telemetry";
+import type { BuzzCanvasHistoryEntry, BuzzLiveTelemetrySnapshot } from "./buzz-live-telemetry";
 import type { LiveCrewAgent } from "./FactoryBoardAndFloor";
 import type { HoldingControlPlaneSnapshot } from "../services/holding-service";
+import type { BuzzChannelLiveInfo } from "../services/buzz-channel-live";
+import { renderBuzzCanvasViewer } from "../components/BuzzCanvasViewer";
 import { PT_BR } from "../i18n/pt-BR";
 
 export interface FactorySecondaryPagesProps {
@@ -41,6 +43,8 @@ export interface FactorySecondaryPagesProps {
   onSaveSettings: () => void;
   onSelectModeQuick: (mode: AutonomyMode) => void;
   onOpenChannelInBuzz?: () => void;
+  onOpenChannelFullPage?: (opts?: { panel?: "members" }) => void;
+  onOpenBuzzLink?: (href: string) => void;
   Boardroom3D?: any;
   onReconcileAgents?: () => void;
   onAgentSessionAction?: (agentKey: string, action: "interrupt" | "compact" | "new") => void;
@@ -52,10 +56,22 @@ export interface FactorySecondaryPagesProps {
   setAgentEditDraft?: (patch: Partial<{ provider: string; model: string; instructions: string }>) => void;
   canvasDraft?: string;
   setCanvasDraft?: (v: string) => void;
+  canvasMode?: "view" | "edit" | "history";
+  setCanvasMode?: (m: "view" | "edit" | "history") => void;
   canvasWritable?: boolean;
   canvasSaving?: boolean;
   onSaveCanvas?: () => void;
-  canvasHistory?: Array<{ id: string; createdAt: number; authorPubkey: string; preview: string }>;
+  onReloadCanvas?: () => void;
+  canvasHistory?: BuzzCanvasHistoryEntry[];
+  channelInfo?: BuzzChannelLiveInfo | null;
+  editingChannelDetails?: boolean;
+  setEditingChannelDetails?: (v: boolean) => void;
+  channelDetailsDraft?: { name: string; description: string };
+  setChannelDetailsDraft?: (patch: Partial<{ name: string; description: string }>) => void;
+  savingChannelDetails?: boolean;
+  onSaveChannelDetails?: () => void;
+  onChannelDiagnostic?: (action: "markRead" | "markUnread" | "refresh") => void;
+  onCopyText?: (text: string, label: string) => void;
   resolveAuthor?: (pubkey: string) => string;
 }
 
@@ -919,7 +935,7 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
     );
   }
 
-  // ── 6. CANVAS / VISÃO & REGRAS INJETADAS (100% OrgFy: Board + Workspace/Canvas + Regras & Lições) ──
+  // ── 6. CANVAS / VISÃO & REGRAS INJETADAS (Canvas nativo Visualizar/Editar/Histórico + Canal + Board + Regras) ──
   if (tab === "vision") {
     const ov = status.orgfyVision;
     const invariantes = ov?.invariantes || [];
@@ -927,6 +943,7 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
     const escalada = Object.entries(ov?.fluxoEscalada || {});
     const regras = ov?.regrasProbatorias || [];
     const papeis = Object.entries(ov?.papeis || {});
+    const ch = props.channelInfo;
     return h(
       "div",
       { style: { display: "flex", flexDirection: "column", gap: "14px" } },
@@ -937,15 +954,55 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
           "div",
           null,
           h("div", { style: { fontSize: "14.5px", fontWeight: 700 } }, `Canvas, Visão & Regras Injetadas · ${status.tenantManifest?.nome || tenant}`),
-          h("div", { className: "of-muted", style: { marginTop: "2px" } }, "Fontes reais do OrgFy: empresas/board.json (Conselho), PROJECT.md + AGENTS.md + Canvas do canal no Buzz (Workspace) e regras-probatorias.json + ctx.agents.addInstructions (Agentes).")
-        ),
-        props.onOpenChannelInBuzz &&
           h(
-            "button",
-            { type: "button", className: "of-btn", "data-variant": "primary", onClick: props.onOpenChannelInBuzz },
-            "Abrir Canvas / Canal no Buzz ↗"
+            "div",
+            { className: "of-muted", style: { marginTop: "2px" } },
+            ch?.available
+              ? `Canal #${ch.name} (${ch.visibility === "private" ? "Privado" : ch.visibility === "public" ? "Público" : "Ativo"} · ${ch.memberCount} membros${ch.description ? ` · ${ch.description}` : ""}) · sincronizado com session.canvas do Buzz.`
+              : "Fontes reais do OrgFy: empresas/board.json (Conselho), PROJECT.md + AGENTS.md + Canvas do canal no Buzz (Workspace) e regras-probatorias.json + ctx.agents.addInstructions (Agentes)."
           )
+        ),
+        h(
+          "div",
+          { style: { display: "inline-flex", gap: "6px", flexWrap: "wrap" } },
+          props.onOpenChannelInBuzz &&
+            h(
+              "button",
+              { type: "button", className: "of-btn", onClick: props.onOpenChannelInBuzz },
+              "Chat Lateral #"
+            ),
+          (props.onOpenChannelFullPage || props.onOpenChannelInBuzz) &&
+            h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                "data-variant": "primary",
+                onClick: () => (props.onOpenChannelFullPage ? props.onOpenChannelFullPage() : props.onOpenChannelInBuzz?.()),
+              },
+              "Abrir Canvas / Canal no Buzz ↗"
+            )
+        )
       ),
+      renderBuzzCanvasViewer({
+        h,
+        tenant,
+        channelName: ch?.name || status.tenantManifest?.nome || tenant,
+        channelId: ch?.channelId || status.tenantManifest?.canal || null,
+        content: props.channelCanvas ?? null,
+        draft: props.canvasDraft ?? props.channelCanvas ?? "",
+        onChangeDraft: (v: string) => props.setCanvasDraft?.(v),
+        writable: Boolean(props.canvasWritable),
+        saving: Boolean(props.canvasSaving),
+        onSave: () => props.onSaveCanvas?.(),
+        onReload: props.onReloadCanvas,
+        history: props.canvasHistory || [],
+        resolveAuthor: props.resolveAuthor,
+        mode: props.canvasMode || "view",
+        onChangeMode: (m) => props.setCanvasMode?.(m),
+        onOpenBuzzLink: props.onOpenBuzzLink,
+        onOpenChannelInBuzz: () => (props.onOpenChannelFullPage ? props.onOpenChannelFullPage() : props.onOpenChannelInBuzz?.()),
+      }),
       h(
         "div",
         { className: "of-grid-2" },
@@ -986,59 +1043,13 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
         h(
           "section",
           { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-          h("div", { className: "of-meter-label" }, `2. Workspace & Canvas (${status.tenantManifest?.nome || tenant})`),
+          h("div", { className: "of-meter-label" }, `2. Workspace & Arquivos de Contexto (${status.tenantManifest?.nome || tenant})`),
           papeis.length > 0 &&
             h(
               "div",
               { style: { display: "flex", flexWrap: "wrap", gap: "6px" } },
               papeis.map(([papel, agente]) => h("span", { key: papel, className: "of-pill" }, `${papel}: ${agente}`))
             ),
-          h(
-            "div",
-            { className: "of-surface", style: { padding: "10px 12px", borderColor: "var(--primary)", display: "flex", flexDirection: "column", gap: "8px" }, "data-canvas-live-editor": "true" },
-            h(
-              "div",
-              { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" } },
-              h("div", { className: "of-mono", style: { fontSize: "10.5px", color: "var(--primary)" } }, `Canvas ao vivo do canal no Buzz (session.canvas · ${tenant})`),
-              props.canvasWritable && props.onSaveCanvas &&
-                h(
-                  "button",
-                  { type: "button", className: "of-btn", "data-variant": "primary", disabled: props.canvasSaving, style: { padding: "3px 9px", fontSize: "11px" }, onClick: props.onSaveCanvas },
-                  props.canvasSaving ? "Salvando..." : "Salvar Canvas no Buzz"
-                )
-            ),
-            props.setCanvasDraft
-              ? h("textarea", {
-                  className: "of-textarea",
-                  style: { minHeight: "150px", fontSize: "11.5px", lineHeight: 1.45 },
-                  placeholder: "Conteúdo do Canvas do canal no Buzz...",
-                  value: props.canvasDraft ?? props.channelCanvas ?? "",
-                  onChange: (e: any) => props.setCanvasDraft!(e.target.value),
-                })
-              : h(
-                  "pre",
-                  { className: "of-muted", style: { margin: 0, whiteSpace: "pre-wrap", fontSize: "11px", maxHeight: "180px", overflowY: "auto", fontFamily: "inherit", lineHeight: 1.45 } },
-                  props.channelCanvas || "Canvas vazio neste canal."
-                ),
-            props.canvasHistory && props.canvasHistory.length > 0 &&
-              h(
-                "details",
-                null,
-                h("summary", { className: "of-muted", style: { cursor: "pointer", fontSize: "11px" } }, `Histórico de revisões (${props.canvasHistory.length})`),
-                h(
-                  "div",
-                  { style: { marginTop: "6px", display: "flex", flexDirection: "column", gap: "4px" } },
-                  props.canvasHistory.map((rev) =>
-                    h(
-                      "div",
-                      { key: rev.id, style: { fontSize: "10.5px", padding: "4px 6px", borderRadius: "5px", background: "var(--card)" } },
-                      h("strong", null, props.resolveAuthor ? props.resolveAuthor(rev.authorPubkey) : rev.authorPubkey.slice(0, 10)),
-                      h("span", { className: "of-muted" }, ` · ${rev.createdAt ? new Date(rev.createdAt).toLocaleString("pt-BR") : ""} — ${rev.preview}`)
-                    )
-                  )
-                )
-              )
-          ),
           h(
             "div",
             { className: "of-surface", style: { padding: "10px 12px" } },
@@ -1098,10 +1109,166 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
     );
   }
 
-  // ── 7. CONFIGURAÇÕES (autonomy-dialog.tsx + limits-editor.tsx + governança do manifesto) ──
+  // ── 7. CONFIGURAÇÕES (Canal no Buzz ao vivo + autonomy-dialog.tsx + limits-editor.tsx) ──
+  const chInfo = props.channelInfo;
   return h(
     "div",
     { style: { display: "flex", flexDirection: "column", gap: "14px", maxWidth: "880px" } },
+    h(
+      "div",
+      { className: "of-card-pad", "data-buzz-channel-settings": "true", style: { display: "flex", flexDirection: "column", gap: "12px" } },
+      h(
+        "div",
+        { style: { display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "8px" } },
+        h(
+          "div",
+          null,
+          h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Canal da Empresa no Buzz · #${chInfo?.name || status.tenantManifest?.nome || tenant}`),
+          h(
+            "div",
+            { className: "of-muted", style: { marginTop: "2px" } },
+            chInfo?.available
+              ? `Stream: ${chInfo.liveStatus} · Roster: ${chInfo.rosterTotalChannels} canais · Papel: ${chInfo.viewerRole || "member"}`
+              : "Conecte o canal da empresa no Buzz para sincronizar descrição, membros, leitura e diagnósticos."
+          )
+        ),
+        h(
+          "div",
+          { style: { display: "inline-flex", gap: "6px", flexWrap: "wrap" } },
+          props.onOpenChannelFullPage &&
+            h(
+              "button",
+              { type: "button", className: "of-btn", "data-variant": "primary", onClick: () => props.onOpenChannelFullPage!() },
+              "Abrir Canal no Buzz ↗"
+            ),
+          props.onOpenChannelFullPage &&
+            h(
+              "button",
+              { type: "button", className: "of-btn", onClick: () => props.onOpenChannelFullPage!({ panel: "members" }) },
+              `Membros (${chInfo?.memberCount ?? 0})`
+            )
+        )
+      ),
+      chInfo?.available &&
+        h(
+          "div",
+          { className: "of-grid-2" },
+          h(
+            "div",
+            { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
+              h("div", { className: "of-meter-label" }, "Descrição do Canal"),
+              chInfo.canEdit && props.setEditingChannelDetails && props.setChannelDetailsDraft &&
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "of-btn",
+                    "data-variant": "ghost",
+                    style: { padding: "2px 6px", fontSize: "10.5px" },
+                    onClick: () => {
+                      if (props.editingChannelDetails) {
+                        props.setEditingChannelDetails!(false);
+                      } else {
+                        props.setChannelDetailsDraft!({ name: chInfo.name, description: chInfo.description });
+                        props.setEditingChannelDetails!(true);
+                      }
+                    },
+                  },
+                  props.editingChannelDetails ? "Cancelar" : "Editar"
+                )
+            ),
+            props.editingChannelDetails && props.channelDetailsDraft && props.setChannelDetailsDraft
+              ? h(
+                  "div",
+                  { style: { display: "flex", flexDirection: "column", gap: "6px" } },
+                  h("input", {
+                    className: "of-input",
+                    placeholder: "Nome do canal",
+                    value: props.channelDetailsDraft.name,
+                    onChange: (e: any) => props.setChannelDetailsDraft!({ name: e.target.value }),
+                  }),
+                  h("textarea", {
+                    className: "of-textarea",
+                    style: { minHeight: "68px", fontSize: "11.5px" },
+                    placeholder: "Descrição oficial da empresa/canal no Buzz...",
+                    value: props.channelDetailsDraft.description,
+                    onChange: (e: any) => props.setChannelDetailsDraft!({ description: e.target.value }),
+                  }),
+                  h(
+                    "button",
+                    {
+                      type: "button",
+                      className: "of-btn",
+                      "data-variant": "primary",
+                      disabled: props.savingChannelDetails,
+                      style: { alignSelf: "flex-start", padding: "4px 10px", fontSize: "11px" },
+                      onClick: () => props.onSaveChannelDetails?.(),
+                    },
+                    props.savingChannelDetails ? "Salvando..." : "Salvar no Buzz (channelDetails.save)"
+                  )
+                )
+              : h(
+                  "div",
+                  { style: { fontSize: "12px", color: chInfo.description ? "var(--foreground)" : "var(--muted-foreground)" } },
+                  chInfo.description || "Sem descrição cadastrada no canal do Buzz."
+                )
+          ),
+          h(
+            "div",
+            { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
+            h("div", { className: "of-meter-label" }, "Acesso, ID & Leitura"),
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", fontSize: "12px" } },
+              h("span", { className: "of-pill", "data-tone": chInfo.visibility === "private" ? "waiting" : "done" }, chInfo.visibility === "private" ? "Privado" : chInfo.visibility === "public" ? "Público" : "Canal"),
+              h("span", { className: "of-pill" }, `${chInfo.memberCount} membros`),
+              typeof chInfo.unreadCount === "number" &&
+                h("span", { className: "of-pill", "data-tone": chInfo.unreadCount > 0 ? "running" : "idle" }, `${chInfo.unreadCount} não lida(s)`)
+            ),
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", gap: "6px", marginTop: "2px" } },
+              h("code", { className: "of-mono of-muted", style: { fontSize: "10.5px", wordBreak: "break-all" } }, chInfo.channelId),
+              props.onCopyText &&
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "of-btn",
+                    "data-variant": "ghost",
+                    style: { padding: "2px 6px", fontSize: "10.5px" },
+                    onClick: () => props.onCopyText!(chInfo.channelId, "Channel ID"),
+                  },
+                  "Copiar"
+                )
+            )
+          )
+        ),
+      chInfo?.available && chInfo.memberPubkeys.length > 0 &&
+        h(
+          "div",
+          { className: "of-surface", style: { padding: "9px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
+          h("div", { className: "of-meter-label" }, `Membros no canal (${chInfo.memberCount})`),
+          h(
+            "div",
+            { style: { display: "flex", flexWrap: "wrap", gap: "5px" } },
+            chInfo.memberPubkeys.slice(0, 24).map((pk) =>
+              h("span", { key: pk, className: "of-pill", style: { fontSize: "10.5px" } }, props.resolveAuthor ? props.resolveAuthor(pk) : pk.slice(0, 10))
+            )
+          )
+        ),
+      chInfo?.available && props.onChannelDiagnostic &&
+        h(
+          "div",
+          { style: { display: "flex", flexWrap: "wrap", gap: "6px", paddingTop: "4px", borderTop: "1px solid var(--border)" } },
+          h("button", { type: "button", className: "of-btn", style: { fontSize: "11px" }, onClick: () => props.onChannelDiagnostic!("markRead") }, "Marcar como lido"),
+          h("button", { type: "button", className: "of-btn", style: { fontSize: "11px" }, onClick: () => props.onChannelDiagnostic!("markUnread") }, "Marcar como não lido"),
+          h("button", { type: "button", className: "of-btn", style: { fontSize: "11px" }, onClick: () => props.onChannelDiagnostic!("refresh") }, "Atualizar canais e roster")
+        )
+    ),
     h(
       "div",
       { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },

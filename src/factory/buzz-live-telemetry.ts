@@ -212,6 +212,7 @@ export interface BuzzCanvasHistoryEntry {
   createdAt: number;
   authorPubkey: string;
   preview: string;
+  fullContent?: string;
 }
 
 export async function readBuzzChannelCanvas(ctx: Context, channelId: string | null | undefined): Promise<string | null> {
@@ -221,14 +222,15 @@ export async function readBuzzChannelCanvas(ctx: Context, channelId: string | nu
 
 export async function readBuzzChannelCanvasDetailed(
   ctx: Context,
-  channelId: string | null | undefined
+  channelId: string | null | undefined,
+  opts?: { strong?: boolean }
 ): Promise<BuzzCanvasState> {
   if (!channelId) return { content: null, writable: false };
   try {
     const session = (ctx as any)?.relay?.snapshot?.()?.session;
     const writable = Boolean(session?.canvas?.available && typeof session.canvas.save === "function");
     if (session?.canvas?.available && typeof session.canvas.read === "function") {
-      const ev = await session.canvas.read(channelId);
+      const ev = await session.canvas.read(channelId, opts?.strong ? { strong: true } : undefined);
       if (ev && typeof ev.content === "string") {
         return {
           content: ev.content.trim() ? ev.content : null,
@@ -271,19 +273,26 @@ export async function readBuzzChannelCanvasHistory(
     const session = (ctx as any)?.relay?.snapshot?.()?.session;
     if (!session?.canvas?.available || typeof session.canvas.history !== "function") return [];
     const page = await session.canvas.history(channelId);
-    const entries: any[] = Array.isArray(page?.entries)
+    // API oficial de @buzz/author retorna { revisions: RelayEvent[], next }
+    const entries: any[] = Array.isArray(page?.revisions)
+      ? page.revisions
+      : Array.isArray(page?.entries)
       ? page.entries
       : Array.isArray(page?.events)
       ? page.events
       : Array.isArray(page)
       ? page
       : [];
-    return entries.slice(0, 8).map((ev: any) => ({
-      id: String(ev?.id || ev?.event?.id || ""),
-      createdAt: Number(ev?.created_at || ev?.event?.created_at || 0) * 1000,
-      authorPubkey: String(ev?.pubkey || ev?.event?.pubkey || "").toLowerCase(),
-      preview: String(ev?.content || ev?.event?.content || "").replace(/\s+/g, " ").slice(0, 100),
-    }));
+    return entries.slice(0, 15).map((ev: any) => {
+      const fullContent = String(ev?.content ?? ev?.event?.content ?? "");
+      return {
+        id: String(ev?.id || ev?.event?.id || ""),
+        createdAt: Number(ev?.created_at || ev?.event?.created_at || 0) * 1000,
+        authorPubkey: String(ev?.pubkey || ev?.event?.pubkey || "").toLowerCase(),
+        preview: fullContent.replace(/\s+/g, " ").slice(0, 140),
+        fullContent,
+      };
+    });
   } catch {
     return [];
   }
