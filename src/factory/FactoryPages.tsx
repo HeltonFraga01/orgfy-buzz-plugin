@@ -41,6 +41,9 @@ export interface FactorySecondaryPagesProps {
   onSaveSettings: () => void;
   onSelectModeQuick: (mode: AutonomyMode) => void;
   onOpenChannelInBuzz?: () => void;
+  Boardroom3D?: any;
+  onReconcileAgents?: () => void;
+  onAgentSessionAction?: (agentKey: string, action: "interrupt" | "compact" | "new") => void;
 }
 
 const CHART_COLORS = ["var(--chart-2)", "var(--chart-1)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"];
@@ -124,6 +127,22 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
     const empresas = holding?.empresas || [];
     const boardAreas = holding?.conselho || [];
     const approvals = holding?.approvals || [];
+    const boardroomSeats = [
+      {
+        id: "ceo-holding",
+        label: holding?.ceoHolding?.nome || "OrgFy Iris",
+        role: "CEO Holding",
+        status: (holding?.ceoHolding?.pubkey && props.telemetry?.byPubkey?.[holding.ceoHolding.pubkey.toLowerCase()]) ? "working" : "active",
+        onClick: () => onOpenAgentDm?.({ name: holding?.ceoHolding?.nome || "OrgFy Iris", pubkey: holding?.ceoHolding?.pubkey || "" }),
+      },
+      ...empresas.map((emp) => ({
+        id: emp.slug,
+        label: emp.workspaceBuzz || emp.nome,
+        role: emp.estagio === "operacional" ? `${emp.agentesProntos}/${emp.agentesTotal} agentes` : emp.estagio,
+        status: emp.estagio === "operacional" ? "active" : "planned",
+        onClick: () => onSelectTenant(emp.slug),
+      })),
+    ];
 
     return h(
       "div",
@@ -153,6 +172,7 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
             `Falar com ${holding?.ceoHolding?.nome || "OrgFy Iris"} ↗`
           )
       ),
+      props.Boardroom3D && h(props.Boardroom3D, { seats: boardroomSeats, title: "Sala de Reunião do Conselho · Tema Boardroom 3D" }),
       h(
         "div",
         { className: "of-grid-3" },
@@ -627,9 +647,25 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
           )
         ),
         h(
-          "span",
-          { className: "of-muted" },
-          `Fonte: empresas/${tenant}.json × Buzz Desktop (${tenantAgents.filter((a) => a.inBuzz).length}/${tenantAgents.length} provisionados)`
+          "div",
+          { style: { display: "inline-flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
+          h(
+            "span",
+            { className: "of-muted" },
+            `Fonte: empresas/${tenant}.json × Buzz Desktop (${tenantAgents.filter((a) => a.inBuzz).length}/${tenantAgents.length} provisionados)`
+          ),
+          props.onReconcileAgents &&
+            h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                "data-variant": "primary",
+                "data-reconcile-r51": "true",
+                onClick: props.onReconcileAgents,
+              },
+              "Reconciliar modelos (Eval R5.1)"
+            )
         )
       ),
       agentTab === "memory"
@@ -637,7 +673,7 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
             "div",
             { className: "of-card-pad" },
             h("div", { style: { fontSize: "14px", fontWeight: 700, marginBottom: "4px" } }, `Agentes de ${empresaNome}`),
-            h("div", { className: "of-muted", style: { marginBottom: "10px" } }, "Cada agente abaixo vem do manifesto oficial desta empresa cruzado com o estado ao vivo no Buzz Desktop. Clique em DM ↗ para conversar na janela nativa do Buzz."),
+            h("div", { className: "of-muted", style: { marginBottom: "10px" } }, "Cada agente abaixo vem do manifesto oficial desta empresa cruzado com o estado ao vivo no Buzz Desktop. Use DM ↗ para conversar na barra lateral ou os controles nativos de sessão (Parar / Compactar / Nova)."),
             tenantAgents.length === 0
               ? h("div", { className: "of-muted" }, `Nenhum agente encontrado em empresas/${tenant}.json.`)
               : h(
@@ -646,7 +682,7 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                   h(
                     "thead",
                     null,
-                    h("tr", null, h("th", null, "Agente"), h("th", null, "Função & Papel"), h("th", null, "Modelo (Buzz)"), h("th", null, "Status"), h("th", null, "Ação"))
+                    h("tr", null, h("th", null, "Agente"), h("th", null, "Função & Papel"), h("th", null, "Modelo (Buzz)"), h("th", null, "Status"), h("th", null, "Ações (Buzz API)"))
                   ),
                   h(
                     "tbody",
@@ -689,19 +725,61 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                         h(
                           "td",
                           null,
-                          onOpenAgentDm && a.pubkey
-                            ? h(
+                          h(
+                            "div",
+                            { style: { display: "inline-flex", alignItems: "center", gap: "4px", flexWrap: "wrap" } },
+                            onOpenAgentDm && a.pubkey &&
+                              h(
                                 "button",
                                 {
                                   type: "button",
                                   className: "of-btn",
                                   "data-variant": "ghost",
-                                  style: { color: "var(--primary)", padding: "3px 8px" },
+                                  style: { color: "var(--primary)", padding: "3px 7px" },
                                   onClick: () => onOpenAgentDm({ key: a.agentKey, pubkey: a.pubkey, name: a.name }),
                                 },
                                 "DM ↗"
+                              ),
+                            props.onAgentSessionAction && a.inBuzz && a.agentKey &&
+                              h(
+                                "button",
+                                {
+                                  type: "button",
+                                  className: "of-btn",
+                                  "data-variant": "ghost",
+                                  style: { padding: "3px 6px", fontSize: "10.5px" },
+                                  title: "Compactar contexto da sessão",
+                                  onClick: () => props.onAgentSessionAction!(a.agentKey, "compact"),
+                                },
+                                "Compactar"
+                              ),
+                            props.onAgentSessionAction && a.inBuzz && a.agentKey &&
+                              h(
+                                "button",
+                                {
+                                  type: "button",
+                                  className: "of-btn",
+                                  "data-variant": "ghost",
+                                  style: { padding: "3px 6px", fontSize: "10.5px" },
+                                  title: "Iniciar nova sessão limpa",
+                                  onClick: () => props.onAgentSessionAction!(a.agentKey, "new"),
+                                },
+                                "Nova"
+                              ),
+                            props.onAgentSessionAction && liveTurn && a.agentKey &&
+                              h(
+                                "button",
+                                {
+                                  type: "button",
+                                  className: "of-btn",
+                                  "data-variant": "danger",
+                                  style: { padding: "3px 6px", fontSize: "10.5px" },
+                                  title: "Interromper turno em andamento",
+                                  onClick: () => props.onAgentSessionAction!(a.agentKey, "interrupt"),
+                                },
+                                "Parar"
                               )
-                            : h("span", { className: "of-muted" }, "—")
+                          )
                         )
                       );
                     })
