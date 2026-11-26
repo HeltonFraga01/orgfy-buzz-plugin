@@ -1006,37 +1006,63 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         postInChat?: boolean;
         text: string;
       }): Promise<BuzzDispatchResult> => {
-        const fallbackCanal = status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === tenant)?.canal || null;
+        const fallbackCanal = resolveActiveChannelId(tenant);
         return sendBuzzChatMessageOrWake(ctx, {
           ...opts,
           fallbackChannelId: fallbackCanal,
         });
       },
-      [status.tenantManifest, holding, tenant]
+      [resolveActiveChannelId, tenant]
     );
 
-    // Dispara auditoria one-shot do Oráculo (Scout) via ctx.agents.wake
+    // Dispara auditoria one-shot do Oráculo (Scout) diretamente no CANAL da empresa ou do Conselho
+    // (nunca em DM), instruindo-o a responder no canal e marcar (@) os conselheiros / responsáveis para continuidade da reunião.
     const handleRunScoutNow = React.useCallback(async () => {
       const scoutTenant = tenantAgents.find((a) => a.papel === "oraculo" || /or[aá]culo|scout/i.test(a.name));
       const scoutLive = liveCrew.find((a) => a.key === scoutTenant?.agentKey || /or[aá]culo|scout/i.test(a.name));
       const agentKey = scoutTenant?.agentKey || scoutLive?.key;
+      const scoutName = scoutTenant?.name || scoutLive?.name || "OrgFy Oráculo";
       if (!agentKey) {
         notify(`Nenhum agente Oráculo/Scout encontrado em ${tenant}.`);
         return;
       }
+      const targetChannelId = resolveActiveChannelId(tenant);
+      const isBoard = tenant === "board";
+      const councilHandles = (holding?.conselho || [])
+        .map((c) => c.responsavel)
+        .filter((n) => n && n.toLowerCase() !== scoutName.toLowerCase())
+        .map((n) => `@${n}`);
+      const uniqueCouncilHandles = Array.from(new Set(councilHandles));
+      const cooName = status.tenantManifest?.coo || "OrgFy Bento";
+      const promptText = isBoard
+        ? `@${scoutName} [ORGFY SCOUT ONE-SHOT · board]\nAudite o portfólio e o workspace atual contra o Canvas/Visão da Holding, identifique os gaps de maior impacto (segurança, testes, UX, dívida técnica ou governança) e proponha os próximos cards/pautas canônicos.\n\n**Regra de Reunião:** responda obrigatoriamente **aqui neste canal do Conselho** (não em DM) e marque (\`@\`) os conselheiros competentes (${uniqueCouncilHandles.join(", ") || "@OrgFy Bento, @OrgFy Bento Arquiteto, @OrgFy Vera, @OrgFy Val, @OrgFy Iris"}) para deliberarem e darem continuidade à reunião.`
+        : `@${scoutName} [ORGFY SCOUT ONE-SHOT · ${tenant}]\nAudite o workspace atual contra o Canvas/Visão de ${status.tenantManifest?.nome || tenant}, identifique os gaps de maior impacto (segurança, testes, UX ou dívida técnica) e proponha os próximos cards canônicos.\n\n**Regra de Canal:** responda obrigatoriamente **aqui neste canal da empresa** (não em DM) e marque \`@${cooName}\` (COO) e os especialistas responsáveis para triagem e continuidade imediata.`;
+
       setRunningScout(true);
       try {
         const res = await wakeAgentInBuzz({
           agentKey,
-          agentName: scoutTenant?.name || scoutLive?.name || "Oráculo",
+          agentName: scoutName,
           pubkey: scoutTenant?.pubkey || scoutLive?.pubkey,
-          text: `[ORGFY SCOUT ONE-SHOT · ${tenant}] Audite o workspace atual contra o Canvas/Visão da empresa, identifique gaps de maior impacto (segurança, testes, UX ou dívida técnica) e proponha os próximos cards canônicos.`,
+          channelId: targetChannelId,
+          preferDm: false,
+          postInChat: true,
+          text: promptText,
         });
-        notify(res.ok ? `${scoutTenant?.name || scoutLive?.name || "Oráculo"} acionado via ctx.agents.wake.` : `Falha ao acionar Oráculo: ${res.error}`);
+        if (res.ok && res.channel && openSideTabRef.current) {
+          try {
+            openSideTabRef.current({ channelId: res.channel }, { keep: true });
+          } catch {}
+        }
+        notify(
+          res.ok
+            ? `${scoutName} acionado no canal de ${isBoard ? "Conselho" : tenant} ✓`
+            : `Falha ao acionar Oráculo: ${res.error}`
+        );
       } finally {
         setRunningScout(false);
       }
-    }, [tenantAgents, liveCrew, tenant, wakeAgentInBuzz, notify]);
+    }, [tenantAgents, liveCrew, tenant, resolveActiveChannelId, holding, status.tenantManifest, wakeAgentInBuzz, notify]);
 
     // Carrega automacoes persistidas por empresa (localStorage + fallback defaults)
     React.useEffect(() => {

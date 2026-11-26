@@ -6,7 +6,9 @@ import type { FactoryStatusPayload, FactoryWorkItem as OrgfyWorkItem } from "../
 import type { BuzzLiveTelemetrySnapshot, LiveAgentTurn } from "../buzz-live-telemetry";
 import type { LiveCrewAgent } from "../FactoryBoardAndFloor";
 import {
+  AREA_LABEL,
   DISCOVERY_AREAS,
+  type DiscoveryArea,
   type FactoryStatus,
   type FactoryWorkItem,
   type SessionInfo,
@@ -175,21 +177,53 @@ function adaptStatusFor3D(
     viewRecent: recent,
     ignored: status.ignored.map(mapItem),
     held: [],
-    scout: {
-      sessionId: scoutSessionId,
-      phase: status.loopState === "discovering" ? "reviewing" : "idle",
-      rounds: 2,
-      lenses: DISCOVERY_AREAS.map((area) => ({
-        area,
-        sessionId: `scout-${status.projectId}-${area}`,
-        status: status.loopState === "discovering" ? "running" : "idle",
-        active: status.loopState === "discovering",
-        reported: false,
-      })),
-      provider: "claude",
-      model: "claude-sonnet-4-6",
-      lastRoundAt: null,
-    },
+    scout: (() => {
+      // Mapeia cada uma das 8 lentes do Mirante 1:1 para um agente real do Buzz da empresa ativa (zero bonecos fantasmas)
+      const areaMatchers: Record<DiscoveryArea, RegExp> = {
+        features: /^(po|pesquisa|produto)$|sol\s*po|sol$/i,
+        ux: /^(frontend|ui|revisor_ui)$|livia/i,
+        performance: /^(backend|performance)$|otto/i,
+        tech_debt: /^(arquiteto)$|arquiteto/i,
+        test_gaps: /^(qa|revisor_codigo)$|teo/i,
+        security: /^(seguranca|revisor_seguranca)$|hugo/i,
+        bugs: /^(infra|release)$|atlas|ravi/i,
+        docs: /^(prompts|revisor_metodo|docs)$|lia|vera/i,
+      };
+      const usedKeys = new Set<string>([pmSessionId || "", scoutSessionId || ""].filter(Boolean));
+      const pickAgentForArea = (area: DiscoveryArea) => {
+        const rx = areaMatchers[area];
+        const exact = pool.find((a) => !usedKeys.has(a.key) && (rx.test(a.papel || "") || rx.test(a.name)));
+        if (exact) {
+          usedKeys.add(exact.key);
+          return exact;
+        }
+        const fallback = pool.find((a) => !usedKeys.has(a.key)) || pool.find((a) => a.key !== scoutSessionId) || pool[0] || null;
+        if (fallback) usedKeys.add(fallback.key);
+        return fallback;
+      };
+      const scoutAgent = pool.find((a) => a.key === scoutSessionId) || null;
+      return {
+        sessionId: scoutSessionId,
+        phase: status.loopState === "discovering" ? "reviewing" : "idle",
+        rounds: 2,
+        lenses: DISCOVERY_AREAS.map((area) => {
+          const assigned = pickAgentForArea(area);
+          const sid = assigned?.key || `scout-${status.projectId}-${area}`;
+          const sess = sessions.get(sid);
+          const isRunning = sess?.status === "running" || status.loopState === "discovering";
+          return {
+            area,
+            sessionId: sid,
+            status: isRunning ? "running" : "idle",
+            active: isRunning,
+            reported: false,
+          };
+        }),
+        provider: scoutAgent?.provider || "nexusmind_antigravity",
+        model: scoutAgent?.model || "gemini-2.5-flash",
+        lastRoundAt: null,
+      };
+    })(),
   };
 
   return {
@@ -512,6 +546,10 @@ export function createFloor3DComponent(ctx: Context) {
             (w.sessionId === ag.agentKey || Boolean(w.card?.item.note && w.card.item.note.toLowerCase().includes(ag.name.toLowerCase())))
         );
         if (directWorker) return directWorker.key;
+        const directArea = scene.agents.find(
+          (a: SceneAgent) => a.role === "area" && !usedFigures.has(a.key) && a.sessionId === ag.agentKey
+        );
+        if (directArea) return directArea.key;
         while (areaCursor < areaFigures.length) {
           const candidate = areaFigures[areaCursor++];
           if (!usedFigures.has(candidate)) return candidate;
@@ -645,8 +683,11 @@ export function createFloor3DComponent(ctx: Context) {
           onMouseEnter: () => setHoveredKey(ag.agentKey),
           onMouseLeave: () => setHoveredKey((cur) => (cur === ag.agentKey ? null : cur)),
           onClick: () => {
-            setSelectedKey(ag.agentKey);
-            stageRef.current?.select(ag.agentKey);
+            const fig = scene.agents.find(
+              (a: SceneAgent) => a.sessionId === ag.agentKey || a.key === ag.agentKey
+            );
+            setSelectedKey(fig ? fig.key : ag.agentKey);
+            stageRef.current?.select(fig ? fig.key : ag.agentKey);
           },
         },
         h(
@@ -1199,8 +1240,9 @@ export function createFloor3DComponent(ctx: Context) {
         (() => {
           const focusKey = selectedKey || hoveredKey;
           if (!focusKey) return null;
-          const sceneAg = scene.agents.find((a: SceneAgent) => a.key === focusKey) || null;
+          const sceneAg = scene.agents.find((a: SceneAgent) => a.key === focusKey || a.sessionId === focusKey) || null;
           const matchedTenantAg =
+            (sceneAg?.sessionId ? tenantAgents.find((a) => a.agentKey === sceneAg.sessionId) : null) ||
             tenantAgents.find((a) => a.agentKey === focusKey || a.name === focusKey) ||
             (sceneAg?.role === "pm"
               ? tenantAgents.find((a) => a.papel === "coo" || /bento|coo/i.test(a.name))
@@ -1210,15 +1252,16 @@ export function createFloor3DComponent(ctx: Context) {
             null;
           const matchedLive = matchedTenantAg
             ? liveCrew.find((c) => c.key === matchedTenantAg.agentKey || (matchedTenantAg.pubkey && c.pubkey?.toLowerCase() === matchedTenantAg.pubkey.toLowerCase()))
-            : liveCrew.find((c) => c.key === focusKey) || null;
+            : liveCrew.find((c) => c.key === focusKey || (sceneAg?.sessionId && c.key === sceneAg.sessionId)) || null;
           const liveTurn = matchedTenantAg ? turnOf(matchedTenantAg) : null;
+          const areaTag = sceneAg?.area ? `Mirante · ${AREA_LABEL[sceneAg.area]}` : null;
           const displayTitle =
             matchedTenantAg?.name ||
             (sceneAg?.role === "pm"
               ? `${status.tenantManifest?.coo || "COO"} (${empresaNome})`
               : sceneAg?.role === "scout"
               ? "Oráculo · Scout"
-              : sceneAg?.card?.item.title || sceneAg?.area || focusKey);
+              : sceneAg?.card?.item.title || areaTag || focusKey);
           const statusText = liveTurn
             ? "Respondendo"
             : matchedTenantAg?.running || sceneAg?.status === "working"
@@ -1236,8 +1279,9 @@ export function createFloor3DComponent(ctx: Context) {
           const stepLabel =
             liveTurn?.stepLabel ||
             sceneAg?.card?.item.title ||
-            sceneAg?.progress ||
+            (areaTag && matchedTenantAg?.funcao ? `${areaTag} — ${matchedTenantAg.funcao}` : areaTag) ||
             matchedTenantAg?.funcao ||
+            sceneAg?.progress ||
             "Aguardando tarefa";
           const modelLabel = `${matchedLive?.provider || matchedTenantAg?.provider || "buzz"} · ${matchedLive?.model || matchedTenantAg?.model || sceneAg?.model || "padrão"}`;
 

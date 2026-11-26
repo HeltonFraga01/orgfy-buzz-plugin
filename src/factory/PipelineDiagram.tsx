@@ -584,25 +584,25 @@ export function renderPipelineDiagram(props: PipelineDiagramProps) {
 
       Fan("in"),
 
-      // Merge
+      // Merge & Escada de Escalada (L0 -> COO Bento -> Conselho -> Bestie Iris)
       h(
         "div",
         { className: "of-pd-group" },
         Node({
           keyId: "merge",
-          kind: status.limits.autoMerge ? "auto" : "human",
-          badge: status.limits.autoMerge ? "Auto-merge" : "Humano",
+          kind: status.limits.autoMerge ? "auto" : "workspace",
+          badge: status.limits.autoMerge ? "Auto-merge" : "COO · GATE",
           title: PT_BR.pipelines.mergeLabel,
-          help: PT_BR.pipelines.mergeHelp,
+          help: "Após CI verde + Revisor L-01, o coordenador integra na main. Se travar ou falhar: L1 COO Bento (auto-cura/DLQ) → L2 CEO/Conselho → L3 Bestie OrgFy Iris (única ponte para o Fundador).",
           items: mergeItems,
-          width: "126px",
+          width: "136px",
           footer: h(
             "span",
             { className: "of-muted", style: { fontSize: "10px" } },
             mergeItems.length > 0
               ? status.limits.autoMerge
                 ? "quando checks passam"
-                : "pronto para GATE"
+                : "Bento → Conselho → Iris"
               : "fila de merge vazia"
           ),
         })

@@ -15573,22 +15573,22 @@ Na fila aguardando agente livre`,
         )
       ),
       Fan("in"),
-      // Merge
+      // Merge & Escada de Escalada (L0 -> COO Bento -> Conselho -> Bestie Iris)
       h(
         "div",
         { className: "of-pd-group" },
         Node({
           keyId: "merge",
-          kind: status.limits.autoMerge ? "auto" : "human",
-          badge: status.limits.autoMerge ? "Auto-merge" : "Humano",
+          kind: status.limits.autoMerge ? "auto" : "workspace",
+          badge: status.limits.autoMerge ? "Auto-merge" : "COO · GATE",
           title: PT_BR.pipelines.mergeLabel,
-          help: PT_BR.pipelines.mergeHelp,
+          help: "Após CI verde + Revisor L-01, o coordenador integra na main. Se travar ou falhar: L1 COO Bento (auto-cura/DLQ) → L2 CEO/Conselho → L3 Bestie OrgFy Iris (única ponte para o Fundador).",
           items: mergeItems,
-          width: "126px",
+          width: "136px",
           footer: h(
             "span",
             { className: "of-muted", style: { fontSize: "10px" } },
-            mergeItems.length > 0 ? status.limits.autoMerge ? "quando checks passam" : "pronto para GATE" : "fila de merge vazia"
+            mergeItems.length > 0 ? status.limits.autoMerge ? "quando checks passam" : "Bento → Conselho → Iris" : "fila de merge vazia"
           )
         })
       )
@@ -49941,21 +49941,52 @@ function adaptStatusFor3D(status, liveCrew, telemetry) {
     viewRecent: recent,
     ignored: status.ignored.map(mapItem),
     held: [],
-    scout: {
-      sessionId: scoutSessionId,
-      phase: status.loopState === "discovering" ? "reviewing" : "idle",
-      rounds: 2,
-      lenses: DISCOVERY_AREAS.map((area) => ({
-        area,
-        sessionId: `scout-${status.projectId}-${area}`,
-        status: status.loopState === "discovering" ? "running" : "idle",
-        active: status.loopState === "discovering",
-        reported: false
-      })),
-      provider: "claude",
-      model: "claude-sonnet-4-6",
-      lastRoundAt: null
-    }
+    scout: (() => {
+      const areaMatchers = {
+        features: /^(po|pesquisa|produto)$|sol\s*po|sol$/i,
+        ux: /^(frontend|ui|revisor_ui)$|livia/i,
+        performance: /^(backend|performance)$|otto/i,
+        tech_debt: /^(arquiteto)$|arquiteto/i,
+        test_gaps: /^(qa|revisor_codigo)$|teo/i,
+        security: /^(seguranca|revisor_seguranca)$|hugo/i,
+        bugs: /^(infra|release)$|atlas|ravi/i,
+        docs: /^(prompts|revisor_metodo|docs)$|lia|vera/i
+      };
+      const usedKeys = new Set([pmSessionId || "", scoutSessionId || ""].filter(Boolean));
+      const pickAgentForArea = (area) => {
+        const rx = areaMatchers[area];
+        const exact = pool.find((a) => !usedKeys.has(a.key) && (rx.test(a.papel || "") || rx.test(a.name)));
+        if (exact) {
+          usedKeys.add(exact.key);
+          return exact;
+        }
+        const fallback = pool.find((a) => !usedKeys.has(a.key)) || pool.find((a) => a.key !== scoutSessionId) || pool[0] || null;
+        if (fallback) usedKeys.add(fallback.key);
+        return fallback;
+      };
+      const scoutAgent = pool.find((a) => a.key === scoutSessionId) || null;
+      return {
+        sessionId: scoutSessionId,
+        phase: status.loopState === "discovering" ? "reviewing" : "idle",
+        rounds: 2,
+        lenses: DISCOVERY_AREAS.map((area) => {
+          const assigned = pickAgentForArea(area);
+          const sid = (assigned == null ? void 0 : assigned.key) || `scout-${status.projectId}-${area}`;
+          const sess = sessions.get(sid);
+          const isRunning = (sess == null ? void 0 : sess.status) === "running" || status.loopState === "discovering";
+          return {
+            area,
+            sessionId: sid,
+            status: isRunning ? "running" : "idle",
+            active: isRunning,
+            reported: false
+          };
+        }),
+        provider: (scoutAgent == null ? void 0 : scoutAgent.provider) || "nexusmind_antigravity",
+        model: (scoutAgent == null ? void 0 : scoutAgent.model) || "gemini-2.5-flash",
+        lastRoundAt: null
+      };
+    })()
   };
   return {
     f,
@@ -50230,6 +50261,10 @@ function createFloor3DComponent(ctx) {
           }
         );
         if (directWorker) return directWorker.key;
+        const directArea = scene.agents.find(
+          (a) => a.role === "area" && !usedFigures.has(a.key) && a.sessionId === ag.agentKey
+        );
+        if (directArea) return directArea.key;
         while (areaCursor < areaFigures.length) {
           const candidate = areaFigures[areaCursor++];
           if (!usedFigures.has(candidate)) return candidate;
@@ -50343,8 +50378,11 @@ function createFloor3DComponent(ctx) {
           onMouseLeave: () => setHoveredKey((cur) => cur === ag.agentKey ? null : cur),
           onClick: () => {
             var _a2;
-            setSelectedKey(ag.agentKey);
-            (_a2 = stageRef.current) == null ? void 0 : _a2.select(ag.agentKey);
+            const fig = scene.agents.find(
+              (a) => a.sessionId === ag.agentKey || a.key === ag.agentKey
+            );
+            setSelectedKey(fig ? fig.key : ag.agentKey);
+            (_a2 = stageRef.current) == null ? void 0 : _a2.select(fig ? fig.key : ag.agentKey);
           }
         },
         h(
@@ -50865,17 +50903,18 @@ function createFloor3DComponent(ctx) {
           var _a2, _b2, _c;
           const focusKey = selectedKey || hoveredKey;
           if (!focusKey) return null;
-          const sceneAg = scene.agents.find((a) => a.key === focusKey) || null;
-          const matchedTenantAg = tenantAgents.find((a) => a.agentKey === focusKey || a.name === focusKey) || ((sceneAg == null ? void 0 : sceneAg.role) === "pm" ? tenantAgents.find((a) => a.papel === "coo" || /bento|coo/i.test(a.name)) : (sceneAg == null ? void 0 : sceneAg.role) === "scout" ? tenantAgents.find((a) => a.papel === "oraculo" || /oraculo|oráculo|scout/i.test(a.name)) : null) || null;
+          const sceneAg = scene.agents.find((a) => a.key === focusKey || a.sessionId === focusKey) || null;
+          const matchedTenantAg = ((sceneAg == null ? void 0 : sceneAg.sessionId) ? tenantAgents.find((a) => a.agentKey === sceneAg.sessionId) : null) || tenantAgents.find((a) => a.agentKey === focusKey || a.name === focusKey) || ((sceneAg == null ? void 0 : sceneAg.role) === "pm" ? tenantAgents.find((a) => a.papel === "coo" || /bento|coo/i.test(a.name)) : (sceneAg == null ? void 0 : sceneAg.role) === "scout" ? tenantAgents.find((a) => a.papel === "oraculo" || /oraculo|oráculo|scout/i.test(a.name)) : null) || null;
           const matchedLive = matchedTenantAg ? liveCrew.find((c) => {
             var _a3;
             return c.key === matchedTenantAg.agentKey || matchedTenantAg.pubkey && ((_a3 = c.pubkey) == null ? void 0 : _a3.toLowerCase()) === matchedTenantAg.pubkey.toLowerCase();
-          }) : liveCrew.find((c) => c.key === focusKey) || null;
+          }) : liveCrew.find((c) => c.key === focusKey || (sceneAg == null ? void 0 : sceneAg.sessionId) && c.key === sceneAg.sessionId) || null;
           const liveTurn = matchedTenantAg ? turnOf(matchedTenantAg) : null;
-          const displayTitle = (matchedTenantAg == null ? void 0 : matchedTenantAg.name) || ((sceneAg == null ? void 0 : sceneAg.role) === "pm" ? `${((_a2 = status.tenantManifest) == null ? void 0 : _a2.coo) || "COO"} (${empresaNome})` : (sceneAg == null ? void 0 : sceneAg.role) === "scout" ? "Oráculo · Scout" : ((_b2 = sceneAg == null ? void 0 : sceneAg.card) == null ? void 0 : _b2.item.title) || (sceneAg == null ? void 0 : sceneAg.area) || focusKey);
+          const areaTag = (sceneAg == null ? void 0 : sceneAg.area) ? `Mirante · ${AREA_LABEL[sceneAg.area]}` : null;
+          const displayTitle = (matchedTenantAg == null ? void 0 : matchedTenantAg.name) || ((sceneAg == null ? void 0 : sceneAg.role) === "pm" ? `${((_a2 = status.tenantManifest) == null ? void 0 : _a2.coo) || "COO"} (${empresaNome})` : (sceneAg == null ? void 0 : sceneAg.role) === "scout" ? "Oráculo · Scout" : ((_b2 = sceneAg == null ? void 0 : sceneAg.card) == null ? void 0 : _b2.item.title) || areaTag || focusKey);
           const statusText = liveTurn ? "Respondendo" : (matchedTenantAg == null ? void 0 : matchedTenantAg.running) || (sceneAg == null ? void 0 : sceneAg.status) === "working" ? "Em execução" : (matchedTenantAg == null ? void 0 : matchedTenantAg.inBuzz) ? "Disponível" : "Ocioso";
           const statusTone = liveTurn ? liveTurn.state === "error" ? "failed" : "running" : (matchedTenantAg == null ? void 0 : matchedTenantAg.inBuzz) ? "done" : "idle";
-          const stepLabel = (liveTurn == null ? void 0 : liveTurn.stepLabel) || ((_c = sceneAg == null ? void 0 : sceneAg.card) == null ? void 0 : _c.item.title) || (sceneAg == null ? void 0 : sceneAg.progress) || (matchedTenantAg == null ? void 0 : matchedTenantAg.funcao) || "Aguardando tarefa";
+          const stepLabel = (liveTurn == null ? void 0 : liveTurn.stepLabel) || ((_c = sceneAg == null ? void 0 : sceneAg.card) == null ? void 0 : _c.item.title) || (areaTag && (matchedTenantAg == null ? void 0 : matchedTenantAg.funcao) ? `${areaTag} — ${matchedTenantAg.funcao}` : areaTag) || (matchedTenantAg == null ? void 0 : matchedTenantAg.funcao) || (sceneAg == null ? void 0 : sceneAg.progress) || "Aguardando tarefa";
           const modelLabel = `${(matchedLive == null ? void 0 : matchedLive.provider) || (matchedTenantAg == null ? void 0 : matchedTenantAg.provider) || "buzz"} · ${(matchedLive == null ? void 0 : matchedLive.model) || (matchedTenantAg == null ? void 0 : matchedTenantAg.model) || (sceneAg == null ? void 0 : sceneAg.model) || "padrão"}`;
           return h(
             "div",
@@ -59658,7 +59697,7 @@ const PINNED_HOST_COMMANDS = Object.freeze([
   {
     id: "orgfy-kpis",
     scriptPath: "ferramentas/esteira/gerar_kpis_esteira.py",
-    sha256: "2d063aa497b563d4eb8a6a13c0c500e2076fb645020bc17bf370993a0849dc7a"
+    sha256: "b3879e5999f173a13e7dae89566cd61382e4a63c48daddefbc93869bba744e62"
   },
   {
     id: "orgfy-controle-write",
@@ -60614,36 +60653,60 @@ function createFactoryAppComponent(ctx, opts = {}) {
     );
     const wakeAgentInBuzz = React.useCallback(
       async (opts2) => {
-        var _a2, _b2;
-        const fallbackCanal = ((_a2 = status.tenantManifest) == null ? void 0 : _a2.canal) || ((_b2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _b2.canal) || null;
+        const fallbackCanal = resolveActiveChannelId(tenant);
         return sendBuzzChatMessageOrWake(ctx, {
           ...opts2,
           fallbackChannelId: fallbackCanal
         });
       },
-      [status.tenantManifest, holding, tenant]
+      [resolveActiveChannelId, tenant]
     );
     const handleRunScoutNow = React.useCallback(async () => {
+      var _a2, _b2;
       const scoutTenant = tenantAgents.find((a) => a.papel === "oraculo" || /or[aá]culo|scout/i.test(a.name));
       const scoutLive = liveCrew.find((a) => a.key === (scoutTenant == null ? void 0 : scoutTenant.agentKey) || /or[aá]culo|scout/i.test(a.name));
       const agentKey = (scoutTenant == null ? void 0 : scoutTenant.agentKey) || (scoutLive == null ? void 0 : scoutLive.key);
+      const scoutName = (scoutTenant == null ? void 0 : scoutTenant.name) || (scoutLive == null ? void 0 : scoutLive.name) || "OrgFy Oráculo";
       if (!agentKey) {
         notify2(`Nenhum agente Oráculo/Scout encontrado em ${tenant}.`);
         return;
       }
+      const targetChannelId = resolveActiveChannelId(tenant);
+      const isBoard = tenant === "board";
+      const councilHandles = ((holding == null ? void 0 : holding.conselho) || []).map((c) => c.responsavel).filter((n) => n && n.toLowerCase() !== scoutName.toLowerCase()).map((n) => `@${n}`);
+      const uniqueCouncilHandles = Array.from(new Set(councilHandles));
+      const cooName = ((_a2 = status.tenantManifest) == null ? void 0 : _a2.coo) || "OrgFy Bento";
+      const promptText = isBoard ? `@${scoutName} [ORGFY SCOUT ONE-SHOT · board]
+Audite o portfólio e o workspace atual contra o Canvas/Visão da Holding, identifique os gaps de maior impacto (segurança, testes, UX, dívida técnica ou governança) e proponha os próximos cards/pautas canônicos.
+
+**Regra de Reunião:** responda obrigatoriamente **aqui neste canal do Conselho** (não em DM) e marque (\`@\`) os conselheiros competentes (${uniqueCouncilHandles.join(", ") || "@OrgFy Bento, @OrgFy Bento Arquiteto, @OrgFy Vera, @OrgFy Val, @OrgFy Iris"}) para deliberarem e darem continuidade à reunião.` : `@${scoutName} [ORGFY SCOUT ONE-SHOT · ${tenant}]
+Audite o workspace atual contra o Canvas/Visão de ${((_b2 = status.tenantManifest) == null ? void 0 : _b2.nome) || tenant}, identifique os gaps de maior impacto (segurança, testes, UX ou dívida técnica) e proponha os próximos cards canônicos.
+
+**Regra de Canal:** responda obrigatoriamente **aqui neste canal da empresa** (não em DM) e marque \`@${cooName}\` (COO) e os especialistas responsáveis para triagem e continuidade imediata.`;
       setRunningScout(true);
       try {
         const res = await wakeAgentInBuzz({
           agentKey,
-          agentName: (scoutTenant == null ? void 0 : scoutTenant.name) || (scoutLive == null ? void 0 : scoutLive.name) || "Oráculo",
+          agentName: scoutName,
           pubkey: (scoutTenant == null ? void 0 : scoutTenant.pubkey) || (scoutLive == null ? void 0 : scoutLive.pubkey),
-          text: `[ORGFY SCOUT ONE-SHOT · ${tenant}] Audite o workspace atual contra o Canvas/Visão da empresa, identifique gaps de maior impacto (segurança, testes, UX ou dívida técnica) e proponha os próximos cards canônicos.`
+          channelId: targetChannelId,
+          preferDm: false,
+          postInChat: true,
+          text: promptText
         });
-        notify2(res.ok ? `${(scoutTenant == null ? void 0 : scoutTenant.name) || (scoutLive == null ? void 0 : scoutLive.name) || "Oráculo"} acionado via ctx.agents.wake.` : `Falha ao acionar Oráculo: ${res.error}`);
+        if (res.ok && res.channel && openSideTabRef.current) {
+          try {
+            openSideTabRef.current({ channelId: res.channel }, { keep: true });
+          } catch {
+          }
+        }
+        notify2(
+          res.ok ? `${scoutName} acionado no canal de ${isBoard ? "Conselho" : tenant} ✓` : `Falha ao acionar Oráculo: ${res.error}`
+        );
       } finally {
         setRunningScout(false);
       }
-    }, [tenantAgents, liveCrew, tenant, wakeAgentInBuzz, notify2]);
+    }, [tenantAgents, liveCrew, tenant, resolveActiveChannelId, holding, status.tenantManifest, wakeAgentInBuzz, notify2]);
     React.useEffect(() => {
       var _a2, _b2;
       const key = `orgfy_automations_${tenant}`;
