@@ -134,6 +134,8 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     const [automations, setAutomations] = React.useState<OrgfyAutomation[]>(() => buildDefaultAutomations("orgfy", "OrgFy Core"));
     const [selectedAutomationId, setSelectedAutomationId] = React.useState<string>("rotina-ceo-orgfy");
     const [runningAutomationId, setRunningAutomationId] = React.useState<string | null>(null);
+    const [cooUpdatesExpanded, setCooUpdatesExpanded] = React.useState<boolean>(true);
+    const [sendingCooUpdates, setSendingCooUpdates] = React.useState<boolean>(false);
     const [compactDensity, setCompactDensity] = React.useState<boolean>(false);
     const [expandedProjects, setExpandedProjects] = React.useState<Record<string, boolean>>({ orgfy: true });
     const [showAllByProject, setShowAllByProject] = React.useState<Record<string, boolean>>({});
@@ -897,7 +899,9 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         } catch {}
         try {
           const host = (ctx as any)?.host;
-          if (typeof host?.writeFile === "function") {
+          if (typeof host?.runCommand === "function") {
+            await host.runCommand("orgfy-controle-write", JSON.stringify({ kind: "automacoes", tenant, automations: list }));
+          } else if (typeof host?.writeFile === "function") {
             const targetPath = `/Users/heltonfraga/.buzz/REPOS/orgfy/.esteira/estado/automacoes-${tenant}.json`;
             await host.writeFile(targetPath, JSON.stringify({ tenant, updatedAt: new Date().toISOString(), automations: list }, null, 2));
           }
@@ -1020,6 +1024,61 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         }
       },
       [notify]
+    );
+
+    const handleSendUpdatesToCoo = React.useCallback(
+      async (entries: Array<{ badge: string; title: string; subtitle?: string; item?: FactoryWorkItem }>) => {
+        const agentsApi = (ctx as any)?.agents;
+        const cooName = status.tenantManifest?.coo || "OrgFy Bento";
+        const cooAg =
+          tenantAgents.find((a) => a.papel === "coo" || a.name.toLowerCase() === cooName.toLowerCase()) ||
+          liveCrew.find((a) => a.name.toLowerCase().includes("bento"));
+        const agentKey = (cooAg && "agentKey" in cooAg ? cooAg.agentKey : cooAg?.key) || "";
+        if (typeof agentsApi?.wake !== "function" || !agentKey) {
+          notify(`Não foi possível acordar ${cooName} (ctx.agents.wake indisponível).`);
+          return;
+        }
+        const canal = status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === tenant)?.canal || undefined;
+        const lines = entries.map((e) => `- [${e.badge}] ${e.title}${e.subtitle ? ` (${e.subtitle})` : ""}`).join("\n");
+        setSendingCooUpdates(true);
+        try {
+          await agentsApi.wake(agentKey, {
+            ...(canal ? { channelId: canal } : {}),
+            text: `[ORGFY FACTORY UPDATES · ${tenant}]\n${entries.length} atualização(ões) recente(s):\n${lines}`,
+          });
+          notify(`${entries.length} update(s) enviado(s) para ${cooName}.`);
+        } catch (err: any) {
+          notify(`Falha ao enviar updates ao COO: ${err?.message || err}`);
+        } finally {
+          setSendingCooUpdates(false);
+        }
+      },
+      [tenant, status.tenantManifest, holding, tenantAgents, liveCrew, notify]
+    );
+
+    const handleSendDiffReview = React.useCallback(
+      async (comments: Array<{ file: string; line: number; lineText: string; comment: string }>, item: FactoryWorkItem, executorName?: string) => {
+        const agentsApi = (ctx as any)?.agents;
+        const targetName = executorName || status.tenantManifest?.coo || "OrgFy Bento";
+        const targetAg =
+          tenantAgents.find((a) => a.name.toLowerCase().includes(targetName.toLowerCase())) ||
+          liveCrew.find((a) => a.name.toLowerCase().includes(targetName.toLowerCase()));
+        const agentKey = (targetAg && "agentKey" in targetAg ? targetAg.agentKey : targetAg?.key) || "";
+        if (typeof agentsApi?.wake !== "function" || !agentKey) {
+          notify(`Comentários prontos, mas ctx.agents.wake indisponível para ${targetName}.`);
+          return;
+        }
+        const canal = status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === tenant)?.canal || undefined;
+        const body = comments
+          .map((c, idx) => `${idx + 1}. \`${c.file}:${c.line}\` — ${c.comment}\n   > ${c.lineText.trim().slice(0, 100)}`)
+          .join("\n");
+        await agentsApi.wake(agentKey, {
+          ...(canal ? { channelId: canal } : {}),
+          text: `[ORGFY DIFF REVIEW · #${item.id.slice(0, 8)} ${item.title}]\nAjustes solicitados em ${comments.length} linha(s):\n${body}`,
+        });
+        notify(`Revisão com ${comments.length} comentário(s) ancorado(s) enviada para ${targetName}.`);
+      },
+      [tenant, status.tenantManifest, holding, tenantAgents, liveCrew, notify]
     );
 
     // CEO Master dinâmico: respeita session.mainAgent do Buzz se configurado, senão board.json (OrgFy Iris)
@@ -1365,6 +1424,10 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                     setScorecardView,
                     scorecardDays,
                     setScorecardDays,
+                    cooUpdatesExpanded,
+                    onToggleCooUpdates: () => setCooUpdatesExpanded((v) => !v),
+                    onSendUpdatesToCoo: handleSendUpdatesToCoo,
+                    sendingCooUpdates,
                   })
                 : tab === "board" || tab === "floor"
                 ? renderFactoryBoardAndFloor({
@@ -1512,6 +1575,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         onOpenAgentDm: handleOpenAgentDmInBuzz,
         onSessionAction: handleAgentSessionAction,
         onToggleChecklistStep: handleToggleChecklistStep,
+        onSendDiffReview: handleSendDiffReview,
         onClose: () => setSelectedItem(null),
       }),
       renderAgentProfileDrawer({

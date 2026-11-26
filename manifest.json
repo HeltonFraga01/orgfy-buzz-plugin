@@ -73,6 +73,13 @@
         "program": "python3",
         "args": ["ferramentas/esteira/goose_loop_radar.py"],
         "maxOutputBytes": 131072
+      },
+      {
+        "id": "orgfy-controle-write",
+        "program": "python3",
+        "args": ["ferramentas/esteira/controle_fabrica_write.py"],
+        "maxInputBytes": 65536,
+        "maxOutputBytes": 16384
       }
     ]
   }

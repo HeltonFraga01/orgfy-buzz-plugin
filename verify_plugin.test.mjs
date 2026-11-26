@@ -1829,4 +1829,54 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     assert.ok(yaml.includes("cron:"), "YAML exportado deve incluir expressão cron");
     assert.ok(yaml.includes("OrgFy Oráculo"), "YAML exportado deve incluir agente alvo");
   });
+
+  test("Onda 2 (v17.6): persistência real via host.runCommand orgfy-controle-write, Feed de Updates do COO, Chat Vivo (registerLink/Preview/CodeBlock) e Diff Review ancorado", async () => {
+    const bundle = fs.readFileSync(path.resolve(__dirname, "plugin.js"), "utf8");
+    const manifest = JSON.parse(fs.readFileSync(path.resolve(__dirname, "manifest.json"), "utf8"));
+    assert.ok(
+      (manifest.host?.commands || []).some((c) => c.id === "orgfy-controle-write" && c.maxInputBytes >= 16384),
+      "manifest.json deve declarar comando seguro orgfy-controle-write com maxInputBytes"
+    );
+    assert.ok(bundle.includes("data-coo-updates-feed"), "Feed de Updates do COO deve estar no bundle");
+    assert.ok(bundle.includes("data-orgfy-live-link"), "Chat Vivo registerLink deve estar no bundle");
+    assert.ok(bundle.includes("data-orgfy-link-preview"), "Chat Vivo registerLinkPreview deve estar no bundle");
+    assert.ok(bundle.includes("data-orgfy-codeblock-card"), "Chat Vivo registerCodeBlock deve estar no bundle");
+    assert.ok(bundle.includes("data-diff-review-bar"), "Barra de revisão ancorada no Diff deve estar no bundle");
+    assert.ok(bundle.includes("data-diff-anchor-composer"), "Compositor de comentário por linha no Diff deve estar no bundle");
+
+    // 1. writeTenantControl via host.runCommand (caminho real do Buzz Desktop sem host.writeFile)
+    let capturedStdin = "";
+    const buzzDesktopCtx = {
+      host: {
+        runCommand: async (id, input) => {
+          assert.equal(id, "orgfy-controle-write");
+          capturedStdin = String(input || "");
+          const parsed = JSON.parse(capturedStdin);
+          return JSON.stringify({ ok: true, path: "/tmp/controle-orgfy.json", control: parsed.control });
+        },
+      },
+    };
+    const resCmd = await orgfyMod.writeTenantControl(buzzDesktopCtx, "orgfy", {
+      limits: { prsAbertos: 10 },
+      mergePolicy: "strict",
+    });
+    assert.equal(resCmd.ok, true);
+    assert.equal(resCmd.control.limits.prsAbertos, 10);
+    assert.ok(capturedStdin.includes("\"prsAbertos\":10"));
+
+    // 2. Chat Vivo parser para buzz://pr e buzz://issue
+    const p1 = orgfyMod.parseBuzzOrgfyEntityUrl("buzz://pr?id=abcdef123456&owner=7fd58ab9&d=orgfy");
+    assert.equal(p1?.kind, "pr");
+    assert.equal(p1?.id, "abcdef123456");
+    assert.equal(p1?.dtag, "orgfy");
+    assert.equal(orgfyMod.parseBuzzOrgfyEntityUrl("https://example.com"), null);
+
+    // 3. Feed de Updates do COO gera entradas para killSwitch + itens merged/failed
+    const st = orgfyMod.buildEmptyFactoryStatus("orgfy");
+    st.killSwitch = true;
+    st.recent = [{ id: "12345678", title: "PR #11 fix", workKey: "pr:11", stage: "merged", step: "done", type: "bug", attempts: 1, sessionId: null, activeSessionId: null, reason: null, note: null, updatedAt: Date.now() }];
+    const feed = orgfyMod.buildCooUpdatesFeed(st, "orgfy");
+    assert.ok(feed.some((e) => e.kind === "paused"));
+    assert.ok(feed.some((e) => e.kind === "merged" && e.title.includes("PR #11")));
+  });
 }

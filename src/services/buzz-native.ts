@@ -15,11 +15,13 @@ import { createAgentOrgfyTabComponent } from "../components/AgentOrgfyTab";
 import { createOrgfyPipelineAttentionSource } from "./orgfy-attention-source";
 import { createOrgfyMessageActionComponent } from "../components/OrgfyMessageActionModal";
 import { createOrgfyComposerPickerComponent } from "../components/OrgfyComposerPicker";
+import { registerOrgfyLiveChatRenderers } from "../components/OrgfyLiveChatRenderers";
 
 export interface BuzzNativeState {
   relayConnected: boolean;
   conversationRegistered: boolean;
   composerToolRegistered: boolean;
+  liveChatRenderersRegistered: boolean;
   sidebarRegistered: boolean;
   shortcutsRegistered: boolean;
   attentionSourceRegistered: boolean;
@@ -31,6 +33,7 @@ let lastNativeState: BuzzNativeState = {
   relayConnected: false,
   conversationRegistered: false,
   composerToolRegistered: false,
+  liveChatRenderersRegistered: false,
   sidebarRegistered: false,
   shortcutsRegistered: false,
   attentionSourceRegistered: false,
@@ -115,6 +118,7 @@ export function registerBuzzNativeIntegrations(ctx: Context | any): BuzzNativeSt
     relayConnected: false,
     conversationRegistered: false,
     composerToolRegistered: false,
+    liveChatRenderersRegistered: false,
     sidebarRegistered: false,
     shortcutsRegistered: false,
     attentionSourceRegistered: false,
@@ -273,6 +277,12 @@ export function registerBuzzNativeIntegrations(ctx: Context | any): BuzzNativeSt
         component: OrgfyComposerPicker,
       });
       state.composerToolRegistered = true;
+      state.conversationRegistered = true;
+    }
+
+    const liveChat = registerOrgfyLiveChatRenderers(ctx);
+    if (liveChat.linkRegistered || liveChat.linkPreviewRegistered || liveChat.codeBlockRegistered) {
+      state.liveChatRenderersRegistered = true;
       state.conversationRegistered = true;
     }
   } catch (err) {

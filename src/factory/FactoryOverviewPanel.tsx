@@ -5,6 +5,7 @@ import type { FactoryStatusPayload, FactoryWorkItem } from "./factory-adapter";
 import type { BuzzLiveTelemetrySnapshot, LiveAgentTurn } from "./buzz-live-telemetry";
 import { PT_BR } from "../i18n/pt-BR";
 import { renderPipelineDiagram } from "./PipelineDiagram";
+import { renderCooUpdatesFeedCard, type CooUpdateEntry } from "./FactoryCooUpdatesFeed";
 
 export interface FactoryOverviewProps {
   h: any;
@@ -32,6 +33,10 @@ export interface FactoryOverviewProps {
   setScorecardView: (v: "builders" | "reviewers" | "pairs") => void;
   scorecardDays: 7 | 30 | 90;
   setScorecardDays: (d: 7 | 30 | 90) => void;
+  cooUpdatesExpanded?: boolean;
+  onToggleCooUpdates?: () => void;
+  onSendUpdatesToCoo?: (entries: CooUpdateEntry[]) => void;
+  sendingCooUpdates?: boolean;
 }
 
 function fmtTokens(n: number | null | undefined): string {
@@ -303,6 +308,19 @@ export function renderFactoryOverviewPanel(props: FactoryOverviewProps) {
         )
       )
     ),
+
+    // ── FEED DE UPDATES PARA O COO (Print 4) ──
+    props.onToggleCooUpdates && props.onSendUpdatesToCoo &&
+      renderCooUpdatesFeedCard({
+        h,
+        tenant,
+        status,
+        expanded: Boolean(props.cooUpdatesExpanded),
+        onToggleExpanded: props.onToggleCooUpdates,
+        onSelectItem,
+        onSendUpdatesToCoo: props.onSendUpdatesToCoo,
+        sending: props.sendingCooUpdates,
+      }),
 
     // ── BLOCO 2: FÁBRICA DE SOFTWARE (Card dedicado) ──
     h(
