@@ -445,12 +445,16 @@ export function renderFactoryBoardAndFloor(props: BoardAndFloorProps) {
       : storeyFocus === "tower" && props.HoldingTower3D
         ? h(props.HoldingTower3D, {
             holding: props.holding,
+            status,
             liveCrew,
             telemetry: props.telemetry,
             activeTenant: tenant,
             onEnterFloor: (slug: string) => {
               props.onEnterTowerFloor?.(slug);
             },
+            onSelectItem,
+            onOpenAgentDm: (ag: any) => props.onOpenAgentDm?.(ag),
+            onOpenTurnInSideChat: (turn: LiveAgentTurn) => props.onOpenTurnInSideChat?.(turn),
             onOpenChannel: (slug: string) => props.onOpenChannelInBuzz?.(slug),
           })
         : props.isBoardTenant && props.Boardroom3D

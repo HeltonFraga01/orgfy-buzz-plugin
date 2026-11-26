@@ -1,9 +1,10 @@
-// Adaptado de CodeDen (MIT) commit b0b2a5a — Torre da Holding Cortexx / OrgFy (Visualização 3D Multi-Andares em Corte Isométrico)
-// - Cobertura: Sala do Conselho da Holding + Escritório Iris com holograma giratório
-// - Andares inferiores: Uma laje viva para cada subsidiária (OrgFy Core, Lumen IPTV, SaaS Tributário...)
-// - Elevador de Dados central com cápsulas luminosas subindo/descendo entre andares
-// - Esteiras animadas com pacotes de PR/cards trafegando em tempo real + avatares 3D reais
-// - Câmera cinematográfica com voo suave (lerp) ao clicar no andar + toggle Dia / Dark Factory
+// Adaptado de CodeDen (MIT) commit b0b2a5a — Torre da Holding Cortexx / OrgFy (Maquete Arquitetônica 3D Multi-Andares)
+// - Pódio arquitetônico + fachadas de vidro temperado com montantes de aço e marcadores externos 1F..4F
+// - Cobertura 4F: Sala do Conselho completa (tapete, mesa executiva com notebooks/mapa, cadeiras, telão KPI ao vivo,
+//   holograma giratório com feixes de comunicação para conselheiros ativos e plantas biófilas)
+// - Andares das Subsidiárias: estações completas (mesa, cadeira, monitor aceso, caneca), rack de servidores,
+//   telão de telemetria por andar e esteira ligada 100% a PRs/cards/turnos reais (zero cubos decorativos)
+// - Elevador panorâmico de dados: cápsulas representam turnos reais ativos no Buzz trafegando até o Conselho (clicáveis)
 
 import * as THREE from "three";
 import type { Context } from "@buzz/author";
@@ -12,9 +13,20 @@ import { Lights } from "./codeden-floor/floor/lights";
 import { Kit, colour, canvasOf } from "./codeden-floor/floor/kit";
 import type { Rgb } from "./codeden-floor/oklch";
 import type { HoldingControlPlaneSnapshot } from "../services/holding-service";
-import type { BuzzLiveTelemetrySnapshot } from "./buzz-live-telemetry";
+import type { FactoryStatusPayload, FactoryWorkItem } from "./factory-adapter";
+import type { BuzzLiveTelemetrySnapshot, LiveAgentTurn } from "./buzz-live-telemetry";
 import type { LiveCrewAgent } from "./FactoryBoardAndFloor";
 import { buildCustomAvatar3D, type Avatar3DHandle } from "./Avatar3DBuilder";
+
+export interface TowerLivePacket {
+  id: string;
+  label: string;
+  stage: "building" | "verifying" | "failed" | "intake" | "merged" | "turn";
+  detail: string;
+  floorSlug: string;
+  workItem?: FactoryWorkItem;
+  turn?: LiveAgentTurn;
+}
 
 export interface HoldingTowerFloorInfo {
   slug: string;
@@ -24,18 +36,39 @@ export interface HoldingTowerFloorInfo {
   agentesCount: number;
   workingCount: number;
   errorCount: number;
-  agents: Array<{ name: string; role?: string; picture?: string; status: "active" | "working" | "planned" | "error" }>;
+  openPrsCount: number;
+  openIssuesCount: number;
+  packets: TowerLivePacket[];
+  agents: Array<{
+    key?: string;
+    pubkey?: string;
+    name: string;
+    role?: string;
+    picture?: string;
+    status: "active" | "working" | "planned" | "error";
+    stepLabel?: string;
+    turn?: LiveAgentTurn;
+  }>;
 }
 
 export interface HoldingTower3DProps {
   holding?: HoldingControlPlaneSnapshot | null;
+  status?: FactoryStatusPayload;
   liveCrew: LiveCrewAgent[];
   telemetry?: BuzzLiveTelemetrySnapshot;
   activeTenant: string;
   onEnterFloor: (slug: string) => void;
+  onSelectItem?: (item: FactoryWorkItem) => void;
+  onOpenAgentDm?: (agent: { key?: string; pubkey?: string; name?: string }) => void;
+  onOpenTurnInSideChat?: (turn: LiveAgentTurn) => void;
   onOpenChannel?: (slug: string) => void;
   onOpenBoard?: (slug: string) => void;
 }
+
+type TowerSelection =
+  | { kind: "floor"; floor: HoldingTowerFloorInfo }
+  | { kind: "packet"; packet: TowerLivePacket; floor: HoldingTowerFloorInfo }
+  | { kind: "agent"; agent: HoldingTowerFloorInfo["agents"][number]; floor: HoldingTowerFloorInfo };
 
 function rgbToCss([r, g, b]: Rgb, alpha = 1): string {
   const rr = Math.round(Math.max(0, Math.min(1, r)) * 255);
@@ -44,21 +77,260 @@ function rgbToCss([r, g, b]: Rgb, alpha = 1): string {
   return alpha >= 1 ? `rgb(${rr}, ${gg}, ${bb})` : `rgba(${rr}, ${gg}, ${bb}, ${alpha})`;
 }
 
-function makeFloorSignTexture(kit: Kit, title: string, subtitle: string, accent: Rgb, isDark: boolean): THREE.CanvasTexture {
-  const c = canvasOf(512, 112);
+function stageColorRgb(stage: TowerLivePacket["stage"], p: FloorPalette): Rgb {
+  switch (stage) {
+    case "failed":
+      return [0.95, 0.3, 0.34];
+    case "verifying":
+      return [0.22, 0.84, 0.56];
+    case "building":
+    case "turn":
+      return p.accent.reviewer;
+    case "merged":
+      return [0.32, 0.78, 0.52];
+    default:
+      return [0.96, 0.72, 0.24];
+  }
+}
+
+/** Cria telão 3D na parede de fundo de cada andar com métricas reais da empresa/Conselho. */
+function makeFloorWallScreenTexture(
+  kit: Kit,
+  floorNum: number,
+  floor: HoldingTowerFloorInfo,
+  accent: Rgb,
+  status?: FactoryStatusPayload
+): THREE.CanvasTexture {
+  const c = canvasOf(768, 224);
   const g = c.getContext("2d")!;
-  g.fillStyle = isDark ? "#11151d" : "#1d222c";
+  const accCss = rgbToCss(accent);
+
+  g.fillStyle = "#0e121a";
+  g.fillRect(0, 0, c.width, c.height);
+
+  // Grid sutil
+  g.strokeStyle = "rgba(255,255,255,0.04)";
+  g.lineWidth = 1;
+  for (let x = 24; x < c.width; x += 48) {
+    g.beginPath();
+    g.moveTo(x, 0);
+    g.lineTo(x, c.height);
+    g.stroke();
+  }
+
+  // Barra lateral + topo
+  g.fillStyle = accCss;
+  g.fillRect(0, 0, 10, c.height);
+  g.fillStyle = "rgba(255,255,255,0.04)";
+  g.fillRect(10, 0, c.width - 10, 56);
+  g.fillStyle = accCss;
+  g.fillRect(10, 54, c.width - 10, 3);
+
+  g.fillStyle = "#f8fafc";
+  g.font = "700 26px -apple-system, BlinkMacSystemFont, sans-serif";
+  g.fillText(`${floorNum}F · ${floor.nome.toUpperCase().slice(0, 26)}`, 26, 37);
+
+  // Pill de estado
+  const pillText = floor.errorCount > 0 ? `${floor.errorCount} ALERTA` : floor.workingCount > 0 ? `${floor.workingCount} AO VIVO` : floor.estagio.toUpperCase();
+  g.fillStyle = rgbToCss(accent, 0.18);
+  g.fillRect(c.width - 168, 12, 148, 30);
+  g.strokeStyle = accCss;
+  g.lineWidth = 1.5;
+  g.strokeRect(c.width - 168, 12, 148, 30);
+  g.fillStyle = accCss;
+  g.font = "700 14px ui-monospace, Menlo, monospace";
+  g.textAlign = "center";
+  g.fillText(pillText.slice(0, 14), c.width - 94, 32);
+  g.textAlign = "left";
+
+  // 3 KPIs reais no painel do andar
+  const cards = floor.isBoard
+    ? [
+        { k: "CONSELHEIROS", v: String(floor.agentesCount), sub: `${floor.workingCount} em turno` },
+        { k: "MERGES (7D)", v: String(status?.stats?.merged7d ?? 0), sub: "holding cortexx" },
+        { k: "GASTO HOJE", v: `$${(status?.spendToday?.usd ?? 0).toFixed(2)}`, sub: "finops ao vivo" },
+      ]
+    : [
+        { k: "AGENTES", v: String(floor.agentesCount), sub: `${floor.workingCount} ativos agora` },
+        { k: "ESTEIRA", v: String(floor.packets.length), sub: floor.packets.length > 0 ? "itens circulando" : "fila livre" },
+        { k: "PRS / ISSUES", v: `${floor.openPrsCount}/${floor.openIssuesCount}`, sub: floor.estagio },
+      ];
+
+  cards.forEach((card, idx) => {
+    const bx = 26 + idx * 242;
+    const by = 74;
+    const bw = 226;
+    const bh = 128;
+    g.fillStyle = "rgba(255,255,255,0.035)";
+    g.fillRect(bx, by, bw, bh);
+    g.strokeStyle = "rgba(255,255,255,0.09)";
+    g.lineWidth = 1.5;
+    g.strokeRect(bx, by, bw, bh);
+
+    g.fillStyle = "#94a3b8";
+    g.font = "700 13px ui-monospace, Menlo, monospace";
+    g.fillText(card.k, bx + 16, by + 28);
+
+    g.fillStyle = "#f8fafc";
+    g.font = "700 42px ui-monospace, Menlo, monospace";
+    g.fillText(card.v, bx + 16, by + 80);
+
+    g.fillStyle = accCss;
+    g.font = "500 14px -apple-system, sans-serif";
+    g.fillText(card.sub.slice(0, 22), bx + 16, by + 110);
+  });
+
+  return kit.canvasTexture(c);
+}
+
+/** Cria plaquinha externa 1F / 2F / 3F / 4F montada na coluna frontal direita da Torre. */
+function makeFloorBadgeTexture(kit: Kit, label: string, accent: Rgb): THREE.CanvasTexture {
+  const c = canvasOf(128, 72);
+  const g = c.getContext("2d")!;
+  g.fillStyle = "#0f131b";
+  g.fillRect(0, 0, c.width, c.height);
+  g.strokeStyle = rgbToCss(accent);
+  g.lineWidth = 6;
+  g.strokeRect(4, 4, c.width - 8, c.height - 8);
+  g.fillStyle = "#f8fafc";
+  g.font = "700 38px ui-monospace, Menlo, monospace";
+  g.textAlign = "center";
+  g.textBaseline = "middle";
+  g.fillText(label, c.width / 2, c.height / 2 + 2);
+  return kit.canvasTexture(c);
+}
+
+/** Cria textura de tela acesa de monitor nas estações de trabalho. */
+function makeDeskScreenTexture(kit: Kit, accent: Rgb, seed: number): THREE.CanvasTexture {
+  const c = canvasOf(128, 80);
+  const g = c.getContext("2d")!;
+  g.fillStyle = "#0b1120";
   g.fillRect(0, 0, c.width, c.height);
   g.fillStyle = rgbToCss(accent);
-  g.fillRect(0, 0, 12, c.height);
-  g.fillRect(12, c.height - 8, c.width - 12, 8);
-  g.fillStyle = "#f8fafc";
-  g.font = "700 32px -apple-system, BlinkMacSystemFont, sans-serif";
-  g.fillText(title.toUpperCase().slice(0, 22), 28, 48);
-  g.fillStyle = "#94a3b8";
-  g.font = "600 18px ui-monospace, Menlo, monospace";
-  g.fillText(subtitle.slice(0, 34), 28, 82);
+  g.fillRect(8, 10, 42, 6);
+  g.fillStyle = "rgba(148,163,184,0.55)";
+  for (let row = 0; row < 5; row += 1) {
+    const w = 34 + ((seed * 23 + row * 19) % 72);
+    g.fillRect(8, 22 + row * 10, Math.min(110, w), 5);
+  }
   return kit.canvasTexture(c);
+}
+
+/** Cria planta arquitetônica biófila no estilo CodeDen. */
+function buildPlantProp(kit: Kit, p: FloorPalette, matSteel: THREE.Material): THREE.Group {
+  const g = new THREE.Group();
+  const pot = new THREE.Mesh(kit.own(new THREE.CylinderGeometry(0.22, 0.16, 0.36, 12)), matSteel);
+  pot.position.y = 0.18;
+  pot.castShadow = true;
+  g.add(pot);
+  const leafA = kit.matte(p.lamp.green, { roughness: 0.72 });
+  const leafB = kit.matte([p.lamp.green[0] * 0.76, p.lamp.green[1] * 0.76, p.lamp.green[2] * 0.76], { roughness: 0.76 });
+  [
+    [0, 0.64, 0, 0.21],
+    [-0.12, 0.5, 0.09, 0.16],
+    [0.12, 0.52, -0.08, 0.17],
+    [0.08, 0.48, 0.11, 0.15],
+  ].forEach(([x, y, z, r], i) => {
+    const f = new THREE.Mesh(kit.own(new THREE.DodecahedronGeometry(r, 0)), i % 2 === 0 ? leafA : leafB);
+    f.position.set(x, y, z);
+    f.castShadow = true;
+    g.add(f);
+  });
+  return g;
+}
+
+/** Constrói estação de trabalho completa (mesa de madeira, pernas de aço, monitor aceso, teclado, caneca e cadeira). */
+function buildWorkstationUnit(
+  kit: Kit,
+  matWood: THREE.Material,
+  matSteel: THREE.Material,
+  matChrome: THREE.Material,
+  matLeather: THREE.Material,
+  matPaper: THREE.Material,
+  screenMat: THREE.Material
+): THREE.Group {
+  const g = new THREE.Group();
+
+  // Tampo + pernas
+  const top = new THREE.Mesh(kit.own(new THREE.BoxGeometry(1.06, 0.06, 0.62)), matWood);
+  top.position.set(0, 0.62, 0.38);
+  top.castShadow = true;
+  top.receiveShadow = true;
+  g.add(top);
+
+  for (const lx of [-0.46, 0.46]) {
+    const leg = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.05, 0.6, 0.54)), matSteel);
+    leg.position.set(lx, 0.3, 0.38);
+    leg.castShadow = true;
+    g.add(leg);
+  }
+
+  // Monitor inclinado voltado para o agente (em -z)
+  const stand = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.08, 0.15, 0.06)), matChrome);
+  stand.position.set(0, 0.72, 0.52);
+  g.add(stand);
+
+  const bezel = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.54, 0.32, 0.04)), matSteel);
+  bezel.position.set(0, 0.88, 0.52);
+  bezel.castShadow = true;
+  g.add(bezel);
+
+  const display = new THREE.Mesh(kit.own(new THREE.PlaneGeometry(0.48, 0.26)), screenMat);
+  display.position.set(0, 0.88, 0.498);
+  display.rotation.y = Math.PI;
+  g.add(display);
+
+  // Teclado + caneca
+  const kb = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.34, 0.018, 0.11)), matSteel);
+  kb.position.set(-0.04, 0.66, 0.28);
+  g.add(kb);
+
+  const mug = new THREE.Mesh(kit.own(new THREE.CylinderGeometry(0.036, 0.032, 0.075, 10)), matPaper);
+  mug.position.set(0.36, 0.69, 0.28);
+  g.add(mug);
+
+  // Cadeira ergonômica atrás da mesa (em z = -0.14)
+  const base = new THREE.Mesh(kit.own(new THREE.CylinderGeometry(0.2, 0.22, 0.035, 12)), matChrome);
+  base.position.set(0, 0.018, -0.14);
+  g.add(base);
+  const stem = new THREE.Mesh(kit.own(new THREE.CylinderGeometry(0.032, 0.038, 0.3, 10)), matSteel);
+  stem.position.set(0, 0.18, -0.14);
+  g.add(stem);
+  const seat = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.44, 0.07, 0.42)), matLeather);
+  seat.position.set(0, 0.35, -0.14);
+  seat.castShadow = true;
+  g.add(seat);
+  const back = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.42, 0.46, 0.07)), matLeather);
+  back.position.set(0, 0.58, -0.32);
+  back.castShadow = true;
+  g.add(back);
+
+  return g;
+}
+
+/** Constrói cadeira executiva para a Cobertura do Conselho. */
+function buildBoardChair(
+  kit: Kit,
+  matLeather: THREE.Material,
+  matSteel: THREE.Material,
+  matChrome: THREE.Material
+): THREE.Group {
+  const chair = new THREE.Group();
+  const base = new THREE.Mesh(kit.own(new THREE.CylinderGeometry(0.21, 0.24, 0.035, 14)), matChrome);
+  base.position.y = 0.018;
+  chair.add(base);
+  const stem = new THREE.Mesh(kit.own(new THREE.CylinderGeometry(0.035, 0.04, 0.32, 10)), matSteel);
+  stem.position.y = 0.18;
+  chair.add(stem);
+  const seat = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.48, 0.08, 0.46)), matLeather);
+  seat.position.y = 0.37;
+  seat.castShadow = true;
+  chair.add(seat);
+  const back = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.46, 0.54, 0.08)), matLeather);
+  back.position.set(0, 0.64, -0.2);
+  back.castShadow = true;
+  chair.add(back);
+  return chair;
 }
 
 export function createHoldingTower3DComponent(ctx: Context) {
@@ -68,16 +340,19 @@ export function createHoldingTower3DComponent(ctx: Context) {
   return function HoldingTower3DCanvas(props: HoldingTower3DProps) {
     const hostRef = React.useRef<HTMLDivElement | null>(null);
     const mountRef = React.useRef<HTMLDivElement | null>(null);
-    const [selectedSlug, setSelectedSlug] = React.useState<string | null>(null);
+    const [selection, setSelection] = React.useState<TowerSelection | null>(null);
     const [hoveredSlug, setHoveredSlug] = React.useState<string | null>(null);
     const [fitTick, setFitTick] = React.useState(0);
     const [darkFactoryMode, setDarkFactoryMode] = React.useState(true);
     const [isFullscreen, setIsFullscreen] = React.useState(false);
 
-    // Monta a pilha de andares de baixo para cima: Subsidiárias + Cobertura (Conselho & Iris)
+    // ── DADOS REAIS POR ANDAR (ZERO PACOTES DECORATIVOS) ──
     const floors = React.useMemo<HoldingTowerFloorInfo[]>(() => {
       const byPk = props.telemetry?.byPubkey || {};
       const crew = props.liveCrew || [];
+      const activeItems = props.status
+        ? [...(props.status.inProgress || []), ...(props.status.backlog || []), ...(props.status.recent || []).slice(0, 3)]
+        : [];
 
       const empresas =
         props.holding?.empresas && props.holding.empresas.length > 0
@@ -96,6 +371,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
           if (slugLower.includes("lumen")) return n.includes("lumen");
           return n.includes(slugLower);
         });
+
         let workingCount = 0;
         let errorCount = 0;
         const agents = matchingCrew.slice(0, 6).map((a) => {
@@ -105,11 +381,64 @@ export function createHoldingTower3DComponent(ctx: Context) {
           if (isErr) errorCount += 1;
           if (isWork) workingCount += 1;
           return {
+            key: a.key,
+            pubkey: a.pubkey,
             name: a.name,
+            role: a.model,
             picture: a.picture,
+            stepLabel: turn?.stepLabel,
+            turn,
             status: (isErr ? "error" : isWork ? "working" : "active") as "active" | "working" | "planned" | "error",
           };
         });
+
+        // Monta pacotes REAIS na esteira deste andar
+        const packets: TowerLivePacket[] = [];
+        if (slugLower === String(props.activeTenant || "").toLowerCase()) {
+          for (const it of activeItems.slice(0, 6)) {
+            const st: TowerLivePacket["stage"] =
+              it.stage === "failed" || it.stage === "reverted"
+                ? "failed"
+                : it.stage === "verifying" || it.stage === "watching"
+                ? "verifying"
+                : it.stage === "building"
+                ? "building"
+                : it.stage === "merged"
+                ? "merged"
+                : "intake";
+            packets.push({
+              id: it.id,
+              label: it.title,
+              stage: st,
+              detail: it.note || it.reason || it.step || it.stage,
+              floorSlug: emp.slug,
+              workItem: it,
+            });
+          }
+        }
+        // Também adiciona turnos ativos ao vivo deste andar se não estiverem cobertos
+        for (const ag of agents) {
+          if (ag.turn && packets.length < 6) {
+            packets.push({
+              id: `turn-${ag.pubkey || ag.name}`,
+              label: `${ag.name}: ${ag.turn.stepLabel || "executando"}`,
+              stage: ag.turn.state === "error" ? "failed" : "turn",
+              detail: ag.turn.toolName ? `Tool: ${ag.turn.toolName}` : "Turno ao vivo no Buzz",
+              floorSlug: emp.slug,
+              turn: ag.turn,
+            });
+          }
+        }
+
+        const openPrsCount =
+          slugLower === String(props.activeTenant || "").toLowerCase()
+            ? props.status?.wip?.openPrs ?? 0
+            : Number(emp.prsAbertos ?? emp.emRevisao ?? 0);
+        const openIssuesCount =
+          slugLower === String(props.activeTenant || "").toLowerCase()
+            ? props.status?.backlog?.length ?? 0
+            : Number(emp.abertas ?? 0);
+
         return {
           slug: emp.slug,
           nome: emp.nome || emp.slug,
@@ -117,6 +446,9 @@ export function createHoldingTower3DComponent(ctx: Context) {
           agentesCount: matchingCrew.length || emp.agentesTotal || 0,
           workingCount,
           errorCount,
+          openPrsCount,
+          openIssuesCount,
+          packets,
           agents:
             agents.length > 0
               ? agents
@@ -126,7 +458,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
         };
       });
 
-      // Cobertura: Conselho da Holding + OrgFy Iris
+      // Cobertura 4F: Conselho da Holding + OrgFy Iris
       const boardCrew = crew.filter((a) => /iris|conselho/i.test(a.name));
       let boardWork = 0;
       let boardErr = 0;
@@ -139,8 +471,13 @@ export function createHoldingTower3DComponent(ctx: Context) {
               if (isErr) boardErr += 1;
               if (isWork) boardWork += 1;
               return {
+                key: a.key,
+                pubkey: a.pubkey,
                 name: a.name,
+                role: a.model,
                 picture: a.picture,
+                stepLabel: turn?.stepLabel,
+                turn,
                 status: (isErr ? "error" : isWork ? "working" : "active") as "active" | "working" | "planned" | "error",
               };
             })
@@ -161,13 +498,18 @@ export function createHoldingTower3DComponent(ctx: Context) {
         agentesCount: boardAgents.length,
         workingCount: boardWork,
         errorCount: boardErr,
+        openPrsCount: 0,
+        openIssuesCount: 0,
+        packets: [],
         agents: boardAgents,
       };
 
       return [...subsidiaryFloors, penthouse];
-    }, [props.holding, props.liveCrew, props.telemetry]);
+    }, [props.holding, props.status, props.liveCrew, props.telemetry, props.activeTenant]);
 
-    const floorsSignature = floors.map((f) => `${f.slug}:${f.workingCount}:${f.errorCount}:${f.agentesCount}`).join("|");
+    const floorsSignature = floors
+      .map((f) => `${f.slug}:${f.workingCount}:${f.errorCount}:${f.agentesCount}:${f.packets.map((p) => `${p.id}:${p.stage}`).join(",")}`)
+      .join("|");
     const targetFloorYRef = React.useRef<number | null>(null);
     const targetFrustumRef = React.useRef<number | null>(null);
 
@@ -178,17 +520,17 @@ export function createHoldingTower3DComponent(ctx: Context) {
       const palette = readPalette();
       const kit = new Kit();
       const width = Math.max(320, container.clientWidth || 780);
-      const height = Math.max(320, container.clientHeight || 520);
+      const height = Math.max(320, container.clientHeight || 540);
 
       const scene = new THREE.Scene();
-      scene.background = darkFactoryMode ? new THREE.Color(0x090b10) : new THREE.Color(0xeef2f7);
+      scene.background = darkFactoryMode ? new THREE.Color(0x090c12) : new THREE.Color(0xeef2f7);
 
-      const FLOOR_H = 3.2;
+      const FLOOR_H = 3.65;
       const totalH = floors.length * FLOOR_H;
-      const defaultCenterY = Math.max(2.2, totalH * 0.45);
-      const defaultFrustum = Math.max(12.5, totalH * 1.15);
+      const defaultCenterY = Math.max(2.6, totalH * 0.46);
+      const defaultFrustum = Math.max(14.0, totalH * 1.12);
 
-      let theta = 0.68;
+      let theta = 0.66;
       let phi = 1.02;
       let frustum = defaultFrustum;
       const target = new THREE.Vector3(0, defaultCenterY, 0);
@@ -202,7 +544,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
         frustum / 2,
         -frustum / 2,
         0.1,
-        160
+        180
       );
 
       const updateCamera = () => {
@@ -213,7 +555,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
         camera.right = (frustum * asp) / 2;
         camera.top = frustum / 2;
         camera.bottom = -frustum / 2;
-        const dist = 36;
+        const dist = 40;
         camera.position.set(
           target.x + dist * Math.sin(phi) * Math.sin(theta),
           target.y + dist * Math.cos(phi),
@@ -236,72 +578,160 @@ export function createHoldingTower3DComponent(ctx: Context) {
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = darkFactoryMode ? 1.15 : 1.02;
+      renderer.toneMappingExposure = darkFactoryMode ? 1.16 : 1.02;
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       container.innerHTML = "";
       container.appendChild(renderer.domElement);
 
       const lights = new Lights();
       scene.add(lights.hemi, lights.sun, lights.sun.target);
-      lights.set([{ x0: -6.5, x1: 6.5, y0: 0, y1: totalH + 2, z0: -4.5, z1: 4.5 }], palette, false);
+      lights.set([{ x0: -7.5, x1: 7.5, y0: 0, y1: totalH + 2, z0: -5, z1: 5 }], palette, false);
 
       if (!darkFactoryMode) {
         const dayFill = new THREE.DirectionalLight(0xffffff, 0.85);
-        dayFill.position.set(-10, 18, 12);
+        dayFill.position.set(-10, 20, 12);
         scene.add(dayFill);
+      } else {
+        const warmFill = new THREE.PointLight(colour(palette.lane), 0.55, 24);
+        warmFill.position.set(4, totalH * 0.65, 6);
+        scene.add(warmFill);
       }
 
-      // Materiais compartilhados
-      const matSlab = kit.matte(darkFactoryMode ? [0.13, 0.15, 0.19] : [0.82, 0.84, 0.88], { roughness: 0.82 });
-      const matWall = kit.matte(darkFactoryMode ? [0.16, 0.18, 0.22] : [0.89, 0.9, 0.93], { roughness: 0.85 });
+      // ── MATERIAIS ARQUITETÔNICOS COMPARTILHADOS ──
+      const matPodium = kit.matte(darkFactoryMode ? [0.09, 0.11, 0.15] : [0.72, 0.75, 0.8], { roughness: 0.9 });
+      const matSlab = kit.matte(darkFactoryMode ? [0.14, 0.16, 0.21] : [0.83, 0.85, 0.89], { roughness: 0.82 });
+      const matFloorWood = kit.matte(darkFactoryMode ? [0.24, 0.2, 0.16] : [0.68, 0.57, 0.44], { roughness: 0.72 });
+      const matFloorSlate = kit.matte(darkFactoryMode ? [0.11, 0.13, 0.17] : [0.46, 0.49, 0.54], { roughness: 0.88 });
+      const matWall = kit.matte(darkFactoryMode ? [0.17, 0.19, 0.24] : [0.89, 0.91, 0.94], { roughness: 0.84 });
       const matSteel = kit.matte(palette.steel, { roughness: 0.42, metalness: 0.45 });
+      const matChrome = kit.matte(palette.chrome, { roughness: 0.22, metalness: 0.75 });
       const matWood = kit.matte(palette.wood, { roughness: 0.55 });
+      const matLeather = kit.matte(darkFactoryMode ? [0.15, 0.17, 0.22] : [0.28, 0.31, 0.38], { roughness: 0.68 });
+      const matPaper = kit.matte(palette.paper, { roughness: 0.42 });
       const matGlass = kit.own(
         new THREE.MeshPhysicalMaterial({
-          color: darkFactoryMode ? 0x60a5fa : 0x3b82f6,
+          color: darkFactoryMode ? 0x7dd3fc : 0x3b82f6,
           transparent: true,
-          opacity: 0.16,
-          roughness: 0.1,
+          opacity: darkFactoryMode ? 0.15 : 0.22,
+          roughness: 0.08,
+          metalness: 0.05,
         })
       );
 
-      // ── ELEVADOR DE DADOS CENTRAL (Duto de vidro conectando todos os andares) ──
-      const shaftX = -4.2;
-      const shaftZ = -2.2;
-      const shaft = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.95, totalH + 0.6, 0.95)), matGlass);
+      const floorW = 11.8;
+      const floorD = 7.0;
+
+      // ── PÓDIO DE FUNDAÇÃO ARQUITETÔNICO SOB O 1F ──
+      const podium = new THREE.Mesh(kit.own(new THREE.BoxGeometry(floorW + 1.1, 0.55, floorD + 1.1)), matPodium);
+      podium.position.set(0, -0.54, 0);
+      podium.receiveShadow = true;
+      scene.add(podium);
+
+      // ── ELEVADOR PANORÂMICO DE DADOS (SÓ MOVIMENTA TURNOS REAIS DO BUZZ) ──
+      const shaftX = -4.9;
+      const shaftZ = -2.45;
+      const shaft = new THREE.Mesh(kit.own(new THREE.BoxGeometry(1.1, totalH + 0.5, 1.1)), matGlass);
       shaft.position.set(shaftX, totalH / 2, shaftZ);
       scene.add(shaft);
 
-      for (const sx of [-0.46, 0.46]) {
-        for (const sz of [-0.46, 0.46]) {
-          const rail = new THREE.Mesh(kit.own(new THREE.CylinderGeometry(0.03, 0.03, totalH + 0.7, 8)), matSteel);
+      for (const sx of [-0.54, 0.54]) {
+        for (const sz of [-0.54, 0.54]) {
+          const rail = new THREE.Mesh(kit.own(new THREE.CylinderGeometry(0.032, 0.032, totalH + 0.65, 8)), matSteel);
           rail.position.set(shaftX + sx, totalH / 2, shaftZ + sz);
           scene.add(rail);
         }
       }
 
-      // Cápsulas de dados subindo/descendo no elevador
-      const dataCapsules: Array<{ mesh: THREE.Mesh; speed: number; offset: number }> = [];
-      for (let i = 0; i < 4; i += 1) {
-        const cap = new THREE.Mesh(
-          kit.own(new THREE.BoxGeometry(0.42, 0.24, 0.42)),
-          kit.matte(palette.lane, { roughness: 0.2, emissive: colour(palette.lane), emissiveIntensity: 0.85 })
+      // Coleta turnos/pacotes REAIS para o elevador (zero cápsulas falsas!)
+      const realElevatorEvents: Array<{
+        packet: TowerLivePacket;
+        floor: HoldingTowerFloorInfo;
+        fromY: number;
+        toY: number;
+      }> = [];
+      const topFloorY = (floors.length - 1) * FLOOR_H + 0.65;
+      floors.forEach((f, fIdx) => {
+        if (f.isBoard) return;
+        for (const ag of f.agents) {
+          if (ag.turn) {
+            realElevatorEvents.push({
+              packet: {
+                id: `elev-${ag.pubkey || ag.name}`,
+                label: `${ag.name} → Conselho`,
+                stage: ag.turn.state === "error" ? "failed" : "turn",
+                detail: ag.turn.stepLabel || "Telemetria ao vivo no Buzz",
+                floorSlug: f.slug,
+                turn: ag.turn,
+              },
+              floor: f,
+              fromY: fIdx * FLOOR_H + 0.65,
+              toY: topFloorY,
+            });
+          }
+        }
+      });
+
+      const dataCapsules: Array<{
+        mesh: THREE.Group;
+        fromY: number;
+        toY: number;
+        speed: number;
+        offset: number;
+      }> = [];
+
+      const hitTargets: THREE.Object3D[] = [];
+      const selectionByHit = new WeakMap<THREE.Object3D, { sel: TowerSelection; focusY: number }>();
+
+      if (realElevatorEvents.length > 0) {
+        realElevatorEvents.slice(0, 6).forEach((ev, i) => {
+          const capRgb = stageColorRgb(ev.packet.stage, palette);
+          const capGroup = new THREE.Group();
+          const frame = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.68, 0.34, 0.68)), matSteel);
+          capGroup.add(frame);
+          const core = new THREE.Mesh(
+            kit.own(new THREE.BoxGeometry(0.54, 0.24, 0.54)),
+            kit.matte(capRgb, { roughness: 0.2, emissive: colour(capRgb), emissiveIntensity: 0.9 })
+          );
+          capGroup.add(core);
+          capGroup.position.set(shaftX, ev.fromY, shaftZ);
+          scene.add(capGroup);
+
+          hitTargets.push(frame);
+          selectionByHit.set(frame, {
+            sel: { kind: "packet", packet: ev.packet, floor: ev.floor },
+            focusY: (ev.fromY + ev.toY) / 2,
+          });
+          dataCapsules.push({
+            mesh: capGroup,
+            fromY: ev.fromY,
+            toY: ev.toY,
+            speed: 0.2 + (i % 3) * 0.05,
+            offset: i / Math.max(1, realElevatorEvents.length),
+          });
+        });
+      } else {
+        // Cabine panorâmica estacionada calmamente no andar ativo quando não há turnos em voo
+        const activeIdx = Math.max(0, floors.findIndex((f) => f.slug === props.activeTenant));
+        const cabin = new THREE.Mesh(
+          kit.own(new THREE.BoxGeometry(0.76, 0.9, 0.76)),
+          kit.matte(palette.steel, { roughness: 0.35, metalness: 0.5 })
         );
-        cap.position.set(shaftX, 0.5, shaftZ);
-        scene.add(cap);
-        dataCapsules.push({ mesh: cap, speed: 0.22 + i * 0.06, offset: i * 0.25 });
+        cabin.position.set(shaftX, activeIdx * FLOOR_H + 0.52, shaftZ);
+        scene.add(cabin);
+        const cabinLight = new THREE.Mesh(
+          kit.own(new THREE.BoxGeometry(0.64, 0.08, 0.64)),
+          kit.matte(palette.lane, { roughness: 0.2, emissive: colour(palette.lane), emissiveIntensity: 0.75 })
+        );
+        cabinLight.position.set(shaftX, activeIdx * FLOOR_H + 0.94, shaftZ);
+        scene.add(cabinLight);
       }
 
-      // ── CONSTRUÇÃO DE CADA ANDAR DA TORRE ──
+      // ── CONSTRUÇÃO ARQUITETÔNICA DE CADA ANDAR ──
       const avatars: Array<{ handle: Avatar3DHandle; phase: number; working: boolean; error: boolean }> = [];
-      const conveyorPackets: Array<{ mesh: THREE.Mesh; y: number; z: number; speed: number; offset: number }> = [];
+      const conveyorPackets: Array<{ mesh: THREE.Group; y: number; z: number; speed: number; offset: number }> = [];
       const warningBeacons: Array<{ mesh: THREE.Mesh; phase: number }> = [];
+      const rackLeds: THREE.Mesh[] = [];
       const holoCores: THREE.Object3D[] = [];
-      const hitTargets: THREE.Object3D[] = [];
-      const floorByHit = new WeakMap<THREE.Object3D, { floor: HoldingTowerFloorInfo; y: number }>();
-
-      const floorW = 10.6;
-      const floorD = 6.2;
 
       floors.forEach((floor, fIdx) => {
         const y0 = fIdx * FLOOR_H;
@@ -309,176 +739,374 @@ export function createHoldingTower3DComponent(ctx: Context) {
         floorGroup.position.set(0, y0, 0);
         scene.add(floorGroup);
 
-        const floorAccent: Rgb = floor.errorCount > 0
-          ? [0.95, 0.32, 0.34]
-          : floor.isBoard
-          ? [0.96, 0.78, 0.24]
-          : floor.workingCount > 0
-          ? palette.accent.reviewer
-          : floor.estagio === "planejado"
-          ? [0.45, 0.48, 0.55]
-          : palette.lane;
+        const floorAccent: Rgb =
+          floor.errorCount > 0
+            ? [0.95, 0.3, 0.34]
+            : floor.isBoard
+            ? [0.96, 0.78, 0.24]
+            : floor.workingCount > 0
+            ? palette.accent.reviewer
+            : floor.estagio === "planejado"
+            ? [0.45, 0.5, 0.6]
+            : palette.lane;
 
         const matAccent = kit.matte(floorAccent, {
-          roughness: 0.3,
+          roughness: 0.28,
           emissive: colour(floorAccent),
-          emissiveIntensity: darkFactoryMode ? 0.65 : 0.35,
+          emissiveIntensity: darkFactoryMode ? 0.68 : 0.36,
         });
 
-        // Laje + filete frontal luminoso
-        const slab = new THREE.Mesh(kit.own(new THREE.BoxGeometry(floorW, 0.26, floorD)), matSlab);
-        slab.position.set(0, -0.13, 0);
+        // 1. Laje principal + filete de acento luminoso frontal/direito
+        const slab = new THREE.Mesh(kit.own(new THREE.BoxGeometry(floorW, 0.28, floorD)), matSlab);
+        slab.position.set(0, -0.14, 0);
         slab.receiveShadow = true;
         slab.castShadow = true;
         floorGroup.add(slab);
 
-        const trimFront = new THREE.Mesh(kit.own(new THREE.BoxGeometry(floorW + 0.04, 0.07, 0.07)), matAccent);
+        const trimFront = new THREE.Mesh(kit.own(new THREE.BoxGeometry(floorW + 0.05, 0.075, 0.08)), matAccent);
         trimFront.position.set(0, -0.02, floorD / 2);
         floorGroup.add(trimFront);
 
-        const trimRight = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.07, 0.07, floorD + 0.04)), matAccent);
+        const trimRight = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.08, 0.075, floorD + 0.05)), matAccent);
         trimRight.position.set(floorW / 2, -0.02, 0);
         floorGroup.add(trimRight);
 
-        // Paredes em L em corte (altura parcial para ver dentro de todos os andares)
-        const wallH = FLOOR_H - 0.32;
-        const backWall = new THREE.Mesh(kit.own(new THREE.BoxGeometry(floorW, wallH, 0.18)), matWall);
-        backWall.position.set(0, wallH / 2, -floorD / 2 + 0.09);
+        // 2. Paredes arquitetônicas em L + Fachada cortina de vidro no lado direito
+        const wallH = FLOOR_H - 0.3;
+        const backWall = new THREE.Mesh(kit.own(new THREE.BoxGeometry(floorW, wallH, 0.2)), matWall);
+        backWall.position.set(0, wallH / 2, -floorD / 2 + 0.1);
         backWall.receiveShadow = true;
         floorGroup.add(backWall);
 
-        const leftWall = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.18, wallH, floorD)), matWall);
-        leftWall.position.set(-floorW / 2 + 0.09, wallH / 2, 0);
+        const leftWall = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.2, wallH, floorD)), matWall);
+        leftWall.position.set(-floorW / 2 + 0.1, wallH / 2, 0);
         leftWall.receiveShadow = true;
         floorGroup.add(leftWall);
 
-        // Pilares de aço nos cantos abertos
+        // Arremate superior em aço nas paredes
+        const backCap = new THREE.Mesh(kit.own(new THREE.BoxGeometry(floorW + 0.04, 0.06, 0.24)), matSteel);
+        backCap.position.set(0, wallH + 0.01, -floorD / 2 + 0.1);
+        floorGroup.add(backCap);
+
+        // Fachada cortina de vidro temperado na lateral direita traseira (igual ao Conselho 3D)
+        const rightGlass = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.05, wallH - 0.15, 3.4)), matGlass);
+        rightGlass.position.set(floorW / 2 - 0.12, wallH / 2, -1.65);
+        floorGroup.add(rightGlass);
+
+        // Pilares de aço + placa externa 1F / 2F / 3F / 4F
         for (const [px, pz] of [
           [floorW / 2 - 0.14, -floorD / 2 + 0.14],
+          [floorW / 2 - 0.14, 0.05],
           [floorW / 2 - 0.14, floorD / 2 - 0.14],
           [-floorW / 2 + 0.14, floorD / 2 - 0.14],
         ]) {
-          const col = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.14, wallH, 0.14)), matSteel);
+          const col = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.16, wallH, 0.16)), matSteel);
           col.position.set(px, wallH / 2, pz);
+          col.castShadow = true;
           floorGroup.add(col);
         }
 
-        // Placa do Andar na parede de fundo
-        const subText = floor.isBoard
-          ? `${floor.agentesCount} conselheiros · ${floor.workingCount} em turno`
-          : `${floor.estagio.toUpperCase()} · ${floor.agentesCount} agentes · ${floor.workingCount} ativos`;
-        const signTex = makeFloorSignTexture(kit, `${fIdx + 1}F · ${floor.nome}`, subText, floorAccent, darkFactoryMode);
-        const signMesh = new THREE.Mesh(
-          kit.own(new THREE.PlaneGeometry(3.4, 0.74)),
-          kit.own(new THREE.MeshBasicMaterial({ map: signTex }))
+        const badgeTex = makeFloorBadgeTexture(kit, `${fIdx + 1}F`, floorAccent);
+        const badgeMesh = new THREE.Mesh(
+          kit.own(new THREE.PlaneGeometry(0.58, 0.34)),
+          kit.own(new THREE.MeshBasicMaterial({ map: badgeTex }))
         );
-        signMesh.position.set(1.4, wallH - 0.62, -floorD / 2 + 0.21);
-        floorGroup.add(signMesh);
+        badgeMesh.position.set(floorW / 2 - 0.14, wallH - 0.38, floorD / 2 - 0.05);
+        floorGroup.add(badgeMesh);
 
-        // Farol de alerta se houver erro/quarentena neste andar
+        // 3. Telão de KPIs reais na parede de fundo de cada andar
+        const screenBezel = new THREE.Mesh(kit.own(new THREE.BoxGeometry(4.6, 1.38, 0.1)), kit.matte(palette.sign, { roughness: 0.45 }));
+        screenBezel.position.set(0.95, wallH - 1.05, -floorD / 2 + 0.22);
+        screenBezel.castShadow = true;
+        floorGroup.add(screenBezel);
+
+        const screenTex = makeFloorWallScreenTexture(kit, fIdx + 1, floor, floorAccent, props.status);
+        const screenPlane = new THREE.Mesh(
+          kit.own(new THREE.PlaneGeometry(4.42, 1.24)),
+          kit.own(new THREE.MeshBasicMaterial({ map: screenTex }))
+        );
+        screenPlane.position.set(0.95, wallH - 1.05, -floorD / 2 + 0.275);
+        floorGroup.add(screenPlane);
+
+        // Farol de alerta se houver erro real neste andar
         if (floor.errorCount > 0) {
           const beacon = new THREE.Mesh(
-            kit.own(new THREE.CylinderGeometry(0.14, 0.18, 0.24, 12)),
-            kit.matte([0.98, 0.25, 0.28], { roughness: 0.2, emissive: 0xef4444, emissiveIntensity: 1.2 })
+            kit.own(new THREE.CylinderGeometry(0.14, 0.18, 0.26, 12)),
+            kit.matte([0.98, 0.24, 0.28], { roughness: 0.2, emissive: 0xef4444, emissiveIntensity: 1.2 })
           );
-          beacon.position.set(4.5, 0.14, 2.3);
+          beacon.position.set(floorW / 2 - 0.7, 0.14, floorD / 2 - 0.65);
           floorGroup.add(beacon);
           warningBeacons.push({ mesh: beacon, phase: fIdx * 1.1 });
         }
 
+        // Planta biófila no canto traseiro direito
+        const cornerPlant = buildPlantProp(kit, palette, matSteel);
+        cornerPlant.position.set(floorW / 2 - 0.85, 0, -floorD / 2 + 0.85);
+        floorGroup.add(cornerPlant);
+
         if (floor.isBoard) {
-          // ── COBERTURA: MESA DO CONSELHO + HOLOGRAMA CENTRAL + AVATARES VIP ──
-          const table = new THREE.Mesh(kit.own(new THREE.BoxGeometry(4.4, 0.12, 1.9)), matWood);
-          table.position.set(0.6, 0.62, 0.2);
-          table.castShadow = true;
-          table.receiveShadow = true;
-          floorGroup.add(table);
-
-          const holo = new THREE.Mesh(
-            kit.own(new THREE.OctahedronGeometry(0.38, 0)),
-            kit.own(
-              new THREE.MeshBasicMaterial({
-                color: colour(floorAccent),
-                wireframe: true,
-                transparent: true,
-                opacity: 0.85,
-              })
-            )
+          // ── 4F COBERTURA: SALA EXECUTIVA DO CONSELHO DA HOLDING ──
+          const rug = new THREE.Mesh(
+            kit.own(new THREE.BoxGeometry(8.2, 0.025, 4.7)),
+            kit.matte(darkFactoryMode ? [0.19, 0.21, 0.28] : [0.84, 0.83, 0.8], { roughness: 0.95 })
           );
-          holo.position.set(0.6, 1.38, 0.2);
-          floorGroup.add(holo);
-          holoCores.push(holo);
+          rug.position.set(0.6, 0.012, 0.25);
+          rug.receiveShadow = true;
+          floorGroup.add(rug);
 
-          const slots: Array<[number, number, number]> = [
-            [-2.0, 0, 0.2],
-            [-0.5, 0, 1.55],
-            [0.7, 0, 1.55],
-            [1.9, 0, 1.55],
-            [-0.2, 0, -1.15],
-            [1.4, 0, -1.15],
-          ];
-          floor.agents.slice(0, slots.length).forEach((ag, idx) => {
-            const av = buildCustomAvatar3D(kit, palette, ag, { seatHeight: 0.12, scale: 0.92, showPortraitMedallion: true });
-            const [ax, ay, az] = slots[idx];
-            av.root.position.set(ax, ay, az);
-            av.root.rotation.y = idx === 0 ? Math.PI / 2 : az > 0.2 ? Math.PI : 0;
-            floorGroup.add(av.root);
-            avatars.push({ handle: av, phase: idx * 0.9, working: ag.status === "working", error: ag.status === "error" });
-          });
-        } else {
-          // ── ANDAR DE SUBSIDIÁRIA: ESTEIRA ANIMADA + BANCADAS + AVATARES REAIS ──
-          const belt = new THREE.Mesh(kit.own(new THREE.BoxGeometry(7.2, 0.12, 0.85)), matSteel);
-          belt.position.set(0.8, 0.18, 1.45);
-          belt.receiveShadow = true;
-          floorGroup.add(belt);
-
-          // Pacotes luminosos percorrendo a esteira
-          const pktCount = floor.estagio === "planejado" ? 1 : 3;
-          for (let pIdx = 0; pIdx < pktCount; pIdx += 1) {
-            const pkt = new THREE.Mesh(
-              kit.own(new THREE.BoxGeometry(0.44, 0.28, 0.44)),
-              kit.matte(floorAccent, { roughness: 0.35, emissive: colour(floorAccent), emissiveIntensity: 0.45 })
-            );
-            pkt.position.set(0, y0 + 0.38, 1.45);
-            pkt.castShadow = true;
-            scene.add(pkt);
-            conveyorPackets.push({
-              mesh: pkt,
-              y: y0 + 0.38,
-              z: 1.45,
-              speed: floor.workingCount > 0 ? 1.5 : 0.65,
-              offset: pIdx / pktCount,
-            });
+          for (const rz of [-2.1, 2.6]) {
+            const rugLine = new THREE.Mesh(kit.own(new THREE.BoxGeometry(8.24, 0.016, 0.045)), matAccent);
+            rugLine.position.set(0.6, 0.024, rz);
+            floorGroup.add(rugLine);
           }
 
-          // Estações de trabalho + avatares 3D reais
-          floor.agents.slice(0, 6).forEach((ag, idx) => {
-            const dx = -2.2 + idx * 1.35;
-            const dz = -0.85;
-            const desk = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.92, 0.56, 0.54)), matWood);
-            desk.position.set(dx, 0.28, dz + 0.42);
-            desk.castShadow = true;
-            floorGroup.add(desk);
+          // Mesa executiva com moldura em aço, tampo de madeira, canaleta e pedestais
+          const tableFrame = new THREE.Mesh(kit.own(new THREE.BoxGeometry(4.9, 0.08, 2.08)), matSteel);
+          tableFrame.position.set(0.6, 0.72, 0.25);
+          tableFrame.castShadow = true;
+          floorGroup.add(tableFrame);
 
-            const av = buildCustomAvatar3D(kit, palette, ag, { seatHeight: 0.08, scale: 0.86, showPortraitMedallion: true });
-            av.root.position.set(dx, 0, dz - 0.15);
+          const tableTop = new THREE.Mesh(kit.own(new THREE.BoxGeometry(4.76, 0.07, 1.94)), matWood);
+          tableTop.position.set(0.6, 0.79, 0.25);
+          tableTop.castShadow = true;
+          tableTop.receiveShadow = true;
+          floorGroup.add(tableTop);
+
+          const inlay = new THREE.Mesh(kit.own(new THREE.BoxGeometry(3.1, 0.015, 0.07)), matAccent);
+          inlay.position.set(0.6, 0.835, 0.25);
+          floorGroup.add(inlay);
+
+          for (const lx of [-0.95, 2.15]) {
+            const ped = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.22, 0.68, 0.95)), matSteel);
+            ped.position.set(lx, 0.34, 0.25);
+            ped.castShadow = true;
+            floorGroup.add(ped);
+          }
+
+          // Holograma central + anel orbital
+          const holoGroup = new THREE.Group();
+          holoGroup.position.set(0.6, 1.56, 0.25);
+          const holo = new THREE.Mesh(
+            kit.own(new THREE.OctahedronGeometry(0.32, 0)),
+            kit.own(new THREE.MeshBasicMaterial({ color: colour(floorAccent), wireframe: true, transparent: true, opacity: 0.82 }))
+          );
+          holoGroup.add(holo);
+          const holoRing = new THREE.Mesh(
+            kit.own(new THREE.TorusGeometry(0.46, 0.014, 8, 28)),
+            kit.own(new THREE.MeshBasicMaterial({ color: colour(palette.accent.reviewer), transparent: true, opacity: 0.55 }))
+          );
+          holoRing.rotation.x = Math.PI / 2;
+          holoGroup.add(holoRing);
+          floorGroup.add(holoGroup);
+          holoCores.push(holoGroup);
+
+          // Cadeiras executivas + avatares esculpidos (SEM fotinha na cabeça) + notebooks
+          const slots: Array<{ pos: [number, number, number]; rotY: number; lap: [number, number, number] }> = [
+            { pos: [-2.4, 0, 0.25], rotY: Math.PI / 2, lap: [-1.4, 0.83, 0.25] },
+            { pos: [-0.65, 0, 1.78], rotY: Math.PI, lap: [-0.65, 0.83, 0.98] },
+            { pos: [0.6, 0, 1.78], rotY: Math.PI, lap: [0.6, 0.83, 0.98] },
+            { pos: [1.85, 0, 1.78], rotY: Math.PI, lap: [1.85, 0.83, 0.98] },
+            { pos: [-0.25, 0, -1.28], rotY: 0, lap: [-0.25, 0.83, -0.48] },
+            { pos: [1.45, 0, -1.28], rotY: 0, lap: [1.45, 0.83, -0.48] },
+          ];
+          floor.agents.slice(0, slots.length).forEach((ag, idx) => {
+            const slot = slots[idx];
+            const seatWrap = new THREE.Group();
+            seatWrap.position.set(...slot.pos);
+            seatWrap.rotation.y = slot.rotY;
+            seatWrap.add(buildBoardChair(kit, matLeather, matSteel, matChrome));
+
+            const av = buildCustomAvatar3D(kit, palette, ag, { seatHeight: 0.39, scale: 0.94, showPortraitMedallion: false });
+            seatWrap.add(av.root);
+            floorGroup.add(seatWrap);
+
+            // Notebook pequeno na mesa
+            const lap = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.36, 0.02, 0.24)), matSteel);
+            lap.position.set(...slot.lap);
+            lap.rotation.y = slot.rotY;
+            floorGroup.add(lap);
+
+            // Feixe luminoso se conselheiro estiver em turno ao vivo
+            if (ag.status === "working") {
+              const curve = new THREE.QuadraticBezierCurve3(
+                new THREE.Vector3(slot.pos[0], 1.15, slot.pos[2]),
+                new THREE.Vector3((slot.pos[0] + 0.6) * 0.5, 1.9, (slot.pos[2] + 0.25) * 0.5),
+                new THREE.Vector3(0.6, 1.56, 0.25)
+              );
+              const beam = new THREE.Mesh(
+                kit.own(new THREE.TubeGeometry(curve, 18, 0.016, 6, false)),
+                kit.own(new THREE.MeshBasicMaterial({ color: colour(palette.accent.reviewer), transparent: true, opacity: 0.68 }))
+              );
+              floorGroup.add(beam);
+            }
+
+            // Hitbox clicável do conselheiro
+            const aHit = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.85, 1.35, 0.85)), kit.own(new THREE.MeshBasicMaterial({ visible: false })));
+            aHit.position.set(0, 0.68, 0);
+            seatWrap.add(aHit);
+            hitTargets.push(aHit);
+            selectionByHit.set(aHit, { sel: { kind: "agent", agent: ag, floor }, focusY: y0 + 1.2 });
+
+            avatars.push({ handle: av, phase: idx * 0.95, working: ag.status === "working", error: ag.status === "error" });
+          });
+        } else if (floor.estagio === "planejado") {
+          // ── ANDAR EM INCUBAÇÃO / BLUEPRINT (SaaS Tributário) ──
+          const blueprintFloor = new THREE.Mesh(
+            kit.own(new THREE.BoxGeometry(8.8, 0.025, 4.8)),
+            kit.matte(darkFactoryMode ? [0.12, 0.17, 0.28] : [0.76, 0.83, 0.94], { roughness: 0.9 })
+          );
+          blueprintFloor.position.set(0.6, 0.012, 0.25);
+          floorGroup.add(blueprintFloor);
+
+          // Mesa de arquitetura / prancheta com blueprint enrolado
+          const draftTable = new THREE.Mesh(kit.own(new THREE.BoxGeometry(2.6, 0.07, 1.3)), matWood);
+          draftTable.position.set(0.4, 0.72, 0.1);
+          draftTable.castShadow = true;
+          floorGroup.add(draftTable);
+          for (const lx of [-1.05, 1.05]) {
+            const leg = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.08, 0.7, 1.1)), matSteel);
+            leg.position.set(0.4 + lx, 0.35, 0.1);
+            floorGroup.add(leg);
+          }
+          const roll = new THREE.Mesh(kit.own(new THREE.CylinderGeometry(0.055, 0.055, 0.75, 12)), kit.matte(palette.blueprint, { roughness: 0.5 }));
+          roll.rotation.z = Math.PI / 2;
+          roll.position.set(0.4, 0.81, 0.1);
+          floorGroup.add(roll);
+
+          // Avatar holográfico de planejamento
+          floor.agents.slice(0, 2).forEach((ag, idx) => {
+            const av = buildCustomAvatar3D(kit, palette, ag, { seatHeight: 0.05, scale: 0.88, showPortraitMedallion: false });
+            av.root.position.set(-1.4 + idx * 1.4, 0, 0.1);
+            av.root.rotation.y = Math.PI / 2;
             floorGroup.add(av.root);
-            avatars.push({ handle: av, phase: fIdx * 1.7 + idx * 0.8, working: ag.status === "working", error: ag.status === "error" });
+            avatars.push({ handle: av, phase: fIdx * 1.4 + idx, working: false, error: false });
+          });
+        } else {
+          // ── ANDAR OPERACIONAL DE SUBSIDIÁRIA (OrgFy Core / Lumen IPTV) ──
+          // Zona de piso madeira (estações de trabalho) + zona ardósia (baia da esteira)
+          const workZone = new THREE.Mesh(kit.own(new THREE.BoxGeometry(9.2, 0.022, 3.0)), matFloorWood);
+          workZone.position.set(0.85, 0.011, -1.1);
+          workZone.receiveShadow = true;
+          floorGroup.add(workZone);
+
+          const beltZone = new THREE.Mesh(kit.own(new THREE.BoxGeometry(9.2, 0.022, 2.3)), matFloorSlate);
+          beltZone.position.set(0.85, 0.011, 1.85);
+          beltZone.receiveShadow = true;
+          floorGroup.add(beltZone);
+
+          // Faixa luminosa separando as duas zonas
+          const dividerLine = new THREE.Mesh(kit.own(new THREE.BoxGeometry(9.2, 0.016, 0.05)), matAccent);
+          dividerLine.position.set(0.85, 0.024, 0.52);
+          floorGroup.add(dividerLine);
+
+          // Rack de servidores ao lado do elevador
+          const rack = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.75, 1.7, 0.7)), matSteel);
+          rack.position.set(-4.85, 0.85, 0.65);
+          rack.castShadow = true;
+          floorGroup.add(rack);
+          for (let r = 0; r < 5; r += 1) {
+            const led = new THREE.Mesh(
+              kit.own(new THREE.BoxGeometry(0.45, 0.036, 0.02)),
+              kit.own(new THREE.MeshBasicMaterial({ color: r % 2 === 0 ? 0x38bdf8 : 0x34d399 }))
+            );
+            led.position.set(-4.85, 0.35 + r * 0.27, 1.01);
+            floorGroup.add(led);
+            rackLeds.push(led);
+          }
+
+          // Esteira industrial com trilhos laterais metálicos
+          const belt = new THREE.Mesh(kit.own(new THREE.BoxGeometry(8.2, 0.14, 0.92)), matSteel);
+          belt.position.set(0.85, 0.18, 1.9);
+          belt.receiveShadow = true;
+          belt.castShadow = true;
+          floorGroup.add(belt);
+
+          for (const rz of [1.42, 2.38]) {
+            const rail = new THREE.Mesh(kit.own(new THREE.BoxGeometry(8.26, 0.04, 0.045)), matAccent);
+            rail.position.set(0.85, 0.27, rz);
+            floorGroup.add(rail);
+          }
+
+          // SOMENTE pacotes REAIS (PRs / cards / turnos ao vivo deste andar) trafegam na esteira!
+          const pktTotal = floor.packets.length;
+          floor.packets.forEach((pktData, pIdx) => {
+            const pktRgb = stageColorRgb(pktData.stage, palette);
+            const pktGroup = new THREE.Group();
+            const crate = new THREE.Mesh(
+              kit.own(new THREE.BoxGeometry(0.56, 0.28, 0.48)),
+              kit.matte(darkFactoryMode ? [0.18, 0.2, 0.26] : [0.3, 0.34, 0.4], { roughness: 0.45 })
+            );
+            crate.castShadow = true;
+            pktGroup.add(crate);
+
+            const capStripe = new THREE.Mesh(
+              kit.own(new THREE.BoxGeometry(0.58, 0.06, 0.5)),
+              kit.matte(pktRgb, { roughness: 0.25, emissive: colour(pktRgb), emissiveIntensity: 0.78 })
+            );
+            capStripe.position.y = 0.14;
+            pktGroup.add(capStripe);
+
+            pktGroup.position.set(-2.8, y0 + 0.41, 1.9);
+            scene.add(pktGroup);
+
+            hitTargets.push(crate);
+            selectionByHit.set(crate, { sel: { kind: "packet", packet: pktData, floor }, focusY: y0 + 1.1 });
+
+            conveyorPackets.push({
+              mesh: pktGroup,
+              y: y0 + 0.41,
+              z: 1.9,
+              speed: pktData.stage === "building" || pktData.stage === "turn" ? 1.35 : 0.72,
+              offset: pIdx / Math.max(1, pktTotal),
+            });
+          });
+
+          // Estações de trabalho completas (mesa + cadeira + monitor aceso) + avatares esculpidos
+          const screenMatA = kit.own(new THREE.MeshBasicMaterial({ map: makeDeskScreenTexture(kit, floorAccent, fIdx * 7 + 1) }));
+          const screenMatB = kit.own(new THREE.MeshBasicMaterial({ map: makeDeskScreenTexture(kit, palette.accent.reviewer, fIdx * 7 + 2) }));
+
+          floor.agents.slice(0, 6).forEach((ag, idx) => {
+            const dx = -2.65 + idx * 1.46;
+            const dz = -1.05;
+            const station = buildWorkstationUnit(
+              kit,
+              matWood,
+              matSteel,
+              matChrome,
+              matLeather,
+              matPaper,
+              idx % 2 === 0 ? screenMatA : screenMatB
+            );
+            station.position.set(dx, 0, dz);
+            floorGroup.add(station);
+
+            const av = buildCustomAvatar3D(kit, palette, ag, { seatHeight: 0.37, scale: 0.88, showPortraitMedallion: false });
+            av.root.position.set(dx, 0, dz - 0.14);
+            floorGroup.add(av.root);
+
+            // Hitbox clicável do agente
+            const aHit = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.85, 1.35, 0.85)), kit.own(new THREE.MeshBasicMaterial({ visible: false })));
+            aHit.position.set(dx, 0.68, dz - 0.14);
+            floorGroup.add(aHit);
+            hitTargets.push(aHit);
+            selectionByHit.set(aHit, { sel: { kind: "agent", agent: ag, floor }, focusY: y0 + 1.15 });
+
+            avatars.push({ handle: av, phase: fIdx * 1.7 + idx * 0.85, working: ag.status === "working", error: ag.status === "error" });
           });
         }
 
-        // Hitbox do andar inteiro para seleção/voo de câmera
-        const hitBox = new THREE.Mesh(
-          kit.own(new THREE.BoxGeometry(floorW, FLOOR_H - 0.2, floorD)),
+        // Hitbox de fallback do andar inteiro (adicionada depois para dar prioridade a pacotes/agentes)
+        const floorHit = new THREE.Mesh(
+          kit.own(new THREE.BoxGeometry(floorW, 0.32, floorD)),
           kit.own(new THREE.MeshBasicMaterial({ visible: false }))
         );
-        hitBox.position.set(0, FLOOR_H / 2 - 0.1, 0);
-        floorGroup.add(hitBox);
-        hitTargets.push(hitBox);
-        floorByHit.set(hitBox, { floor, y: y0 + 1.1 });
+        floorHit.position.set(0, -0.14, 0);
+        floorGroup.add(floorHit);
+        hitTargets.push(floorHit);
+        selectionByHit.set(floorHit, { sel: { kind: "floor", floor }, focusY: y0 + 1.25 });
       });
 
-      // Interações de mouse (orbit, zoom, clique para focar andar, duplo clique para entrar)
+      // ── INTERAÇÕES DE MOUSE ──
       const raycaster = new THREE.Raycaster();
       const pointer = new THREE.Vector2();
       let dragging = false;
@@ -486,14 +1114,17 @@ export function createHoldingTower3DComponent(ctx: Context) {
       let lastX = 0;
       let lastY = 0;
 
-      const pickFloor = (e: MouseEvent) => {
+      const pickTarget = (e: MouseEvent) => {
         const rect = renderer.domElement.getBoundingClientRect();
         pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
         pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
         raycaster.setFromCamera(pointer, camera);
         const hits = raycaster.intersectObjects(hitTargets, false);
-        if (hits.length === 0) return null;
-        return floorByHit.get(hits[0].object) || null;
+        for (const hit of hits) {
+          const entry = selectionByHit.get(hit.object);
+          if (entry) return entry;
+        }
+        return null;
       };
 
       const onDown = (e: MouseEvent) => {
@@ -510,26 +1141,26 @@ export function createHoldingTower3DComponent(ctx: Context) {
           const dy = e.clientY - lastY;
           if (Math.abs(dx) > 2 || Math.abs(dy) > 2) moved = true;
           theta -= dx * 0.008;
-          phi = Math.max(0.42, Math.min(1.3, phi - dy * 0.006));
+          phi = Math.max(0.42, Math.min(1.28, phi - dy * 0.006));
           lastX = e.clientX;
           lastY = e.clientY;
           updateCamera();
           return;
         }
-        const hit = pickFloor(e);
-        setHoveredSlug(hit ? hit.floor.slug : null);
+        const hit = pickTarget(e);
+        setHoveredSlug(hit ? hit.sel.floor.slug : null);
         renderer.domElement.style.cursor = hit ? "pointer" : "grab";
       };
 
       const onUp = (e: MouseEvent) => {
         if (dragging && !moved) {
-          const hit = pickFloor(e);
+          const hit = pickTarget(e);
           if (hit) {
-            setSelectedSlug(hit.floor.slug);
-            targetFloorYRef.current = hit.y;
-            targetFrustumRef.current = 8.4;
+            setSelection(hit.sel);
+            targetFloorYRef.current = hit.focusY;
+            targetFrustumRef.current = hit.sel.kind === "floor" ? 9.2 : 7.8;
           } else {
-            setSelectedSlug(null);
+            setSelection(null);
             targetFloorYRef.current = defaultCenterY;
             targetFrustumRef.current = defaultFrustum;
           }
@@ -539,13 +1170,13 @@ export function createHoldingTower3DComponent(ctx: Context) {
       };
 
       const onDblClick = (e: MouseEvent) => {
-        const hit = pickFloor(e);
-        if (hit) props.onEnterFloor(hit.floor.slug);
+        const hit = pickTarget(e);
+        if (hit) props.onEnterFloor(hit.sel.floor.slug);
       };
 
       const onWheel = (e: WheelEvent) => {
         e.preventDefault();
-        const nextF = Math.max(6.2, Math.min(24, frustum + e.deltaY * 0.01));
+        const nextF = Math.max(6.0, Math.min(26, frustum + e.deltaY * 0.01));
         frustum = nextF;
         targetFrustumRef.current = nextF;
         updateCamera();
@@ -565,7 +1196,6 @@ export function createHoldingTower3DComponent(ctx: Context) {
         rafId = requestAnimationFrame(animate);
         const t = clock.getElapsedTime();
 
-        // Voo suave (lerp) da câmera ao focar um andar
         let camDirty = false;
         if (targetFloorYRef.current !== null && Math.abs(target.y - targetFloorYRef.current) > 0.01) {
           target.y += (targetFloorYRef.current - target.y) * 0.09;
@@ -577,31 +1207,34 @@ export function createHoldingTower3DComponent(ctx: Context) {
         }
         if (camDirty) updateCamera();
 
-        // Anima avatares 3D
         for (const a of avatars) {
           a.handle.animate(t, a.phase, { working: a.working, error: a.error });
         }
 
-        // Anima cápsulas no elevador de dados
+        // Cápsulas REAIS trafegando entre o andar de origem e o Conselho 4F
         for (const cap of dataCapsules) {
           const frac = (t * cap.speed + cap.offset) % 1;
           const pingPong = frac < 0.5 ? frac * 2 : (1 - frac) * 2;
-          cap.mesh.position.y = 0.4 + pingPong * Math.max(1, totalH - 0.9);
-          cap.mesh.rotation.y = t * 1.4;
+          cap.mesh.position.y = cap.fromY + pingPong * Math.max(0.5, cap.toY - cap.fromY);
+          cap.mesh.rotation.y = t * 1.1;
         }
 
-        // Anima pacotes percorrendo as esteiras das subsidiárias
+        // Pacotes REAIS trafegando nas esteiras
         for (const pkt of conveyorPackets) {
-          const frac = (t * pkt.speed * 0.16 + pkt.offset) % 1;
-          pkt.mesh.position.x = -2.4 + frac * 6.4;
-          pkt.mesh.position.y = pkt.y + Math.sin(t * 4 + pkt.offset * 6) * 0.02;
+          const frac = (t * pkt.speed * 0.14 + pkt.offset) % 1;
+          pkt.mesh.position.x = -2.9 + frac * 7.4;
+          pkt.mesh.position.y = pkt.y + Math.sin(t * 3.8 + pkt.offset * 6) * 0.015;
         }
 
-        // Anima hologramas da Cobertura e beacons de alerta
-        for (const holo of holoCores) {
-          holo.rotation.y = t * 0.9;
-          holo.rotation.x = Math.sin(t * 0.7) * 0.25;
+        for (let i = 0; i < rackLeds.length; i += 1) {
+          rackLeds[i].visible = Math.sin(t * 3.4 + i * 1.5) > -0.65;
         }
+
+        for (const holo of holoCores) {
+          holo.rotation.y = t * 0.8;
+          holo.position.y = 1.56 + Math.sin(t * 1.7) * 0.045;
+        }
+
         for (const b of warningBeacons) {
           b.mesh.scale.setScalar(1 + Math.sin(t * 7 + b.phase) * 0.14);
         }
@@ -633,28 +1266,32 @@ export function createHoldingTower3DComponent(ctx: Context) {
         kit.dispose();
         renderer.dispose();
       };
-    }, [floorsSignature, fitTick, darkFactoryMode]);
+    }, [floorsSignature, fitTick, darkFactoryMode, props.activeTenant]);
 
-    const focusedFloor =
-      floors.find((f) => f.slug === (selectedSlug || hoveredSlug)) || null;
+    const selectedSlug = selection?.floor.slug || null;
+    const activeFloorCard = selection?.floor || floors.find((f) => f.slug === hoveredSlug) || null;
 
     const focusFloorBySlug = (slug: string | null) => {
-      setSelectedSlug(slug);
       if (!slug) {
+        setSelection(null);
         setFitTick((n) => n + 1);
         return;
       }
       const idx = floors.findIndex((f) => f.slug === slug);
       if (idx >= 0) {
-        targetFloorYRef.current = idx * 3.2 + 1.1;
-        targetFrustumRef.current = 8.4;
+        setSelection({ kind: "floor", floor: floors[idx] });
+        targetFloorYRef.current = idx * 3.65 + 1.25;
+        targetFrustumRef.current = 9.2;
       }
     };
+
+    const totalLivePackets = floors.reduce((sum, f) => sum + f.packets.length, 0);
 
     return h(
       "div",
       {
         "data-holding-tower-3d": "true",
+        "data-holding-tower-sculpted": "true",
         style: { display: "flex", flexDirection: "column", gap: "8px", flex: 1, minHeight: "560px" },
       },
       h(
@@ -667,7 +1304,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
             minHeight: "520px",
             borderRadius: "12px",
             border: "1px solid var(--border)",
-            background: darkFactoryMode ? "#090b10" : "#eef2f7",
+            background: darkFactoryMode ? "#090c12" : "#eef2f7",
             overflow: "hidden",
           },
         },
@@ -688,7 +1325,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
               padding: "8px",
               borderRadius: "10px",
               border: "1px solid var(--border)",
-              background: "rgba(14, 17, 24, 0.9)",
+              background: "rgba(14, 17, 24, 0.92)",
               backdropFilter: "blur(10px)",
             },
           },
@@ -703,33 +1340,34 @@ export function createHoldingTower3DComponent(ctx: Context) {
                 type: "button",
                 className: "of-btn",
                 "data-variant": active ? "primary" : undefined,
-                style: { justifyContent: "space-between", fontSize: "11px", padding: "4px 8px", minWidth: "164px" },
+                style: { justifyContent: "space-between", fontSize: "11px", padding: "4px 8px", minWidth: "178px" },
                 onClick: () => focusFloorBySlug(active ? null : f.slug),
               },
               h("span", null, `${floorNum}F · ${f.isBoard ? "Conselho" : f.nome}`),
               h(
                 "span",
                 { className: "of-mono", style: { fontSize: "10px", opacity: 0.85 } },
-                f.errorCount > 0 ? `!${f.errorCount}` : f.workingCount > 0 ? `⚡${f.workingCount}` : `${f.agentesCount}`
+                f.errorCount > 0 ? `!${f.errorCount}` : f.workingCount > 0 ? `⚡${f.workingCount}` : f.packets.length > 0 ? `📦${f.packets.length}` : `${f.agentesCount}`
               )
             );
           })
         ),
 
-        // Card flutuante do andar selecionado/hover no canto superior direito
-        focusedFloor &&
+        // Card flutuante contextual (Pacote real clicado OU Agente clicado OU Andar focado)
+        (selection || activeFloorCard) &&
           h(
             "div",
             {
+              "data-tower-inspector-card": "true",
               style: {
                 position: "absolute",
                 top: "12px",
                 right: "12px",
                 zIndex: 22,
-                width: "268px",
+                width: "286px",
                 borderRadius: "10px",
                 border: "1px solid var(--border-strong)",
-                background: "rgba(15, 18, 24, 0.94)",
+                background: "rgba(15, 18, 24, 0.95)",
                 backdropFilter: "blur(10px)",
                 padding: "11px 13px",
                 display: "flex",
@@ -737,54 +1375,134 @@ export function createHoldingTower3DComponent(ctx: Context) {
                 gap: "8px",
               },
             },
-            h(
-              "div",
-              { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" } },
-              h("strong", { style: { fontSize: "12.5px" } }, focusedFloor.nome),
-              h(
-                "span",
-                {
-                  className: "of-pill",
-                  "data-tone": focusedFloor.errorCount > 0 ? "failed" : focusedFloor.workingCount > 0 ? "running" : "done",
-                  style: { fontSize: "10px" },
-                },
-                focusedFloor.estagio
-              )
-            ),
-            h(
-              "div",
-              { className: "of-muted", style: { fontSize: "11px" } },
-              `${focusedFloor.agentesCount} agentes · ${focusedFloor.workingCount} respondendo${focusedFloor.errorCount > 0 ? ` · ${focusedFloor.errorCount} com erro` : ""}`
-            ),
-            h(
-              "div",
-              { style: { display: "flex", gap: "6px" } },
-              h(
-                "button",
-                {
-                  type: "button",
-                  className: "of-btn",
-                  "data-variant": "primary",
-                  style: { flex: 1, justifyContent: "center", fontSize: "11px" },
-                  onClick: () => props.onEnterFloor(focusedFloor.slug),
-                },
-                focusedFloor.isBoard ? "Entrar na Sala 3D ↗" : "Entrar no Andar 3D ↗"
-              ),
-              props.onOpenChannel &&
-                h(
-                  "button",
-                  {
-                    type: "button",
-                    className: "of-btn",
-                    style: { fontSize: "11px" },
-                    onClick: () => props.onOpenChannel!(focusedFloor.slug),
-                  },
-                  "Canal"
-                )
-            )
+            selection?.kind === "packet"
+              ? [
+                  h(
+                    "div",
+                    { key: "h", style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px" } },
+                    h("strong", { style: { fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, selection.packet.label),
+                    h("span", { className: "of-pill", "data-tone": selection.packet.stage === "failed" ? "failed" : "running", style: { fontSize: "10px" } }, selection.packet.stage)
+                  ),
+                  h("div", { key: "d", className: "of-muted", style: { fontSize: "11px" } }, `${selection.floor.nome} · ${selection.packet.detail}`),
+                  h(
+                    "div",
+                    { key: "a", style: { display: "flex", gap: "6px" } },
+                    selection.packet.workItem && props.onSelectItem &&
+                      h(
+                        "button",
+                        {
+                          type: "button",
+                          className: "of-btn",
+                          "data-variant": "primary",
+                          style: { flex: 1, justifyContent: "center", fontSize: "11px" },
+                          onClick: () => props.onSelectItem!(selection.packet.workItem!),
+                        },
+                        "Inspecionar Card/PR ↗"
+                      ),
+                    selection.packet.turn && props.onOpenTurnInSideChat &&
+                      h(
+                        "button",
+                        {
+                          type: "button",
+                          className: "of-btn",
+                          "data-variant": "primary",
+                          style: { flex: 1, justifyContent: "center", fontSize: "11px" },
+                          onClick: () => props.onOpenTurnInSideChat!(selection.packet.turn!),
+                        },
+                        "Abrir turno no chat ↗"
+                      )
+                  ),
+                ]
+              : selection?.kind === "agent"
+              ? [
+                  h(
+                    "div",
+                    { key: "h", style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px" } },
+                    h("strong", { style: { fontSize: "12.5px" } }, selection.agent.name),
+                    h(
+                      "span",
+                      { className: "of-pill", "data-tone": selection.agent.status === "error" ? "failed" : selection.agent.status === "working" ? "running" : "done", style: { fontSize: "10px" } },
+                      selection.agent.status === "working" ? "Em turno" : selection.agent.status === "error" ? "Erro" : "Online"
+                    )
+                  ),
+                  h("div", { key: "d", className: "of-muted", style: { fontSize: "11px" } }, selection.agent.stepLabel || `${selection.floor.nome} · ${selection.agent.role || "Agente"}`),
+                  h(
+                    "div",
+                    { key: "a", style: { display: "flex", gap: "6px" } },
+                    props.onOpenAgentDm && selection.agent.pubkey &&
+                      h(
+                        "button",
+                        {
+                          type: "button",
+                          className: "of-btn",
+                          "data-variant": "primary",
+                          style: { flex: 1, justifyContent: "center", fontSize: "11px" },
+                          onClick: () => props.onOpenAgentDm!({ key: selection.agent.key, pubkey: selection.agent.pubkey, name: selection.agent.name }),
+                        },
+                        "Abrir chat ↗"
+                      ),
+                    h(
+                      "button",
+                      {
+                        type: "button",
+                        className: "of-btn",
+                        style: { fontSize: "11px" },
+                        onClick: () => props.onEnterFloor(selection.floor.slug),
+                      },
+                      "Entrar no Andar"
+                    )
+                  ),
+                ]
+              : activeFloorCard && [
+                  h(
+                    "div",
+                    { key: "h", style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" } },
+                    h("strong", { style: { fontSize: "12.5px" } }, activeFloorCard.nome),
+                    h(
+                      "span",
+                      {
+                        className: "of-pill",
+                        "data-tone": activeFloorCard.errorCount > 0 ? "failed" : activeFloorCard.workingCount > 0 ? "running" : "done",
+                        style: { fontSize: "10px" },
+                      },
+                      activeFloorCard.estagio
+                    )
+                  ),
+                  h(
+                    "div",
+                    { key: "d", className: "of-muted", style: { fontSize: "11px" } },
+                    `${activeFloorCard.agentesCount} agentes · ${activeFloorCard.workingCount} em turno · ${activeFloorCard.packets.length} item(ns) na esteira`
+                  ),
+                  h(
+                    "div",
+                    { key: "a", style: { display: "flex", gap: "6px" } },
+                    h(
+                      "button",
+                      {
+                        type: "button",
+                        className: "of-btn",
+                        "data-variant": "primary",
+                        style: { flex: 1, justifyContent: "center", fontSize: "11px" },
+                        onClick: () => props.onEnterFloor(activeFloorCard.slug),
+                      },
+                      activeFloorCard.isBoard ? "Entrar na Sala 3D ↗" : "Entrar no Andar 3D ↗"
+                    ),
+                    props.onOpenChannel &&
+                      h(
+                        "button",
+                        {
+                          type: "button",
+                          className: "of-btn",
+                          style: { fontSize: "11px" },
+                          onClick: () => props.onOpenChannel!(activeFloorCard.slug),
+                        },
+                        "Canal"
+                      )
+                  ),
+                ]
           ),
 
-        // Controles no canto inferior direito (Dia/Noite Dark Factory, Tela cheia, Fit)
+        // Controles no canto inferior direito
         h(
           "div",
           { style: { position: "absolute", right: "12px", bottom: "12px", zIndex: 20, display: "inline-flex", gap: "6px" } },
@@ -828,7 +1546,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
               className: "of-btn",
               style: { background: "rgba(18, 20, 26, 0.88)" },
               onClick: () => {
-                setSelectedSlug(null);
+                setSelection(null);
                 setFitTick((n) => n + 1);
               },
             },
@@ -839,7 +1557,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
       h(
         "div",
         { className: "of-muted", style: { textAlign: "center", fontSize: "11px" } },
-        `Torre da Holding Cortexx · ${floors.length} andares ao vivo · Clique no andar para aproximar · Duplo clique para entrar`
+        `Torre da Holding Cortexx · ${floors.length} andares · ${totalLivePackets} pacote(s) reais na esteira · Clique em qualquer agente, pacote ou andar`
       )
     );
   };

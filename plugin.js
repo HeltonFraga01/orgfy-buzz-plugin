@@ -17880,12 +17880,22 @@ function renderFactoryBoardAndFloor(props) {
       )
     ) : storeyFocus === "tower" && props.HoldingTower3D ? h(props.HoldingTower3D, {
       holding: props.holding,
+      status,
       liveCrew,
       telemetry: props.telemetry,
       activeTenant: tenant,
       onEnterFloor: (slug) => {
         var _a2;
         (_a2 = props.onEnterTowerFloor) == null ? void 0 : _a2.call(props, slug);
+      },
+      onSelectItem,
+      onOpenAgentDm: (ag) => {
+        var _a2;
+        return (_a2 = props.onOpenAgentDm) == null ? void 0 : _a2.call(props, ag);
+      },
+      onOpenTurnInSideChat: (turn) => {
+        var _a2;
+        return (_a2 = props.onOpenTurnInSideChat) == null ? void 0 : _a2.call(props, turn);
       },
       onOpenChannel: (slug) => {
         var _a2;
@@ -52914,71 +52924,69 @@ function hashHue(str) {
     h = Math.imul(h, 16777619);
   }
   const palette = [
-    [0.32, 0.58, 0.92],
-    [0.24, 0.78, 0.58],
-    [0.92, 0.58, 0.24],
+    [0.34, 0.58, 0.92],
+    [0.24, 0.76, 0.58],
+    [0.9, 0.56, 0.24],
     [0.64, 0.45, 0.92],
-    [0.86, 0.36, 0.44],
-    [0.88, 0.78, 0.24],
-    [0.24, 0.74, 0.84]
+    [0.86, 0.36, 0.46],
+    [0.86, 0.76, 0.26],
+    [0.24, 0.72, 0.84]
   ];
   return palette[(h >>> 0) % palette.length];
 }
 function resolveAvatarArchetype(name, role = "", p) {
   const txt = `${name} ${role}`.toLowerCase();
   if (/iris|ceo\s*master|bestie/.test(txt)) {
-    return { kind: "iris_ceo", bodyRgb: [0.88, 0.28, 0.28], accentRgb: [0.22, 0.82, 0.96], visorRgb: [0.12, 0.16, 0.24] };
+    return { kind: "iris_ceo", bodyRgb: [0.9, 0.3, 0.3], suitRgb: [0.18, 0.2, 0.27], accentRgb: [0.22, 0.86, 0.98] };
   }
   if (/bento|arquit/.test(txt)) {
-    return { kind: "bento_tall", bodyRgb: [0.26, 0.56, 0.92], accentRgb: [0.88, 0.94, 1] };
+    return { kind: "bento_tall", bodyRgb: [0.28, 0.56, 0.92], suitRgb: [0.16, 0.22, 0.34], accentRgb: [0.82, 0.92, 1] };
   }
-  if (/cro|risco|compliance|auditor/.test(txt)) {
-    return { kind: "giraffe_cro", bodyRgb: [0.34, 0.66, 0.94], accentRgb: [0.95, 0.84, 0.32] };
+  if (/cro|risco|compliance|auditor|hugo|segur/.test(txt)) {
+    return { kind: "giraffe_cro", bodyRgb: [0.32, 0.64, 0.92], suitRgb: [0.16, 0.2, 0.28], accentRgb: [0.96, 0.82, 0.28] };
   }
-  if (/cgo|growth/.test(txt)) {
-    return { kind: "hover_cgo", bodyRgb: [0.32, 0.48, 0.76], accentRgb: [0.36, 0.88, 0.98] };
+  if (/cgo|growth|val\b/.test(txt)) {
+    return { kind: "hover_cgo", bodyRgb: [0.3, 0.48, 0.78], suitRgb: [0.14, 0.19, 0.28], accentRgb: [0.32, 0.9, 0.98] };
   }
   if (/cto|coo/.test(txt)) {
-    return { kind: "horned_cto", bodyRgb: [0.84, 0.34, 0.24], accentRgb: [0.98, 0.72, 0.24] };
+    return { kind: "horned_cto", bodyRgb: [0.86, 0.36, 0.24], suitRgb: [0.18, 0.17, 0.22], accentRgb: [0.98, 0.74, 0.24] };
   }
   if (/cpo|produto|po\b/.test(txt)) {
-    return { kind: "hat_cpo", bodyRgb: [0.58, 0.38, 0.86], accentRgb: [0.76, 0.94, 0.34] };
+    return { kind: "hat_cpo", bodyRgb: [0.58, 0.4, 0.86], suitRgb: [0.19, 0.16, 0.28], accentRgb: [0.76, 0.94, 0.36] };
   }
   if (/or[aá]culo|scout|sol\b/.test(txt)) {
-    return { kind: "owl_oracle", bodyRgb: [0.56, 0.44, 0.72], accentRgb: [0.96, 0.82, 0.36] };
+    return { kind: "owl_oracle", bodyRgb: [0.52, 0.42, 0.74], suitRgb: [0.17, 0.16, 0.25], accentRgb: [0.98, 0.82, 0.32] };
   }
-  if (/lumen\s*dev|lumen\s*qa|atlas|ravi|hugo|otto|teo/.test(txt)) {
+  if (/lumen\s*dev|lumen\s*qa|atlas|otto|ravi|teo/.test(txt)) {
     const isDark = /lumen\s*(dev|qa)/.test(txt);
     return {
       kind: isDark ? "stealth_dev" : "classic_bot",
-      bodyRgb: isDark ? [0.18, 0.2, 0.25] : /atlas|hugo|ravi|livia|lia/.test(txt) ? [0.88, 0.78, 0.22] : hashHue(name),
-      accentRgb: isDark ? [0.28, 0.88, 0.62] : p.lane
+      bodyRgb: isDark ? [0.2, 0.23, 0.3] : /atlas|ravi/.test(txt) ? [0.88, 0.76, 0.24] : hashHue(name),
+      suitRgb: [0.15, 0.17, 0.23],
+      accentRgb: isDark ? [0.28, 0.9, 0.64] : p.lane
     };
   }
-  return { kind: "classic_bot", bodyRgb: hashHue(name), accentRgb: p.lane };
+  return { kind: "classic_bot", bodyRgb: hashHue(name), suitRgb: [0.16, 0.18, 0.24], accentRgb: p.lane };
 }
 function buildPortraitBadge(kit, name, picture, ringColorCss) {
   const c = canvasOf(128, 128);
   const g = c.getContext("2d");
-  const drawFallback = () => {
-    g.clearRect(0, 0, 128, 128);
-    g.fillStyle = "#141821";
-    g.beginPath();
-    g.arc(64, 64, 58, 0, Math.PI * 2);
-    g.fill();
-    g.fillStyle = "#f1f5f9";
-    g.font = "700 44px -apple-system, BlinkMacSystemFont, sans-serif";
-    g.textAlign = "center";
-    g.textBaseline = "middle";
-    const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map((s) => s[0].toUpperCase()).join("");
-    g.fillText(initials || "AI", 64, 66);
-    g.strokeStyle = ringColorCss;
-    g.lineWidth = 8;
-    g.beginPath();
-    g.arc(64, 64, 58, 0, Math.PI * 2);
-    g.stroke();
-  };
-  drawFallback();
+  g.clearRect(0, 0, 128, 128);
+  g.fillStyle = "#141821";
+  g.beginPath();
+  g.arc(64, 64, 58, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = "#f1f5f9";
+  g.font = "700 44px -apple-system, BlinkMacSystemFont, sans-serif";
+  g.textAlign = "center";
+  g.textBaseline = "middle";
+  const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map((s) => s[0].toUpperCase()).join("");
+  g.fillText(initials || "AI", 64, 66);
+  g.strokeStyle = ringColorCss;
+  g.lineWidth = 8;
+  g.beginPath();
+  g.arc(64, 64, 58, 0, Math.PI * 2);
+  g.stroke();
   const tex = kit.canvasTexture(c);
   if (picture && typeof Image !== "undefined") {
     try {
@@ -53007,11 +53015,33 @@ function buildPortraitBadge(kit, name, picture, ringColorCss) {
     } catch {
     }
   }
-  const badge = new Mesh(
-    kit.own(new CircleGeometry(0.145, 24)),
+  return new Mesh(
+    kit.own(new CircleGeometry(0.135, 24)),
     kit.own(new MeshBasicMaterial({ map: tex, transparent: true, side: DoubleSide }))
   );
-  return badge;
+}
+function buildArticulatedArm(kit, side, matSuit, matBody, matAccent, castShadow) {
+  const pivot = new Group();
+  pivot.position.set(side * 0.215, 0.28, 0.02);
+  const shoulder = new Mesh(kit.own(new SphereGeometry(0.056, 10, 10)), matSuit);
+  shoulder.castShadow = castShadow;
+  pivot.add(shoulder);
+  const sleeve = new Mesh(kit.own(new CapsuleGeometry(0.04, 0.13, 6, 10)), matSuit);
+  sleeve.position.set(side * 0.02, -0.07, 0.075);
+  sleeve.rotation.x = 0.72;
+  sleeve.rotation.z = -side * 0.18;
+  sleeve.castShadow = castShadow;
+  pivot.add(sleeve);
+  const cuff = new Mesh(kit.own(new CylinderGeometry(0.043, 0.043, 0.022, 10)), matAccent);
+  cuff.position.set(side * 0.025, -0.115, 0.135);
+  cuff.rotation.x = 0.72;
+  pivot.add(cuff);
+  const hand = new Mesh(kit.own(new SphereGeometry(0.05, 12, 10)), matBody);
+  hand.scale.set(0.95, 0.85, 1.15);
+  hand.position.set(side * 0.025, -0.13, 0.165);
+  hand.castShadow = castShadow;
+  pivot.add(hand);
+  return pivot;
 }
 function buildCustomAvatar3D(kit, p, input, opts) {
   const root = new Group();
@@ -53021,195 +53051,306 @@ function buildCustomAvatar3D(kit, p, input, opts) {
   const isWorking = input.status === "working";
   const isError = input.status === "error";
   const style = resolveAvatarArchetype(input.name, input.role, p);
-  const bodyRgb = isPlanned ? [0.5, 0.54, 0.6] : style.bodyRgb;
-  const accentRgb = isError ? [0.95, 0.32, 0.34] : isWorking ? p.accent.reviewer : isPlanned ? [0.45, 0.48, 0.54] : style.accentRgb;
+  const bodyRgb = isPlanned ? [0.52, 0.56, 0.62] : style.bodyRgb;
+  const suitRgb = isPlanned ? [0.36, 0.39, 0.45] : style.suitRgb;
+  const accentRgb = isError ? [0.95, 0.32, 0.34] : isWorking ? p.accent.reviewer : isPlanned ? [0.46, 0.49, 0.56] : style.accentRgb;
   const matBody = kit.matte(bodyRgb, {
-    roughness: 0.52,
+    roughness: 0.44,
+    metalness: 0.08,
     transparent: isPlanned,
     opacity: isPlanned ? 0.42 : 1
   });
-  const matDark = kit.matte([0.1, 0.12, 0.16], { roughness: 0.38 });
-  const matWhite = kit.matte([0.97, 0.98, 1], { roughness: 0.3 });
+  const matSuit = kit.matte(suitRgb, {
+    roughness: 0.58,
+    metalness: 0.15,
+    transparent: isPlanned,
+    opacity: isPlanned ? 0.42 : 1
+  });
+  const matCollar = kit.matte([0.92, 0.94, 0.97], {
+    roughness: 0.45,
+    transparent: isPlanned,
+    opacity: isPlanned ? 0.42 : 1
+  });
+  const matDark = kit.matte([0.09, 0.11, 0.15], { roughness: 0.32, metalness: 0.25 });
+  const matWhite = kit.matte([0.98, 0.99, 1], { roughness: 0.22 });
+  const matGold = kit.matte([0.98, 0.8, 0.24], {
+    roughness: 0.24,
+    metalness: 0.55,
+    emissive: colour([0.98, 0.8, 0.24]),
+    emissiveIntensity: 0.45
+  });
   const matAccent = kit.matte(accentRgb, {
-    roughness: 0.3,
+    roughness: 0.26,
+    metalness: 0.18,
     emissive: colour(accentRgb),
-    emissiveIntensity: isPlanned ? 0.08 : isWorking || isError ? 0.85 : 0.42
+    emissiveIntensity: isPlanned ? 0.08 : isWorking || isError ? 0.9 : 0.45
   });
   const bodyGroup = new Group();
   bodyGroup.position.set(0, seatHeight, 0.04);
   bodyGroup.scale.setScalar(scale);
   root.add(bodyGroup);
+  const headGroup = new Group();
+  bodyGroup.add(headGroup);
   const eyesGroup = new Group();
-  let eyeY = 0.42;
-  let eyeZ = 0.19;
-  let headTopY = 0.68;
-  if (style.kind === "bento_tall") {
-    const torso = new Mesh(kit.own(new CapsuleGeometry(0.165, 0.36, 8, 16)), matBody);
-    torso.position.y = 0.36;
-    torso.castShadow = !isPlanned;
-    bodyGroup.add(torso);
-    for (const ax of [-0.075, 0.075]) {
-      const stalk = new Mesh(kit.own(new CylinderGeometry(0.016, 0.02, 0.18, 8)), matBody);
-      stalk.position.set(ax, 0.72, 0);
-      bodyGroup.add(stalk);
-      const bulb = new Mesh(kit.own(new SphereGeometry(0.032, 10, 10)), matAccent);
-      bulb.position.set(ax, 0.82, 0);
-      bodyGroup.add(bulb);
-    }
-    eyeY = 0.52;
-    eyeZ = 0.155;
-    headTopY = 0.86;
-  } else if (style.kind === "giraffe_cro") {
-    const baseBody = new Mesh(kit.own(new SphereGeometry(0.19, 14, 14)), matBody);
-    baseBody.position.y = 0.2;
-    baseBody.scale.set(1, 0.95, 1.05);
-    baseBody.castShadow = !isPlanned;
-    bodyGroup.add(baseBody);
-    const neck = new Mesh(kit.own(new CylinderGeometry(0.075, 0.11, 0.34, 12)), matBody);
-    neck.position.set(0, 0.44, 0.02);
-    neck.castShadow = !isPlanned;
-    bodyGroup.add(neck);
-    const head = new Mesh(kit.own(new SphereGeometry(0.135, 14, 14)), matBody);
-    head.position.set(0, 0.64, 0.06);
-    head.scale.set(0.95, 0.9, 1.2);
-    head.castShadow = !isPlanned;
-    bodyGroup.add(head);
-    for (const hx of [-0.06, 0.06]) {
-      const horn = new Mesh(kit.own(new CylinderGeometry(0.015, 0.02, 0.11, 8)), matBody);
-      horn.position.set(hx, 0.77, 0.03);
-      bodyGroup.add(horn);
-      const tip = new Mesh(kit.own(new SphereGeometry(0.026, 8, 8)), matAccent);
-      tip.position.set(hx, 0.83, 0.03);
-      bodyGroup.add(tip);
-    }
-    eyeY = 0.65;
-    eyeZ = 0.19;
-    headTopY = 0.86;
-  } else if (style.kind === "hover_cgo") {
-    const hull = new Mesh(kit.own(new BoxGeometry(0.46, 0.22, 0.44)), matBody);
-    hull.position.set(0, 0.2, 0);
+  let eyeY = 0.02;
+  let eyeZ = 0.18;
+  let headTopY = 0.72;
+  let crownMesh = null;
+  if (style.kind === "hover_cgo") {
+    const hull = new Mesh(kit.own(new BoxGeometry(0.46, 0.18, 0.44)), matSuit);
+    hull.position.set(0, 0.16, 0);
     hull.castShadow = !isPlanned;
     bodyGroup.add(hull);
-    const canopy = new Mesh(kit.own(new SphereGeometry(0.19, 14, 12)), matDark);
-    canopy.position.set(0, 0.32, 0.02);
-    canopy.scale.set(1.1, 0.72, 1);
-    bodyGroup.add(canopy);
+    const upperDeck = new Mesh(kit.own(new BoxGeometry(0.42, 0.08, 0.4)), matBody);
+    upperDeck.position.set(0, 0.26, 0);
+    upperDeck.castShadow = !isPlanned;
+    bodyGroup.add(upperDeck);
+    const trimStripe = new Mesh(kit.own(new BoxGeometry(0.47, 0.032, 0.45)), matAccent);
+    trimStripe.position.set(0, 0.21, 0);
+    bodyGroup.add(trimStripe);
+    headGroup.position.set(0, 0.36, 0.01);
+    const canopy = new Mesh(kit.own(new SphereGeometry(0.185, 18, 14)), matDark);
+    canopy.scale.set(1.08, 0.76, 1.02);
+    canopy.castShadow = !isPlanned;
+    headGroup.add(canopy);
+    for (const sx of [-0.25, 0.25]) {
+      const fin = new Mesh(kit.own(new BoxGeometry(0.05, 0.12, 0.28)), matBody);
+      fin.position.set(sx, 0.19, -0.04);
+      bodyGroup.add(fin);
+    }
     for (const lx of [-0.14, 0.14]) {
-      const light = new Mesh(kit.own(new SphereGeometry(0.038, 10, 10)), matAccent);
-      light.position.set(lx, 0.2, 0.225);
-      bodyGroup.add(light);
+      const headlamp = new Mesh(kit.own(new SphereGeometry(0.034, 10, 10)), matAccent);
+      headlamp.position.set(lx, 0.2, 0.225);
+      bodyGroup.add(headlamp);
     }
-    eyeY = 0.33;
-    eyeZ = 0.19;
-    headTopY = 0.56;
-  } else if (style.kind === "iris_ceo") {
-    const torso = new Mesh(kit.own(new CylinderGeometry(0.16, 0.22, 0.3, 16)), matBody);
-    torso.position.y = 0.18;
-    torso.castShadow = !isPlanned;
-    bodyGroup.add(torso);
-    const head = new Mesh(kit.own(new SphereGeometry(0.21, 18, 16)), matBody);
-    head.position.y = 0.46;
-    head.castShadow = !isPlanned;
-    bodyGroup.add(head);
-    const visor = new Mesh(kit.own(new BoxGeometry(0.28, 0.12, 0.08)), matDark);
-    visor.position.set(0, 0.46, 0.165);
-    bodyGroup.add(visor);
-    for (const sx of [-0.21, 0.21]) {
-      const ear = new Mesh(kit.own(new CylinderGeometry(0.035, 0.035, 0.06, 10)), matAccent);
-      ear.rotation.z = Math.PI / 2;
-      ear.position.set(sx, 0.47, 0);
-      bodyGroup.add(ear);
-    }
-    const crown = new Mesh(
-      kit.own(new TorusGeometry(0.13, 0.018, 8, 24)),
-      kit.matte([0.98, 0.8, 0.24], { roughness: 0.25, emissive: colour([0.98, 0.8, 0.24]), emissiveIntensity: 0.65 })
-    );
-    crown.rotation.x = Math.PI / 2;
-    crown.position.y = 0.74;
-    bodyGroup.add(crown);
-    eyeY = 0.46;
-    eyeZ = 0.21;
-    headTopY = 0.78;
-  } else if (style.kind === "stealth_dev") {
-    const cube = new Mesh(kit.own(new BoxGeometry(0.36, 0.44, 0.34)), matBody);
-    cube.position.y = 0.28;
-    cube.castShadow = !isPlanned;
-    bodyGroup.add(cube);
-    const trim = new Mesh(kit.own(new BoxGeometry(0.38, 0.04, 0.36)), matAccent);
-    trim.position.y = 0.48;
-    bodyGroup.add(trim);
-    eyeY = 0.36;
+    eyeY = 0.01;
     eyeZ = 0.175;
-    headTopY = 0.58;
-  } else if (style.kind === "horned_cto") {
-    const torso = new Mesh(kit.own(new CapsuleGeometry(0.19, 0.2, 8, 16)), matBody);
-    torso.position.y = 0.3;
-    torso.castShadow = !isPlanned;
-    bodyGroup.add(torso);
-    for (const sx of [-0.12, 0.12]) {
-      const horn = new Mesh(kit.own(new ConeGeometry(0.045, 0.15, 10)), matAccent);
-      horn.position.set(sx, 0.6, 0);
-      horn.rotation.z = sx < 0 ? 0.32 : -0.32;
-      bodyGroup.add(horn);
-    }
-    eyeY = 0.4;
-    eyeZ = 0.185;
-    headTopY = 0.7;
+    headTopY = 0.56;
   } else {
-    const torso = new Mesh(kit.own(new CapsuleGeometry(0.19, 0.22, 8, 16)), matBody);
-    torso.position.y = 0.31;
-    torso.castShadow = !isPlanned;
-    bodyGroup.add(torso);
-    if (style.kind === "hat_cpo") {
-      const hat = new Mesh(kit.own(new CylinderGeometry(0.13, 0.17, 0.16, 14)), matDark);
-      hat.position.y = 0.62;
-      bodyGroup.add(hat);
-      const band = new Mesh(kit.own(new CylinderGeometry(0.162, 0.168, 0.03, 14)), matAccent);
-      band.position.y = 0.56;
-      bodyGroup.add(band);
-      headTopY = 0.74;
-    } else {
-      const ant = new Mesh(kit.own(new CylinderGeometry(0.014, 0.018, 0.14, 8)), matDark);
-      ant.position.y = 0.62;
-      bodyGroup.add(ant);
-      const orb = new Mesh(kit.own(new SphereGeometry(0.04, 10, 10)), matAccent);
-      orb.position.y = 0.7;
-      bodyGroup.add(orb);
-      headTopY = 0.76;
+    for (const fx of [-0.085, 0.085]) {
+      const shoe = new Mesh(kit.own(new CapsuleGeometry(0.044, 0.06, 6, 10)), matDark);
+      shoe.rotation.x = Math.PI / 2;
+      shoe.position.set(fx, 0.04, 0.05);
+      shoe.castShadow = !isPlanned;
+      bodyGroup.add(shoe);
     }
-    eyeY = 0.41;
-    eyeZ = 0.185;
+    const torsoH = style.kind === "bento_tall" ? 0.34 : 0.27;
+    const torso = new Mesh(
+      kit.own(new CylinderGeometry(0.155, 0.195, torsoH, 18)),
+      matSuit
+    );
+    torso.position.y = 0.07 + torsoH / 2;
+    torso.castShadow = !isPlanned;
+    torso.receiveShadow = true;
+    bodyGroup.add(torso);
+    const collar = new Mesh(
+      kit.own(new TorusGeometry(0.14, 0.028, 8, 20)),
+      style.kind === "stealth_dev" ? matAccent : matCollar
+    );
+    collar.rotation.x = Math.PI / 2;
+    collar.position.y = 0.07 + torsoH - 0.01;
+    bodyGroup.add(collar);
+    const chestBadge = new Mesh(kit.own(new BoxGeometry(0.1, 0.055, 0.03)), matAccent);
+    chestBadge.position.set(0, 0.07 + torsoH * 0.58, 0.165);
+    bodyGroup.add(chestBadge);
+    const neckH = style.kind === "giraffe_cro" ? 0.22 : 0.06;
+    const neck = new Mesh(kit.own(new CylinderGeometry(0.065, 0.085, neckH, 12)), matBody);
+    neck.position.y = 0.07 + torsoH + neckH / 2 - 0.01;
+    neck.castShadow = !isPlanned;
+    bodyGroup.add(neck);
+    const headBaseY = 0.07 + torsoH + neckH + 0.14;
+    headGroup.position.set(0, headBaseY, 0.01);
+    if (style.kind === "iris_ceo") {
+      const head = new Mesh(kit.own(new SphereGeometry(0.205, 22, 18)), matBody);
+      head.scale.set(1.02, 0.96, 1);
+      head.castShadow = !isPlanned;
+      headGroup.add(head);
+      const visor = new Mesh(kit.own(new BoxGeometry(0.28, 0.115, 0.09)), matDark);
+      visor.position.set(0, 0, 0.155);
+      headGroup.add(visor);
+      const visorRim = new Mesh(kit.own(new BoxGeometry(0.295, 0.018, 0.095)), matAccent);
+      visorRim.position.set(0, 0.062, 0.155);
+      headGroup.add(visorRim);
+      for (const sx of [-0.21, 0.21]) {
+        const cup = new Mesh(kit.own(new CylinderGeometry(0.052, 0.052, 0.048, 14)), matDark);
+        cup.rotation.z = Math.PI / 2;
+        cup.position.set(sx, 0.01, 0);
+        headGroup.add(cup);
+        const led = new Mesh(kit.own(new CylinderGeometry(0.03, 0.03, 0.054, 12)), matAccent);
+        led.rotation.z = Math.PI / 2;
+        led.position.set(sx, 0.01, 0);
+        headGroup.add(led);
+      }
+      const crown = new Mesh(kit.own(new TorusGeometry(0.135, 0.016, 10, 28)), matGold);
+      crown.rotation.x = Math.PI / 2;
+      crown.position.y = 0.28;
+      headGroup.add(crown);
+      crownMesh = crown;
+      eyeY = 0;
+      eyeZ = 0.205;
+      headTopY = headBaseY + 0.32;
+    } else if (style.kind === "bento_tall") {
+      const head = new Mesh(kit.own(new CapsuleGeometry(0.16, 0.12, 10, 18)), matBody);
+      head.castShadow = !isPlanned;
+      headGroup.add(head);
+      for (const gx of [-0.068, 0.068]) {
+        const frame = new Mesh(kit.own(new TorusGeometry(0.046, 0.011, 8, 16)), matDark);
+        frame.position.set(gx, 0.02, 0.155);
+        headGroup.add(frame);
+      }
+      const bridge = new Mesh(kit.own(new BoxGeometry(0.045, 0.014, 0.014)), matDark);
+      bridge.position.set(0, 0.025, 0.16);
+      headGroup.add(bridge);
+      for (const ax of [-0.075, 0.075]) {
+        const stalk = new Mesh(kit.own(new CylinderGeometry(0.013, 0.018, 0.16, 8)), matDark);
+        stalk.position.set(ax, 0.26, 0);
+        headGroup.add(stalk);
+        const bulb = new Mesh(kit.own(new SphereGeometry(0.032, 10, 10)), matAccent);
+        bulb.position.set(ax, 0.35, 0);
+        headGroup.add(bulb);
+      }
+      eyeY = 0.02;
+      eyeZ = 0.145;
+      headTopY = headBaseY + 0.38;
+    } else if (style.kind === "giraffe_cro") {
+      const head = new Mesh(kit.own(new SphereGeometry(0.16, 18, 16)), matBody);
+      head.scale.set(0.96, 0.92, 1.18);
+      head.castShadow = !isPlanned;
+      headGroup.add(head);
+      const crest = new Mesh(kit.own(new BoxGeometry(0.045, 0.09, 0.22)), matGold);
+      crest.position.set(0, 0.145, -0.02);
+      headGroup.add(crest);
+      for (const hx of [-0.07, 0.07]) {
+        const horn = new Mesh(kit.own(new CylinderGeometry(0.014, 0.02, 0.12, 8)), matBody);
+        horn.position.set(hx, 0.18, 0.02);
+        headGroup.add(horn);
+        const tip = new Mesh(kit.own(new SphereGeometry(0.028, 10, 10)), matGold);
+        tip.position.set(hx, 0.25, 0.02);
+        headGroup.add(tip);
+      }
+      eyeY = 0.01;
+      eyeZ = 0.175;
+      headTopY = headBaseY + 0.28;
+    } else if (style.kind === "horned_cto") {
+      const head = new Mesh(kit.own(new SphereGeometry(0.195, 20, 16)), matBody);
+      head.scale.set(1.04, 0.95, 0.98);
+      head.castShadow = !isPlanned;
+      headGroup.add(head);
+      const brow = new Mesh(kit.own(new BoxGeometry(0.26, 0.036, 0.08)), matDark);
+      brow.position.set(0, 0.08, 0.155);
+      headGroup.add(brow);
+      for (const sx of [-0.13, 0.13]) {
+        const horn = new Mesh(kit.own(new ConeGeometry(0.042, 0.15, 10)), matAccent);
+        horn.position.set(sx, 0.21, 0);
+        horn.rotation.z = sx < 0 ? 0.34 : -0.34;
+        headGroup.add(horn);
+      }
+      eyeY = 0.01;
+      eyeZ = 0.178;
+      headTopY = headBaseY + 0.28;
+    } else if (style.kind === "stealth_dev") {
+      const head = new Mesh(kit.own(new BoxGeometry(0.32, 0.28, 0.3)), matBody);
+      head.castShadow = !isPlanned;
+      headGroup.add(head);
+      const visor = new Mesh(kit.own(new BoxGeometry(0.28, 0.095, 0.04)), matDark);
+      visor.position.set(0, 0.02, 0.145);
+      headGroup.add(visor);
+      const topBar = new Mesh(kit.own(new BoxGeometry(0.34, 0.032, 0.32)), matAccent);
+      topBar.position.set(0, 0.145, 0);
+      headGroup.add(topBar);
+      eyeY = 0.02;
+      eyeZ = 0.17;
+      headTopY = headBaseY + 0.2;
+    } else if (style.kind === "owl_oracle") {
+      const head = new Mesh(kit.own(new SphereGeometry(0.19, 18, 16)), matBody);
+      head.castShadow = !isPlanned;
+      headGroup.add(head);
+      for (const gx of [-0.072, 0.072]) {
+        const goggle = new Mesh(kit.own(new CylinderGeometry(0.056, 0.056, 0.06, 14)), matDark);
+        goggle.rotation.x = Math.PI / 2;
+        goggle.position.set(gx, 0.02, 0.155);
+        headGroup.add(goggle);
+        const rim = new Mesh(kit.own(new TorusGeometry(0.056, 0.01, 8, 16)), matGold);
+        rim.position.set(gx, 0.02, 0.185);
+        headGroup.add(rim);
+      }
+      eyeY = 0.02;
+      eyeZ = 0.182;
+      headTopY = headBaseY + 0.22;
+    } else {
+      const head = new Mesh(kit.own(new SphereGeometry(0.19, 20, 16)), matBody);
+      head.scale.set(1.02, 0.96, 1);
+      head.castShadow = !isPlanned;
+      headGroup.add(head);
+      if (style.kind === "hat_cpo") {
+        const brim = new Mesh(kit.own(new CylinderGeometry(0.22, 0.22, 0.022, 18)), matDark);
+        brim.position.y = 0.16;
+        headGroup.add(brim);
+        const hatTop = new Mesh(kit.own(new CylinderGeometry(0.135, 0.16, 0.15, 16)), matDark);
+        hatTop.position.y = 0.24;
+        headGroup.add(hatTop);
+        const band = new Mesh(kit.own(new CylinderGeometry(0.158, 0.164, 0.032, 16)), matAccent);
+        band.position.y = 0.185;
+        headGroup.add(band);
+        headTopY = headBaseY + 0.34;
+      } else {
+        const band = new Mesh(kit.own(new TorusGeometry(0.195, 0.016, 8, 20, Math.PI)), matDark);
+        band.position.y = 0.01;
+        headGroup.add(band);
+        const ant = new Mesh(kit.own(new CylinderGeometry(0.012, 0.016, 0.12, 8)), matDark);
+        ant.position.y = 0.24;
+        headGroup.add(ant);
+        const orb = new Mesh(kit.own(new SphereGeometry(0.036, 10, 10)), matAccent);
+        orb.position.y = 0.31;
+        headGroup.add(orb);
+        headTopY = headBaseY + 0.35;
+      }
+      eyeY = 0.015;
+      eyeZ = 0.175;
+    }
+    if (style.kind !== "iris_ceo" && style.kind !== "stealth_dev") {
+      const smile = new Mesh(
+        kit.own(new TorusGeometry(0.042, 9e-3, 6, 12, Math.PI)),
+        matDark
+      );
+      smile.rotation.z = Math.PI;
+      smile.position.set(0, eyeY - 0.068, eyeZ - 5e-3);
+      headGroup.add(smile);
+    }
   }
-  const useGlowEyes = style.kind === "iris_ceo" || style.kind === "stealth_dev" || style.kind === "hover_cgo";
+  const useGlowEyes = style.kind === "iris_ceo" || style.kind === "stealth_dev" || style.kind === "hover_cgo" || style.kind === "owl_oracle";
   eyesGroup.position.set(0, eyeY, eyeZ);
   for (const ex of [-0.068, 0.068]) {
     if (useGlowEyes) {
-      const eye = new Mesh(kit.own(new SphereGeometry(0.028, 10, 10)), matAccent);
+      const eye = new Mesh(kit.own(new SphereGeometry(0.028, 12, 10)), matAccent);
+      eye.scale.set(1.15, 0.85, 0.7);
       eye.position.set(ex, 0, 0);
       eyesGroup.add(eye);
     } else {
-      const sclera = new Mesh(kit.own(new SphereGeometry(0.042, 10, 10)), matWhite);
+      const sclera = new Mesh(kit.own(new SphereGeometry(0.04, 12, 10)), matWhite);
       sclera.position.set(ex, 0, 0);
       eyesGroup.add(sclera);
-      const pupil = new Mesh(kit.own(new SphereGeometry(0.022, 8, 8)), matDark);
-      pupil.position.set(ex, 0, 0.026);
+      const pupil = new Mesh(kit.own(new SphereGeometry(0.022, 10, 8)), matDark);
+      pupil.position.set(ex, 0, 0.024);
       eyesGroup.add(pupil);
+      const glint = new Mesh(kit.own(new SphereGeometry(8e-3, 6, 6)), matWhite);
+      glint.position.set(ex + 0.01, 0.012, 0.042);
+      eyesGroup.add(glint);
     }
   }
-  bodyGroup.add(eyesGroup);
-  const leftHand = new Mesh(kit.own(new SphereGeometry(0.055, 10, 10)), matBody);
-  leftHand.position.set(-0.22, 0.22, 0.14);
-  leftHand.castShadow = !isPlanned;
-  bodyGroup.add(leftHand);
-  const rightHand = new Mesh(kit.own(new SphereGeometry(0.055, 10, 10)), matBody);
-  rightHand.position.set(0.22, 0.22, 0.14);
-  rightHand.castShadow = !isPlanned;
-  bodyGroup.add(rightHand);
-  let haloMesh = null;
-  if ((opts == null ? void 0 : opts.showPortraitMedallion) !== false) {
+  headGroup.add(eyesGroup);
+  const leftHand = buildArticulatedArm(kit, -1, matSuit, matBody, matAccent, !isPlanned);
+  const rightHand = buildArticulatedArm(kit, 1, matSuit, matBody, matAccent, !isPlanned);
+  if (style.kind === "hover_cgo") {
+    leftHand.visible = false;
+    rightHand.visible = false;
+  }
+  bodyGroup.add(leftHand, rightHand);
+  let haloMesh = crownMesh;
+  if ((opts == null ? void 0 : opts.showPortraitMedallion) === true) {
     const ringCss = isError ? "#f87171" : isWorking ? "#60a5fa" : "#3dd68c";
     const badge = buildPortraitBadge(kit, input.name, input.picture, ringCss);
-    badge.position.set(0, headTopY + 0.18, 0.02);
+    badge.position.set(0, headTopY + 0.16, 0.02);
     bodyGroup.add(badge);
     haloMesh = badge;
   }
@@ -53219,7 +53360,7 @@ function buildCustomAvatar3D(kit, p, input, opts) {
       new MeshBasicMaterial({
         color: colour(accentRgb),
         transparent: true,
-        opacity: isPlanned ? 0.25 : 0.78,
+        opacity: isPlanned ? 0.22 : 0.78,
         side: DoubleSide
       })
     )
@@ -53248,18 +53389,25 @@ function buildCustomAvatar3D(kit, p, input, opts) {
     const celebrating = (animOpts == null ? void 0 : animOpts.celebrating) ?? false;
     if (celebrating) {
       bodyGroup.position.y = baseY + Math.abs(Math.sin(t * 7.5 + phase)) * 0.16;
-      leftHand.position.y = 0.36 + Math.sin(t * 10) * 0.04;
-      rightHand.position.y = 0.36 + Math.cos(t * 10) * 0.04;
+      leftHand.rotation.x = -0.9 + Math.sin(t * 10) * 0.25;
+      rightHand.rotation.x = -0.9 + Math.cos(t * 10) * 0.25;
+      headGroup.rotation.y = Math.sin(t * 5 + phase) * 0.22;
     } else if (working) {
-      bodyGroup.position.y = baseY + Math.sin(t * 3.4 + phase) * 0.018;
-      leftHand.position.y = 0.21 + Math.sin(t * 14 + phase) * 0.025;
-      rightHand.position.y = 0.21 + Math.cos(t * 14 + phase) * 0.025;
-      leftHand.position.z = 0.16 + Math.sin(t * 7 + phase) * 0.015;
-      rightHand.position.z = 0.16 + Math.cos(t * 7 + phase) * 0.015;
+      bodyGroup.position.y = baseY + Math.sin(t * 3.4 + phase) * 0.016;
+      leftHand.rotation.x = Math.sin(t * 13 + phase) * 0.22;
+      rightHand.rotation.x = Math.cos(t * 13 + phase) * 0.22;
+      headGroup.rotation.y = Math.sin(t * 1.4 + phase) * 0.12;
+      headGroup.rotation.x = 0.08 + Math.sin(t * 2.6 + phase) * 0.04;
     } else {
       bodyGroup.position.y = baseY + Math.sin(t * 1.6 + phase) * (isPlanned ? 4e-3 : 0.014);
-      leftHand.position.y = 0.22;
-      rightHand.position.y = 0.22;
+      leftHand.rotation.x = Math.sin(t * 1.2 + phase) * 0.04;
+      rightHand.rotation.x = Math.cos(t * 1.2 + phase) * 0.04;
+      headGroup.rotation.y = Math.sin(t * 0.7 + phase) * 0.16;
+      headGroup.rotation.x = 0;
+    }
+    if (crownMesh) {
+      crownMesh.position.y = 0.28 + Math.sin(t * 2.4 + phase) * 0.018;
+      crownMesh.rotation.z = t * 0.6;
     }
     const blinkCycle = (t + phase * 0.7) % 4.4;
     eyesGroup.scale.y = blinkCycle > 4.26 ? 0.12 : 1;
@@ -54020,7 +54168,7 @@ function createBoardroom3DComponent(ctx) {
           kit,
           palette,
           { name: displayName, role: seat.role, picture: crewMatch == null ? void 0 : crewMatch.picture, status: avStatus },
-          { seatHeight: 0.44, scale: 1.08, showPortraitMedallion: true }
+          { seatHeight: 0.44, scale: 1.08, showPortraitMedallion: false }
         );
         seatGroup.add(avatar.root);
         if (seat.status === "working") {
@@ -54163,6 +54311,7 @@ function createBoardroom3DComponent(ctx) {
         holoCore.rotation.x = Math.sin(t * 0.6) * 0.28;
         holoGroup.position.y = 1.62 + Math.sin(t * 1.8) * 0.05;
         holoRing.rotation.z = -t * 0.6;
+        const projectedBubbles = [];
         for (const a of animated) {
           a.avatar.animate(t, a.phase, { working: a.seat.status === "working" });
           const bubbleNode = bubbleNodesRef.current.get(a.seat.id);
@@ -54174,10 +54323,23 @@ function createBoardroom3DComponent(ctx) {
             const bh = bubbleNode.offsetHeight || 86;
             const cx = Math.max(bw / 2 + 10, Math.min(cw - bw / 2 - 10, sx));
             const bottom = Math.max(bh + 12, Math.min(ch - 18, sy - 14));
-            bubbleNode.style.transform = `translate3d(${Math.round(cx)}px, ${Math.round(bottom)}px, 0) translate(-50%, -100%)`;
-            bubbleNode.style.opacity = "1";
-            bubbleNode.style.pointerEvents = "auto";
+            projectedBubbles.push({ node: bubbleNode, cx, bottom, w: bw, h: bh });
           }
+        }
+        projectedBubbles.sort((a, b) => a.bottom - b.bottom);
+        for (let i = 0; i < projectedBubbles.length; i += 1) {
+          const cur = projectedBubbles[i];
+          for (let j = 0; j < i; j += 1) {
+            const prev = projectedBubbles[j];
+            const overlapX = Math.abs(cur.cx - prev.cx) < (cur.w + prev.w) * 0.48;
+            const overlapY = Math.abs(cur.bottom - prev.bottom) < prev.h + 8;
+            if (overlapX && overlapY) {
+              cur.bottom = Math.max(cur.h + 14, prev.bottom - prev.h - 10);
+            }
+          }
+          cur.node.style.transform = `translate3d(${Math.round(cur.cx)}px, ${Math.round(cur.bottom)}px, 0) translate(-50%, -100%)`;
+          cur.node.style.opacity = "1";
+          cur.node.style.pointerEvents = "auto";
         }
         renderer.render(scene, camera);
       };
@@ -54233,7 +54395,17 @@ function createBoardroom3DComponent(ctx) {
     const enrichedSeats = seats.map(resolveSeatMeta);
     const workingNowCount = enrichedSeats.filter((e) => Boolean(e.liveTurn)).length;
     const inBuzzCount = enrichedSeats.filter((e) => e.inBuzz).length;
-    const speechBubbles = enrichedSeats.filter((e) => Boolean(e.liveTurn || e.doneRec));
+    const speechBubbles = (() => {
+      const seenPk = /* @__PURE__ */ new Set();
+      return enrichedSeats.filter((e) => {
+        if (!e.liveTurn && !e.doneRec) return false;
+        if (e.pubkey) {
+          if (seenPk.has(e.pubkey)) return false;
+          seenPk.add(e.pubkey);
+        }
+        return true;
+      });
+    })();
     React.useEffect(() => {
       if (speechBubbles.length === 0) return;
       const timer = window.setInterval(() => {
@@ -54793,21 +54965,200 @@ function rgbToCss([r, g, b], alpha = 1) {
   const bb = Math.round(Math.max(0, Math.min(1, b)) * 255);
   return alpha >= 1 ? `rgb(${rr}, ${gg}, ${bb})` : `rgba(${rr}, ${gg}, ${bb}, ${alpha})`;
 }
-function makeFloorSignTexture(kit, title, subtitle, accent, isDark) {
-  const c = canvasOf(512, 112);
+function stageColorRgb(stage, p) {
+  switch (stage) {
+    case "failed":
+      return [0.95, 0.3, 0.34];
+    case "verifying":
+      return [0.22, 0.84, 0.56];
+    case "building":
+    case "turn":
+      return p.accent.reviewer;
+    case "merged":
+      return [0.32, 0.78, 0.52];
+    default:
+      return [0.96, 0.72, 0.24];
+  }
+}
+function makeFloorWallScreenTexture(kit, floorNum, floor, accent, status) {
+  var _a, _b;
+  const c = canvasOf(768, 224);
   const g = c.getContext("2d");
-  g.fillStyle = isDark ? "#11151d" : "#1d222c";
+  const accCss = rgbToCss(accent);
+  g.fillStyle = "#0e121a";
+  g.fillRect(0, 0, c.width, c.height);
+  g.strokeStyle = "rgba(255,255,255,0.04)";
+  g.lineWidth = 1;
+  for (let x = 24; x < c.width; x += 48) {
+    g.beginPath();
+    g.moveTo(x, 0);
+    g.lineTo(x, c.height);
+    g.stroke();
+  }
+  g.fillStyle = accCss;
+  g.fillRect(0, 0, 10, c.height);
+  g.fillStyle = "rgba(255,255,255,0.04)";
+  g.fillRect(10, 0, c.width - 10, 56);
+  g.fillStyle = accCss;
+  g.fillRect(10, 54, c.width - 10, 3);
+  g.fillStyle = "#f8fafc";
+  g.font = "700 26px -apple-system, BlinkMacSystemFont, sans-serif";
+  g.fillText(`${floorNum}F · ${floor.nome.toUpperCase().slice(0, 26)}`, 26, 37);
+  const pillText = floor.errorCount > 0 ? `${floor.errorCount} ALERTA` : floor.workingCount > 0 ? `${floor.workingCount} AO VIVO` : floor.estagio.toUpperCase();
+  g.fillStyle = rgbToCss(accent, 0.18);
+  g.fillRect(c.width - 168, 12, 148, 30);
+  g.strokeStyle = accCss;
+  g.lineWidth = 1.5;
+  g.strokeRect(c.width - 168, 12, 148, 30);
+  g.fillStyle = accCss;
+  g.font = "700 14px ui-monospace, Menlo, monospace";
+  g.textAlign = "center";
+  g.fillText(pillText.slice(0, 14), c.width - 94, 32);
+  g.textAlign = "left";
+  const cards = floor.isBoard ? [
+    { k: "CONSELHEIROS", v: String(floor.agentesCount), sub: `${floor.workingCount} em turno` },
+    { k: "MERGES (7D)", v: String(((_a = status == null ? void 0 : status.stats) == null ? void 0 : _a.merged7d) ?? 0), sub: "holding cortexx" },
+    { k: "GASTO HOJE", v: `$${(((_b = status == null ? void 0 : status.spendToday) == null ? void 0 : _b.usd) ?? 0).toFixed(2)}`, sub: "finops ao vivo" }
+  ] : [
+    { k: "AGENTES", v: String(floor.agentesCount), sub: `${floor.workingCount} ativos agora` },
+    { k: "ESTEIRA", v: String(floor.packets.length), sub: floor.packets.length > 0 ? "itens circulando" : "fila livre" },
+    { k: "PRS / ISSUES", v: `${floor.openPrsCount}/${floor.openIssuesCount}`, sub: floor.estagio }
+  ];
+  cards.forEach((card, idx) => {
+    const bx = 26 + idx * 242;
+    const by = 74;
+    const bw = 226;
+    const bh = 128;
+    g.fillStyle = "rgba(255,255,255,0.035)";
+    g.fillRect(bx, by, bw, bh);
+    g.strokeStyle = "rgba(255,255,255,0.09)";
+    g.lineWidth = 1.5;
+    g.strokeRect(bx, by, bw, bh);
+    g.fillStyle = "#94a3b8";
+    g.font = "700 13px ui-monospace, Menlo, monospace";
+    g.fillText(card.k, bx + 16, by + 28);
+    g.fillStyle = "#f8fafc";
+    g.font = "700 42px ui-monospace, Menlo, monospace";
+    g.fillText(card.v, bx + 16, by + 80);
+    g.fillStyle = accCss;
+    g.font = "500 14px -apple-system, sans-serif";
+    g.fillText(card.sub.slice(0, 22), bx + 16, by + 110);
+  });
+  return kit.canvasTexture(c);
+}
+function makeFloorBadgeTexture(kit, label, accent) {
+  const c = canvasOf(128, 72);
+  const g = c.getContext("2d");
+  g.fillStyle = "#0f131b";
+  g.fillRect(0, 0, c.width, c.height);
+  g.strokeStyle = rgbToCss(accent);
+  g.lineWidth = 6;
+  g.strokeRect(4, 4, c.width - 8, c.height - 8);
+  g.fillStyle = "#f8fafc";
+  g.font = "700 38px ui-monospace, Menlo, monospace";
+  g.textAlign = "center";
+  g.textBaseline = "middle";
+  g.fillText(label, c.width / 2, c.height / 2 + 2);
+  return kit.canvasTexture(c);
+}
+function makeDeskScreenTexture(kit, accent, seed) {
+  const c = canvasOf(128, 80);
+  const g = c.getContext("2d");
+  g.fillStyle = "#0b1120";
   g.fillRect(0, 0, c.width, c.height);
   g.fillStyle = rgbToCss(accent);
-  g.fillRect(0, 0, 12, c.height);
-  g.fillRect(12, c.height - 8, c.width - 12, 8);
-  g.fillStyle = "#f8fafc";
-  g.font = "700 32px -apple-system, BlinkMacSystemFont, sans-serif";
-  g.fillText(title.toUpperCase().slice(0, 22), 28, 48);
-  g.fillStyle = "#94a3b8";
-  g.font = "600 18px ui-monospace, Menlo, monospace";
-  g.fillText(subtitle.slice(0, 34), 28, 82);
+  g.fillRect(8, 10, 42, 6);
+  g.fillStyle = "rgba(148,163,184,0.55)";
+  for (let row = 0; row < 5; row += 1) {
+    const w = 34 + (seed * 23 + row * 19) % 72;
+    g.fillRect(8, 22 + row * 10, Math.min(110, w), 5);
+  }
   return kit.canvasTexture(c);
+}
+function buildPlantProp(kit, p, matSteel) {
+  const g = new Group();
+  const pot = new Mesh(kit.own(new CylinderGeometry(0.22, 0.16, 0.36, 12)), matSteel);
+  pot.position.y = 0.18;
+  pot.castShadow = true;
+  g.add(pot);
+  const leafA = kit.matte(p.lamp.green, { roughness: 0.72 });
+  const leafB = kit.matte([p.lamp.green[0] * 0.76, p.lamp.green[1] * 0.76, p.lamp.green[2] * 0.76], { roughness: 0.76 });
+  [
+    [0, 0.64, 0, 0.21],
+    [-0.12, 0.5, 0.09, 0.16],
+    [0.12, 0.52, -0.08, 0.17],
+    [0.08, 0.48, 0.11, 0.15]
+  ].forEach(([x, y, z, r], i) => {
+    const f = new Mesh(kit.own(new DodecahedronGeometry(r, 0)), i % 2 === 0 ? leafA : leafB);
+    f.position.set(x, y, z);
+    f.castShadow = true;
+    g.add(f);
+  });
+  return g;
+}
+function buildWorkstationUnit(kit, matWood, matSteel, matChrome, matLeather, matPaper, screenMat) {
+  const g = new Group();
+  const top = new Mesh(kit.own(new BoxGeometry(1.06, 0.06, 0.62)), matWood);
+  top.position.set(0, 0.62, 0.38);
+  top.castShadow = true;
+  top.receiveShadow = true;
+  g.add(top);
+  for (const lx of [-0.46, 0.46]) {
+    const leg = new Mesh(kit.own(new BoxGeometry(0.05, 0.6, 0.54)), matSteel);
+    leg.position.set(lx, 0.3, 0.38);
+    leg.castShadow = true;
+    g.add(leg);
+  }
+  const stand = new Mesh(kit.own(new BoxGeometry(0.08, 0.15, 0.06)), matChrome);
+  stand.position.set(0, 0.72, 0.52);
+  g.add(stand);
+  const bezel = new Mesh(kit.own(new BoxGeometry(0.54, 0.32, 0.04)), matSteel);
+  bezel.position.set(0, 0.88, 0.52);
+  bezel.castShadow = true;
+  g.add(bezel);
+  const display2 = new Mesh(kit.own(new PlaneGeometry(0.48, 0.26)), screenMat);
+  display2.position.set(0, 0.88, 0.498);
+  display2.rotation.y = Math.PI;
+  g.add(display2);
+  const kb = new Mesh(kit.own(new BoxGeometry(0.34, 0.018, 0.11)), matSteel);
+  kb.position.set(-0.04, 0.66, 0.28);
+  g.add(kb);
+  const mug = new Mesh(kit.own(new CylinderGeometry(0.036, 0.032, 0.075, 10)), matPaper);
+  mug.position.set(0.36, 0.69, 0.28);
+  g.add(mug);
+  const base = new Mesh(kit.own(new CylinderGeometry(0.2, 0.22, 0.035, 12)), matChrome);
+  base.position.set(0, 0.018, -0.14);
+  g.add(base);
+  const stem = new Mesh(kit.own(new CylinderGeometry(0.032, 0.038, 0.3, 10)), matSteel);
+  stem.position.set(0, 0.18, -0.14);
+  g.add(stem);
+  const seat = new Mesh(kit.own(new BoxGeometry(0.44, 0.07, 0.42)), matLeather);
+  seat.position.set(0, 0.35, -0.14);
+  seat.castShadow = true;
+  g.add(seat);
+  const back = new Mesh(kit.own(new BoxGeometry(0.42, 0.46, 0.07)), matLeather);
+  back.position.set(0, 0.58, -0.32);
+  back.castShadow = true;
+  g.add(back);
+  return g;
+}
+function buildBoardChair(kit, matLeather, matSteel, matChrome) {
+  const chair = new Group();
+  const base = new Mesh(kit.own(new CylinderGeometry(0.21, 0.24, 0.035, 14)), matChrome);
+  base.position.y = 0.018;
+  chair.add(base);
+  const stem = new Mesh(kit.own(new CylinderGeometry(0.035, 0.04, 0.32, 10)), matSteel);
+  stem.position.y = 0.18;
+  chair.add(stem);
+  const seat = new Mesh(kit.own(new BoxGeometry(0.48, 0.08, 0.46)), matLeather);
+  seat.position.y = 0.37;
+  seat.castShadow = true;
+  chair.add(seat);
+  const back = new Mesh(kit.own(new BoxGeometry(0.46, 0.54, 0.08)), matLeather);
+  back.position.set(0, 0.64, -0.2);
+  back.castShadow = true;
+  chair.add(back);
+  return chair;
 }
 function createHoldingTower3DComponent(ctx) {
   const React = ctx.react;
@@ -54815,7 +55166,7 @@ function createHoldingTower3DComponent(ctx) {
   return function HoldingTower3DCanvas(props) {
     const hostRef = React.useRef(null);
     const mountRef = React.useRef(null);
-    const [selectedSlug, setSelectedSlug] = React.useState(null);
+    const [selection, setSelection] = React.useState(null);
     const [hoveredSlug, setHoveredSlug] = React.useState(null);
     const [fitTick, setFitTick] = React.useState(0);
     const [darkFactoryMode, setDarkFactoryMode] = React.useState(true);
@@ -54824,12 +55175,14 @@ function createHoldingTower3DComponent(ctx) {
       var _a, _b;
       const byPk = ((_a = props.telemetry) == null ? void 0 : _a.byPubkey) || {};
       const crew = props.liveCrew || [];
+      const activeItems = props.status ? [...props.status.inProgress || [], ...props.status.backlog || [], ...(props.status.recent || []).slice(0, 3)] : [];
       const empresas = ((_b = props.holding) == null ? void 0 : _b.empresas) && props.holding.empresas.length > 0 ? props.holding.empresas : [
         { slug: "orgfy", nome: "OrgFy Core", estagio: "operacional", agentesTotal: 16, agentesProntos: 16 },
         { slug: "lumen-iptv", nome: "Lumen IPTV", estagio: "operacional", agentesTotal: 6, agentesProntos: 6 },
         { slug: "saas-tributario", nome: "SaaS Tributário", estagio: "planejado", agentesTotal: 0, agentesProntos: 0 }
       ];
       const subsidiaryFloors = empresas.map((emp) => {
+        var _a2, _b2, _c, _d;
         const slugLower = String(emp.slug || "").toLowerCase();
         const matchingCrew = crew.filter((a) => {
           const n = a.name.toLowerCase();
@@ -54846,11 +55199,44 @@ function createHoldingTower3DComponent(ctx) {
           if (isErr) errorCount += 1;
           if (isWork) workingCount += 1;
           return {
+            key: a.key,
+            pubkey: a.pubkey,
             name: a.name,
+            role: a.model,
             picture: a.picture,
+            stepLabel: turn == null ? void 0 : turn.stepLabel,
+            turn,
             status: isErr ? "error" : isWork ? "working" : "active"
           };
         });
+        const packets = [];
+        if (slugLower === String(props.activeTenant || "").toLowerCase()) {
+          for (const it of activeItems.slice(0, 6)) {
+            const st = it.stage === "failed" || it.stage === "reverted" ? "failed" : it.stage === "verifying" || it.stage === "watching" ? "verifying" : it.stage === "building" ? "building" : it.stage === "merged" ? "merged" : "intake";
+            packets.push({
+              id: it.id,
+              label: it.title,
+              stage: st,
+              detail: it.note || it.reason || it.step || it.stage,
+              floorSlug: emp.slug,
+              workItem: it
+            });
+          }
+        }
+        for (const ag of agents) {
+          if (ag.turn && packets.length < 6) {
+            packets.push({
+              id: `turn-${ag.pubkey || ag.name}`,
+              label: `${ag.name}: ${ag.turn.stepLabel || "executando"}`,
+              stage: ag.turn.state === "error" ? "failed" : "turn",
+              detail: ag.turn.toolName ? `Tool: ${ag.turn.toolName}` : "Turno ao vivo no Buzz",
+              floorSlug: emp.slug,
+              turn: ag.turn
+            });
+          }
+        }
+        const openPrsCount = slugLower === String(props.activeTenant || "").toLowerCase() ? ((_b2 = (_a2 = props.status) == null ? void 0 : _a2.wip) == null ? void 0 : _b2.openPrs) ?? 0 : Number(emp.prsAbertos ?? emp.emRevisao ?? 0);
+        const openIssuesCount = slugLower === String(props.activeTenant || "").toLowerCase() ? ((_d = (_c = props.status) == null ? void 0 : _c.backlog) == null ? void 0 : _d.length) ?? 0 : Number(emp.abertas ?? 0);
         return {
           slug: emp.slug,
           nome: emp.nome || emp.slug,
@@ -54858,6 +55244,9 @@ function createHoldingTower3DComponent(ctx) {
           agentesCount: matchingCrew.length || emp.agentesTotal || 0,
           workingCount,
           errorCount,
+          openPrsCount,
+          openIssuesCount,
+          packets,
           agents: agents.length > 0 ? agents : emp.estagio === "planejado" ? [{ name: `${emp.nome} PO`, status: "planned" }] : [{ name: `${emp.nome} Dev`, status: "active" }]
         };
       });
@@ -54871,8 +55260,13 @@ function createHoldingTower3DComponent(ctx) {
         if (isErr) boardErr += 1;
         if (isWork) boardWork += 1;
         return {
+          key: a.key,
+          pubkey: a.pubkey,
           name: a.name,
+          role: a.model,
           picture: a.picture,
+          stepLabel: turn == null ? void 0 : turn.stepLabel,
+          turn,
           status: isErr ? "error" : isWork ? "working" : "active"
         };
       }) : [
@@ -54891,11 +55285,14 @@ function createHoldingTower3DComponent(ctx) {
         agentesCount: boardAgents.length,
         workingCount: boardWork,
         errorCount: boardErr,
+        openPrsCount: 0,
+        openIssuesCount: 0,
+        packets: [],
         agents: boardAgents
       };
       return [...subsidiaryFloors, penthouse];
-    }, [props.holding, props.liveCrew, props.telemetry]);
-    const floorsSignature = floors.map((f) => `${f.slug}:${f.workingCount}:${f.errorCount}:${f.agentesCount}`).join("|");
+    }, [props.holding, props.status, props.liveCrew, props.telemetry, props.activeTenant]);
+    const floorsSignature = floors.map((f) => `${f.slug}:${f.workingCount}:${f.errorCount}:${f.agentesCount}:${f.packets.map((p) => `${p.id}:${p.stage}`).join(",")}`).join("|");
     const targetFloorYRef = React.useRef(null);
     const targetFrustumRef = React.useRef(null);
     React.useEffect(() => {
@@ -54904,14 +55301,14 @@ function createHoldingTower3DComponent(ctx) {
       const palette = readPalette();
       const kit = new Kit();
       const width = Math.max(320, container.clientWidth || 780);
-      const height = Math.max(320, container.clientHeight || 520);
+      const height = Math.max(320, container.clientHeight || 540);
       const scene = new Scene();
-      scene.background = darkFactoryMode ? new Color(592656) : new Color(15659767);
-      const FLOOR_H = 3.2;
+      scene.background = darkFactoryMode ? new Color(592914) : new Color(15659767);
+      const FLOOR_H = 3.65;
       const totalH = floors.length * FLOOR_H;
-      const defaultCenterY = Math.max(2.2, totalH * 0.45);
-      const defaultFrustum = Math.max(12.5, totalH * 1.15);
-      let theta = 0.68;
+      const defaultCenterY = Math.max(2.6, totalH * 0.46);
+      const defaultFrustum = Math.max(14, totalH * 1.12);
+      let theta = 0.66;
       let phi = 1.02;
       let frustum = defaultFrustum;
       const target = new Vector3(0, defaultCenterY, 0);
@@ -54924,7 +55321,7 @@ function createHoldingTower3DComponent(ctx) {
         frustum / 2,
         -frustum / 2,
         0.1,
-        160
+        180
       );
       const updateCamera = () => {
         const w = Math.max(320, container.clientWidth || width);
@@ -54934,7 +55331,7 @@ function createHoldingTower3DComponent(ctx) {
         camera.right = frustum * asp / 2;
         camera.top = frustum / 2;
         camera.bottom = -frustum / 2;
-        const dist = 36;
+        const dist = 40;
         camera.position.set(
           target.x + dist * Math.sin(phi) * Math.sin(theta),
           target.y + dist * Math.cos(phi),
@@ -54956,196 +55353,419 @@ function createHoldingTower3DComponent(ctx) {
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = PCFSoftShadowMap;
       renderer.toneMapping = ACESFilmicToneMapping;
-      renderer.toneMappingExposure = darkFactoryMode ? 1.15 : 1.02;
+      renderer.toneMappingExposure = darkFactoryMode ? 1.16 : 1.02;
       renderer.outputColorSpace = SRGBColorSpace;
       container.innerHTML = "";
       container.appendChild(renderer.domElement);
       const lights = new Lights();
       scene.add(lights.hemi, lights.sun, lights.sun.target);
-      lights.set([{ x0: -6.5, x1: 6.5, y0: 0, y1: totalH + 2, z0: -4.5, z1: 4.5 }], palette, false);
+      lights.set([{ x0: -7.5, x1: 7.5, y0: 0, y1: totalH + 2, z0: -5, z1: 5 }], palette, false);
       if (!darkFactoryMode) {
         const dayFill = new DirectionalLight(16777215, 0.85);
-        dayFill.position.set(-10, 18, 12);
+        dayFill.position.set(-10, 20, 12);
         scene.add(dayFill);
+      } else {
+        const warmFill = new PointLight(colour(palette.lane), 0.55, 24);
+        warmFill.position.set(4, totalH * 0.65, 6);
+        scene.add(warmFill);
       }
-      const matSlab = kit.matte(darkFactoryMode ? [0.13, 0.15, 0.19] : [0.82, 0.84, 0.88], { roughness: 0.82 });
-      const matWall = kit.matte(darkFactoryMode ? [0.16, 0.18, 0.22] : [0.89, 0.9, 0.93], { roughness: 0.85 });
+      const matPodium = kit.matte(darkFactoryMode ? [0.09, 0.11, 0.15] : [0.72, 0.75, 0.8], { roughness: 0.9 });
+      const matSlab = kit.matte(darkFactoryMode ? [0.14, 0.16, 0.21] : [0.83, 0.85, 0.89], { roughness: 0.82 });
+      const matFloorWood = kit.matte(darkFactoryMode ? [0.24, 0.2, 0.16] : [0.68, 0.57, 0.44], { roughness: 0.72 });
+      const matFloorSlate = kit.matte(darkFactoryMode ? [0.11, 0.13, 0.17] : [0.46, 0.49, 0.54], { roughness: 0.88 });
+      const matWall = kit.matte(darkFactoryMode ? [0.17, 0.19, 0.24] : [0.89, 0.91, 0.94], { roughness: 0.84 });
       const matSteel = kit.matte(palette.steel, { roughness: 0.42, metalness: 0.45 });
+      const matChrome = kit.matte(palette.chrome, { roughness: 0.22, metalness: 0.75 });
       const matWood = kit.matte(palette.wood, { roughness: 0.55 });
+      const matLeather = kit.matte(darkFactoryMode ? [0.15, 0.17, 0.22] : [0.28, 0.31, 0.38], { roughness: 0.68 });
+      const matPaper = kit.matte(palette.paper, { roughness: 0.42 });
       const matGlass = kit.own(
         new MeshPhysicalMaterial({
-          color: darkFactoryMode ? 6333946 : 3900150,
+          color: darkFactoryMode ? 8246268 : 3900150,
           transparent: true,
-          opacity: 0.16,
-          roughness: 0.1
+          opacity: darkFactoryMode ? 0.15 : 0.22,
+          roughness: 0.08,
+          metalness: 0.05
         })
       );
-      const shaftX = -4.2;
-      const shaftZ = -2.2;
-      const shaft = new Mesh(kit.own(new BoxGeometry(0.95, totalH + 0.6, 0.95)), matGlass);
+      const floorW = 11.8;
+      const floorD = 7;
+      const podium = new Mesh(kit.own(new BoxGeometry(floorW + 1.1, 0.55, floorD + 1.1)), matPodium);
+      podium.position.set(0, -0.54, 0);
+      podium.receiveShadow = true;
+      scene.add(podium);
+      const shaftX = -4.9;
+      const shaftZ = -2.45;
+      const shaft = new Mesh(kit.own(new BoxGeometry(1.1, totalH + 0.5, 1.1)), matGlass);
       shaft.position.set(shaftX, totalH / 2, shaftZ);
       scene.add(shaft);
-      for (const sx of [-0.46, 0.46]) {
-        for (const sz of [-0.46, 0.46]) {
-          const rail = new Mesh(kit.own(new CylinderGeometry(0.03, 0.03, totalH + 0.7, 8)), matSteel);
+      for (const sx of [-0.54, 0.54]) {
+        for (const sz of [-0.54, 0.54]) {
+          const rail = new Mesh(kit.own(new CylinderGeometry(0.032, 0.032, totalH + 0.65, 8)), matSteel);
           rail.position.set(shaftX + sx, totalH / 2, shaftZ + sz);
           scene.add(rail);
         }
       }
+      const realElevatorEvents = [];
+      const topFloorY = (floors.length - 1) * FLOOR_H + 0.65;
+      floors.forEach((f, fIdx) => {
+        if (f.isBoard) return;
+        for (const ag of f.agents) {
+          if (ag.turn) {
+            realElevatorEvents.push({
+              packet: {
+                id: `elev-${ag.pubkey || ag.name}`,
+                label: `${ag.name} → Conselho`,
+                stage: ag.turn.state === "error" ? "failed" : "turn",
+                detail: ag.turn.stepLabel || "Telemetria ao vivo no Buzz",
+                floorSlug: f.slug,
+                turn: ag.turn
+              },
+              floor: f,
+              fromY: fIdx * FLOOR_H + 0.65,
+              toY: topFloorY
+            });
+          }
+        }
+      });
       const dataCapsules = [];
-      for (let i = 0; i < 4; i += 1) {
-        const cap = new Mesh(
-          kit.own(new BoxGeometry(0.42, 0.24, 0.42)),
-          kit.matte(palette.lane, { roughness: 0.2, emissive: colour(palette.lane), emissiveIntensity: 0.85 })
+      const hitTargets = [];
+      const selectionByHit = /* @__PURE__ */ new WeakMap();
+      if (realElevatorEvents.length > 0) {
+        realElevatorEvents.slice(0, 6).forEach((ev, i) => {
+          const capRgb = stageColorRgb(ev.packet.stage, palette);
+          const capGroup = new Group();
+          const frame = new Mesh(kit.own(new BoxGeometry(0.68, 0.34, 0.68)), matSteel);
+          capGroup.add(frame);
+          const core = new Mesh(
+            kit.own(new BoxGeometry(0.54, 0.24, 0.54)),
+            kit.matte(capRgb, { roughness: 0.2, emissive: colour(capRgb), emissiveIntensity: 0.9 })
+          );
+          capGroup.add(core);
+          capGroup.position.set(shaftX, ev.fromY, shaftZ);
+          scene.add(capGroup);
+          hitTargets.push(frame);
+          selectionByHit.set(frame, {
+            sel: { kind: "packet", packet: ev.packet, floor: ev.floor },
+            focusY: (ev.fromY + ev.toY) / 2
+          });
+          dataCapsules.push({
+            mesh: capGroup,
+            fromY: ev.fromY,
+            toY: ev.toY,
+            speed: 0.2 + i % 3 * 0.05,
+            offset: i / Math.max(1, realElevatorEvents.length)
+          });
+        });
+      } else {
+        const activeIdx = Math.max(0, floors.findIndex((f) => f.slug === props.activeTenant));
+        const cabin = new Mesh(
+          kit.own(new BoxGeometry(0.76, 0.9, 0.76)),
+          kit.matte(palette.steel, { roughness: 0.35, metalness: 0.5 })
         );
-        cap.position.set(shaftX, 0.5, shaftZ);
-        scene.add(cap);
-        dataCapsules.push({ mesh: cap, speed: 0.22 + i * 0.06, offset: i * 0.25 });
+        cabin.position.set(shaftX, activeIdx * FLOOR_H + 0.52, shaftZ);
+        scene.add(cabin);
+        const cabinLight = new Mesh(
+          kit.own(new BoxGeometry(0.64, 0.08, 0.64)),
+          kit.matte(palette.lane, { roughness: 0.2, emissive: colour(palette.lane), emissiveIntensity: 0.75 })
+        );
+        cabinLight.position.set(shaftX, activeIdx * FLOOR_H + 0.94, shaftZ);
+        scene.add(cabinLight);
       }
       const avatars = [];
       const conveyorPackets = [];
       const warningBeacons = [];
+      const rackLeds = [];
       const holoCores = [];
-      const hitTargets = [];
-      const floorByHit = /* @__PURE__ */ new WeakMap();
-      const floorW = 10.6;
-      const floorD = 6.2;
       floors.forEach((floor, fIdx) => {
         const y0 = fIdx * FLOOR_H;
         const floorGroup = new Group();
         floorGroup.position.set(0, y0, 0);
         scene.add(floorGroup);
-        const floorAccent = floor.errorCount > 0 ? [0.95, 0.32, 0.34] : floor.isBoard ? [0.96, 0.78, 0.24] : floor.workingCount > 0 ? palette.accent.reviewer : floor.estagio === "planejado" ? [0.45, 0.48, 0.55] : palette.lane;
+        const floorAccent = floor.errorCount > 0 ? [0.95, 0.3, 0.34] : floor.isBoard ? [0.96, 0.78, 0.24] : floor.workingCount > 0 ? palette.accent.reviewer : floor.estagio === "planejado" ? [0.45, 0.5, 0.6] : palette.lane;
         const matAccent = kit.matte(floorAccent, {
-          roughness: 0.3,
+          roughness: 0.28,
           emissive: colour(floorAccent),
-          emissiveIntensity: darkFactoryMode ? 0.65 : 0.35
+          emissiveIntensity: darkFactoryMode ? 0.68 : 0.36
         });
-        const slab = new Mesh(kit.own(new BoxGeometry(floorW, 0.26, floorD)), matSlab);
-        slab.position.set(0, -0.13, 0);
+        const slab = new Mesh(kit.own(new BoxGeometry(floorW, 0.28, floorD)), matSlab);
+        slab.position.set(0, -0.14, 0);
         slab.receiveShadow = true;
         slab.castShadow = true;
         floorGroup.add(slab);
-        const trimFront = new Mesh(kit.own(new BoxGeometry(floorW + 0.04, 0.07, 0.07)), matAccent);
+        const trimFront = new Mesh(kit.own(new BoxGeometry(floorW + 0.05, 0.075, 0.08)), matAccent);
         trimFront.position.set(0, -0.02, floorD / 2);
         floorGroup.add(trimFront);
-        const trimRight = new Mesh(kit.own(new BoxGeometry(0.07, 0.07, floorD + 0.04)), matAccent);
+        const trimRight = new Mesh(kit.own(new BoxGeometry(0.08, 0.075, floorD + 0.05)), matAccent);
         trimRight.position.set(floorW / 2, -0.02, 0);
         floorGroup.add(trimRight);
-        const wallH = FLOOR_H - 0.32;
-        const backWall = new Mesh(kit.own(new BoxGeometry(floorW, wallH, 0.18)), matWall);
-        backWall.position.set(0, wallH / 2, -floorD / 2 + 0.09);
+        const wallH = FLOOR_H - 0.3;
+        const backWall = new Mesh(kit.own(new BoxGeometry(floorW, wallH, 0.2)), matWall);
+        backWall.position.set(0, wallH / 2, -floorD / 2 + 0.1);
         backWall.receiveShadow = true;
         floorGroup.add(backWall);
-        const leftWall = new Mesh(kit.own(new BoxGeometry(0.18, wallH, floorD)), matWall);
-        leftWall.position.set(-floorW / 2 + 0.09, wallH / 2, 0);
+        const leftWall = new Mesh(kit.own(new BoxGeometry(0.2, wallH, floorD)), matWall);
+        leftWall.position.set(-floorW / 2 + 0.1, wallH / 2, 0);
         leftWall.receiveShadow = true;
         floorGroup.add(leftWall);
+        const backCap = new Mesh(kit.own(new BoxGeometry(floorW + 0.04, 0.06, 0.24)), matSteel);
+        backCap.position.set(0, wallH + 0.01, -floorD / 2 + 0.1);
+        floorGroup.add(backCap);
+        const rightGlass = new Mesh(kit.own(new BoxGeometry(0.05, wallH - 0.15, 3.4)), matGlass);
+        rightGlass.position.set(floorW / 2 - 0.12, wallH / 2, -1.65);
+        floorGroup.add(rightGlass);
         for (const [px2, pz2] of [
           [floorW / 2 - 0.14, -floorD / 2 + 0.14],
+          [floorW / 2 - 0.14, 0.05],
           [floorW / 2 - 0.14, floorD / 2 - 0.14],
           [-floorW / 2 + 0.14, floorD / 2 - 0.14]
         ]) {
-          const col = new Mesh(kit.own(new BoxGeometry(0.14, wallH, 0.14)), matSteel);
+          const col = new Mesh(kit.own(new BoxGeometry(0.16, wallH, 0.16)), matSteel);
           col.position.set(px2, wallH / 2, pz2);
+          col.castShadow = true;
           floorGroup.add(col);
         }
-        const subText = floor.isBoard ? `${floor.agentesCount} conselheiros · ${floor.workingCount} em turno` : `${floor.estagio.toUpperCase()} · ${floor.agentesCount} agentes · ${floor.workingCount} ativos`;
-        const signTex = makeFloorSignTexture(kit, `${fIdx + 1}F · ${floor.nome}`, subText, floorAccent, darkFactoryMode);
-        const signMesh = new Mesh(
-          kit.own(new PlaneGeometry(3.4, 0.74)),
-          kit.own(new MeshBasicMaterial({ map: signTex }))
+        const badgeTex = makeFloorBadgeTexture(kit, `${fIdx + 1}F`, floorAccent);
+        const badgeMesh = new Mesh(
+          kit.own(new PlaneGeometry(0.58, 0.34)),
+          kit.own(new MeshBasicMaterial({ map: badgeTex }))
         );
-        signMesh.position.set(1.4, wallH - 0.62, -floorD / 2 + 0.21);
-        floorGroup.add(signMesh);
+        badgeMesh.position.set(floorW / 2 - 0.14, wallH - 0.38, floorD / 2 - 0.05);
+        floorGroup.add(badgeMesh);
+        const screenBezel = new Mesh(kit.own(new BoxGeometry(4.6, 1.38, 0.1)), kit.matte(palette.sign, { roughness: 0.45 }));
+        screenBezel.position.set(0.95, wallH - 1.05, -floorD / 2 + 0.22);
+        screenBezel.castShadow = true;
+        floorGroup.add(screenBezel);
+        const screenTex = makeFloorWallScreenTexture(kit, fIdx + 1, floor, floorAccent, props.status);
+        const screenPlane = new Mesh(
+          kit.own(new PlaneGeometry(4.42, 1.24)),
+          kit.own(new MeshBasicMaterial({ map: screenTex }))
+        );
+        screenPlane.position.set(0.95, wallH - 1.05, -floorD / 2 + 0.275);
+        floorGroup.add(screenPlane);
         if (floor.errorCount > 0) {
           const beacon = new Mesh(
-            kit.own(new CylinderGeometry(0.14, 0.18, 0.24, 12)),
-            kit.matte([0.98, 0.25, 0.28], { roughness: 0.2, emissive: 15680580, emissiveIntensity: 1.2 })
+            kit.own(new CylinderGeometry(0.14, 0.18, 0.26, 12)),
+            kit.matte([0.98, 0.24, 0.28], { roughness: 0.2, emissive: 15680580, emissiveIntensity: 1.2 })
           );
-          beacon.position.set(4.5, 0.14, 2.3);
+          beacon.position.set(floorW / 2 - 0.7, 0.14, floorD / 2 - 0.65);
           floorGroup.add(beacon);
           warningBeacons.push({ mesh: beacon, phase: fIdx * 1.1 });
         }
+        const cornerPlant = buildPlantProp(kit, palette, matSteel);
+        cornerPlant.position.set(floorW / 2 - 0.85, 0, -floorD / 2 + 0.85);
+        floorGroup.add(cornerPlant);
         if (floor.isBoard) {
-          const table = new Mesh(kit.own(new BoxGeometry(4.4, 0.12, 1.9)), matWood);
-          table.position.set(0.6, 0.62, 0.2);
-          table.castShadow = true;
-          table.receiveShadow = true;
-          floorGroup.add(table);
-          const holo = new Mesh(
-            kit.own(new OctahedronGeometry(0.38, 0)),
-            kit.own(
-              new MeshBasicMaterial({
-                color: colour(floorAccent),
-                wireframe: true,
-                transparent: true,
-                opacity: 0.85
-              })
-            )
+          const rug = new Mesh(
+            kit.own(new BoxGeometry(8.2, 0.025, 4.7)),
+            kit.matte(darkFactoryMode ? [0.19, 0.21, 0.28] : [0.84, 0.83, 0.8], { roughness: 0.95 })
           );
-          holo.position.set(0.6, 1.38, 0.2);
-          floorGroup.add(holo);
-          holoCores.push(holo);
+          rug.position.set(0.6, 0.012, 0.25);
+          rug.receiveShadow = true;
+          floorGroup.add(rug);
+          for (const rz of [-2.1, 2.6]) {
+            const rugLine = new Mesh(kit.own(new BoxGeometry(8.24, 0.016, 0.045)), matAccent);
+            rugLine.position.set(0.6, 0.024, rz);
+            floorGroup.add(rugLine);
+          }
+          const tableFrame = new Mesh(kit.own(new BoxGeometry(4.9, 0.08, 2.08)), matSteel);
+          tableFrame.position.set(0.6, 0.72, 0.25);
+          tableFrame.castShadow = true;
+          floorGroup.add(tableFrame);
+          const tableTop = new Mesh(kit.own(new BoxGeometry(4.76, 0.07, 1.94)), matWood);
+          tableTop.position.set(0.6, 0.79, 0.25);
+          tableTop.castShadow = true;
+          tableTop.receiveShadow = true;
+          floorGroup.add(tableTop);
+          const inlay = new Mesh(kit.own(new BoxGeometry(3.1, 0.015, 0.07)), matAccent);
+          inlay.position.set(0.6, 0.835, 0.25);
+          floorGroup.add(inlay);
+          for (const lx of [-0.95, 2.15]) {
+            const ped = new Mesh(kit.own(new BoxGeometry(0.22, 0.68, 0.95)), matSteel);
+            ped.position.set(lx, 0.34, 0.25);
+            ped.castShadow = true;
+            floorGroup.add(ped);
+          }
+          const holoGroup = new Group();
+          holoGroup.position.set(0.6, 1.56, 0.25);
+          const holo = new Mesh(
+            kit.own(new OctahedronGeometry(0.32, 0)),
+            kit.own(new MeshBasicMaterial({ color: colour(floorAccent), wireframe: true, transparent: true, opacity: 0.82 }))
+          );
+          holoGroup.add(holo);
+          const holoRing = new Mesh(
+            kit.own(new TorusGeometry(0.46, 0.014, 8, 28)),
+            kit.own(new MeshBasicMaterial({ color: colour(palette.accent.reviewer), transparent: true, opacity: 0.55 }))
+          );
+          holoRing.rotation.x = Math.PI / 2;
+          holoGroup.add(holoRing);
+          floorGroup.add(holoGroup);
+          holoCores.push(holoGroup);
           const slots = [
-            [-2, 0, 0.2],
-            [-0.5, 0, 1.55],
-            [0.7, 0, 1.55],
-            [1.9, 0, 1.55],
-            [-0.2, 0, -1.15],
-            [1.4, 0, -1.15]
+            { pos: [-2.4, 0, 0.25], rotY: Math.PI / 2, lap: [-1.4, 0.83, 0.25] },
+            { pos: [-0.65, 0, 1.78], rotY: Math.PI, lap: [-0.65, 0.83, 0.98] },
+            { pos: [0.6, 0, 1.78], rotY: Math.PI, lap: [0.6, 0.83, 0.98] },
+            { pos: [1.85, 0, 1.78], rotY: Math.PI, lap: [1.85, 0.83, 0.98] },
+            { pos: [-0.25, 0, -1.28], rotY: 0, lap: [-0.25, 0.83, -0.48] },
+            { pos: [1.45, 0, -1.28], rotY: 0, lap: [1.45, 0.83, -0.48] }
           ];
           floor.agents.slice(0, slots.length).forEach((ag, idx) => {
-            const av = buildCustomAvatar3D(kit, palette, ag, { seatHeight: 0.12, scale: 0.92, showPortraitMedallion: true });
-            const [ax, ay, az] = slots[idx];
-            av.root.position.set(ax, ay, az);
-            av.root.rotation.y = idx === 0 ? Math.PI / 2 : az > 0.2 ? Math.PI : 0;
+            const slot = slots[idx];
+            const seatWrap = new Group();
+            seatWrap.position.set(...slot.pos);
+            seatWrap.rotation.y = slot.rotY;
+            seatWrap.add(buildBoardChair(kit, matLeather, matSteel, matChrome));
+            const av = buildCustomAvatar3D(kit, palette, ag, { seatHeight: 0.39, scale: 0.94, showPortraitMedallion: false });
+            seatWrap.add(av.root);
+            floorGroup.add(seatWrap);
+            const lap = new Mesh(kit.own(new BoxGeometry(0.36, 0.02, 0.24)), matSteel);
+            lap.position.set(...slot.lap);
+            lap.rotation.y = slot.rotY;
+            floorGroup.add(lap);
+            if (ag.status === "working") {
+              const curve = new QuadraticBezierCurve3(
+                new Vector3(slot.pos[0], 1.15, slot.pos[2]),
+                new Vector3((slot.pos[0] + 0.6) * 0.5, 1.9, (slot.pos[2] + 0.25) * 0.5),
+                new Vector3(0.6, 1.56, 0.25)
+              );
+              const beam = new Mesh(
+                kit.own(new TubeGeometry(curve, 18, 0.016, 6, false)),
+                kit.own(new MeshBasicMaterial({ color: colour(palette.accent.reviewer), transparent: true, opacity: 0.68 }))
+              );
+              floorGroup.add(beam);
+            }
+            const aHit = new Mesh(kit.own(new BoxGeometry(0.85, 1.35, 0.85)), kit.own(new MeshBasicMaterial({ visible: false })));
+            aHit.position.set(0, 0.68, 0);
+            seatWrap.add(aHit);
+            hitTargets.push(aHit);
+            selectionByHit.set(aHit, { sel: { kind: "agent", agent: ag, floor }, focusY: y0 + 1.2 });
+            avatars.push({ handle: av, phase: idx * 0.95, working: ag.status === "working", error: ag.status === "error" });
+          });
+        } else if (floor.estagio === "planejado") {
+          const blueprintFloor = new Mesh(
+            kit.own(new BoxGeometry(8.8, 0.025, 4.8)),
+            kit.matte(darkFactoryMode ? [0.12, 0.17, 0.28] : [0.76, 0.83, 0.94], { roughness: 0.9 })
+          );
+          blueprintFloor.position.set(0.6, 0.012, 0.25);
+          floorGroup.add(blueprintFloor);
+          const draftTable = new Mesh(kit.own(new BoxGeometry(2.6, 0.07, 1.3)), matWood);
+          draftTable.position.set(0.4, 0.72, 0.1);
+          draftTable.castShadow = true;
+          floorGroup.add(draftTable);
+          for (const lx of [-1.05, 1.05]) {
+            const leg = new Mesh(kit.own(new BoxGeometry(0.08, 0.7, 1.1)), matSteel);
+            leg.position.set(0.4 + lx, 0.35, 0.1);
+            floorGroup.add(leg);
+          }
+          const roll = new Mesh(kit.own(new CylinderGeometry(0.055, 0.055, 0.75, 12)), kit.matte(palette.blueprint, { roughness: 0.5 }));
+          roll.rotation.z = Math.PI / 2;
+          roll.position.set(0.4, 0.81, 0.1);
+          floorGroup.add(roll);
+          floor.agents.slice(0, 2).forEach((ag, idx) => {
+            const av = buildCustomAvatar3D(kit, palette, ag, { seatHeight: 0.05, scale: 0.88, showPortraitMedallion: false });
+            av.root.position.set(-1.4 + idx * 1.4, 0, 0.1);
+            av.root.rotation.y = Math.PI / 2;
             floorGroup.add(av.root);
-            avatars.push({ handle: av, phase: idx * 0.9, working: ag.status === "working", error: ag.status === "error" });
+            avatars.push({ handle: av, phase: fIdx * 1.4 + idx, working: false, error: false });
           });
         } else {
-          const belt = new Mesh(kit.own(new BoxGeometry(7.2, 0.12, 0.85)), matSteel);
-          belt.position.set(0.8, 0.18, 1.45);
-          belt.receiveShadow = true;
-          floorGroup.add(belt);
-          const pktCount = floor.estagio === "planejado" ? 1 : 3;
-          for (let pIdx = 0; pIdx < pktCount; pIdx += 1) {
-            const pkt = new Mesh(
-              kit.own(new BoxGeometry(0.44, 0.28, 0.44)),
-              kit.matte(floorAccent, { roughness: 0.35, emissive: colour(floorAccent), emissiveIntensity: 0.45 })
+          const workZone = new Mesh(kit.own(new BoxGeometry(9.2, 0.022, 3)), matFloorWood);
+          workZone.position.set(0.85, 0.011, -1.1);
+          workZone.receiveShadow = true;
+          floorGroup.add(workZone);
+          const beltZone = new Mesh(kit.own(new BoxGeometry(9.2, 0.022, 2.3)), matFloorSlate);
+          beltZone.position.set(0.85, 0.011, 1.85);
+          beltZone.receiveShadow = true;
+          floorGroup.add(beltZone);
+          const dividerLine = new Mesh(kit.own(new BoxGeometry(9.2, 0.016, 0.05)), matAccent);
+          dividerLine.position.set(0.85, 0.024, 0.52);
+          floorGroup.add(dividerLine);
+          const rack = new Mesh(kit.own(new BoxGeometry(0.75, 1.7, 0.7)), matSteel);
+          rack.position.set(-4.85, 0.85, 0.65);
+          rack.castShadow = true;
+          floorGroup.add(rack);
+          for (let r = 0; r < 5; r += 1) {
+            const led = new Mesh(
+              kit.own(new BoxGeometry(0.45, 0.036, 0.02)),
+              kit.own(new MeshBasicMaterial({ color: r % 2 === 0 ? 3718648 : 3462041 }))
             );
-            pkt.position.set(0, y0 + 0.38, 1.45);
-            pkt.castShadow = true;
-            scene.add(pkt);
-            conveyorPackets.push({
-              mesh: pkt,
-              y: y0 + 0.38,
-              z: 1.45,
-              speed: floor.workingCount > 0 ? 1.5 : 0.65,
-              offset: pIdx / pktCount
-            });
+            led.position.set(-4.85, 0.35 + r * 0.27, 1.01);
+            floorGroup.add(led);
+            rackLeds.push(led);
           }
+          const belt = new Mesh(kit.own(new BoxGeometry(8.2, 0.14, 0.92)), matSteel);
+          belt.position.set(0.85, 0.18, 1.9);
+          belt.receiveShadow = true;
+          belt.castShadow = true;
+          floorGroup.add(belt);
+          for (const rz of [1.42, 2.38]) {
+            const rail = new Mesh(kit.own(new BoxGeometry(8.26, 0.04, 0.045)), matAccent);
+            rail.position.set(0.85, 0.27, rz);
+            floorGroup.add(rail);
+          }
+          const pktTotal = floor.packets.length;
+          floor.packets.forEach((pktData, pIdx) => {
+            const pktRgb = stageColorRgb(pktData.stage, palette);
+            const pktGroup = new Group();
+            const crate = new Mesh(
+              kit.own(new BoxGeometry(0.56, 0.28, 0.48)),
+              kit.matte(darkFactoryMode ? [0.18, 0.2, 0.26] : [0.3, 0.34, 0.4], { roughness: 0.45 })
+            );
+            crate.castShadow = true;
+            pktGroup.add(crate);
+            const capStripe = new Mesh(
+              kit.own(new BoxGeometry(0.58, 0.06, 0.5)),
+              kit.matte(pktRgb, { roughness: 0.25, emissive: colour(pktRgb), emissiveIntensity: 0.78 })
+            );
+            capStripe.position.y = 0.14;
+            pktGroup.add(capStripe);
+            pktGroup.position.set(-2.8, y0 + 0.41, 1.9);
+            scene.add(pktGroup);
+            hitTargets.push(crate);
+            selectionByHit.set(crate, { sel: { kind: "packet", packet: pktData, floor }, focusY: y0 + 1.1 });
+            conveyorPackets.push({
+              mesh: pktGroup,
+              y: y0 + 0.41,
+              z: 1.9,
+              speed: pktData.stage === "building" || pktData.stage === "turn" ? 1.35 : 0.72,
+              offset: pIdx / Math.max(1, pktTotal)
+            });
+          });
+          const screenMatA = kit.own(new MeshBasicMaterial({ map: makeDeskScreenTexture(kit, floorAccent, fIdx * 7 + 1) }));
+          const screenMatB = kit.own(new MeshBasicMaterial({ map: makeDeskScreenTexture(kit, palette.accent.reviewer, fIdx * 7 + 2) }));
           floor.agents.slice(0, 6).forEach((ag, idx) => {
-            const dx = -2.2 + idx * 1.35;
-            const dz = -0.85;
-            const desk = new Mesh(kit.own(new BoxGeometry(0.92, 0.56, 0.54)), matWood);
-            desk.position.set(dx, 0.28, dz + 0.42);
-            desk.castShadow = true;
-            floorGroup.add(desk);
-            const av = buildCustomAvatar3D(kit, palette, ag, { seatHeight: 0.08, scale: 0.86, showPortraitMedallion: true });
-            av.root.position.set(dx, 0, dz - 0.15);
+            const dx = -2.65 + idx * 1.46;
+            const dz = -1.05;
+            const station = buildWorkstationUnit(
+              kit,
+              matWood,
+              matSteel,
+              matChrome,
+              matLeather,
+              matPaper,
+              idx % 2 === 0 ? screenMatA : screenMatB
+            );
+            station.position.set(dx, 0, dz);
+            floorGroup.add(station);
+            const av = buildCustomAvatar3D(kit, palette, ag, { seatHeight: 0.37, scale: 0.88, showPortraitMedallion: false });
+            av.root.position.set(dx, 0, dz - 0.14);
             floorGroup.add(av.root);
-            avatars.push({ handle: av, phase: fIdx * 1.7 + idx * 0.8, working: ag.status === "working", error: ag.status === "error" });
+            const aHit = new Mesh(kit.own(new BoxGeometry(0.85, 1.35, 0.85)), kit.own(new MeshBasicMaterial({ visible: false })));
+            aHit.position.set(dx, 0.68, dz - 0.14);
+            floorGroup.add(aHit);
+            hitTargets.push(aHit);
+            selectionByHit.set(aHit, { sel: { kind: "agent", agent: ag, floor }, focusY: y0 + 1.15 });
+            avatars.push({ handle: av, phase: fIdx * 1.7 + idx * 0.85, working: ag.status === "working", error: ag.status === "error" });
           });
         }
-        const hitBox = new Mesh(
-          kit.own(new BoxGeometry(floorW, FLOOR_H - 0.2, floorD)),
+        const floorHit = new Mesh(
+          kit.own(new BoxGeometry(floorW, 0.32, floorD)),
           kit.own(new MeshBasicMaterial({ visible: false }))
         );
-        hitBox.position.set(0, FLOOR_H / 2 - 0.1, 0);
-        floorGroup.add(hitBox);
-        hitTargets.push(hitBox);
-        floorByHit.set(hitBox, { floor, y: y0 + 1.1 });
+        floorHit.position.set(0, -0.14, 0);
+        floorGroup.add(floorHit);
+        hitTargets.push(floorHit);
+        selectionByHit.set(floorHit, { sel: { kind: "floor", floor }, focusY: y0 + 1.25 });
       });
       const raycaster = new Raycaster();
       const pointer = new Vector2();
@@ -55153,14 +55773,17 @@ function createHoldingTower3DComponent(ctx) {
       let moved = false;
       let lastX = 0;
       let lastY = 0;
-      const pickFloor = (e) => {
+      const pickTarget = (e) => {
         const rect = renderer.domElement.getBoundingClientRect();
         pointer.x = (e.clientX - rect.left) / rect.width * 2 - 1;
         pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
         raycaster.setFromCamera(pointer, camera);
         const hits = raycaster.intersectObjects(hitTargets, false);
-        if (hits.length === 0) return null;
-        return floorByHit.get(hits[0].object) || null;
+        for (const hit2 of hits) {
+          const entry = selectionByHit.get(hit2.object);
+          if (entry) return entry;
+        }
+        return null;
       };
       const onDown = (e) => {
         dragging = true;
@@ -55175,25 +55798,25 @@ function createHoldingTower3DComponent(ctx) {
           const dy = e.clientY - lastY;
           if (Math.abs(dx) > 2 || Math.abs(dy) > 2) moved = true;
           theta -= dx * 8e-3;
-          phi = Math.max(0.42, Math.min(1.3, phi - dy * 6e-3));
+          phi = Math.max(0.42, Math.min(1.28, phi - dy * 6e-3));
           lastX = e.clientX;
           lastY = e.clientY;
           updateCamera();
           return;
         }
-        const hit2 = pickFloor(e);
-        setHoveredSlug(hit2 ? hit2.floor.slug : null);
+        const hit2 = pickTarget(e);
+        setHoveredSlug(hit2 ? hit2.sel.floor.slug : null);
         renderer.domElement.style.cursor = hit2 ? "pointer" : "grab";
       };
       const onUp = (e) => {
         if (dragging && !moved) {
-          const hit2 = pickFloor(e);
+          const hit2 = pickTarget(e);
           if (hit2) {
-            setSelectedSlug(hit2.floor.slug);
-            targetFloorYRef.current = hit2.y;
-            targetFrustumRef.current = 8.4;
+            setSelection(hit2.sel);
+            targetFloorYRef.current = hit2.focusY;
+            targetFrustumRef.current = hit2.sel.kind === "floor" ? 9.2 : 7.8;
           } else {
-            setSelectedSlug(null);
+            setSelection(null);
             targetFloorYRef.current = defaultCenterY;
             targetFrustumRef.current = defaultFrustum;
           }
@@ -55202,12 +55825,12 @@ function createHoldingTower3DComponent(ctx) {
         renderer.domElement.style.cursor = "grab";
       };
       const onDblClick = (e) => {
-        const hit2 = pickFloor(e);
-        if (hit2) props.onEnterFloor(hit2.floor.slug);
+        const hit2 = pickTarget(e);
+        if (hit2) props.onEnterFloor(hit2.sel.floor.slug);
       };
       const onWheel = (e) => {
         e.preventDefault();
-        const nextF = Math.max(6.2, Math.min(24, frustum + e.deltaY * 0.01));
+        const nextF = Math.max(6, Math.min(26, frustum + e.deltaY * 0.01));
         frustum = nextF;
         targetFrustumRef.current = nextF;
         updateCamera();
@@ -55240,17 +55863,20 @@ function createHoldingTower3DComponent(ctx) {
         for (const cap of dataCapsules) {
           const frac = (t * cap.speed + cap.offset) % 1;
           const pingPong = frac < 0.5 ? frac * 2 : (1 - frac) * 2;
-          cap.mesh.position.y = 0.4 + pingPong * Math.max(1, totalH - 0.9);
-          cap.mesh.rotation.y = t * 1.4;
+          cap.mesh.position.y = cap.fromY + pingPong * Math.max(0.5, cap.toY - cap.fromY);
+          cap.mesh.rotation.y = t * 1.1;
         }
         for (const pkt of conveyorPackets) {
-          const frac = (t * pkt.speed * 0.16 + pkt.offset) % 1;
-          pkt.mesh.position.x = -2.4 + frac * 6.4;
-          pkt.mesh.position.y = pkt.y + Math.sin(t * 4 + pkt.offset * 6) * 0.02;
+          const frac = (t * pkt.speed * 0.14 + pkt.offset) % 1;
+          pkt.mesh.position.x = -2.9 + frac * 7.4;
+          pkt.mesh.position.y = pkt.y + Math.sin(t * 3.8 + pkt.offset * 6) * 0.015;
+        }
+        for (let i = 0; i < rackLeds.length; i += 1) {
+          rackLeds[i].visible = Math.sin(t * 3.4 + i * 1.5) > -0.65;
         }
         for (const holo of holoCores) {
-          holo.rotation.y = t * 0.9;
-          holo.rotation.x = Math.sin(t * 0.7) * 0.25;
+          holo.rotation.y = t * 0.8;
+          holo.position.y = 1.56 + Math.sin(t * 1.7) * 0.045;
         }
         for (const b of warningBeacons) {
           b.mesh.scale.setScalar(1 + Math.sin(t * 7 + b.phase) * 0.14);
@@ -55277,24 +55903,28 @@ function createHoldingTower3DComponent(ctx) {
         kit.dispose();
         renderer.dispose();
       };
-    }, [floorsSignature, fitTick, darkFactoryMode]);
-    const focusedFloor = floors.find((f) => f.slug === (selectedSlug || hoveredSlug)) || null;
+    }, [floorsSignature, fitTick, darkFactoryMode, props.activeTenant]);
+    const selectedSlug = (selection == null ? void 0 : selection.floor.slug) || null;
+    const activeFloorCard = (selection == null ? void 0 : selection.floor) || floors.find((f) => f.slug === hoveredSlug) || null;
     const focusFloorBySlug = (slug) => {
-      setSelectedSlug(slug);
       if (!slug) {
+        setSelection(null);
         setFitTick((n) => n + 1);
         return;
       }
       const idx = floors.findIndex((f) => f.slug === slug);
       if (idx >= 0) {
-        targetFloorYRef.current = idx * 3.2 + 1.1;
-        targetFrustumRef.current = 8.4;
+        setSelection({ kind: "floor", floor: floors[idx] });
+        targetFloorYRef.current = idx * 3.65 + 1.25;
+        targetFrustumRef.current = 9.2;
       }
     };
+    const totalLivePackets = floors.reduce((sum, f) => sum + f.packets.length, 0);
     return h(
       "div",
       {
         "data-holding-tower-3d": "true",
+        "data-holding-tower-sculpted": "true",
         style: { display: "flex", flexDirection: "column", gap: "8px", flex: 1, minHeight: "560px" }
       },
       h(
@@ -55307,7 +55937,7 @@ function createHoldingTower3DComponent(ctx) {
             minHeight: "520px",
             borderRadius: "12px",
             border: "1px solid var(--border)",
-            background: darkFactoryMode ? "#090b10" : "#eef2f7",
+            background: darkFactoryMode ? "#090c12" : "#eef2f7",
             overflow: "hidden"
           }
         },
@@ -55327,7 +55957,7 @@ function createHoldingTower3DComponent(ctx) {
               padding: "8px",
               borderRadius: "10px",
               border: "1px solid var(--border)",
-              background: "rgba(14, 17, 24, 0.9)",
+              background: "rgba(14, 17, 24, 0.92)",
               backdropFilter: "blur(10px)"
             }
           },
@@ -55342,31 +55972,32 @@ function createHoldingTower3DComponent(ctx) {
                 type: "button",
                 className: "of-btn",
                 "data-variant": active ? "primary" : void 0,
-                style: { justifyContent: "space-between", fontSize: "11px", padding: "4px 8px", minWidth: "164px" },
+                style: { justifyContent: "space-between", fontSize: "11px", padding: "4px 8px", minWidth: "178px" },
                 onClick: () => focusFloorBySlug(active ? null : f.slug)
               },
               h("span", null, `${floorNum}F · ${f.isBoard ? "Conselho" : f.nome}`),
               h(
                 "span",
                 { className: "of-mono", style: { fontSize: "10px", opacity: 0.85 } },
-                f.errorCount > 0 ? `!${f.errorCount}` : f.workingCount > 0 ? `⚡${f.workingCount}` : `${f.agentesCount}`
+                f.errorCount > 0 ? `!${f.errorCount}` : f.workingCount > 0 ? `⚡${f.workingCount}` : f.packets.length > 0 ? `📦${f.packets.length}` : `${f.agentesCount}`
               )
             );
           })
         ),
-        // Card flutuante do andar selecionado/hover no canto superior direito
-        focusedFloor && h(
+        // Card flutuante contextual (Pacote real clicado OU Agente clicado OU Andar focado)
+        (selection || activeFloorCard) && h(
           "div",
           {
+            "data-tower-inspector-card": "true",
             style: {
               position: "absolute",
               top: "12px",
               right: "12px",
               zIndex: 22,
-              width: "268px",
+              width: "286px",
               borderRadius: "10px",
               border: "1px solid var(--border-strong)",
-              background: "rgba(15, 18, 24, 0.94)",
+              background: "rgba(15, 18, 24, 0.95)",
               backdropFilter: "blur(10px)",
               padding: "11px 13px",
               display: "flex",
@@ -55374,52 +56005,125 @@ function createHoldingTower3DComponent(ctx) {
               gap: "8px"
             }
           },
-          h(
-            "div",
-            { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" } },
-            h("strong", { style: { fontSize: "12.5px" } }, focusedFloor.nome),
+          (selection == null ? void 0 : selection.kind) === "packet" ? [
             h(
-              "span",
-              {
-                className: "of-pill",
-                "data-tone": focusedFloor.errorCount > 0 ? "failed" : focusedFloor.workingCount > 0 ? "running" : "done",
-                style: { fontSize: "10px" }
-              },
-              focusedFloor.estagio
-            )
-          ),
-          h(
-            "div",
-            { className: "of-muted", style: { fontSize: "11px" } },
-            `${focusedFloor.agentesCount} agentes · ${focusedFloor.workingCount} respondendo${focusedFloor.errorCount > 0 ? ` · ${focusedFloor.errorCount} com erro` : ""}`
-          ),
-          h(
-            "div",
-            { style: { display: "flex", gap: "6px" } },
-            h(
-              "button",
-              {
-                type: "button",
-                className: "of-btn",
-                "data-variant": "primary",
-                style: { flex: 1, justifyContent: "center", fontSize: "11px" },
-                onClick: () => props.onEnterFloor(focusedFloor.slug)
-              },
-              focusedFloor.isBoard ? "Entrar na Sala 3D ↗" : "Entrar no Andar 3D ↗"
+              "div",
+              { key: "h", style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px" } },
+              h("strong", { style: { fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, selection.packet.label),
+              h("span", { className: "of-pill", "data-tone": selection.packet.stage === "failed" ? "failed" : "running", style: { fontSize: "10px" } }, selection.packet.stage)
             ),
-            props.onOpenChannel && h(
-              "button",
-              {
-                type: "button",
-                className: "of-btn",
-                style: { fontSize: "11px" },
-                onClick: () => props.onOpenChannel(focusedFloor.slug)
-              },
-              "Canal"
+            h("div", { key: "d", className: "of-muted", style: { fontSize: "11px" } }, `${selection.floor.nome} · ${selection.packet.detail}`),
+            h(
+              "div",
+              { key: "a", style: { display: "flex", gap: "6px" } },
+              selection.packet.workItem && props.onSelectItem && h(
+                "button",
+                {
+                  type: "button",
+                  className: "of-btn",
+                  "data-variant": "primary",
+                  style: { flex: 1, justifyContent: "center", fontSize: "11px" },
+                  onClick: () => props.onSelectItem(selection.packet.workItem)
+                },
+                "Inspecionar Card/PR ↗"
+              ),
+              selection.packet.turn && props.onOpenTurnInSideChat && h(
+                "button",
+                {
+                  type: "button",
+                  className: "of-btn",
+                  "data-variant": "primary",
+                  style: { flex: 1, justifyContent: "center", fontSize: "11px" },
+                  onClick: () => props.onOpenTurnInSideChat(selection.packet.turn)
+                },
+                "Abrir turno no chat ↗"
+              )
             )
-          )
+          ] : (selection == null ? void 0 : selection.kind) === "agent" ? [
+            h(
+              "div",
+              { key: "h", style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px" } },
+              h("strong", { style: { fontSize: "12.5px" } }, selection.agent.name),
+              h(
+                "span",
+                { className: "of-pill", "data-tone": selection.agent.status === "error" ? "failed" : selection.agent.status === "working" ? "running" : "done", style: { fontSize: "10px" } },
+                selection.agent.status === "working" ? "Em turno" : selection.agent.status === "error" ? "Erro" : "Online"
+              )
+            ),
+            h("div", { key: "d", className: "of-muted", style: { fontSize: "11px" } }, selection.agent.stepLabel || `${selection.floor.nome} · ${selection.agent.role || "Agente"}`),
+            h(
+              "div",
+              { key: "a", style: { display: "flex", gap: "6px" } },
+              props.onOpenAgentDm && selection.agent.pubkey && h(
+                "button",
+                {
+                  type: "button",
+                  className: "of-btn",
+                  "data-variant": "primary",
+                  style: { flex: 1, justifyContent: "center", fontSize: "11px" },
+                  onClick: () => props.onOpenAgentDm({ key: selection.agent.key, pubkey: selection.agent.pubkey, name: selection.agent.name })
+                },
+                "Abrir chat ↗"
+              ),
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "of-btn",
+                  style: { fontSize: "11px" },
+                  onClick: () => props.onEnterFloor(selection.floor.slug)
+                },
+                "Entrar no Andar"
+              )
+            )
+          ] : activeFloorCard && [
+            h(
+              "div",
+              { key: "h", style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" } },
+              h("strong", { style: { fontSize: "12.5px" } }, activeFloorCard.nome),
+              h(
+                "span",
+                {
+                  className: "of-pill",
+                  "data-tone": activeFloorCard.errorCount > 0 ? "failed" : activeFloorCard.workingCount > 0 ? "running" : "done",
+                  style: { fontSize: "10px" }
+                },
+                activeFloorCard.estagio
+              )
+            ),
+            h(
+              "div",
+              { key: "d", className: "of-muted", style: { fontSize: "11px" } },
+              `${activeFloorCard.agentesCount} agentes · ${activeFloorCard.workingCount} em turno · ${activeFloorCard.packets.length} item(ns) na esteira`
+            ),
+            h(
+              "div",
+              { key: "a", style: { display: "flex", gap: "6px" } },
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "of-btn",
+                  "data-variant": "primary",
+                  style: { flex: 1, justifyContent: "center", fontSize: "11px" },
+                  onClick: () => props.onEnterFloor(activeFloorCard.slug)
+                },
+                activeFloorCard.isBoard ? "Entrar na Sala 3D ↗" : "Entrar no Andar 3D ↗"
+              ),
+              props.onOpenChannel && h(
+                "button",
+                {
+                  type: "button",
+                  className: "of-btn",
+                  style: { fontSize: "11px" },
+                  onClick: () => props.onOpenChannel(activeFloorCard.slug)
+                },
+                "Canal"
+              )
+            )
+          ]
         ),
-        // Controles no canto inferior direito (Dia/Noite Dark Factory, Tela cheia, Fit)
+        // Controles no canto inferior direito
         h(
           "div",
           { style: { position: "absolute", right: "12px", bottom: "12px", zIndex: 20, display: "inline-flex", gap: "6px" } },
@@ -55465,7 +56169,7 @@ function createHoldingTower3DComponent(ctx) {
               className: "of-btn",
               style: { background: "rgba(18, 20, 26, 0.88)" },
               onClick: () => {
-                setSelectedSlug(null);
+                setSelection(null);
                 setFitTick((n) => n + 1);
               }
             },
@@ -55476,7 +56180,7 @@ function createHoldingTower3DComponent(ctx) {
       h(
         "div",
         { className: "of-muted", style: { textAlign: "center", fontSize: "11px" } },
-        `Torre da Holding Cortexx · ${floors.length} andares ao vivo · Clique no andar para aproximar · Duplo clique para entrar`
+        `Torre da Holding Cortexx · ${floors.length} andares · ${totalLivePackets} pacote(s) reais na esteira · Clique em qualquer agente, pacote ou andar`
       )
     );
   };

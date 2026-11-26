@@ -1091,7 +1091,7 @@ export function createBoardroom3DComponent(ctx: Context) {
           kit,
           palette,
           { name: displayName, role: seat.role, picture: crewMatch?.picture, status: avStatus, index: idx },
-          { seatHeight: 0.44, scale: 1.08, showPortraitMedallion: true }
+          { seatHeight: 0.44, scale: 1.08, showPortraitMedallion: false }
         );
         seatGroup.add(avatar.root);
 
@@ -1253,6 +1253,7 @@ export function createBoardroom3DComponent(ctx: Context) {
         holoGroup.position.y = 1.62 + Math.sin(t * 1.8) * 0.05;
         holoRing.rotation.z = -t * 0.6;
 
+        const projectedBubbles: Array<{ node: HTMLDivElement; cx: number; bottom: number; w: number; h: number }> = [];
         for (const a of animated) {
           a.avatar.animate(t, a.phase, { working: a.seat.status === "working" });
 
@@ -1265,10 +1266,23 @@ export function createBoardroom3DComponent(ctx: Context) {
             const bh = bubbleNode.offsetHeight || 86;
             const cx = Math.max(bw / 2 + 10, Math.min(cw - bw / 2 - 10, sx));
             const bottom = Math.max(bh + 12, Math.min(ch - 18, sy - 14));
-            bubbleNode.style.transform = `translate3d(${Math.round(cx)}px, ${Math.round(bottom)}px, 0) translate(-50%, -100%)`;
-            bubbleNode.style.opacity = "1";
-            bubbleNode.style.pointerEvents = "auto";
+            projectedBubbles.push({ node: bubbleNode, cx, bottom, w: bw, h: bh });
           }
+        }
+        projectedBubbles.sort((a, b) => a.bottom - b.bottom);
+        for (let i = 0; i < projectedBubbles.length; i += 1) {
+          const cur = projectedBubbles[i];
+          for (let j = 0; j < i; j += 1) {
+            const prev = projectedBubbles[j];
+            const overlapX = Math.abs(cur.cx - prev.cx) < (cur.w + prev.w) * 0.48;
+            const overlapY = Math.abs(cur.bottom - prev.bottom) < prev.h + 8;
+            if (overlapX && overlapY) {
+              cur.bottom = Math.max(cur.h + 14, prev.bottom - prev.h - 10);
+            }
+          }
+          cur.node.style.transform = `translate3d(${Math.round(cur.cx)}px, ${Math.round(cur.bottom)}px, 0) translate(-50%, -100%)`;
+          cur.node.style.opacity = "1";
+          cur.node.style.pointerEvents = "auto";
         }
         renderer.render(scene, camera);
       };
@@ -1330,7 +1344,17 @@ export function createBoardroom3DComponent(ctx: Context) {
     const workingNowCount = enrichedSeats.filter((e) => Boolean(e.liveTurn)).length;
     const inBuzzCount = enrichedSeats.filter((e) => e.inBuzz).length;
 
-    const speechBubbles = enrichedSeats.filter((e) => Boolean(e.liveTurn || e.doneRec));
+    const speechBubbles = (() => {
+      const seenPk = new Set<string>();
+      return enrichedSeats.filter((e) => {
+        if (!e.liveTurn && !e.doneRec) return false;
+        if (e.pubkey) {
+          if (seenPk.has(e.pubkey)) return false;
+          seenPk.add(e.pubkey);
+        }
+        return true;
+      });
+    })();
 
     React.useEffect(() => {
       if (speechBubbles.length === 0) return;
