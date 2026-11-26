@@ -124,6 +124,15 @@ export interface FactorySecondaryPagesProps {
   scaffoldingSubsidiary?: boolean;
   subsidiaryDraft?: { open: boolean; slug: string; nome: string; descricao: string; budgetTokensDiario: number; gastoDiaUsd: number };
   setSubsidiaryDraft?: (patch: Partial<{ open: boolean; slug: string; nome: string; descricao: string; budgetTokensDiario: number; gastoDiaUsd: number }>) => void;
+  evalFilter?: "all" | "attention" | "approved";
+  setEvalFilter?: (f: "all" | "attention" | "approved") => void;
+  mcpTools?: Array<{ name: string; description: string; category: string; params: string[]; required: string[] }>;
+  mcpSearch?: string;
+  setMcpSearch?: (v: string) => void;
+  mcpCategory?: string;
+  setMcpCategory?: (v: string) => void;
+  onOpenAgentProfile?: (target: { key?: string; pubkey?: string; name?: string } | string) => void;
+  onMigrateSingleAgentModel?: (agentKey: string, target: { provider: string; model: string }) => Promise<void> | void;
 }
 
 const CHART_COLORS = ["var(--chart-2)", "var(--chart-1)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"];
@@ -924,7 +933,7 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
             { id: "memory", label: `Plantel ${empresaNome} (${tenantAgents.length})` },
             { id: "eval", label: `Eval & Modelos R5.1 (${modelos.length})` },
             { id: "skills", label: `Revisores L-01 (${revisoresSurf.length})` },
-            { id: "mcp", label: "MCP (21 tools)" },
+            { id: "mcp", label: `MCP (${(props.mcpTools || []).length || 22} tools)` },
           ] as const).map((t) =>
             h(
               "button",
@@ -1147,69 +1156,500 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                 )
           )
         : agentTab === "eval"
-        ? h(
-            "div",
-            { className: "of-card-pad" },
-            h("div", { style: { fontSize: "14px", fontWeight: 700, marginBottom: "4px" } }, PT_BR.labels.modelsTitle),
-            h("div", { className: "of-muted", style: { marginBottom: "10px" } }, "Fonte: docs/eval-modelos-onda5.md. Qualquer agente com modelo abaixo de 8/10 em tool call aparece em vermelho."),
-            modelos.length === 0
-              ? h("div", { className: "of-muted" }, PT_BR.labels.unavailable)
-              : h(
-                  "table",
-                  { className: "of-table" },
-                  h("thead", null, h("tr", null, h("th", null, "Agente"), h("th", null, "Papel"), h("th", null, "Modelo"), h("th", null, "Tool call (R5.1)"))),
+        ? (() => {
+            const evalFilter = props.evalFilter || "all";
+            const approvedCount = modelos.filter((m) => m.evalStatus === "approved").length;
+            const belowCount = modelos.filter((m) => m.evalStatus === "below_min").length;
+            const attentionCount = modelos.filter((m) => m.evalStatus !== "approved").length;
+            const filteredModelos =
+              evalFilter === "attention"
+                ? modelos.filter((m) => m.evalStatus !== "approved")
+                : evalFilter === "approved"
+                ? modelos.filter((m) => m.evalStatus === "approved")
+                : modelos;
+            return h(
+              "div",
+              { style: { display: "flex", flexDirection: "column", gap: "12px" }, "data-eval-r51-view": "true" },
+              h(
+                "div",
+                { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "10px" } },
+                [
+                  { label: "Aprovados R5.1 (≥ 8/10)", val: `${approvedCount}/${modelos.length}`, tone: "done", sub: "tool call validado em 10 cards" },
+                  { label: "Abaixo do mínimo (< 8/10)", val: String(belowCount), tone: belowCount > 0 ? "failed" : "done", sub: belowCount > 0 ? "migração recomendada" : "nenhum agente crítico" },
+                  { label: "Fora do eval / Timeout", val: String(Math.max(0, attentionCount - belowCount)), tone: attentionCount - belowCount > 0 ? "waiting" : "done", sub: "mistral-large (>20s) ou não testado" },
+                  { label: "Vencedores R5.1 (10/10)", val: "2 modelos", tone: "done", sub: "gemini-2.5-flash (2.0s) · sonnet-4-6 (4.1s)" },
+                ].map((k) =>
                   h(
-                    "tbody",
+                    "div",
+                    { key: k.label, className: "of-card-pad", style: { padding: "11px 13px" } },
+                    h("div", { className: "of-meter-label" }, k.label),
+                    h("div", { className: "of-num", style: { fontSize: "19px", fontWeight: 700, marginTop: "4px", color: k.tone === "failed" ? "var(--status-failed)" : k.tone === "waiting" ? "var(--status-waiting)" : "var(--foreground)" } }, k.val),
+                    h("div", { className: "of-muted", style: { fontSize: "10.5px", marginTop: "2px" } }, k.sub)
+                  )
+                )
+              ),
+              h(
+                "div",
+                { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+                h(
+                  "div",
+                  { style: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" } },
+                  h(
+                    "div",
                     null,
-                    modelos.map((m) =>
-                      h(
-                        "tr",
-                        { key: m.agente },
-                        h("td", { style: { fontWeight: 600 } }, m.agente),
-                        h("td", { className: "of-muted" }, m.papel || "—"),
-                        h("td", { className: "of-mono" }, m.modelo || PT_BR.labels.unavailable),
+                    h("div", { style: { fontSize: "14px", fontWeight: 700 } }, PT_BR.labels.modelsTitle),
+                    h("div", { className: "of-muted", style: { fontSize: "11.5px", marginTop: "2px" } }, "Fonte: docs/eval-modelos-onda5.md (10 cards reais). Modelos < 8/10 ou com timeout >20s ficam sinalizados para migração em 1 clique via ctx.agents.save().")
+                  ),
+                  props.setEvalFilter &&
+                    h(
+                      "div",
+                      { className: "of-segmented" },
+                      ([
+                        { id: "all", label: `Todos (${modelos.length})` },
+                        { id: "attention", label: `Migrar (${attentionCount})` },
+                        { id: "approved", label: `Aprovados (${approvedCount})` },
+                      ] as const).map((f) =>
                         h(
-                          "td",
-                          null,
+                          "button",
+                          {
+                            key: f.id,
+                            type: "button",
+                            className: "of-seg-btn",
+                            "data-active": evalFilter === f.id ? "true" : "false",
+                            onClick: () => props.setEvalFilter!(f.id),
+                          },
+                          f.label
+                        )
+                      )
+                    )
+                ),
+                filteredModelos.length === 0
+                  ? h("div", { className: "of-muted", style: { padding: "16px 0" } }, "Nenhum agente corresponde ao filtro selecionado.")
+                  : h(
+                      "table",
+                      { className: "of-table" },
+                      h(
+                        "thead",
+                        null,
+                        h("tr", null, h("th", null, "Agente"), h("th", null, "Papel"), h("th", null, "Modelo & Provider"), h("th", null, "Tool call (R5.1)"), h("th", null, "Latência / Custo"), h("th", null, "Ação (Buzz API)"))
+                      ),
+                      h(
+                        "tbody",
+                        null,
+                        filteredModelos.map((m) => {
+                          const agSpec = tenantAgents.find((a) => a.name === m.agente);
+                          const isTier1 = /(ceo|coo|revis|arquit|segur|secur|qa|oraculo|conselho|board)/i.test(String(m.papel || ""));
+                          const recTarget = isTier1
+                            ? { provider: "nexusmind_anthropic", model: "claude-sonnet-4-6", label: "Sonnet 4.6" }
+                            : { provider: "nexusmind_antigravity", model: "gemini-2.5-flash", label: "Flash 2.5" };
+                          const scorePct = typeof m.scoreNum === "number" ? Math.max(4, m.scoreNum * 10) : 0;
+                          const tone =
+                            m.evalStatus === "approved"
+                              ? "done"
+                              : m.evalStatus === "below_min"
+                              ? "failed"
+                              : "waiting";
+                          const pillText =
+                            m.evalStatus === "approved"
+                              ? `${m.toolcall_eval} · aprovado`
+                              : m.evalStatus === "below_min"
+                              ? `${m.toolcall_eval} · abaixo do mín.`
+                              : m.evalStatus === "unsupported"
+                              ? "Timeout >20s · bloquear"
+                              : "Não avaliado no R5.1";
+                          return h(
+                            "tr",
+                            { key: m.agente },
+                            h(
+                              "td",
+                              { style: { fontWeight: 600 } },
+                              h(
+                                "span",
+                                { style: { display: "inline-flex", alignItems: "center", gap: "7px" } },
+                                h("span", { className: "of-dot", "data-tone": tone }),
+                                m.agente
+                              )
+                            ),
+                            h("td", { className: "of-muted" }, m.papel || "—"),
+                            h(
+                              "td",
+                              null,
+                              h("div", { className: "of-mono", style: { fontSize: "12px" } }, m.modelo || PT_BR.labels.unavailable),
+                              m.provider && h("div", { className: "of-mono of-muted", style: { fontSize: "10px" } }, m.provider)
+                            ),
+                            h(
+                              "td",
+                              { style: { minWidth: "175px" } },
+                              h("span", { className: "of-pill", "data-tone": tone }, pillText),
+                              typeof m.scoreNum === "number" &&
+                                h(
+                                  "div",
+                                  { className: "of-bar-track", style: { marginTop: "5px", height: "4px", maxWidth: "130px" } },
+                                  h("div", {
+                                    className: "of-bar-fill",
+                                    style: {
+                                      width: `${scorePct}%`,
+                                      background: tone === "done" ? "var(--status-done)" : "var(--status-failed)",
+                                    },
+                                  })
+                                )
+                            ),
+                            h(
+                              "td",
+                              { className: "of-mono of-muted", style: { fontSize: "11px" } },
+                              m.latencyMs ? `${m.latencyMs}ms · ${m.costUsd || "—"}` : "—"
+                            ),
+                            h(
+                              "td",
+                              null,
+                              m.evalStatus === "approved"
+                                ? h("span", { style: { fontSize: "11px", color: "var(--status-done)", fontWeight: 600 } }, "✓ Alinhado")
+                                : props.onMigrateSingleAgentModel && agSpec?.inBuzz && agSpec?.agentKey
+                                ? h(
+                                    "button",
+                                    {
+                                      type: "button",
+                                      className: "of-btn",
+                                      style: { padding: "3px 8px", fontSize: "11px" },
+                                      onClick: () => props.onMigrateSingleAgentModel!(agSpec.agentKey, { provider: recTarget.provider, model: recTarget.model }),
+                                    },
+                                    `Migrar → ${recTarget.label}`
+                                  )
+                                : h("span", { className: "of-muted", style: { fontSize: "11px" } }, "A provisionar")
+                            )
+                          );
+                        })
+                      )
+                    )
+              )
+            );
+          })()
+        : agentTab === "skills"
+        ? (() => {
+            const surfaceMeta: Record<string, { trustId: string; paths: string[]; desc: string }> = {
+              codigo: { trustId: "bug", paths: ["src/**", "ferramentas/**", "testes/**"], desc: "Revisão de mérito, provas L-22, regressões e qualidade de código." },
+              metodo: { trustId: "docs", paths: ["specs/**", "cards/**", "licoes/**", "contratos/**"], desc: "Conformidade Specsfy, TDD, regras L-01/L-22/L-90 e governança." },
+              seguranca: { trustId: "seguranca", paths: ["empresas/**", "ferramentas/ci.sh", ".github/**", "infra/secrets/**"], desc: "Auditoria de chaves, CI isolado, alçadas constitucionais e matérias reservadas." },
+              ui: { trustId: "feature", paths: ["src/factory/**", "src/components/**", "manifest.json"], desc: "Design System CodeDen/Buzz, acessibilidade, Shadow DOM e UX nativa." },
+              arquitetura: { trustId: "infra", paths: ["ferramentas/esteira/**", "contratos/alcadas_politica.json"], desc: "Fronteiras de módulos, contratos, performance e dívida estrutural." },
+            };
+            const approvedReviewers = revisoresSurf.filter(([, rev]) => {
+              const row = modelos.find((m) => m.agente.toLowerCase() === String(rev).toLowerCase());
+              return row?.evalStatus === "approved";
+            }).length;
+            const openReviewsCount = status.inProgress.filter((i) => i.stage === "verifying").length;
+            return h(
+              "div",
+              { style: { display: "flex", flexDirection: "column", gap: "12px" }, "data-reviewers-l01-view": "true" },
+              h(
+                "div",
+                { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "10px" } },
+                [
+                  { label: "Superfícies cobertas (L-01)", val: `${revisoresSurf.length}/5`, sub: "segregação executor ≠ revisor" },
+                  { label: "Revisores em modelo R5.1", val: `${approvedReviewers}/${revisoresSurf.length}`, sub: approvedReviewers < revisoresSurf.length ? "reconciliar modelos recomendado" : "todos validados ≥ 8/10" },
+                  { label: "PRs em revisão agora", val: String(openReviewsCount), sub: "aguardando veredito GATE" },
+                  { label: "Modo de alçadas", val: (status.alcadasPolitica?.modo || "observe").toUpperCase(), sub: "contratos/alcadas_politica.json" },
+                ].map((k) =>
+                  h(
+                    "div",
+                    { key: k.label, className: "of-card-pad", style: { padding: "11px 13px" } },
+                    h("div", { className: "of-meter-label" }, k.label),
+                    h("div", { className: "of-num", style: { fontSize: "19px", fontWeight: 700, marginTop: "4px" } }, k.val),
+                    h("div", { className: "of-muted", style: { fontSize: "10.5px", marginTop: "2px" } }, k.sub)
+                  )
+                )
+              ),
+              h(
+                "div",
+                { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "12px" } },
+                h(
+                  "div",
+                  null,
+                  h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Matriz de Revisores Independentes (L-01) · ${empresaNome}`),
+                  h("div", { className: "of-muted", style: { fontSize: "11.5px", marginTop: "2px" } }, "Regra L-01: o executor nunca pode revisar a própria entrega. Cada superfície cruza o revisor titular, modelo vivo no Buzz, nível de autonomia (Trust Engine) e caminhos cobertos.")
+                ),
+                revisoresSurf.length === 0
+                  ? h("div", { className: "of-muted" }, PT_BR.labels.unavailable)
+                  : h(
+                      "div",
+                      { className: "of-grid-3" },
+                      revisoresSurf.map(([superficie, revisor]) => {
+                        const keyNorm = superficie.toLowerCase();
+                        const meta = surfaceMeta[keyNorm] || { trustId: "feature", paths: ["**"], desc: "Revisão técnica independente L-01." };
+                        const agSpec = tenantAgents.find((a) => a.name.toLowerCase() === String(revisor).toLowerCase());
+                        const evalRow = modelos.find((m) => m.agente.toLowerCase() === String(revisor).toLowerCase());
+                        const liveMatch = liveCrew.find((c) => c.key === agSpec?.agentKey || c.name.toLowerCase() === String(revisor).toLowerCase());
+                        const pkLower = (agSpec?.pubkey || liveMatch?.pubkey || "").toLowerCase();
+                        const liveTurn = pkLower && props.telemetry?.byPubkey ? props.telemetry.byPubkey[pkLower] : null;
+                        const trustCat = status.trustEngine?.categories?.find((c) => c.id === meta.trustId) || null;
+                        const evalTone = evalRow?.evalStatus === "approved" ? "done" : evalRow?.evalStatus === "below_min" ? "failed" : "waiting";
+                        return h(
+                          "div",
+                          { key: superficie, className: "of-surface", style: { padding: "12px 14px", display: "flex", flexDirection: "column", gap: "9px" } },
                           h(
-                            "span",
-                            { className: "of-pill", "data-tone": m.abaixo_minimo ? "failed" : m.toolcall_eval ? "done" : "idle" },
-                            m.toolcall_eval ? (m.abaixo_minimo ? `${m.toolcall_eval} · ${PT_BR.labels.evalBelowMin}` : m.toolcall_eval) : PT_BR.labels.unavailable
+                            "div",
+                            { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px" } },
+                            h("span", { className: "of-meter-label", style: { color: "var(--primary)" } }, superficie.toUpperCase()),
+                            trustCat &&
+                              h(
+                                "span",
+                                { className: "of-pill", "data-tone": trustCat.mode === "dark_auto_merge" ? "done" : trustCat.locked ? "failed" : "waiting", style: { fontSize: "10px" } },
+                                trustCat.mode === "dark_auto_merge" ? "DARK AUTO" : trustCat.locked ? "GATE HUMANO 🔒" : "ASSISTIDO"
+                              )
+                          ),
+                          h(
+                            "div",
+                            { style: { display: "flex", alignItems: "center", gap: "9px" } },
+                            liveMatch?.picture
+                              ? h("img", { src: liveMatch.picture, alt: revisor, style: { width: "28px", height: "28px", borderRadius: "7px", objectFit: "cover", border: "1px solid var(--border)" } })
+                              : h("span", { className: "of-project-tile", style: { width: "28px", height: "28px", fontSize: "12px" } }, String(revisor).replace(/^OrgFy\s+/i, "").charAt(0).toUpperCase()),
+                            h(
+                              "div",
+                              { style: { minWidth: 0, flex: 1 } },
+                              h("div", { style: { fontSize: "13.5px", fontWeight: 700, display: "flex", alignItems: "center", gap: "6px" } }, revisor, h("span", { className: "of-dot", "data-tone": liveTurn ? "running" : agSpec?.inBuzz ? "done" : "idle" })),
+                              h("div", { className: "of-muted", style: { fontSize: "10.5px" } }, liveTurn ? `⚡ ${liveTurn.stepLabel}` : agSpec?.funcao || "Revisor titular L-01")
+                            )
+                          ),
+                          h("div", { className: "of-muted", style: { fontSize: "11px", lineHeight: 1.4 } }, meta.desc),
+                          h(
+                            "div",
+                            { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px", flexWrap: "wrap", paddingTop: "6px", borderTop: "1px solid var(--border)" } },
+                            h("code", { className: "of-mono of-muted", style: { fontSize: "10.5px" } }, evalRow?.modelo || agSpec?.model || "—"),
+                            h("span", { className: "of-pill", "data-tone": evalTone, style: { fontSize: "10px" } }, evalRow?.toolcall_eval ? `R5.1 ${evalRow.toolcall_eval}` : evalRow?.evalStatus === "unsupported" ? "Timeout >20s" : "Não avaliado")
+                          ),
+                          h(
+                            "div",
+                            { style: { display: "flex", flexWrap: "wrap", gap: "4px" } },
+                            meta.paths.map((p) => h("code", { key: p, className: "of-mono", style: { fontSize: "10px", padding: "1px 6px", borderRadius: "4px", background: "var(--muted)", color: "var(--muted-foreground)" } }, p))
+                          ),
+                          h(
+                            "div",
+                            { style: { display: "flex", alignItems: "center", gap: "6px", marginTop: "auto", paddingTop: "4px" } },
+                            onOpenAgentDm && (agSpec?.pubkey || liveMatch?.pubkey) &&
+                              h(
+                                "button",
+                                {
+                                  type: "button",
+                                  className: "of-btn",
+                                  style: { padding: "3px 8px", fontSize: "11px" },
+                                  onClick: () => onOpenAgentDm({ key: agSpec?.agentKey || liveMatch?.key, pubkey: agSpec?.pubkey || liveMatch?.pubkey, name: revisor }),
+                                },
+                                "DM ↗"
+                              ),
+                            props.onOpenAgentProfile && (agSpec?.pubkey || liveMatch?.pubkey || agSpec?.agentKey) &&
+                              h(
+                                "button",
+                                {
+                                  type: "button",
+                                  className: "of-btn",
+                                  "data-variant": "ghost",
+                                  style: { padding: "3px 8px", fontSize: "11px" },
+                                  onClick: () => props.onOpenAgentProfile!({ key: agSpec?.agentKey || liveMatch?.key, pubkey: agSpec?.pubkey || liveMatch?.pubkey, name: revisor }),
+                                },
+                                "Perfil Buzz ↗"
+                              ),
+                            trustCat &&
+                              h("span", { className: "of-mono of-muted", style: { marginLeft: "auto", fontSize: "10px" } }, `Escape ${trustCat.escapeRatePct.toFixed(1)}%`)
                           )
+                        );
+                      })
+                    )
+              ),
+              status.alcadasPolitica?.materiasReservadas?.length &&
+                h(
+                  "div",
+                  { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+                  h(
+                    "div",
+                    { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" } },
+                    h("div", { style: { fontSize: "13px", fontWeight: 700 } }, "Matérias Reservadas & Alçadas por Path (contratos/alcadas_politica.json)"),
+                    h("span", { className: "of-pill", "data-tone": "waiting" }, `Modo: ${status.alcadasPolitica.modo || "observe"}`)
+                  ),
+                  h(
+                    "div",
+                    { className: "of-grid-3" },
+                    status.alcadasPolitica.materiasReservadas.map((mat) =>
+                      h(
+                        "div",
+                        { key: mat.id, className: "of-surface", style: { padding: "9px 11px", display: "flex", flexDirection: "column", gap: "5px" } },
+                        h(
+                          "div",
+                          { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "6px" } },
+                          h("strong", { style: { fontSize: "12px" } }, mat.nome),
+                          h("span", { className: "of-pill", "data-tone": "failed", style: { fontSize: "9.5px" } }, mat.alcada.toUpperCase())
+                        ),
+                        h(
+                          "div",
+                          { style: { display: "flex", flexWrap: "wrap", gap: "4px" } },
+                          mat.padroes.map((p) => h("code", { key: p, className: "of-mono of-muted", style: { fontSize: "10px" } }, p))
                         )
                       )
                     )
                   )
                 )
-          )
-        : agentTab === "skills"
-        ? h(
-            "div",
-            { className: "of-card-pad" },
-            h("div", { style: { fontSize: "14px", fontWeight: 700, marginBottom: "6px" } }, `Matriz de Revisores Independentes (L-01) · ${empresaNome}`),
-            h("div", { className: "of-muted", style: { marginBottom: "10px" } }, "Regra L-01: o executor nunca pode revisar a própria entrega. Cada superfície tem revisor titular definido no manifesto da empresa."),
-            revisoresSurf.length === 0
-              ? h("div", { className: "of-muted" }, PT_BR.labels.unavailable)
-              : h(
-                  "div",
-                  { className: "of-grid-3" },
-                  revisoresSurf.map(([superficie, revisor]) =>
-                    h(
-                      "div",
-                      { key: superficie, className: "of-surface", style: { padding: "10px 12px" } },
-                      h("div", { className: "of-meter-label" }, superficie),
-                      h("div", { style: { fontSize: "13px", fontWeight: 700, marginTop: "3px" } }, revisor)
-                    )
+            );
+          })()
+        : (() => {
+            const tools = props.mcpTools || [];
+            const query = (props.mcpSearch || "").trim().toLowerCase();
+            const cat = props.mcpCategory || "all";
+            const categories = ["all", ...Array.from(new Set(tools.map((t) => t.category)))];
+            const filteredTools = tools.filter((t) => {
+              if (cat !== "all" && t.category !== cat) return false;
+              if (!query) return true;
+              return t.name.toLowerCase().includes(query) || t.description.toLowerCase().includes(query) || t.params.some((p) => p.toLowerCase().includes(query));
+            });
+            const integrity = props.commandIntegrity;
+            return h(
+              "div",
+              { style: { display: "flex", flexDirection: "column", gap: "12px" }, "data-mcp-registry-view": "true" },
+              h(
+                "div",
+                { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "10px" } },
+                [
+                  { label: "Agent Tools MCP", val: `${tools.length || 22} ativas`, sub: "injetadas via ctx.agents.addTool" },
+                  { label: "Host Commands SHA-256", val: integrity ? `${integrity.verified}/${integrity.total} íntegros` : "7 pinados", sub: integrity && integrity.mismatches > 0 ? `${integrity.mismatches} divergência(s)` : "manifest.json verificado" },
+                  { label: "Agentes no Buzz Desktop", val: String(liveCrew.length), sub: "recebem o catálogo automaticamente" },
+                  { label: "Transporte & Tracing", val: "JSON-RPC 2.0", sub: "MCP Loopback · OTel GenAI" },
+                ].map((k) =>
+                  h(
+                    "div",
+                    { key: k.label, className: "of-card-pad", style: { padding: "11px 13px" } },
+                    h("div", { className: "of-meter-label" }, k.label),
+                    h("div", { className: "of-num", style: { fontSize: "19px", fontWeight: 700, marginTop: "4px" } }, k.val),
+                    h("div", { className: "of-muted", style: { fontSize: "10.5px", marginTop: "2px" } }, k.sub)
                   )
                 )
-          )
-        : h(
-            "div",
-            { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "8px" } },
-            h("div", { style: { fontSize: "14px", fontWeight: 700 } }, "Unified Tool Registry · 21 Agent Tools MCP"),
-            h("div", { className: "of-muted" }, "Todas as sessões de agentes no Buzz recebem automaticamente as ferramentas determinísticas do OrgFy: orgfy_roster_live, orgfy_handoff_pack, orgfy_smart_dispatch, orgfy_card_create, orgfy_card_progress, orgfy_checkout_lock, orgfy_gate, orgfy_loop_radar, orgfy_session_stop e orgfy_model_failover."),
-            h("div", { className: "of-muted" }, `Total de agentes registrados globalmente no Buzz Desktop: ${liveCrew.length}.`)
-          )
+              ),
+              h(
+                "div",
+                { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+                h(
+                  "div",
+                  { style: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" } },
+                  h(
+                    "div",
+                    null,
+                    h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Unified Tool Registry · ${tools.length || 22} Agent Tools MCP`),
+                    h("div", { className: "of-muted", style: { fontSize: "11.5px", marginTop: "2px" } }, "Catálogo determinístico registrado nativamente em todas as sessões de agentes do Buzz Desktop.")
+                  ),
+                  props.setMcpSearch &&
+                    h("input", {
+                      className: "of-input",
+                      style: { width: "240px" },
+                      placeholder: "Filtrar tool, descrição ou parâmetro...",
+                      value: props.mcpSearch || "",
+                      onChange: (e: any) => props.setMcpSearch!(e.target.value),
+                    })
+                ),
+                props.setMcpCategory &&
+                  h(
+                    "div",
+                    { className: "of-segmented", style: { width: "fit-content", flexWrap: "wrap" } },
+                    categories.map((c) =>
+                      h(
+                        "button",
+                        {
+                          key: c,
+                          type: "button",
+                          className: "of-seg-btn",
+                          "data-active": cat === c ? "true" : "false",
+                          onClick: () => props.setMcpCategory!(c),
+                        },
+                        c === "all" ? `Todas (${tools.length})` : `${c} (${tools.filter((t) => t.category === c).length})`
+                      )
+                    )
+                  ),
+                h(
+                  "div",
+                  { style: { border: "1px solid var(--border)", borderRadius: "10px", overflow: "hidden" } },
+                  filteredTools.length === 0
+                    ? h("div", { className: "of-muted", style: { padding: "16px", textAlign: "center" } }, "Nenhuma ferramenta MCP encontrada para esse filtro.")
+                    : filteredTools.map((tool, idx) =>
+                        h(
+                          "div",
+                          {
+                            key: tool.name,
+                            style: {
+                              padding: "10px 14px",
+                              borderBottom: idx < filteredTools.length - 1 ? "1px solid var(--border)" : "none",
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: "5px",
+                            },
+                          },
+                          h(
+                            "div",
+                            { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
+                            h("code", { className: "of-mono", style: { fontSize: "12.5px", fontWeight: 700, color: "var(--foreground)" } }, tool.name),
+                            h("span", { className: "of-pill", "data-tone": "done", style: { fontSize: "10px" } }, tool.category),
+                            h("span", { className: "of-pill", style: { fontSize: "9.5px" } }, "built-in")
+                          ),
+                          h("div", { className: "of-muted", style: { fontSize: "11.5px", lineHeight: 1.4 } }, tool.description),
+                          tool.params.length > 0 &&
+                            h(
+                              "div",
+                              { style: { display: "flex", flexWrap: "wrap", gap: "4px", marginTop: "2px" } },
+                              tool.params.map((p) => {
+                                const req = tool.required.includes(p);
+                                return h(
+                                  "code",
+                                  {
+                                    key: p,
+                                    className: "of-mono",
+                                    style: {
+                                      fontSize: "10px",
+                                      padding: "1px 6px",
+                                      borderRadius: "4px",
+                                      background: req ? "var(--primary-soft)" : "var(--muted)",
+                                      color: req ? "var(--primary)" : "var(--muted-foreground)",
+                                    },
+                                  },
+                                  req ? `${p}*` : p
+                                );
+                              })
+                            )
+                        )
+                      )
+                )
+              ),
+              h(
+                "div",
+                { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+                h(
+                  "div",
+                  { style: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" } },
+                  h(
+                    "div",
+                    null,
+                    h("div", { style: { fontSize: "13.5px", fontWeight: 700 } }, "Host Commands Pinados por SHA-256 (manifest.json)"),
+                    h("div", { className: "of-muted", style: { fontSize: "11px" } }, "Substitui execuções abertas de python/osascript por comandos declarativos com integridade verificada.")
+                  ),
+                  props.onAuditCommandIntegrity &&
+                    h("button", { type: "button", className: "of-btn", style: { fontSize: "11px", padding: "4px 10px" }, onClick: props.onAuditCommandIntegrity }, "↻ Auditar SHA-256")
+                ),
+                integrity?.results?.length
+                  ? h(
+                      "div",
+                      { className: "of-grid-2" },
+                      integrity.results.map((r) =>
+                        h(
+                          "div",
+                          { key: r.id, className: "of-surface", style: { padding: "8px 11px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" } },
+                          h(
+                            "div",
+                            { style: { minWidth: 0 } },
+                            h("div", { className: "of-mono", style: { fontSize: "12px", fontWeight: 600 } }, r.id),
+                            h("div", { className: "of-mono of-muted", style: { fontSize: "10px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, `sha256: ${(r.actualSha256 || r.expectedSha256).slice(0, 16)}…`)
+                          ),
+                          h("span", { className: "of-pill", "data-tone": r.status === "verified" ? "done" : "failed" }, r.status === "verified" ? "✓ Íntegro" : r.status)
+                        )
+                      )
+                    )
+                  : h("div", { className: "of-muted", style: { fontSize: "11.5px" } }, "Clique em Auditar SHA-256 para inspecionar os 7 host commands pinados.")
+              )
+            );
+          })()
     );
   }
 
@@ -1350,11 +1790,34 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
     );
   }
 
-  // ── 7. CONFIGURAÇÕES (Canal no Buzz ao vivo + autonomy-dialog.tsx + limits-editor.tsx) ──
+  // ── 7. CONFIGURAÇÕES (Layout 2 colunas equilibrado + Canal Buzz com humanos/agentes + Autonomia + Limites + Trust Engine + Segurança) ──
   const chInfo = props.channelInfo;
+  const settingsTenantAgents = status.tenantManifest?.agentes || [];
+  const resolvedMembers = (chInfo?.memberPubkeys || []).map((pk) => {
+    const pkLow = pk.toLowerCase();
+    const name = props.resolveAuthor ? props.resolveAuthor(pk) : pk.slice(0, 10);
+    const isAgent = settingsTenantAgents.some((a) => a.pubkey?.toLowerCase() === pkLow) || liveCrew.some((c) => c.pubkey?.toLowerCase() === pkLow);
+    const isWorking = Boolean(props.telemetry?.byPubkey?.[pkLow]);
+    return { pk, name, isAgent, isWorking };
+  });
+  const humanMembers = resolvedMembers.filter((m) => !m.isAgent);
+  const agentMembers = resolvedMembers.filter((m) => m.isAgent);
   return h(
     "div",
-    { style: { display: "flex", flexDirection: "column", gap: "14px", maxWidth: "880px" } },
+    {
+      "data-settings-grid-layout": "true",
+      style: {
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(460px, 1fr))",
+        gap: "16px",
+        alignItems: "start",
+        width: "100%",
+        maxWidth: "1440px",
+      },
+    },
+    h(
+      "div",
+      { style: { display: "flex", flexDirection: "column", gap: "14px", minWidth: 0 } },
     h(
       "div",
       { className: "of-card-pad", "data-buzz-channel-settings": "true", style: { display: "flex", flexDirection: "column", gap: "12px" } },
@@ -1488,18 +1951,46 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
             )
           )
         ),
-      chInfo?.available && chInfo.memberPubkeys.length > 0 &&
+      chInfo?.available && resolvedMembers.length > 0 &&
         h(
           "div",
-          { className: "of-surface", style: { padding: "9px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
-          h("div", { className: "of-meter-label" }, `Membros no canal (${chInfo.memberCount})`),
+          { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "8px" } },
           h(
             "div",
-            { style: { display: "flex", flexWrap: "wrap", gap: "5px" } },
-            chInfo.memberPubkeys.slice(0, 24).map((pk) =>
-              h("span", { key: pk, className: "of-pill", style: { fontSize: "10.5px" } }, props.resolveAuthor ? props.resolveAuthor(pk) : pk.slice(0, 10))
+            { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px" } },
+            h("div", { className: "of-meter-label" }, `Membros no canal (${chInfo.memberCount})`),
+            h("span", { className: "of-muted", style: { fontSize: "10.5px" } }, `${humanMembers.length} humano(s) · ${agentMembers.length} agente(s)`)
+          ),
+          humanMembers.length > 0 &&
+            h(
+              "div",
+              { style: { display: "flex", flexWrap: "wrap", gap: "5px", alignItems: "center" } },
+              h("span", { className: "of-muted", style: { fontSize: "10px", marginRight: "2px" } }, "Humanos:"),
+              humanMembers.slice(0, 8).map((m) =>
+                h("span", { key: m.pk, className: "of-pill", "data-tone": "waiting", style: { fontSize: "10.5px" } }, m.name)
+              )
+            ),
+          agentMembers.length > 0 &&
+            h(
+              "div",
+              { style: { display: "flex", flexWrap: "wrap", gap: "5px", alignItems: "center" } },
+              h("span", { className: "of-muted", style: { fontSize: "10px", marginRight: "2px" } }, "Agentes:"),
+              agentMembers.slice(0, 20).map((m) =>
+                h(
+                  "button",
+                  {
+                    key: m.pk,
+                    type: "button",
+                    className: "of-pill",
+                    "data-tone": m.isWorking ? "running" : "idle",
+                    style: { fontSize: "10.5px", cursor: onOpenAgentDm ? "pointer" : "default", display: "inline-flex", alignItems: "center", gap: "4px" },
+                    onClick: () => onOpenAgentDm?.({ pubkey: m.pk, name: m.name }),
+                  },
+                  h("span", { className: "of-dot", "data-tone": m.isWorking ? "running" : "done" }),
+                  m.name
+                )
+              )
             )
-          )
         ),
       chInfo?.available && props.onChannelDiagnostic &&
         h(
@@ -1551,6 +2042,10 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
         )
       )
     ),
+    ),
+    h(
+      "div",
+      { style: { display: "flex", flexDirection: "column", gap: "14px", minWidth: 0 } },
     h(
       "div",
       { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "12px" } },
@@ -1755,6 +2250,7 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
             )
           )
         )
+    )
     )
   );
 }

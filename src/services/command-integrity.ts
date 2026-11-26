@@ -105,7 +105,16 @@ export async function verifyHostCommandIntegrity(
   try {
     const fullPath = `${repoRoot.replace(/\/$/, "")}/${spec.scriptPath}`;
     const raw = await readFile(fullPath);
-    const text = typeof raw === "string" ? raw : typeof raw?.text === "string" ? raw.text : typeof raw?.content === "string" ? raw.content : null;
+    const text =
+      typeof raw === "string"
+        ? raw
+        : raw instanceof Uint8Array
+        ? new TextDecoder().decode(raw)
+        : typeof raw?.text === "string"
+        ? raw.text
+        : typeof raw?.content === "string"
+        ? raw.content
+        : null;
     if (text === null) {
       return {
         id: spec.id,
