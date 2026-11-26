@@ -52,7 +52,7 @@ import { openIssueInBuzz, openSystemUri } from "../services/orgfy-bridge";
 import { fetchHoldingControlPlane, type HoldingControlPlaneSnapshot } from "../services/holding-service";
 import { executeCardProgress } from "../services/card-progress";
 import { renderCommandPalette, renderFactorySidebar, type FactorySidebarProps } from "./FactorySidebar";
-import { buildDefaultAutomations, exportAutomationToBuzzWorkflowYaml, type OrgfyAutomation } from "./AutomationEditor";
+import { buildDefaultAutomations, DEFAULT_GUARDS, exportAutomationToBuzzWorkflowYaml, exportAutomationToMarkdown, ORGFY_AUTOMATION_TEMPLATES, type OrgfyAutomation } from "./AutomationEditor";
 import { createQuestionCardsPanel } from "./QuestionCardsPanel";
 import {
   getOrgfyCrdtStore,
@@ -142,6 +142,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     const [runningScout, setRunningScout] = React.useState<boolean>(false);
     const [automations, setAutomations] = React.useState<OrgfyAutomation[]>(() => buildDefaultAutomations("orgfy", "OrgFy Core"));
     const [selectedAutomationId, setSelectedAutomationId] = React.useState<string>("rotina-ceo-orgfy");
+    const [automationView, setAutomationView] = React.useState<"list" | "detail">("list");
     const [runningAutomationId, setRunningAutomationId] = React.useState<string | null>(null);
     const [cooUpdatesExpanded, setCooUpdatesExpanded] = React.useState<boolean>(true);
     const [sendingCooUpdates, setSendingCooUpdates] = React.useState<boolean>(false);
@@ -941,28 +942,93 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       setAutomations((prev) => prev.map((a) => (a.id === id ? { ...a, ...patch } : a)));
     }, []);
 
-    const handleCreateAutomation = React.useCallback(() => {
-      const newId = `auto-${Date.now().toString(36)}`;
+    const handleCreateAutomation = React.useCallback((initial?: Partial<OrgfyAutomation>) => {
+      const newId = initial?.id || `auto-${Date.now().toString(36)}`;
       const item: OrgfyAutomation = {
         id: newId,
-        name: "Nova automação",
-        description: "Rotina personalizada da OrgFy Factory.",
+        name: initial?.name || "Nova automação",
+        description: initial?.description || "Rotina personalizada da OrgFy Factory.",
+        scope: initial?.scope || "project",
+        enabled: initial?.enabled ?? false,
+        source: initial?.source || "orgfy",
+        templateId: initial?.templateId,
+        workKey: initial?.workKey || `automation:${newId}`,
+        triggerKind: initial?.triggerKind || "schedule",
+        frequency: initial?.frequency || "daily",
+        dayOfWeek: initial?.dayOfWeek ?? 1,
+        dayOfMonth: initial?.dayOfMonth,
+        timeHHMM: initial?.timeHHMM || "09:00",
+        timezone: initial?.timezone || "America/Sao_Paulo",
+        eventKind: initial?.eventKind || "pr_opened",
+        actionKind: initial?.actionKind || "agent_session",
+        targetAgent: initial?.targetAgent || tenantAgents[0]?.name || "OrgFy Bento",
+        autonomy: initial?.autonomy || "auto",
+        guards: initial?.guards || { ...DEFAULT_GUARDS },
+        prompt: initial?.prompt || `Execute esta rotina em {{project.name}} ({{date}}).`,
+        recentRuns: initial?.recentRuns || [],
+      };
+      setAutomations((prev) => {
+        const next = [item, ...prev];
+        void persistAutomations(next, false);
+        return next;
+      });
+      setSelectedAutomationId(newId);
+    }, [tenantAgents, persistAutomations]);
+
+    const handleExportAutomationMarkdown = React.useCallback(
+      (auto: OrgfyAutomation) => {
+        const md = exportAutomationToMarkdown(auto);
+        handleCopyText(md, `Markdown (.md) de ${auto.name}`);
+      },
+      [handleCopyText]
+    );
+
+    const handleImportAutomation = React.useCallback(
+      (auto: OrgfyAutomation) => {
+        handleCreateAutomation(auto);
+        setAutomationView("detail");
+        notify(`Automação "${auto.name}" importada (desligada por segurança).`);
+      },
+      [handleCreateAutomation, notify]
+    );
+
+    const handleAddStarterSet = React.useCallback(() => {
+      const existing = new Set(automations.map((a) => a.templateId).filter(Boolean));
+      const toAdd = ORGFY_AUTOMATION_TEMPLATES.filter((t) => t.starter && !existing.has(t.id));
+      if (toAdd.length === 0) {
+        notify("Todos os templates Starter já estão nesta empresa.");
+        return;
+      }
+      const created: OrgfyAutomation[] = toAdd.map((tpl) => ({
+        id: `${tpl.id}-${tenant}`,
+        name: tpl.name,
+        description: tpl.description,
         scope: "project",
         enabled: true,
-        triggerKind: "schedule",
-        frequency: "daily",
-        dayOfWeek: 1,
-        timeHHMM: "09:00",
+        source: "template",
+        templateId: tpl.id,
+        workKey: `automation:${tpl.id}`,
+        triggerKind: tpl.triggerKind,
+        frequency: tpl.frequency,
+        dayOfWeek: tpl.dayOfWeek,
+        dayOfMonth: tpl.dayOfMonth,
+        timeHHMM: tpl.timeHHMM,
         timezone: "America/Sao_Paulo",
-        eventKind: "pr_opened",
-        actionKind: "agent_session",
-        targetAgent: tenantAgents[0]?.name || "OrgFy Bento",
-        prompt: `Execute esta rotina em {{project.name}} ({{date}}).`,
+        eventKind: tpl.eventKind,
+        actionKind: tpl.actionKind,
+        targetAgent: tenantAgents.some((a) => a.name === tpl.defaultAgent) ? tpl.defaultAgent : tenantAgents[0]?.name || tpl.defaultAgent,
+        autonomy: tpl.autonomy,
+        guards: { ...DEFAULT_GUARDS, overlapPolicy: tpl.overlapPolicy },
+        prompt: tpl.prompt,
         recentRuns: [],
-      };
-      setAutomations((prev) => [item, ...prev]);
-      setSelectedAutomationId(newId);
-    }, [tenantAgents]);
+      }));
+      setAutomations((prev) => {
+        const next = [...created, ...prev];
+        void persistAutomations(next, false);
+        return next;
+      });
+      notify(`Conjunto inicial ativado: ${created.length} automações adicionadas.`);
+    }, [automations, tenant, tenantAgents, persistAutomations, notify]);
 
     const handleDeleteAutomation = React.useCallback((id: string) => {
       setAutomations((prev) => {
@@ -1234,10 +1300,9 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     const pendingApprovals = (holding?.approvals || []).filter((a) => a.status === "pendente").length;
     const pendingQuestionCardsCount = questionCards.filter((c) => c.status === "pending").length;
     const abaixoMinimoCount = (status.modelos || []).filter((m) => m.abaixo_minimo).length;
-    const inboxCount =
-      pendingQuestionCardsCount +
-      status.held.length +
-      [...status.inProgress, ...status.recent].filter((i) => i.stage === "escalated" || i.stage === "failed" || i.stage === "reverted").length;
+    // Na governança OrgFy (board.json), 'Aguardando você' (Fundador) conta SOMENTE Question Cards pendentes e escaladas explícitas da Iris/Board (nunca quarentena/falha operacional do COO)
+    const founderEscalatedItems = [...status.inProgress, ...status.recent].filter((i) => i.stage === "escalated");
+    const inboxCount = pendingQuestionCardsCount + status.held.length + founderEscalatedItems.length;
 
     // Contagem REAL de agentes respondendo agora nesta empresa (via session.agentActivity!)
     const tenantWorkingNowCount = tenantAgents.filter((a) => Boolean(a.pubkey && telemetry.byPubkey[a.pubkey.toLowerCase()])).length;
@@ -1339,12 +1404,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
             pendingApprovals,
             inboxCount,
             urgentInbox: pendingApprovals > 0 || status.held.length > 0,
-            waitingItems: [
-              ...status.held,
-              ...[...status.inProgress, ...status.recent].filter(
-                (i) => i.stage === "escalated" || i.stage === "failed" || i.stage === "reverted"
-              ),
-            ],
+            waitingItems: [...status.held, ...founderEscalatedItems],
             onOpenMasterDm: () =>
               handleOpenAgentDmInBuzz(
                 masterLive || { name: masterAgentName, pubkey: holding?.ceoHolding?.pubkey || "" }
@@ -1668,6 +1728,11 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                     onSaveAutomations: () => void persistAutomations(automations, true),
                     onRunAutomationNow: handleRunAutomationNow,
                     onExportAutomationYaml: handleExportAutomationYaml,
+                    onExportAutomationMarkdown: handleExportAutomationMarkdown,
+                    onImportAutomation: handleImportAutomation,
+                    onAddStarterSet: handleAddStarterSet,
+                    automationView,
+                    setAutomationView,
                     runningAutomationId,
                     QuestionCardsPanel,
                     questionCards,
@@ -1710,6 +1775,49 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         onToggleChecklistStep: handleToggleChecklistStep,
         onSendDiffReview: handleSendDiffReview,
         onRecordVisualEvidence: handleRecordVisualEvidence,
+        onEscalateItem: async (targetItem: FactoryWorkItem, target: "coo" | "ceo_empresa" | "iris" | "review_l01") => {
+          const targetName =
+            target === "iris"
+              ? holding?.ceoHolding?.nome || "OrgFy Iris"
+              : target === "review_l01"
+              ? Object.values(status.tenantManifest?.revisoresPorSuperficie || {})[0] || "OrgFy Teo"
+              : status.tenantManifest?.coo || "OrgFy Bento";
+          const ag =
+            tenantAgents.find((a) => a.name.toLowerCase() === targetName.toLowerCase()) ||
+            liveCrew.find((a) => a.name.toLowerCase().includes(targetName.toLowerCase()));
+          const agentKey = (ag && "agentKey" in ag ? ag.agentKey : ag?.key) || "";
+          const actionLabel =
+            target === "iris"
+              ? "ESCALADA CEO HOLDING (Iris)"
+              : target === "review_l01"
+              ? "SOLICITAÇÃO DE REVISÃO L-01 / GATE"
+              : "TRATAMENTO OPERACIONAL COO";
+          const msg = [
+            `@${targetName} [${actionLabel} · ${tenant}]`,
+            `- **Item:** #${targetItem.id.slice(0, 8)} — ${targetItem.title}`,
+            targetItem.reason ? `- **Motivo / Quarentena:** ${targetItem.reason}` : "",
+            targetItem.note ? `- **Contexto:** ${targetItem.note}` : "",
+            target === "coo"
+              ? "Avalie o erro/quarentena na esteira, resolva ou escale para a CEO da empresa / OrgFy Iris se exigir decisão de negócio."
+              : target === "review_l01"
+              ? "Execute a revisão independente L-01 e emita o veredito do GATE."
+              : "Item escalado pela cadeia OrgFy para avaliação da CEO da Holding.",
+          ]
+            .filter(Boolean)
+            .join("\n");
+          const res = await wakeAgentInBuzz({
+            agentKey,
+            agentName: targetName,
+            pubkey: ag?.pubkey,
+            preferDm: true,
+            postInChat: true,
+            text: msg,
+          });
+          if (res.ok && res.channel && openSideTabRef.current) {
+            try { openSideTabRef.current({ channelId: res.channel }, { keep: true }); } catch {}
+          }
+          notify(res.ok ? `Encaminhado para ${targetName} no Buzz ✓` : `Falha ao encaminhar para ${targetName}: ${res.error}`);
+        },
         onClose: () => setSelectedItem(null),
       }),
       renderAgentProfileDrawer({

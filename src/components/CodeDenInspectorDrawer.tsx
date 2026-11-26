@@ -63,6 +63,7 @@ export interface CodeDenInspectorDrawerProps {
   onToggleChecklistStep?: (stepId: string, nextDone: boolean, item: FactoryWorkItem) => void;
   onSendDiffReview?: (comments: DiffAnchoredComment[], item: FactoryWorkItem, executorName?: string) => Promise<void> | void;
   onRecordVisualEvidence?: (evidence: VisualEvidenceSubmission, item: FactoryWorkItem, executorName?: string) => Promise<void> | void;
+  onEscalateItem?: (item: FactoryWorkItem, target: "coo" | "ceo_empresa" | "iris" | "review_l01") => Promise<void> | void;
   onClose: () => void;
 }
 
@@ -710,6 +711,7 @@ export function createCodeDenInspectorDrawer(React: Context["react"]) {
       onToggleChecklistStep,
       onSendDiffReview,
       onRecordVisualEvidence,
+      onEscalateItem,
       onClose,
     } = props;
 
@@ -1465,6 +1467,89 @@ export function createCodeDenInspectorDrawer(React: Context["react"]) {
                       `${(repoDetail?.commit || selectedCommit).slice(0, 8)} → main`
                     )
                 ),
+
+                // Bloco de governança e ações diretas (motivo real da quarentena/falha + cadeia COO -> CEO -> Iris)
+                (item.stage === "failed" || item.stage === "reverted" || item.stage === "escalated" || item.stage === "verifying") &&
+                  h(
+                    "div",
+                    {
+                      "data-orgfy-escalation-bar": "true",
+                      style: {
+                        padding: "10px 12px",
+                        borderRadius: "8px",
+                        border: item.stage === "failed" || item.stage === "reverted"
+                          ? "1px solid rgba(239, 68, 68, 0.42)"
+                          : "1px solid rgba(245, 158, 11, 0.38)",
+                        background: item.stage === "failed" || item.stage === "reverted"
+                          ? "rgba(239, 68, 68, 0.08)"
+                          : "rgba(245, 158, 11, 0.07)",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "8px",
+                      },
+                    },
+                    h(
+                      "div",
+                      { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" } },
+                      h(
+                        "strong",
+                        { style: { fontSize: "11.5px", color: item.stage === "failed" ? "#fca5a5" : "var(--status-waiting)" } },
+                        item.stage === "failed"
+                          ? "Problema operacional na esteira (alçada do COO)"
+                          : item.stage === "verifying"
+                          ? "PR aberto aguardando revisão L-01 / GATE"
+                          : "Escalada pendente"
+                      ),
+                      h(
+                        "span",
+                        { className: "of-mono of-muted", style: { fontSize: "10px" } },
+                        "COO Bento → CEO Empresa → OrgFy Iris → Fundador"
+                      )
+                    ),
+                    item.reason &&
+                      h(
+                        "div",
+                        { className: "of-mono", style: { fontSize: "11px", color: "var(--foreground)", wordBreak: "break-word", lineHeight: 1.45 } },
+                        item.reason
+                      ),
+                    onEscalateItem &&
+                      h(
+                        "div",
+                        { style: { display: "flex", flexWrap: "wrap", gap: "6px" } },
+                        h(
+                          "button",
+                          {
+                            type: "button",
+                            className: "of-btn",
+                            "data-variant": "primary",
+                            style: { padding: "4px 9px", fontSize: "11px" },
+                            onClick: () => void onEscalateItem(item, "coo"),
+                          },
+                          "Acionar COO (OrgFy Bento) ↗"
+                        ),
+                        item.stage === "verifying" &&
+                          h(
+                            "button",
+                            {
+                              type: "button",
+                              className: "of-btn",
+                              style: { padding: "4px 9px", fontSize: "11px" },
+                              onClick: () => void onEscalateItem(item, "review_l01"),
+                            },
+                            "Solicitar Revisão L-01 ↗"
+                          ),
+                        h(
+                          "button",
+                          {
+                            type: "button",
+                            className: "of-btn",
+                            style: { padding: "4px 9px", fontSize: "11px" },
+                            onClick: () => void onEscalateItem(item, "iris"),
+                          },
+                          "Escalar para OrgFy Iris ↗"
+                        )
+                      )
+                  ),
 
                 // Trilha da pipeline compacta horizontal (substitui bloco vertical pesado)
                 h(
