@@ -6320,7 +6320,7 @@ function buildUnifiedOrgfyTools(ctx) {
         required: ["agents", "message"]
       },
       execute: async (args, meta) => {
-        var _a, _b;
+        var _a, _b, _c;
         const requestedNames = Array.isArray(args == null ? void 0 : args.agents) ? args.agents.map((s) => String(s || "").replace(/^@/, "").trim()).filter(Boolean) : [];
         const message = String((args == null ? void 0 : args.message) || "").trim();
         if (requestedNames.length === 0 || !message) {
@@ -6330,9 +6330,9 @@ function buildUnifiedOrgfyTools(ctx) {
           };
         }
         const snapAgents = (() => {
-          var _a2, _b2, _c;
+          var _a2, _b2, _c2;
           try {
-            return ((_c = (_b2 = (_a2 = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _a2.snapshot) == null ? void 0 : _b2.call(_a2)) == null ? void 0 : _c.agents) || [];
+            return ((_c2 = (_b2 = (_a2 = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _a2.snapshot) == null ? void 0 : _b2.call(_a2)) == null ? void 0 : _c2.agents) || [];
           } catch {
             return [];
           }
@@ -6365,6 +6365,8 @@ function buildUnifiedOrgfyTools(ctx) {
         const resolvedChannel = isUuidLike(args == null ? void 0 : args.channel_id) ? String(args.channel_id).trim() : isUuidLike(ctxChan) ? String(ctxChan).trim() : null;
         const resolvedRoot = isHex642(args == null ? void 0 : args.thread_root) ? String(args.thread_root).trim().toLowerCase() : isHex642(ctxRoot) ? String(ctxRoot).trim().toLowerCase() : null;
         const [primary, ...rest] = targets;
+        const callerName = String(((_c = meta == null ? void 0 : meta.client) == null ? void 0 : _c.name) || "Agente OrgFy").trim();
+        const wakeText = `[HANDOFF DE ${callerName}] ${message}`;
         const res = await sendBuzzChatMessageOrWake(ctx, {
           agentKey: primary.agentKey,
           agentName: primary.agentName,
@@ -6373,12 +6375,12 @@ function buildUnifiedOrgfyTools(ctx) {
           channelId: resolvedChannel,
           threadRoot: resolvedRoot,
           preferDm: false,
-          postInChat: true,
+          postInChat: false,
           ensureWake: true,
-          text: message
+          text: wakeText
         });
         return {
-          text: JSON.stringify({ ...res, notFound }, null, 2),
+          text: JSON.stringify({ ...res, notFound, note: "Wake entregue diretamente aos agentes sem postar mensagem como o Fundador." }, null, 2),
           isError: !res.ok
         };
       }
@@ -60892,10 +60894,10 @@ function createFactoryAppComponent(ctx, opts = {}) {
       const promptText = isBoard ? `@${scoutName} [ORGFY SCOUT ONE-SHOT · board]
 Audite o portfólio e o workspace atual contra o Canvas/Visão da Holding, identifique os gaps de maior impacto (segurança, testes, UX, dívida técnica ou governança) e proponha os próximos cards/pautas canônicos.
 
-**Regra de Reunião (Menção Garantida):** responda **aqui neste canal do Conselho** (não em DM) e, para acionar os conselheiros competentes (${councilNames.join(", ") || "OrgFy Iris, OrgFy Bento Arquiteto, OrgFy Vera, OrgFy Bento, OrgFy Val"}), chame obrigatoriamente a tool \`orgfy_mention_wake\` passando \`agents\` + \`message\` — nunca escreva apenas \`@Nome\` em texto puro.` : `@${scoutName} [ORGFY SCOUT ONE-SHOT · ${tenant}]
+**Regra de Reunião:** responda **aqui neste canal do Conselho** (não em DM) usando \`buzz__send\` com sua própria assinatura e as pubkeys em \`mentions\` (${councilNames.join(", ") || "OrgFy Iris, OrgFy Bento Arquiteto, OrgFy Vera, OrgFy Bento, OrgFy Val"}). Se precisar garantir o disparo de algum conselheiro, chame \`orgfy_mention_wake\` (que apenas acorda sem postar como o Fundador).` : `@${scoutName} [ORGFY SCOUT ONE-SHOT · ${tenant}]
 Audite o workspace atual contra o Canvas/Visão de ${((_b2 = status.tenantManifest) == null ? void 0 : _b2.nome) || tenant}, identifique os gaps de maior impacto (segurança, testes, UX ou dívida técnica) e proponha os próximos cards canônicos.
 
-**Regra de Canal (Menção Garantida):** responda **aqui neste canal da empresa** (não em DM) e chame a tool \`orgfy_mention_wake\` com \`agents: ["${cooName}", ...]\` para acionar o COO e os especialistas sem risco de menção fantasma.`;
+**Regra de Canal:** responda **aqui neste canal da empresa** (não em DM) usando \`buzz__send\` com \`mentions\` para \`${cooName}\` (COO) e especialistas responsáveis (e \`orgfy_mention_wake\` se precisar garantir o wake).`;
       setRunningScout(true);
       try {
         const res = await wakeAgentInBuzz({
@@ -62430,8 +62432,8 @@ INVARIANTS UNIVERSAIS (TODOS OS PAPÉIS):
 - L-01 / L-22 / L-90: Executor != Revisor; aceite L-22 imutável (SHA-256); nunca afrouxe testes ou gates.
 - Specsfy + TDD (FAIL-CLOSED): nunca use 'buzz issues create' direto nem '--gate gate:qa'. Effort 1-2 (Z2): TDD RED->GREEN; Effort 3-6 (Z3): exige spec.md com Definition/Plan Gate Passed; Effort 7-10 (Z4): + DECIDIDO. Crie via 'orgfy_card_create', valide com './ferramentas/card-lint.sh' e publique via './ferramentas/buzz-issue-guard.sh'.
 - Guarda de Identidade & Freio Anti-Loop: menção para '@OutroPerfil' ou thread aguardando GATE de outro -> responda apenas '[SILENT]'. Máx 12 shells sem commit / 2 falhas consecutivas -> pare e publique 'BLOQUEADO | por | motivo | falta | resolve'. Nunca faça 'git checkout' na raiz do repo (use worktree isolado).
-- Menção Garantida entre Agentes (ZERO menção fantasma): escrever '@Nome' em texto puro NÃO acorda outro agente no canal. Para acionar conselheiros, COO ou especialistas e continuar a reunião no canal, use SEMPRE a tool 'orgfy_mention_wake(agents=[...], message=...)' — ela publica 'nostr:npub1...' + tag 'p' e garante wake real.
-- Ferramentas-chave de 1 chamada: 'orgfy_mention_wake' (menção real + wake garantido no canal), 'orgfy_roster_live' (quem está livre de verdade + limpa locks zumbis), 'orgfy_handoff_pack' (retomada/revisão P1..Pn + git), 'orgfy_smart_dispatch' (delegação one-shot L-01 + WRITE_SET_CONFLICT), 'orgfy_card_progress', 'orgfy_checkout_lock' (sempre passe exclusive_paths), 'orgfy_loop_radar', 'orgfy_session_stop', 'orgfy_model_failover', 'orgfy_gate'.
+- Menção Garantida entre Agentes (ZERO menção fantasma e ZERO personificação do Fundador): publique sua resposta normalmente com sua própria assinatura no canal via 'buzz__send' (passando as pubkeys em 'mentions') e, para garantir que os conselheiros/especialistas acordem na thread, chame 'orgfy_mention_wake(agents=[...], message=...)' — ela apenas acorda os agentes via 'wake' sem postar como o Fundador.
+- Ferramentas-chave de 1 chamada: 'orgfy_mention_wake' (wake garantido para outros agentes no canal), 'orgfy_roster_live' (quem está livre de verdade + limpa locks zumbis), 'orgfy_handoff_pack' (retomada/revisão P1..Pn + git), 'orgfy_smart_dispatch' (delegação one-shot L-01 + WRITE_SET_CONFLICT), 'orgfy_card_progress', 'orgfy_checkout_lock' (sempre passe exclusive_paths), 'orgfy_loop_radar', 'orgfy_session_stop', 'orgfy_model_failover', 'orgfy_gate'.
 
 REGRAS POR PAPEL (APLIQUE APENAS O SEU):
 - [Executor]: use 'orgfy_handoff_pack' ao retomar; mantenha 'orgfy_card_progress' atualizado; edite apenas Escrita exclusiva; se 'git push relay' der exit 128, pegue o header via 'buzz__repo' com GIT_CONFIG_COUNT=1.

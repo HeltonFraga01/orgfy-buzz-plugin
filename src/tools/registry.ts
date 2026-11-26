@@ -964,6 +964,11 @@ export function buildUnifiedOrgfyTools(ctx: Context | any): UnifiedOrgfyTool[] {
             ? String(ctxRoot).trim().toLowerCase()
             : null;
         const [primary, ...rest] = targets;
+        const callerName = String(meta?.client?.name || "Agente OrgFy").trim();
+        const wakeText = `[HANDOFF DE ${callerName}] ${message}`;
+        // IMPORTANTE: postInChat=false SEMPRE! Agentes NUNCA podem postar via session.messages.send
+        // porque isso assina a mensagem como se fosse o Fundador (Helton). O agente publica sua própria
+        // mensagem via buzz__send (com sua própria assinatura) e usa orgfy_mention_wake apenas para garantir o wake.
         const res = await sendBuzzChatMessageOrWake(ctx, {
           agentKey: primary.agentKey,
           agentName: primary.agentName,
@@ -972,12 +977,12 @@ export function buildUnifiedOrgfyTools(ctx: Context | any): UnifiedOrgfyTool[] {
           channelId: resolvedChannel,
           threadRoot: resolvedRoot,
           preferDm: false,
-          postInChat: true,
+          postInChat: false,
           ensureWake: true,
-          text: message,
+          text: wakeText,
         });
         return {
-          text: JSON.stringify({ ...res, notFound }, null, 2),
+          text: JSON.stringify({ ...res, notFound, note: "Wake entregue diretamente aos agentes sem postar mensagem como o Fundador." }, null, 2),
           isError: !res.ok,
         };
       },
