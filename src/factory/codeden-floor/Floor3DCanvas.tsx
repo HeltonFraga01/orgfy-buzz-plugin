@@ -281,6 +281,7 @@ export function createFloor3DComponent(ctx: Context) {
     const [isFullscreen, setIsFullscreen] = React.useState<boolean>(false);
     const [completedTurns, setCompletedTurns] = React.useState<Record<string, CompletedBubbleTurn>>({});
     const [, setClockTick] = React.useState<number>(0);
+    const [themeVersion, setThemeVersion] = React.useState<number>(0);
 
     const tenantAgents = status.tenantManifest?.agentes || [];
     const empresaNome = status.tenantManifest?.nome || tenant;
@@ -454,11 +455,22 @@ export function createFloor3DComponent(ctx: Context) {
     }, []);
 
     React.useEffect(() => {
+      const root = globalThis.document?.documentElement;
+      if (!root || typeof MutationObserver === "undefined") return;
+      const obs = new MutationObserver(() => setThemeVersion((v) => v + 1));
+      obs.observe(root, {
+        attributes: true,
+        attributeFilter: ["class", "style", "data-accent", "data-color-mode", "data-color-level"],
+      });
+      return () => obs.disconnect();
+    }, []);
+
+    React.useEffect(() => {
       const st = stageRef.current;
       if (!st) return;
       const palette = readPalette();
       st.update({ layout, scene, palette, lookout });
-    }, [layout, scene, lookout]);
+    }, [layout, scene, lookout, themeVersion]);
 
     React.useEffect(() => {
       stageRef.current?.setFocus(focus);

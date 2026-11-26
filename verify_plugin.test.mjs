@@ -2384,4 +2384,28 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     const appSrc = fs.readFileSync(path.resolve(__dirname, "src", "factory", "FactoryApp.tsx"), "utf8");
     assert.ok(appSrc.includes("verifiedThreadId"), "handleOpenTurnInSideChat deve validar threadRootId antes de abrir aba Thread");
   });
+
+  test("v18.5: Sweep 100% Buzz Theme (Automações, Andar 3D live observer, Digest, shadow-shell) + Doc canônica", () => {
+    const docPath = path.resolve(__dirname, "docs", "BUZZ_THEME_INHERITANCE.md");
+    assert.ok(fs.existsSync(docPath), "docs/BUZZ_THEME_INHERITANCE.md deve existir");
+    const docContent = fs.readFileSync(docPath, "utf8");
+    assert.ok(docContent.includes("--affordance-accent-prominent"), "doc deve documentar --affordance-accent-prominent");
+    assert.ok(docContent.includes("--text-on-accent"), "doc deve documentar --text-on-accent");
+
+    const autoSrc = fs.readFileSync(path.resolve(__dirname, "src", "factory", "AutomationEditor.tsx"), "utf8");
+    assert.ok(!autoSrc.includes("#f59e0b"), "AutomationEditor.tsx não deve conter #f59e0b hardcoded");
+    assert.ok(!autoSrc.includes("rgba(245, 158, 11"), "AutomationEditor.tsx não deve conter rgba(245, 158, 11 hardcoded");
+
+    const paletteSrc = fs.readFileSync(path.resolve(__dirname, "src", "factory", "codeden-floor", "floor", "palette.ts"), "utf8");
+    assert.ok(paletteSrc.includes("--affordance-accent-prominent"), "palette.ts deve ler --affordance-accent-prominent do Buzz");
+    assert.ok(paletteSrc.includes("colorMode"), "palette.ts deve detectar data-color-mode=light do Buzz");
+    assert.ok(!paletteSrc.includes("--accent-primary"), "palette.ts não deve ler --accent-primary inexistente");
+    assert.ok(!paletteSrc.includes("--green-11"), "palette.ts não deve fixar --green-11 no Andar 3D");
+
+    const floorSrc = fs.readFileSync(path.resolve(__dirname, "src", "factory", "codeden-floor", "Floor3DCanvas.tsx"), "utf8");
+    assert.ok(floorSrc.includes("MutationObserver") && floorSrc.includes("data-accent"), "Floor3DCanvas.tsx deve observar trocas de data-accent em tempo real");
+
+    const overviewSrc = fs.readFileSync(path.resolve(__dirname, "src", "factory", "FactoryOverviewPanel.tsx"), "utf8");
+    assert.ok(!overviewSrc.includes("rgba(245, 158, 11"), "FactoryOverviewPanel.tsx não deve conter borda âmbar hardcoded no Digest");
+  });
 }
