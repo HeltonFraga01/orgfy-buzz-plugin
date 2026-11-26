@@ -2033,4 +2033,105 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     assert.ok(floorSrc.includes("onOpenTurnInSideChat"), "Floor3DCanvas deve aceitar onOpenTurnInSideChat para abrir a resposta exata");
     assert.ok(floorSrc.includes("positionBubblesRef.current(figures)"), "FloorStage onFrame deve posicionar balões diretamente via DOM sem re-render");
   });
+
+  test("v17.9: Resposta do Question Card posta mensagem real Kind 9 no DM/thread via session.messages.send/reply", async () => {
+    const sent = [];
+    const replies = [];
+    const wakes = [];
+    const dmId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    const chanId = "11111111-2222-4333-8444-555555555555";
+    const rootId = "b".repeat(64);
+    const bentoPubkey = "c".repeat(64);
+
+    const chatCtx = {
+      relay: {
+        snapshot: () => ({
+          status: "ready",
+          session: {
+            channels: {
+              list: () => ({
+                channels: [
+                  { id: dmId, channelType: "dm", name: "OrgFy Bento", members: [bentoPubkey, "d".repeat(64)] },
+                  { id: chanId, channelType: "stream", name: "OrgFy", members: [bentoPubkey, "d".repeat(64)] },
+                ],
+              }),
+            },
+            channelWrites: {
+              refreshMembership: async (id) =>
+                id === dmId
+                  ? { id: dmId, channelType: "dm", members: [bentoPubkey, "d".repeat(64)] }
+                  : { id: chanId, channelType: "stream", members: [bentoPubkey, "d".repeat(64)] },
+            },
+            messages: {
+              send: (cid, content, mentions) => {
+                sent.push({ cid, content, mentions });
+                return "e".repeat(64);
+              },
+              reply: (cid, root, content, mentions) => {
+                replies.push({ cid, root, content, mentions });
+                return "f".repeat(64);
+              },
+            },
+          },
+        }),
+      },
+      agents: {
+        wake: async (key, payload) => wakes.push({ key, payload }),
+      },
+    };
+
+    // 1. DM: deve chamar session.messages.send(dmId, text, [bentoPubkey]) (mensagem visível no DM + menção ao agente)
+    const dmRes = await orgfyMod.sendBuzzChatMessageOrWake(chatCtx, {
+      agentKey: "local:orgfy-bento",
+      agentName: "OrgFy Bento",
+      pubkey: bentoPubkey,
+      channelId: dmId,
+      preferDm: true,
+      postInChat: true,
+      text: "@OrgFy Bento **Teste**\n- **Escolha:** Sim",
+    });
+    assert.equal(dmRes.ok, true);
+    assert.equal(dmRes.mode, "chat_message");
+    assert.equal(dmRes.eventId, "e".repeat(64));
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].cid, dmId);
+    assert.deepEqual(sent[0].mentions, [bentoPubkey]);
+    assert.equal(wakes.length, 0, "quando session.messages.send funciona, não precisa de wake invisível duplicado");
+
+    // 2. Thread de canal: deve chamar session.messages.reply(chanId, rootId, text, [bentoPubkey])
+    const threadRes = await orgfyMod.sendBuzzChatMessageOrWake(chatCtx, {
+      agentKey: "local:orgfy-bento",
+      agentName: "OrgFy Bento",
+      pubkey: bentoPubkey,
+      channelId: chanId,
+      threadRoot: rootId,
+      postInChat: true,
+      text: "@OrgFy Bento Resposta na thread",
+    });
+    assert.equal(threadRes.ok, true);
+    assert.equal(threadRes.mode, "chat_message");
+    assert.equal(threadRes.threadRoot, rootId);
+    assert.equal(replies.length, 1);
+    assert.equal(replies[0].cid, chanId);
+    assert.equal(replies[0].root, rootId);
+    assert.deepEqual(replies[0].mentions, [bentoPubkey]);
+
+    // 3. Fallback quando session.messages indisponível -> cai para ctx.agents.wake
+    const wakeOnlyCtx = {
+      relay: { snapshot: () => ({ status: "ready", session: { channels: { list: () => ({ channels: [{ id: dmId, channelType: "dm", members: [bentoPubkey] }] }) } } }) },
+      agents: { wake: async (key, payload) => wakes.push({ key, payload }) },
+    };
+    const fbRes = await orgfyMod.sendBuzzChatMessageOrWake(wakeOnlyCtx, {
+      agentKey: "local:orgfy-bento",
+      agentName: "OrgFy Bento",
+      pubkey: bentoPubkey,
+      channelId: dmId,
+      postInChat: true,
+      text: "Fallback wake",
+    });
+    assert.equal(fbRes.ok, true);
+    assert.equal(fbRes.mode, "wake_fallback");
+    assert.equal(wakes.length, 1);
+    assert.equal(wakes[0].payload.channel, dmId);
+  });
 }

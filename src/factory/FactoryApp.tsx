@@ -59,6 +59,7 @@ import {
   type OrgfyQuestionCard,
   type QuestionCardAnswer,
 } from "../services/orgfy-crdt-store";
+import { sendBuzzChatMessageOrWake, type BuzzDispatchResult } from "../services/buzz-chat-dispatch";
 
 type FactoryTab =
   | "holding"
@@ -853,8 +854,8 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       [liveCrew, tenantAgents, resolveBuzzScope, notify]
     );
 
-    // Helper oficial para ctx.agents.wake(agentKey, { channel, root?, topLevel?, text })
-    // Resolve DM existente (quando preferDm=true ou channelId ausente/inválido) ou canal da empresa com topLevel: true.
+    // Helper oficial de entrega no Buzz: posta mensagem real Kind 9 via session.messages.send/reply
+    // (visível no chat/DM/thread e acorda o agente como menção do dono), com fallback para ctx.agents.wake.
     const wakeAgentInBuzz = React.useCallback(
       async (opts: {
         agentKey: string;
@@ -863,79 +864,14 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         channelId?: string | null;
         threadRoot?: string | null;
         preferDm?: boolean;
+        postInChat?: boolean;
         text: string;
-      }): Promise<{ ok: boolean; channel?: string; error?: string }> => {
-        const agentsApi = (ctx as any)?.agents;
-        if (typeof agentsApi?.wake !== "function" || !opts.agentKey) {
-          return { ok: false, error: "ctx.agents.wake indisponível ou agente sem key" };
-        }
-        const isUuid = (v: unknown): v is string =>
-          typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v.trim());
-        const isHex64 = (v: unknown): v is string =>
-          typeof v === "string" && /^[0-9a-f]{64}$/i.test(v.trim());
-
-        const session = (ctx as any)?.relay?.snapshot?.()?.session;
-        const channelsList: any[] = (() => {
-          try {
-            return session?.channels?.list?.()?.channels || [];
-          } catch {
-            return [];
-          }
-        })();
-
-        const findDmChannelId = async (): Promise<string | null> => {
-          const pkLower = (opts.pubkey || "").trim().toLowerCase();
-          const nameLower = (opts.agentName || "").trim().toLowerCase();
-          const existing = channelsList.find((ch: any) => {
-            if (ch?.channelType !== "dm" && ch?.channelType !== "solo") return false;
-            if (pkLower) {
-              const members = [...(ch.participants || []), ...(ch.members || [])];
-              if (members.some((m: string) => String(m).toLowerCase() === pkLower)) return true;
-            }
-            return Boolean(nameLower && typeof ch?.name === "string" && ch.name.toLowerCase().includes(nameLower));
-          });
-          if (existing?.id) return String(existing.id);
-          if (pkLower && session?.directMessages?.available && typeof session.directMessages.open === "function") {
-            const ac = new AbortController();
-            const timer = setTimeout(() => ac.abort(), 6000);
-            try {
-              const opened = await session.directMessages.open([pkLower], ac.signal);
-              if (opened) return String(opened);
-            } catch {} finally {
-              clearTimeout(timer);
-            }
-          }
-          return null;
-        };
-
-        let resolvedChannel: string | null = isUuid(opts.channelId) ? opts.channelId.trim() : null;
-        if (!resolvedChannel && opts.preferDm) {
-          resolvedChannel = await findDmChannelId();
-        }
-        if (!resolvedChannel) {
-          const fallbackCanal = status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === tenant)?.canal || null;
-          resolvedChannel = isUuid(fallbackCanal) ? fallbackCanal.trim() : await findDmChannelId();
-        }
-        if (!resolvedChannel) {
-          return { ok: false, error: "Nenhum canal/DM válido encontrado para acordar o agente" };
-        }
-
-        const matchedCh = channelsList.find((ch: any) => String(ch?.id || "") === resolvedChannel);
-        const isDmOrSolo = matchedCh?.channelType === "dm" || matchedCh?.channelType === "solo";
-        const validRoot = !isDmOrSolo && isHex64(opts.threadRoot) ? opts.threadRoot.trim().toLowerCase() : undefined;
-
-        const payload: any = {
-          channel: resolvedChannel,
-          text: opts.text,
-          ...(validRoot ? { root: validRoot } : isDmOrSolo ? {} : { topLevel: true as const }),
-        };
-
-        try {
-          await agentsApi.wake(opts.agentKey, payload);
-          return { ok: true, channel: resolvedChannel };
-        } catch (err: any) {
-          return { ok: false, error: err?.message || String(err) };
-        }
+      }): Promise<BuzzDispatchResult> => {
+        const fallbackCanal = status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === tenant)?.canal || null;
+        return sendBuzzChatMessageOrWake(ctx, {
+          ...opts,
+          fallbackChannelId: fallbackCanal,
+        });
       },
       [status.tenantManifest, holding, tenant]
     );
@@ -1196,6 +1132,11 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
           liveCrew.find((a) => a.name.toLowerCase().includes(card.requestedBy.toLowerCase()));
         const agentKey = (targetAg && "agentKey" in targetAg ? targetAg.agentKey : targetAg?.key) || "";
         const targetPubkey = card.requestedByPubkey || targetAg?.pubkey;
+        const replyLines = [
+          `@${card.requestedBy} **${card.title}**`,
+          selectedLabels ? `- **Escolha:** ${selectedLabels}` : "",
+          answer.freeText ? `- **Observação:** ${answer.freeText}` : "",
+        ].filter(Boolean);
         const wakeRes = await wakeAgentInBuzz({
           agentKey,
           agentName: card.requestedBy,
@@ -1203,12 +1144,25 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
           channelId: card.channelId,
           threadRoot: card.threadRoot,
           preferDm: true,
-          text: `[ORGFY QUESTION CARD RESPONDIDO · ${card.id}]\nDecisão: ${card.title}\nOpções selecionadas: ${selectedLabels || "(texto livre)"}${answer.freeText ? `\nObservação do Fundador: ${answer.freeText}` : ""}`,
+          postInChat: true,
+          text: replyLines.join("\n"),
         });
         if (wakeRes.ok) {
-          notify(`Resposta salva e ${card.requestedBy} acordado via Buzz.`);
+          if (wakeRes.mode === "chat_message" && wakeRes.channel && openSideTabRef.current) {
+            try {
+              openSideTabRef.current(
+                { channelId: wakeRes.channel, threadId: wakeRes.threadRoot },
+                { keep: true }
+              );
+            } catch {}
+          }
+          notify(
+            wakeRes.mode === "chat_message"
+              ? `Resposta enviada no chat de ${card.requestedBy} ✓`
+              : `Resposta salva e ${card.requestedBy} acordado via Buzz (fallback wake).`
+          );
         } else {
-          notify(`Resposta salva no CRDT, mas não foi possível acordar ${card.requestedBy}: ${wakeRes.error}`);
+          notify(`Resposta salva no CRDT, mas falhou ao enviar no chat de ${card.requestedBy}: ${wakeRes.error}`);
         }
       },
       [refreshQuestionCards, tenantAgents, liveCrew, wakeAgentInBuzz, notify]
