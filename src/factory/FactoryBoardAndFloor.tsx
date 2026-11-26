@@ -251,10 +251,14 @@ export function renderFactoryBoardAndFloor(props: BoardAndFloorProps) {
               className: "of-btn",
               "data-run-scout-now": "true",
               disabled: props.runningScout,
-              title: "Disparar auditoria imediata do Oráculo (Scout) contra o Canvas/Visão",
+              title: props.isBoardTenant
+                ? "Acionar Conselho CPO no #Conselho-Canal para auditar o portfólio contra a Visão e abrir pauta com os conselheiros"
+                : "Disparar auditoria imediata do Oráculo (Scout) contra o Canvas/Visão",
               onClick: props.onRunScout,
             },
-            props.runningScout ? "Oráculo…" : "Oráculo"
+            props.isBoardTenant
+              ? (props.runningScout ? "Conselho CPO…" : "Pauta CPO")
+              : (props.runningScout ? "Oráculo…" : "Oráculo")
           ),
         props.onToggleKillSwitch &&
           h(

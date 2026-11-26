@@ -17502,10 +17502,10 @@ function renderFactoryBoardAndFloor(props) {
             className: "of-btn",
             "data-run-scout-now": "true",
             disabled: props.runningScout,
-            title: "Disparar auditoria imediata do Oráculo (Scout) contra o Canvas/Visão",
+            title: props.isBoardTenant ? "Acionar Conselho CPO no #Conselho-Canal para auditar o portfólio contra a Visão e abrir pauta com os conselheiros" : "Disparar auditoria imediata do Oráculo (Scout) contra o Canvas/Visão",
             onClick: props.onRunScout
           },
-          props.runningScout ? "Oráculo…" : "Oráculo"
+          props.isBoardTenant ? props.runningScout ? "Conselho CPO…" : "Pauta CPO" : props.runningScout ? "Oráculo…" : "Oráculo"
         ),
         props.onToggleKillSwitch && h(
           "button",
@@ -60945,8 +60945,8 @@ function createFactoryAppComponent(ctx, opts = {}) {
         )
       );
       const cooName = ((_a2 = status.tenantManifest) == null ? void 0 : _a2.coo) || "OrgFy Bento";
-      const promptText = isBoard ? `@${scoutName} [ORGFY SCOUT ONE-SHOT · board]
-Audite o portfólio e o workspace atual contra o Canvas/Visão da Holding, identifique os gaps de maior impacto (segurança, testes, UX, dívida técnica ou governança) e proponha os próximos cards/pautas canônicos.
+      const promptText = isBoard ? `@${scoutName} [CONSELHO CPO · PAUTA DE PORTFÓLIO · board]
+Audite o portfólio da Holding (OrgFy Core, Lumen IPTV, SaaS Tributário) contra o Canvas/Visão atual, identifique os gaps de maior impacto em produto, receita, segurança, testes e governança, e proponha os próximos cards/pautas canônicos.
 
 **Regra de Reunião:** responda **aqui neste canal do Conselho** (não em DM) usando \`buzz__send\` com sua própria assinatura e as pubkeys em \`mentions\` (${councilNames.join(", ") || "OrgFy Iris, Conselho CTO, Conselho CRO, Conselho COO, Conselho CGO"}). Se precisar garantir o disparo de algum conselheiro, chame \`orgfy_mention_wake\` (que apenas acorda sem postar como o Fundador).` : `@${scoutName} [ORGFY SCOUT ONE-SHOT · ${tenant}]
 Audite o workspace atual contra o Canvas/Visão de ${((_b2 = status.tenantManifest) == null ? void 0 : _b2.nome) || tenant}, identifique os gaps de maior impacto (segurança, testes, UX ou dívida técnica) e proponha os próximos cards canônicos.
@@ -60972,7 +60972,7 @@ Audite o workspace atual contra o Canvas/Visão de ${((_b2 = status.tenantManife
         }
         const missingWarn = res.missingMembers && res.missingMembers.length > 0 ? ` (acordado via wake — adicione ${res.missingMembers.join(", ")} em Membros do canal)` : "";
         notify2(
-          res.ok ? `${scoutName} acionado no canal de ${isBoard ? "Conselho" : tenant} ✓${missingWarn}` : `Falha ao acionar Oráculo: ${res.error}`
+          res.ok ? `${scoutName} acionado no canal de ${isBoard ? "Conselho" : tenant} ✓${missingWarn}` : `Falha ao acionar ${scoutName}: ${res.error}`
         );
       } finally {
         setRunningScout(false);

@@ -1054,7 +1054,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       );
       const cooName = status.tenantManifest?.coo || "OrgFy Bento";
       const promptText = isBoard
-        ? `@${scoutName} [ORGFY SCOUT ONE-SHOT · board]\nAudite o portfólio e o workspace atual contra o Canvas/Visão da Holding, identifique os gaps de maior impacto (segurança, testes, UX, dívida técnica ou governança) e proponha os próximos cards/pautas canônicos.\n\n**Regra de Reunião:** responda **aqui neste canal do Conselho** (não em DM) usando \`buzz__send\` com sua própria assinatura e as pubkeys em \`mentions\` (${councilNames.join(", ") || "OrgFy Iris, Conselho CTO, Conselho CRO, Conselho COO, Conselho CGO"}). Se precisar garantir o disparo de algum conselheiro, chame \`orgfy_mention_wake\` (que apenas acorda sem postar como o Fundador).`
+        ? `@${scoutName} [CONSELHO CPO · PAUTA DE PORTFÓLIO · board]\nAudite o portfólio da Holding (OrgFy Core, Lumen IPTV, SaaS Tributário) contra o Canvas/Visão atual, identifique os gaps de maior impacto em produto, receita, segurança, testes e governança, e proponha os próximos cards/pautas canônicos.\n\n**Regra de Reunião:** responda **aqui neste canal do Conselho** (não em DM) usando \`buzz__send\` com sua própria assinatura e as pubkeys em \`mentions\` (${councilNames.join(", ") || "OrgFy Iris, Conselho CTO, Conselho CRO, Conselho COO, Conselho CGO"}). Se precisar garantir o disparo de algum conselheiro, chame \`orgfy_mention_wake\` (que apenas acorda sem postar como o Fundador).`
         : `@${scoutName} [ORGFY SCOUT ONE-SHOT · ${tenant}]\nAudite o workspace atual contra o Canvas/Visão de ${status.tenantManifest?.nome || tenant}, identifique os gaps de maior impacto (segurança, testes, UX ou dívida técnica) e proponha os próximos cards canônicos.\n\n**Regra de Canal:** responda **aqui neste canal da empresa** (não em DM) usando \`buzz__send\` com \`mentions\` para \`${cooName}\` (COO) e especialistas responsáveis (e \`orgfy_mention_wake\` se precisar garantir o wake).`;
 
       setRunningScout(true);
@@ -1081,7 +1081,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         notify(
           res.ok
             ? `${scoutName} acionado no canal de ${isBoard ? "Conselho" : tenant} ✓${missingWarn}`
-            : `Falha ao acionar Oráculo: ${res.error}`
+            : `Falha ao acionar ${scoutName}: ${res.error}`
         );
       } finally {
         setRunningScout(false);
