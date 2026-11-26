@@ -2269,16 +2269,16 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     assert.equal(rCrit.delivered, true);
     assert.equal(delivered.length, 1);
 
-    // 5. Pinagem SHA-256 dos 5 scripts reais em host.commands
-    assert.equal(orgfyMod.PINNED_HOST_COMMANDS.length, 5);
+    // 5. Pinagem SHA-256 dos 7 scripts reais em host.commands
+    assert.equal(orgfyMod.PINNED_HOST_COMMANDS.length, 7);
     const audit = await orgfyMod.auditAllHostCommandsIntegrity({
       host: {
         readFile: async (p) => fs.readFileSync(p, "utf8"),
       },
     });
-    assert.equal(audit.total, 5);
-    assert.equal(audit.mismatches, 0, `Todos os 5 scripts host.commands devem bater SHA-256: ${JSON.stringify(audit.results)}`);
-    assert.equal(audit.verified, 5);
+    assert.equal(audit.total, 7);
+    assert.equal(audit.mismatches, 0, `Todos os 7 scripts host.commands devem bater SHA-256: ${JSON.stringify(audit.results)}`);
+    assert.equal(audit.verified, 7);
 
     // 6. CRDT Conselho & Locks Distribuídos
     const store = orgfyMod.getOrgfyCrdtStore(null);
@@ -2301,5 +2301,19 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     assert.ok(activeLocks.some((l) => l.id === lock.id));
     const rel = await store.releaseDistributedLock(lock.id);
     assert.equal(rel?.status, "released");
+  });
+
+  test("v18.0 (Onda 4): Motor de Confiança & Escape Rate (Autonomia Graduada) + Holding-as-Code 1-clique", () => {
+    const bundle = fs.readFileSync(path.resolve(__dirname, "plugin.js"), "utf8");
+    const manifest = JSON.parse(fs.readFileSync(path.resolve(__dirname, "manifest.json"), "utf8"));
+    const cmds = manifest.host?.commands || [];
+
+    assert.ok(cmds.some((c) => c.id === "orgfy-trust-engine" && c.maxInputBytes >= 16384), "manifest.json deve declarar orgfy-trust-engine");
+    assert.ok(cmds.some((c) => c.id === "orgfy-holding-scaffold" && c.maxInputBytes >= 16384), "manifest.json deve declarar orgfy-holding-scaffold");
+    assert.ok(bundle.includes("data-orgfy-trust-engine"), "Card do Motor de Confiança & Escape Rate deve estar no bundle");
+    assert.ok(bundle.includes("data-holding-as-code-wizard"), "Wizard 1-clique Holding-as-Code deve estar no bundle");
+    assert.ok(bundle.includes("data-open-holding-wizard"), "Botão + Nova Subsidiária (1-clique) deve estar no Conselho");
+    assert.ok(bundle.includes("DARK AUTO-MERGE"), "Badge DARK AUTO-MERGE do Motor de Confiança deve estar no bundle");
+    assert.ok(bundle.includes("GATE HUMANO"), "Badge GATE HUMANO 🔒 para segurança deve estar no bundle");
   });
 }
