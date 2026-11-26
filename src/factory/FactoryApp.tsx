@@ -585,25 +585,31 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         notify("Todos os agentes provisionados já estão em modelos aprovados no Eval R5.1.");
         return;
       }
+      const freshAgents = ((agentsApi.snapshot?.()?.agents || []) as any[]);
       let updated = 0;
+      let firstError = "";
       for (const ag of targets) {
         const papel = String(ag.papel || "").toLowerCase();
         const isTier1 = /(ceo|coo|revis|arquit|segur|secur|qa|oraculo|conselho|board)/.test(papel);
         const provider = isTier1 ? "nexusmind_anthropic" : "nexusmind_antigravity";
         const model = isTier1 ? "claude-sonnet-5-5" : "gemini-2.5-flash";
-        const liveMatch = liveCrew.find((c) => c.key === ag.agentKey);
+        const fresh = freshAgents.find((c: any) => c?.key === ag.agentKey) || liveCrew.find((c) => c.key === ag.agentKey);
+        const baseCfg = fresh?.config && typeof fresh.config === "object" ? fresh.config : {};
         try {
+          // Omite `base` para que o Buzz resolva automaticamente `editorConfig().base`
+          // (passar `configBase` vazio `{}` causa erro "config isn't synced here yet").
           await agentsApi.save(ag.agentKey, {
-            config: { ...(liveMatch?.config || {}), provider, model },
-            ...(liveMatch?.configBase ? { base: liveMatch.configBase } : {}),
+            config: { ...baseCfg, provider, model },
           });
           updated += 1;
-        } catch {}
+        } catch (err: any) {
+          if (!firstError) firstError = err?.message || String(err);
+        }
       }
       notify(
         updated > 0
           ? `${updated}/${targets.length} agente(s) reconciliado(s) para os vencedores do Eval R5.1 via ctx.agents.save().`
-          : "Nenhum agente pôde ser atualizado via ctx.agents.save()."
+          : `Nenhum agente pôde ser atualizado${firstError ? `: ${firstError}` : " via ctx.agents.save()."}`
       );
       await refresh(tenant);
     }, [tenantAgents, liveCrew, tenant, notify, refresh]);
@@ -615,19 +621,20 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
           notify("API ctx.agents.save indisponível nesta versão do Buzz.");
           return;
         }
-        const liveMatch = liveCrew.find((c) => c.key === agentKey);
+        const freshAgents = ((agentsApi.snapshot?.()?.agents || []) as any[]);
+        const fresh = freshAgents.find((c: any) => c?.key === agentKey) || liveCrew.find((c) => c.key === agentKey);
+        const baseCfg = fresh?.config && typeof fresh.config === "object" ? fresh.config : {};
         try {
           await agentsApi.save(agentKey, {
             config: {
-              ...(liveMatch?.config || {}),
+              ...baseCfg,
               ...(patch.provider ? { provider: patch.provider.trim() } : {}),
               ...(patch.model ? { model: patch.model.trim() } : {}),
               ...(patch.instructions !== undefined && patch.instructions.trim() ? { instructions: patch.instructions } : {}),
             },
-            ...(liveMatch?.configBase ? { base: liveMatch.configBase } : {}),
           });
           setEditingAgentKey(null);
-          notify(`Perfil de ${liveMatch?.name || agentKey} salvo via ctx.agents.save().`);
+          notify(`Perfil de ${fresh?.name || agentKey} salvo via ctx.agents.save().`);
           await refresh(tenant);
         } catch (err: any) {
           notify(`Falha ao salvar perfil: ${err?.message || err}`);

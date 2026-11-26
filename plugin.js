@@ -6123,6 +6123,7 @@ function createAgentOrgfyTabComponent(ctx) {
       return () => unsub();
     }, [loadAgentContext]);
     const handleApplyEvalR51 = async () => {
+      var _a, _b;
       const agentsApi = ctx == null ? void 0 : ctx.agents;
       if (!agentKey || typeof (agentsApi == null ? void 0 : agentsApi.save) !== "function") {
         setStatusBanner({ ok: false, text: "API ctx.agents.save indisponível nesta versão do Buzz." });
@@ -6131,9 +6132,11 @@ function createAgentOrgfyTabComponent(ctx) {
       setBusyAction("eval");
       setStatusBanner(null);
       try {
+        const freshList = ((_b = (_a = agentsApi.snapshot) == null ? void 0 : _a.call(agentsApi)) == null ? void 0 : _b.agents) || [];
+        const freshAgent = freshList.find((x) => (x == null ? void 0 : x.key) === agentKey) || agent;
+        const baseCfg = (freshAgent == null ? void 0 : freshAgent.config) && typeof freshAgent.config === "object" ? freshAgent.config : agentCfg;
         await agentsApi.save(agentKey, {
-          config: { ...agentCfg, provider: recommended.provider, model: recommended.model },
-          ...(agent == null ? void 0 : agent.configBase) ? { base: agent.configBase } : {}
+          config: { ...baseCfg, provider: recommended.provider, model: recommended.model }
         });
         setStatusBanner({
           ok: true,
@@ -47486,6 +47489,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
       [notify2]
     );
     const handleReconcileAgentsR51 = React.useCallback(async () => {
+      var _a2, _b2;
       const agentsApi = ctx == null ? void 0 : ctx.agents;
       if (typeof (agentsApi == null ? void 0 : agentsApi.save) !== "function") {
         notify2("API ctx.agents.save indisponível nesta versão do Buzz.");
@@ -47503,47 +47507,52 @@ function createFactoryAppComponent(ctx, opts = {}) {
         notify2("Todos os agentes provisionados já estão em modelos aprovados no Eval R5.1.");
         return;
       }
+      const freshAgents = ((_b2 = (_a2 = agentsApi.snapshot) == null ? void 0 : _a2.call(agentsApi)) == null ? void 0 : _b2.agents) || [];
       let updated = 0;
+      let firstError = "";
       for (const ag of targets) {
         const papel = String(ag.papel || "").toLowerCase();
         const isTier1 = /(ceo|coo|revis|arquit|segur|secur|qa|oraculo|conselho|board)/.test(papel);
         const provider = isTier1 ? "nexusmind_anthropic" : "nexusmind_antigravity";
         const model = isTier1 ? "claude-sonnet-5-5" : "gemini-2.5-flash";
-        const liveMatch = liveCrew.find((c) => c.key === ag.agentKey);
+        const fresh = freshAgents.find((c) => (c == null ? void 0 : c.key) === ag.agentKey) || liveCrew.find((c) => c.key === ag.agentKey);
+        const baseCfg = (fresh == null ? void 0 : fresh.config) && typeof fresh.config === "object" ? fresh.config : {};
         try {
           await agentsApi.save(ag.agentKey, {
-            config: { ...(liveMatch == null ? void 0 : liveMatch.config) || {}, provider, model },
-            ...(liveMatch == null ? void 0 : liveMatch.configBase) ? { base: liveMatch.configBase } : {}
+            config: { ...baseCfg, provider, model }
           });
           updated += 1;
-        } catch {
+        } catch (err) {
+          if (!firstError) firstError = (err == null ? void 0 : err.message) || String(err);
         }
       }
       notify2(
-        updated > 0 ? `${updated}/${targets.length} agente(s) reconciliado(s) para os vencedores do Eval R5.1 via ctx.agents.save().` : "Nenhum agente pôde ser atualizado via ctx.agents.save()."
+        updated > 0 ? `${updated}/${targets.length} agente(s) reconciliado(s) para os vencedores do Eval R5.1 via ctx.agents.save().` : `Nenhum agente pôde ser atualizado${firstError ? `: ${firstError}` : " via ctx.agents.save()."}`
       );
       await refresh(tenant);
     }, [tenantAgents, liveCrew, tenant, notify2, refresh]);
     const handleSaveAgentProfile = React.useCallback(
       async (agentKey, patch) => {
+        var _a2, _b2;
         const agentsApi = ctx == null ? void 0 : ctx.agents;
         if (typeof (agentsApi == null ? void 0 : agentsApi.save) !== "function") {
           notify2("API ctx.agents.save indisponível nesta versão do Buzz.");
           return;
         }
-        const liveMatch = liveCrew.find((c) => c.key === agentKey);
+        const freshAgents = ((_b2 = (_a2 = agentsApi.snapshot) == null ? void 0 : _a2.call(agentsApi)) == null ? void 0 : _b2.agents) || [];
+        const fresh = freshAgents.find((c) => (c == null ? void 0 : c.key) === agentKey) || liveCrew.find((c) => c.key === agentKey);
+        const baseCfg = (fresh == null ? void 0 : fresh.config) && typeof fresh.config === "object" ? fresh.config : {};
         try {
           await agentsApi.save(agentKey, {
             config: {
-              ...(liveMatch == null ? void 0 : liveMatch.config) || {},
+              ...baseCfg,
               ...patch.provider ? { provider: patch.provider.trim() } : {},
               ...patch.model ? { model: patch.model.trim() } : {},
               ...patch.instructions !== void 0 && patch.instructions.trim() ? { instructions: patch.instructions } : {}
-            },
-            ...(liveMatch == null ? void 0 : liveMatch.configBase) ? { base: liveMatch.configBase } : {}
+            }
           });
           setEditingAgentKey(null);
-          notify2(`Perfil de ${(liveMatch == null ? void 0 : liveMatch.name) || agentKey} salvo via ctx.agents.save().`);
+          notify2(`Perfil de ${(fresh == null ? void 0 : fresh.name) || agentKey} salvo via ctx.agents.save().`);
           await refresh(tenant);
         } catch (err) {
           notify2(`Falha ao salvar perfil: ${(err == null ? void 0 : err.message) || err}`);
