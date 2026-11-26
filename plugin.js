@@ -57565,12 +57565,25 @@ function renderFactorySecondaryPage(props) {
             { className: "of-muted" },
             `Fonte: empresas/${tenant}.json × Buzz Desktop (${tenantAgents.filter((a) => a.inBuzz).length}/${tenantAgents.length} provisionados)`
           ),
-          props.onReconcileAgents && h(
+          tenant === "board" && props.onSyncCouncilPrompts && h(
             "button",
             {
               type: "button",
               className: "of-btn",
               "data-variant": "primary",
+              "data-sync-council-prompts": "true",
+              disabled: Boolean(props.syncingCouncilPrompts),
+              title: "Lê REPOS/holding/agentes/01..05 e publica via ctx.agents.save() preservando seus modelos e providers",
+              onClick: props.onSyncCouncilPrompts
+            },
+            props.syncingCouncilPrompts ? "Sincronizando..." : "Sincronizar prompts do Conselho (Buzz)"
+          ),
+          props.onReconcileAgents && h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-variant": tenant === "board" ? void 0 : "primary",
               "data-reconcile-r51": "true",
               onClick: props.onReconcileAgents
             },
@@ -60100,6 +60113,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
     const [selectedItemDetail, setSelectedItemDetail] = React.useState(null);
     const [selectedItemDetailLoading, setSelectedItemDetailLoading] = React.useState(false);
     const [editingAgentKey, setEditingAgentKey] = React.useState(null);
+    const [syncingCouncilPrompts, setSyncingCouncilPrompts] = React.useState(false);
     const [agentEditDraft, setAgentEditDraftState] = React.useState({ provider: "", model: "", instructions: "" });
     const setAgentEditDraft = React.useCallback((patch) => {
       setAgentEditDraftState((prev) => ({ ...prev, ...patch }));
@@ -60752,6 +60766,82 @@ function createFactoryAppComponent(ctx, opts = {}) {
       },
       [liveCrew, tenant, notify2, refresh]
     );
+    const handleSyncCouncilPrompts = React.useCallback(async () => {
+      var _a2, _b2, _c2;
+      const agentsApi = ctx == null ? void 0 : ctx.agents;
+      const readFile = (_a2 = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a2.readFile;
+      if (typeof (agentsApi == null ? void 0 : agentsApi.save) !== "function") {
+        notify2("API ctx.agents.save indisponível nesta versão do Buzz.");
+        return;
+      }
+      if (typeof readFile !== "function") {
+        notify2("API ctx.host.readFile indisponível para ler os prompts do Conselho.");
+        return;
+      }
+      const targets = [
+        { name: "Conselho CTO", pubkey: "23afe6952365da1ac539f3c9e372ce533e541249e1fb6f2f0e1f0776cab879a6", file: "01-conselho-cto.md" },
+        { name: "Conselho CRO", pubkey: "6988361a3ab2427ed1a45a4ae3aeb8160cf3cb950e0d71609096b9b4717fa276", file: "02-conselho-cro.md" },
+        { name: "Conselho CPO", pubkey: "f5b4f41290119e35e2c689f5542b9fdcda3bd5ed134f3b555adae2beb42470e2", file: "03-conselho-cpo.md" },
+        { name: "Conselho COO", pubkey: "6a55606c488c86781013f9f9d9d26f63f9f809af5f67bcdf44784bc2a0946f12", file: "04-conselho-coo.md" },
+        { name: "Conselho CGO", pubkey: "3c120707546229742e5517f12baf59b75afbc3aa3690ce6ad5a6b07931232e57", file: "05-conselho-cgo.md" }
+      ];
+      const decodeText2 = (raw) => {
+        if (typeof raw === "string") return raw;
+        if (raw instanceof Uint8Array) return new TextDecoder().decode(raw);
+        if (typeof (raw == null ? void 0 : raw.text) === "string") return raw.text;
+        if (typeof (raw == null ? void 0 : raw.content) === "string") return raw.content;
+        return "";
+      };
+      setSyncingCouncilPrompts(true);
+      try {
+        const freshAgents = ((_c2 = (_b2 = agentsApi.snapshot) == null ? void 0 : _b2.call(agentsApi)) == null ? void 0 : _c2.agents) || [];
+        let updated = 0;
+        let firstError = "";
+        for (const t of targets) {
+          let instructions = "";
+          for (const candidatePath of [
+            `/Users/heltonfraga/.buzz/REPOS/holding/agentes/${t.file}`,
+            `/Users/heltonfraga/.buzz/REPOS/orgfy/empresas/conselho/agentes/${t.file}`
+          ]) {
+            try {
+              const txt = decodeText2(await readFile(candidatePath)).trim();
+              if (txt) {
+                instructions = txt;
+                break;
+              }
+            } catch {
+            }
+          }
+          if (!instructions) {
+            if (!firstError) firstError = `Arquivo ${t.file} não encontrado`;
+            continue;
+          }
+          const match = freshAgents.find((a) => String((a == null ? void 0 : a.pubkey) || "").toLowerCase() === t.pubkey.toLowerCase()) || freshAgents.find((a) => String((a == null ? void 0 : a.name) || "").toLowerCase() === t.name.toLowerCase());
+          if (!(match == null ? void 0 : match.key)) {
+            if (!firstError) firstError = `${t.name} não encontrado no Buzz`;
+            continue;
+          }
+          const baseCfg = (match == null ? void 0 : match.config) && typeof match.config === "object" ? match.config : {};
+          try {
+            await agentsApi.save(match.key, {
+              config: {
+                ...baseCfg,
+                instructions
+              }
+            });
+            updated += 1;
+          } catch (err) {
+            if (!firstError) firstError = `${t.name}: ${(err == null ? void 0 : err.message) || err}`;
+          }
+        }
+        notify2(
+          updated > 0 ? `${updated}/${targets.length} prompt(s) do Conselho publicados no Buzz (modelos preservados) ✓` : `Falha ao sincronizar prompts do Conselho${firstError ? `: ${firstError}` : ""}.`
+        );
+        await refresh(tenant);
+      } finally {
+        setSyncingCouncilPrompts(false);
+      }
+    }, [tenant, notify2, refresh]);
     const handleAgentSessionAction = React.useCallback(
       async (agentKey, action) => {
         var _a2, _b2;
@@ -61898,6 +61988,8 @@ Nota: ${evidence.note}`
                 onOpenBuzzLink: handleOpenBuzzLink,
                 Boardroom3D,
                 onReconcileAgents: handleReconcileAgentsR51,
+                onSyncCouncilPrompts: handleSyncCouncilPrompts,
+                syncingCouncilPrompts,
                 onAgentSessionAction: handleAgentSessionAction,
                 onOpenAgentDrawer: (k) => void handleOpenNativeAgentProfile(k),
                 onSaveAgentProfile: handleSaveAgentProfile,

@@ -60,6 +60,8 @@ export interface FactorySecondaryPagesProps {
   onOpenBuzzLink?: (href: string) => void;
   Boardroom3D?: any;
   onReconcileAgents?: () => void;
+  onSyncCouncilPrompts?: () => void;
+  syncingCouncilPrompts?: boolean;
   onAgentSessionAction?: (agentKey: string, action: "interrupt" | "compact" | "new") => void;
   onOpenAgentDrawer?: (agentKey: string) => void;
   onSaveAgentProfile?: (agentKey: string, patch: { provider: string; model: string; instructions?: string }) => Promise<void> | void;
@@ -832,13 +834,27 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
             { className: "of-muted" },
             `Fonte: empresas/${tenant}.json × Buzz Desktop (${tenantAgents.filter((a) => a.inBuzz).length}/${tenantAgents.length} provisionados)`
           ),
-          props.onReconcileAgents &&
+          tenant === "board" && props.onSyncCouncilPrompts &&
             h(
               "button",
               {
                 type: "button",
                 className: "of-btn",
                 "data-variant": "primary",
+                "data-sync-council-prompts": "true",
+                disabled: Boolean(props.syncingCouncilPrompts),
+                title: "Lê REPOS/holding/agentes/01..05 e publica via ctx.agents.save() preservando seus modelos e providers",
+                onClick: props.onSyncCouncilPrompts,
+              },
+              props.syncingCouncilPrompts ? "Sincronizando..." : "Sincronizar prompts do Conselho (Buzz)"
+            ),
+          props.onReconcileAgents &&
+            h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                "data-variant": tenant === "board" ? undefined : "primary",
                 "data-reconcile-r51": "true",
                 onClick: props.onReconcileAgents,
               },
