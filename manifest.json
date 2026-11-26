@@ -37,6 +37,16 @@
         "id": "buzz",
         "program": "buzz",
         "args": []
+      },
+      {
+        "id": "orgfy-kpis",
+        "program": "python3",
+        "args": ["ferramentas/esteira/gerar_kpis_esteira.py"]
+      },
+      {
+        "id": "orgfy-loop-radar",
+        "program": "python3",
+        "args": ["ferramentas/esteira/goose_loop_radar.py"]
       }
     ],
     "commands": [
