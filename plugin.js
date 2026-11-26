@@ -60926,16 +60926,19 @@ function createFactoryAppComponent(ctx, opts = {}) {
     );
     const handleRunScoutNow = React.useCallback(async () => {
       var _a2, _b2;
-      const scoutTenant = tenantAgents.find((a) => a.papel === "oraculo" || /or[aá]culo|scout/i.test(a.name));
-      const scoutLive = liveCrew.find((a) => a.key === (scoutTenant == null ? void 0 : scoutTenant.agentKey) || /or[aá]culo|scout/i.test(a.name));
+      const isBoard = tenant === "board";
+      const scoutTenant = isBoard ? tenantAgents.find((a) => a.papel === "cpo" || /conselho\s+cpo/i.test(a.name)) || tenantAgents.find((a) => a.papel === "oraculo" || /or[aá]culo|scout/i.test(a.name)) : tenantAgents.find((a) => a.papel === "oraculo" || /or[aá]culo|scout/i.test(a.name));
+      const scoutLive = isBoard ? liveCrew.find((a) => {
+        var _a3;
+        return a.key === (scoutTenant == null ? void 0 : scoutTenant.agentKey) || (scoutTenant == null ? void 0 : scoutTenant.pubkey) && ((_a3 = a.pubkey) == null ? void 0 : _a3.toLowerCase()) === scoutTenant.pubkey.toLowerCase() || /conselho\s+cpo/i.test(a.name);
+      }) : liveCrew.find((a) => a.key === (scoutTenant == null ? void 0 : scoutTenant.agentKey) || /or[aá]culo|scout/i.test(a.name));
       const agentKey = (scoutTenant == null ? void 0 : scoutTenant.agentKey) || (scoutLive == null ? void 0 : scoutLive.key);
-      const scoutName = (scoutTenant == null ? void 0 : scoutTenant.name) || (scoutLive == null ? void 0 : scoutLive.name) || "OrgFy Oráculo";
+      const scoutName = (scoutTenant == null ? void 0 : scoutTenant.name) || (scoutLive == null ? void 0 : scoutLive.name) || (isBoard ? "Conselho CPO" : "OrgFy Oráculo");
       if (!agentKey) {
-        notify2(`Nenhum agente Oráculo/Scout encontrado em ${tenant}.`);
+        notify2(`Nenhum agente ${isBoard ? "Conselho CPO" : "Oráculo/Scout"} encontrado em ${tenant}.`);
         return;
       }
       const targetChannelId = resolveActiveChannelId(tenant);
-      const isBoard = tenant === "board";
       const councilNames = Array.from(
         new Set(
           ((holding == null ? void 0 : holding.conselho) || []).map((c) => c.responsavel).filter((n) => n && n.toLowerCase() !== scoutName.toLowerCase())
@@ -60945,7 +60948,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
       const promptText = isBoard ? `@${scoutName} [ORGFY SCOUT ONE-SHOT · board]
 Audite o portfólio e o workspace atual contra o Canvas/Visão da Holding, identifique os gaps de maior impacto (segurança, testes, UX, dívida técnica ou governança) e proponha os próximos cards/pautas canônicos.
 
-**Regra de Reunião:** responda **aqui neste canal do Conselho** (não em DM) usando \`buzz__send\` com sua própria assinatura e as pubkeys em \`mentions\` (${councilNames.join(", ") || "OrgFy Iris, OrgFy Bento Arquiteto, OrgFy Vera, OrgFy Bento, OrgFy Val"}). Se precisar garantir o disparo de algum conselheiro, chame \`orgfy_mention_wake\` (que apenas acorda sem postar como o Fundador).` : `@${scoutName} [ORGFY SCOUT ONE-SHOT · ${tenant}]
+**Regra de Reunião:** responda **aqui neste canal do Conselho** (não em DM) usando \`buzz__send\` com sua própria assinatura e as pubkeys em \`mentions\` (${councilNames.join(", ") || "OrgFy Iris, Conselho CTO, Conselho CRO, Conselho COO, Conselho CGO"}). Se precisar garantir o disparo de algum conselheiro, chame \`orgfy_mention_wake\` (que apenas acorda sem postar como o Fundador).` : `@${scoutName} [ORGFY SCOUT ONE-SHOT · ${tenant}]
 Audite o workspace atual contra o Canvas/Visão de ${((_b2 = status.tenantManifest) == null ? void 0 : _b2.nome) || tenant}, identifique os gaps de maior impacto (segurança, testes, UX ou dívida técnica) e proponha os próximos cards canônicos.
 
 **Regra de Canal:** responda **aqui neste canal da empresa** (não em DM) usando \`buzz__send\` com \`mentions\` para \`${cooName}\` (COO) e especialistas responsáveis (e \`orgfy_mention_wake\` se precisar garantir o wake).`;
