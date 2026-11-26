@@ -13,6 +13,7 @@ import type { Rgb } from "./codeden-floor/oklch";
 import type { FactoryStatusPayload } from "./factory-adapter";
 import type { BuzzLiveTelemetrySnapshot, LiveAgentTurn } from "./buzz-live-telemetry";
 import type { LiveCrewAgent } from "./FactoryBoardAndFloor";
+import { buildCustomAvatar3D, type Avatar3DHandle } from "./Avatar3DBuilder";
 
 export interface BoardroomSeat {
   id: string;
@@ -30,6 +31,7 @@ export interface Boardroom3DProps {
   title?: string;
   fullHeight?: boolean;
   status?: FactoryStatusPayload;
+  holding?: any;
   liveCrew?: LiveCrewAgent[];
   telemetry?: BuzzLiveTelemetrySnapshot;
   onOpenAgentDm?: (agent: { key?: string; pubkey?: string; name?: string }) => void;
@@ -94,8 +96,15 @@ function makeWallSignTexture(kit: Kit, text: string, p: FloorPalette): THREE.Can
   return kit.canvasTexture(c);
 }
 
-/** Cria textura Canvas da tela executiva principal do Conselho (KPIs, empresas e gráfico no acento do Buzz). */
-function makeExecutiveScreenTexture(kit: Kit, seats: BoardroomSeat[], p: FloorPalette): THREE.CanvasTexture {
+/** Cria textura Canvas da tela executiva principal do Conselho (3 slides interativos clicáveis). */
+function makeExecutiveScreenTexture(
+  kit: Kit,
+  seats: BoardroomSeat[],
+  p: FloorPalette,
+  slideIndex: number = 0,
+  status?: FactoryStatusPayload,
+  holding?: any
+): THREE.CanvasTexture {
   const c = canvasOf(1024, 420);
   const g = c.getContext("2d")!;
   const accent = rgbToCss(p.lane);
@@ -130,7 +139,12 @@ function makeExecutiveScreenTexture(kit: Kit, seats: BoardroomSeat[], p: FloorPa
 
   g.fillStyle = "#f4f6fb";
   g.font = "700 22px -apple-system, BlinkMacSystemFont, sans-serif";
-  g.fillText("CONSELHO DA HOLDING · PAINEL EXECUTIVO", 28, 37);
+  const slideTitles = [
+    "CONSELHO DA HOLDING · PAINEL EXECUTIVO (1/3)",
+    "FINOPS & NEXUSMIND GATEWAY · AUTOPILOTO VIP (2/3)",
+    "PORTFÓLIO DAS SUBSIDIÁRIAS · HOLDING CORTEXX (3/3)",
+  ];
+  g.fillText(slideTitles[slideIndex % 3], 28, 37);
 
   // Pill AO VIVO no topo direito
   g.fillStyle = accentSoft;
@@ -145,16 +159,33 @@ function makeExecutiveScreenTexture(kit: Kit, seats: BoardroomSeat[], p: FloorPa
   g.font = "700 14px ui-monospace, Menlo, monospace";
   g.fillText("L-01 · ATIVO", c.width - 134, 34);
 
-  // Contadores reais dos assentos
+  // Contadores reais dos assentos + FinOps + Portfólio por slide
   const activeCnt = seats.filter((s) => s.status === "active").length;
   const workingCnt = seats.filter((s) => s.status === "working").length;
   const plannedCnt = seats.filter((s) => s.status === "planned").length;
+  const spendUsd = status?.spendToday?.usd ?? 0;
+  const budgetUsd = status?.limits?.dailyBudget?.usd ?? 50;
+  const merges7d = status?.stats?.merged7d ?? 0;
+  const empresas = Array.isArray(holding?.empresas) ? holding.empresas : [];
 
-  const kpis = [
-    { label: "ASSENTOS ATIVOS", val: String(activeCnt + workingCnt), sub: `${seats.length} no conselho`, col: accent },
-    { label: "EM EXECUÇÃO", val: String(workingCnt), sub: "turnos ao vivo", col: blue },
-    { label: "PLANEJADOS", val: String(plannedCnt), sub: "em incubação", col: "#9ca3af" },
-  ];
+  const kpis =
+    slideIndex % 3 === 1
+      ? [
+          { label: "GASTO HOJE", val: `$${spendUsd.toFixed(2)}`, sub: `orçamento $${budgetUsd}/dia`, col: accent },
+          { label: "MERGES (7D)", val: String(merges7d), sub: "esteira determinística", col: blue },
+          { label: "ESCUDO VIP", val: "ATIVO", sub: "Iris & Conselho isolados", col: "#fbbf24" },
+        ]
+      : slideIndex % 3 === 2
+      ? [
+          { label: "SUBSIDIÁRIAS", val: String(empresas.length || 3), sub: "no portfólio Cortexx", col: accent },
+          { label: "OPERACIONAIS", val: String(empresas.filter((e: any) => e.estagio === "operacional").length || 2), sub: "rodando no Buzz", col: blue },
+          { label: "WIP ATIVO", val: String(status?.wip?.openPrs ?? 0), sub: `limite ${status?.wip?.limit ?? 6} PRs`, col: "#9ca3af" },
+        ]
+      : [
+          { label: "ASSENTOS ATIVOS", val: String(activeCnt + workingCnt), sub: `${seats.length} no conselho`, col: accent },
+          { label: "EM EXECUÇÃO", val: String(workingCnt), sub: "turnos ao vivo", col: blue },
+          { label: "PLANEJADOS", val: String(plannedCnt), sub: "em incubação", col: "#9ca3af" },
+        ];
 
   kpis.forEach((k, idx) => {
     const x = 28 + idx * 324;
@@ -591,6 +622,7 @@ export function createBoardroom3DComponent(ctx: Context) {
     const prevActiveByPubkeyRef = React.useRef<Record<string, LiveAgentTurn>>({});
     const [fitTick, setFitTick] = React.useState(0);
     const [themeVersion, setThemeVersion] = React.useState(0);
+    const [screenSlide, setScreenSlide] = React.useState(0);
     const [isFullscreen, setIsFullscreen] = React.useState(false);
     const [rosterOpen, setRosterOpen] = React.useState(false);
     const [rosterFilter, setRosterFilter] = React.useState<"all" | "active">("all");
@@ -846,12 +878,13 @@ export function createBoardroom3DComponent(ctx: Context) {
       screenBezel.castShadow = true;
       scene.add(screenBezel);
 
-      const screenTex = makeExecutiveScreenTexture(kit, seats, palette);
+      const screenTex = makeExecutiveScreenTexture(kit, seats, palette, screenSlide, props.status, props.holding);
       const screenDisplay = new THREE.Mesh(
         kit.own(new THREE.PlaneGeometry(4.84, 1.78)),
         kit.own(new THREE.MeshBasicMaterial({ map: screenTex }))
       );
       screenDisplay.position.set(0, 1.68, -3.435);
+      screenDisplay.userData.isExecutiveScreen = true;
       scene.add(screenDisplay);
 
       const screenTrim = new THREE.Mesh(kit.own(new THREE.BoxGeometry(5.1, 0.05, 0.14)), matLane);
@@ -991,21 +1024,50 @@ export function createBoardroom3DComponent(ctx: Context) {
         { pos: [3.42, 0, 0.15], rotY: -Math.PI / 2, deskPos: [2.32, 0.89, 0.15] },
       ];
 
+      // ── HOLOGRAMA CENTRAL DE REUNIÃO SOBRE A MESA ──
+      const holoGroup = new THREE.Group();
+      holoGroup.position.set(0, 1.62, 0.15);
+      scene.add(holoGroup);
+
+      const holoCore = new THREE.Mesh(
+        kit.own(new THREE.OctahedronGeometry(0.32, 0)),
+        kit.own(
+          new THREE.MeshBasicMaterial({
+            color: colour(palette.lane),
+            wireframe: true,
+            transparent: true,
+            opacity: 0.72,
+          })
+        )
+      );
+      holoGroup.add(holoCore);
+
+      const holoRing = new THREE.Mesh(
+        kit.own(new THREE.TorusGeometry(0.48, 0.014, 8, 32)),
+        kit.own(
+          new THREE.MeshBasicMaterial({
+            color: colour(palette.accent.reviewer),
+            transparent: true,
+            opacity: 0.55,
+          })
+        )
+      );
+      holoRing.rotation.x = Math.PI / 2;
+      holoGroup.add(holoRing);
+
       interface AnimatedDirector {
         seat: BoardroomSeat;
         seatGroup: THREE.Group;
-        bodyGroup: THREE.Group;
-        eyesMesh: THREE.Mesh;
-        dotsMesh: THREE.Mesh | null;
-        ringMesh: THREE.Mesh;
+        avatar: Avatar3DHandle;
         phase: number;
-        baseY: number;
+        pos: [number, number, number];
         hitTarget: THREE.Object3D;
       }
 
       const animated: AnimatedDirector[] = [];
-      const hitTargets: THREE.Object3D[] = [];
-      const seatByObject = new WeakMap<THREE.Object3D, BoardroomSeat>();
+      const hitTargets: THREE.Object3D[] = [screenDisplay];
+      const seatByObject = new WeakMap<THREE.Object3D, { seat: BoardroomSeat; pos: [number, number, number] }>();
+      const crewList = props.liveCrew || [];
 
       seats.slice(0, seatSlots.length).forEach((seat, idx) => {
         const slot = seatSlots[idx];
@@ -1017,8 +1079,40 @@ export function createBoardroom3DComponent(ctx: Context) {
         const chair = buildExecutiveChair(kit, matLeather, matSteel, matChrome);
         seatGroup.add(chair);
 
-        const director = buildCodeDenDirector(kit, crew, palette, seat, idx);
-        seatGroup.add(director.root);
+        const displayName = seat.agentName || seat.role || seat.label;
+        const pk = (seat.pubkey || "").toLowerCase();
+        const crewMatch = crewList.find(
+          (c) => (pk && c.pubkey?.toLowerCase() === pk) || c.name.toLowerCase() === displayName.toLowerCase()
+        );
+        const liveTurn = pk && props.telemetry?.byPubkey ? props.telemetry.byPubkey[pk] : undefined;
+        const avStatus = liveTurn?.state === "error" ? "error" : seat.status;
+
+        const avatar = buildCustomAvatar3D(
+          kit,
+          palette,
+          { name: displayName, role: seat.role, picture: crewMatch?.picture, status: avStatus, index: idx },
+          { seatHeight: 0.44, scale: 1.08, showPortraitMedallion: true }
+        );
+        seatGroup.add(avatar.root);
+
+        // Feixe luminoso ligando conselheiros ativos ao holograma central da mesa
+        if (seat.status === "working") {
+          const startPt = new THREE.Vector3(slot.pos[0], 1.15, slot.pos[2]);
+          const midPt = new THREE.Vector3(slot.pos[0] * 0.45, 1.85, (slot.pos[2] + 0.15) * 0.45);
+          const endPt = new THREE.Vector3(0, 1.62, 0.15);
+          const curve = new THREE.QuadraticBezierCurve3(startPt, midPt, endPt);
+          const beam = new THREE.Mesh(
+            kit.own(new THREE.TubeGeometry(curve, 20, 0.018, 6, false)),
+            kit.own(
+              new THREE.MeshBasicMaterial({
+                color: colour(palette.accent.reviewer),
+                transparent: true,
+                opacity: 0.65,
+              })
+            )
+          );
+          scene.add(beam);
+        }
 
         const propsGroup = buildSeatDeskProps(kit, palette, seat.status);
         propsGroup.position.set(...slot.deskPos);
@@ -1032,20 +1126,21 @@ export function createBoardroom3DComponent(ctx: Context) {
         hitBox.position.set(0, 0.72, 0);
         seatGroup.add(hitBox);
         hitTargets.push(hitBox);
-        seatByObject.set(hitBox, seat);
+        seatByObject.set(hitBox, { seat, pos: slot.pos });
 
         animated.push({
           seat,
           seatGroup,
-          bodyGroup: director.bodyGroup,
-          eyesMesh: director.eyesMesh,
-          dotsMesh: director.dotsMesh,
-          ringMesh: director.ringMesh,
+          avatar,
           phase: idx * 1.37,
-          baseY: director.bodyGroup.position.y,
+          pos: slot.pos,
           hitTarget: hitBox,
         });
       });
+
+      const defaultTarget = new THREE.Vector3(0, 0.72, -0.15);
+      const desiredTarget = defaultTarget.clone();
+      let desiredFrustum = 9.4;
 
       const raycaster = new THREE.Raycaster();
       const pointer = new THREE.Vector2();
@@ -1054,14 +1149,17 @@ export function createBoardroom3DComponent(ctx: Context) {
       let lastX = 0;
       let lastY = 0;
 
-      const pickSeat = (e: MouseEvent): BoardroomSeat | null => {
+      const pickHit = (e: MouseEvent) => {
         const rect = renderer.domElement.getBoundingClientRect();
         pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
         pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
         raycaster.setFromCamera(pointer, camera);
         const hits = raycaster.intersectObjects(hitTargets, false);
         if (hits.length === 0) return null;
-        return seatByObject.get(hits[0].object) || null;
+        const obj = hits[0].object;
+        if (obj.userData?.isExecutiveScreen) return { kind: "screen" as const };
+        const entry = seatByObject.get(obj);
+        return entry ? { kind: "seat" as const, ...entry } : null;
       };
 
       const onDown = (e: MouseEvent) => {
@@ -1084,15 +1182,26 @@ export function createBoardroom3DComponent(ctx: Context) {
           updateCamera();
           return;
         }
-        const hit = pickSeat(e);
-        setHoveredSeatId((cur) => (cur === (hit?.id || null) ? cur : (hit?.id || null)));
+        const hit = pickHit(e);
+        const hitSeatId = hit?.kind === "seat" ? hit.seat.id : null;
+        setHoveredSeatId((cur) => (cur === hitSeatId ? cur : hitSeatId));
         renderer.domElement.style.cursor = hit ? "pointer" : "grab";
       };
 
       const onUp = (e: MouseEvent) => {
         if (dragging && !moved) {
-          const hit = pickSeat(e);
-          setSelectedSeatId(hit ? hit.id : null);
+          const hit = pickHit(e);
+          if (hit?.kind === "screen") {
+            setScreenSlide((s) => (s + 1) % 3);
+          } else if (hit?.kind === "seat") {
+            setSelectedSeatId(hit.seat.id);
+            desiredTarget.set(hit.pos[0] * 0.65, 0.9, hit.pos[2] * 0.65);
+            desiredFrustum = 6.6;
+          } else {
+            setSelectedSeatId(null);
+            desiredTarget.copy(defaultTarget);
+            desiredFrustum = 9.4;
+          }
         }
         dragging = false;
         renderer.domElement.style.cursor = "grab";
@@ -1100,7 +1209,8 @@ export function createBoardroom3DComponent(ctx: Context) {
 
       const onWheel = (e: WheelEvent) => {
         e.preventDefault();
-        frustum = Math.max(5.8, Math.min(14.5, frustum + e.deltaY * 0.008));
+        frustum = Math.max(5.4, Math.min(14.5, frustum + e.deltaY * 0.008));
+        desiredFrustum = frustum;
         updateCamera();
       };
 
@@ -1124,22 +1234,27 @@ export function createBoardroom3DComponent(ctx: Context) {
         const t = clock.getElapsedTime();
         const cw = container.clientWidth || width;
         const ch = container.clientHeight || height;
+
+        // Voo cinematográfico suave (lerp) da câmera ao focar um conselheiro
+        let camDirty = false;
+        if (target.distanceTo(desiredTarget) > 0.01) {
+          target.lerp(desiredTarget, 0.09);
+          camDirty = true;
+        }
+        if (Math.abs(frustum - desiredFrustum) > 0.015) {
+          frustum += (desiredFrustum - frustum) * 0.09;
+          camDirty = true;
+        }
+        if (camDirty) updateCamera();
+
+        // Anima holograma central
+        holoCore.rotation.y = t * 0.85;
+        holoCore.rotation.x = Math.sin(t * 0.6) * 0.28;
+        holoGroup.position.y = 1.62 + Math.sin(t * 1.8) * 0.05;
+        holoRing.rotation.z = -t * 0.6;
+
         for (const a of animated) {
-          const speed = a.seat.status === "working" ? 3.2 : 1.7;
-          const amp = a.seat.status === "planned" ? 0.004 : 0.015;
-          a.bodyGroup.position.y = a.baseY + Math.sin(t * speed + a.phase) * amp;
-
-          const blinkCycle = (t + a.phase) % 4.2;
-          const blinkScale = blinkCycle > 4.06 ? 0.14 : 1;
-          a.eyesMesh.scale.y = blinkScale;
-
-          if (a.dotsMesh) {
-            a.dotsMesh.rotation.y = t * 2.4;
-          }
-          if (a.seat.status === "working") {
-            const s = 1.38 + Math.sin(t * 3.6 + a.phase) * 0.08;
-            a.ringMesh.scale.set(s, s, 1);
-          }
+          a.avatar.animate(t, a.phase, { working: a.seat.status === "working" });
 
           const bubbleNode = bubbleNodesRef.current.get(a.seat.id);
           if (bubbleNode) {
@@ -1182,7 +1297,7 @@ export function createBoardroom3DComponent(ctx: Context) {
         kit.dispose();
         renderer.dispose();
       };
-    }, [seatsKey, fitTick, themeVersion]);
+    }, [seatsKey, fitTick, themeVersion, screenSlide]);
 
     const liveCrew = props.liveCrew || [];
     const resolveSeatMeta = (s: BoardroomSeat) => {

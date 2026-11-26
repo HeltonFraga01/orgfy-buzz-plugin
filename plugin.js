@@ -17658,14 +17658,18 @@ function renderFactoryBoardAndFloor(props) {
       h(
         "div",
         { style: { marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
-        viewMode === "floor" && !props.isBoardTenant && h(
+        viewMode === "floor" && h(
           "div",
           { className: "of-segmented", role: "radiogroup", "aria-label": "Andares da fábrica" },
-          [
+          (props.isBoardTenant ? [
+            { id: "both", label: "Sala 3D" },
+            { id: "tower", label: "Torre Holding" }
+          ] : [
             { id: "workshop", label: "Oficina" },
             { id: "lookout", label: "Mirante" },
-            { id: "both", label: "Ambos" }
-          ].map(
+            { id: "both", label: "Ambos" },
+            { id: "tower", label: "Torre Holding" }
+          ]).map(
             (st) => h(
               "button",
               {
@@ -17874,11 +17878,25 @@ function renderFactoryBoardAndFloor(props) {
           );
         })
       )
-    ) : props.isBoardTenant && props.Boardroom3D ? h(props.Boardroom3D, {
+    ) : storeyFocus === "tower" && props.HoldingTower3D ? h(props.HoldingTower3D, {
+      holding: props.holding,
+      liveCrew,
+      telemetry: props.telemetry,
+      activeTenant: tenant,
+      onEnterFloor: (slug) => {
+        var _a2;
+        (_a2 = props.onEnterTowerFloor) == null ? void 0 : _a2.call(props, slug);
+      },
+      onOpenChannel: (slug) => {
+        var _a2;
+        return (_a2 = props.onOpenChannelInBuzz) == null ? void 0 : _a2.call(props, slug);
+      }
+    }) : props.isBoardTenant && props.Boardroom3D ? h(props.Boardroom3D, {
       seats: props.boardroomSeats || [],
       title: "Sala de Reunião do Conselho · Conselheiros & Bestie (OrgFy Iris)",
       fullHeight: true,
       status,
+      holding: props.holding,
       liveCrew,
       telemetry: props.telemetry,
       onOpenAgentDm: (ag) => {
@@ -17901,7 +17919,7 @@ function renderFactoryBoardAndFloor(props) {
         status,
         liveCrew,
         telemetry: props.telemetry,
-        focus: storeyFocus,
+        focus: storeyFocus === "tower" ? "both" : storeyFocus,
         onSelectItem,
         onOpenAgentDm: (ag) => {
           var _a2;
@@ -21525,17 +21543,17 @@ const _Matrix3 = class _Matrix3 {
    * @return {Matrix3} A reference to this matrix.
    */
   transpose() {
-    let tmp;
+    let tmp3;
     const m = this.elements;
-    tmp = m[1];
+    tmp3 = m[1];
     m[1] = m[3];
-    m[3] = tmp;
-    tmp = m[2];
+    m[3] = tmp3;
+    tmp3 = m[2];
     m[2] = m[6];
-    m[6] = tmp;
-    tmp = m[5];
+    m[6] = tmp3;
+    tmp3 = m[5];
     m[5] = m[7];
-    m[7] = tmp;
+    m[7] = tmp3;
     return this;
   }
   /**
@@ -24009,25 +24027,25 @@ const _Matrix4 = class _Matrix4 {
    */
   transpose() {
     const te = this.elements;
-    let tmp;
-    tmp = te[1];
+    let tmp3;
+    tmp3 = te[1];
     te[1] = te[4];
-    te[4] = tmp;
-    tmp = te[2];
+    te[4] = tmp3;
+    tmp3 = te[2];
     te[2] = te[8];
-    te[8] = tmp;
-    tmp = te[6];
+    te[8] = tmp3;
+    tmp3 = te[6];
     te[6] = te[9];
-    te[9] = tmp;
-    tmp = te[3];
+    te[9] = tmp3;
+    tmp3 = te[3];
     te[3] = te[12];
-    te[12] = tmp;
-    tmp = te[7];
+    te[12] = tmp3;
+    tmp3 = te[7];
     te[7] = te[13];
-    te[13] = tmp;
-    tmp = te[11];
+    te[13] = tmp3;
+    tmp3 = te[11];
     te[11] = te[14];
-    te[14] = tmp;
+    te[14] = tmp3;
     return this;
   }
   /**
@@ -25613,11 +25631,11 @@ class Object3D extends EventDispatcher {
     this.matrix.compose(this.position, this.quaternion, this.scale);
     const pivot = this.pivot;
     if (pivot !== null) {
-      const px = pivot.x, py = pivot.y, pz = pivot.z;
+      const px2 = pivot.x, py2 = pivot.y, pz2 = pivot.z;
       const te = this.matrix.elements;
-      te[12] += px - te[0] * px - te[4] * py - te[8] * pz;
-      te[13] += py - te[1] * px - te[5] * py - te[9] * pz;
-      te[14] += pz - te[2] * px - te[6] * py - te[10] * pz;
+      te[12] += px2 - te[0] * px2 - te[4] * py2 - te[8] * pz2;
+      te[13] += py2 - te[1] * px2 - te[5] * py2 - te[9] * pz2;
+      te[14] += pz2 - te[2] * px2 - te[6] * py2 - te[10] * pz2;
     }
     this.matrixWorldNeedsUpdate = true;
   }
@@ -29133,18 +29151,18 @@ class BufferGeometry extends EventDispatcher {
         );
       }
     }
-    const tmp = new Vector3(), tmp2 = new Vector3();
+    const tmp3 = new Vector3(), tmp22 = new Vector3();
     const n = new Vector3(), n2 = new Vector3();
     function handleVertex(v2) {
       n.fromBufferAttribute(normalAttribute, v2);
       n2.copy(n);
       const t = tan1[v2];
-      tmp.copy(t);
-      tmp.sub(n.multiplyScalar(n.dot(t))).normalize();
-      tmp2.crossVectors(n2, t);
-      const test = tmp2.dot(tan2[v2]);
+      tmp3.copy(t);
+      tmp3.sub(n.multiplyScalar(n.dot(t))).normalize();
+      tmp22.crossVectors(n2, t);
+      const test = tmp22.dot(tan2[v2]);
       const w = test < 0 ? -1 : 1;
-      tangentAttribute.setXYZW(v2, tmp.x, tmp.y, tmp.z, w);
+      tangentAttribute.setXYZW(v2, tmp3.x, tmp3.y, tmp3.z, w);
     }
     for (let i = 0, il = positionAttribute.count; i < il; ++i) {
       if (used[i]) handleVertex(i);
@@ -32624,6 +32642,1033 @@ class DodecahedronGeometry extends PolyhedronGeometry {
     return new DodecahedronGeometry(data.radius, data.detail);
   }
 }
+class Curve {
+  /**
+   * Constructs a new curve.
+   */
+  constructor() {
+    this.type = "Curve";
+    this.arcLengthDivisions = 200;
+    this.needsUpdate = false;
+    this.cacheArcLengths = null;
+  }
+  /**
+   * This method returns a vector in 2D or 3D space (depending on the curve definition)
+   * for the given interpolation factor.
+   *
+   * @abstract
+   * @param {number} t - A interpolation factor representing a position on the curve. Must be in the range `[0,1]`.
+   * @param {(Vector2|Vector3)} [optionalTarget] - The optional target vector the result is written to.
+   * @return {(Vector2|Vector3)} The position on the curve. It can be a 2D or 3D vector depending on the curve definition.
+   */
+  getPoint() {
+    warn("Curve: .getPoint() not implemented.");
+  }
+  /**
+   * This method returns a vector in 2D or 3D space (depending on the curve definition)
+   * for the given interpolation factor. Unlike {@link Curve#getPoint}, this method honors the length
+   * of the curve which equidistant samples.
+   *
+   * @param {number} u - A interpolation factor representing a position on the curve. Must be in the range `[0,1]`.
+   * @param {(Vector2|Vector3)} [optionalTarget] - The optional target vector the result is written to.
+   * @return {(Vector2|Vector3)} The position on the curve. It can be a 2D or 3D vector depending on the curve definition.
+   */
+  getPointAt(u, optionalTarget) {
+    const t = this.getUtoTmapping(u);
+    return this.getPoint(t, optionalTarget);
+  }
+  /**
+   * This method samples the curve via {@link Curve#getPoint} and returns an array of points representing
+   * the curve shape.
+   *
+   * @param {number} [divisions=5] - The number of divisions.
+   * @return {Array<(Vector2|Vector3)>} An array holding the sampled curve values. The number of points is `divisions + 1`.
+   */
+  getPoints(divisions = 5) {
+    const points = [];
+    for (let d = 0; d <= divisions; d++) {
+      points.push(this.getPoint(d / divisions));
+    }
+    return points;
+  }
+  // Get sequence of points using getPointAt( u )
+  /**
+   * This method samples the curve via {@link Curve#getPointAt} and returns an array of points representing
+   * the curve shape. Unlike {@link Curve#getPoints}, this method returns equi-spaced points across the entire
+   * curve.
+   *
+   * @param {number} [divisions=5] - The number of divisions.
+   * @return {Array<(Vector2|Vector3)>} An array holding the sampled curve values. The number of points is `divisions + 1`.
+   */
+  getSpacedPoints(divisions = 5) {
+    const points = [];
+    for (let d = 0; d <= divisions; d++) {
+      points.push(this.getPointAt(d / divisions));
+    }
+    return points;
+  }
+  /**
+   * Returns the total arc length of the curve.
+   *
+   * @return {number} The length of the curve.
+   */
+  getLength() {
+    const lengths = this.getLengths();
+    return lengths[lengths.length - 1];
+  }
+  /**
+   * Returns an array of cumulative segment lengths of the curve.
+   *
+   * @param {number} [divisions=this.arcLengthDivisions] - The number of divisions.
+   * @return {Array<number>} An array holding the cumulative segment lengths.
+   */
+  getLengths(divisions = this.arcLengthDivisions) {
+    if (this.cacheArcLengths && this.cacheArcLengths.length === divisions + 1 && !this.needsUpdate) {
+      return this.cacheArcLengths;
+    }
+    this.needsUpdate = false;
+    const cache = [];
+    let current, last = this.getPoint(0);
+    let sum = 0;
+    cache.push(0);
+    for (let p = 1; p <= divisions; p++) {
+      current = this.getPoint(p / divisions);
+      sum += current.distanceTo(last);
+      cache.push(sum);
+      last = current;
+    }
+    this.cacheArcLengths = cache;
+    return cache;
+  }
+  /**
+   * Update the cumulative segment distance cache. The method must be called
+   * every time curve parameters are changed. If an updated curve is part of a
+   * composed curve like {@link CurvePath}, this method must be called on the
+   * composed curve, too.
+   */
+  updateArcLengths() {
+    this.needsUpdate = true;
+    this.getLengths();
+  }
+  /**
+   * Given an interpolation factor in the range `[0,1]`, this method returns an updated
+   * interpolation factor in the same range that can be ued to sample equidistant points
+   * from a curve.
+   *
+   * @param {number} u - The interpolation factor.
+   * @param {?number} distance - An optional distance on the curve.
+   * @return {number} The updated interpolation factor.
+   */
+  getUtoTmapping(u, distance = null) {
+    const arcLengths = this.getLengths();
+    let i = 0;
+    const il = arcLengths.length;
+    let targetArcLength;
+    if (distance) {
+      targetArcLength = distance;
+    } else {
+      targetArcLength = u * arcLengths[il - 1];
+    }
+    let low = 0, high = il - 1, comparison;
+    while (low <= high) {
+      i = Math.floor(low + (high - low) / 2);
+      comparison = arcLengths[i] - targetArcLength;
+      if (comparison < 0) {
+        low = i + 1;
+      } else if (comparison > 0) {
+        high = i - 1;
+      } else {
+        high = i;
+        break;
+      }
+    }
+    i = high;
+    if (arcLengths[i] === targetArcLength) {
+      return i / (il - 1);
+    }
+    const lengthBefore = arcLengths[i];
+    const lengthAfter = arcLengths[i + 1];
+    const segmentLength = lengthAfter - lengthBefore;
+    const segmentFraction = (targetArcLength - lengthBefore) / segmentLength;
+    const t = (i + segmentFraction) / (il - 1);
+    return t;
+  }
+  /**
+   * Returns a unit vector tangent for the given interpolation factor.
+   * If the derived curve does not implement its tangent derivation,
+   * two points a small delta apart will be used to find its gradient
+   * which seems to give a reasonable approximation.
+   *
+   * @param {number} t - The interpolation factor.
+   * @param {(Vector2|Vector3)} [optionalTarget] - The optional target vector the result is written to.
+   * @return {(Vector2|Vector3)} The tangent vector.
+   */
+  getTangent(t, optionalTarget) {
+    const delta = 1e-4;
+    let t1 = t - delta;
+    let t2 = t + delta;
+    if (t1 < 0) t1 = 0;
+    if (t2 > 1) t2 = 1;
+    const pt1 = this.getPoint(t1);
+    const pt2 = this.getPoint(t2);
+    const tangent = optionalTarget || (pt1.isVector2 ? new Vector2() : new Vector3());
+    tangent.copy(pt2).sub(pt1).normalize();
+    return tangent;
+  }
+  /**
+   * Same as {@link Curve#getTangent} but with equidistant samples.
+   *
+   * @param {number} u - The interpolation factor.
+   * @param {(Vector2|Vector3)} [optionalTarget] - The optional target vector the result is written to.
+   * @return {(Vector2|Vector3)} The tangent vector.
+   * @see {@link Curve#getPointAt}
+   */
+  getTangentAt(u, optionalTarget) {
+    const t = this.getUtoTmapping(u);
+    return this.getTangent(t, optionalTarget);
+  }
+  /**
+   * Generates the Frenet Frames. Requires a curve definition in 3D space. Used
+   * in geometries like {@link TubeGeometry} or {@link ExtrudeGeometry}.
+   *
+   * @param {number} segments - The number of segments.
+   * @param {boolean} [closed=false] - Whether the curve is closed or not.
+   * @return {{tangents: Array<Vector3>, normals: Array<Vector3>, binormals: Array<Vector3>}} The Frenet Frames.
+   */
+  computeFrenetFrames(segments, closed = false) {
+    const normal = new Vector3();
+    const tangents = [];
+    const normals = [];
+    const binormals = [];
+    const vec = new Vector3();
+    const mat = new Matrix4();
+    for (let i = 0; i <= segments; i++) {
+      const u = i / segments;
+      tangents[i] = this.getTangentAt(u, new Vector3());
+    }
+    normals[0] = new Vector3();
+    binormals[0] = new Vector3();
+    let min = Number.MAX_VALUE;
+    const tx = Math.abs(tangents[0].x);
+    const ty = Math.abs(tangents[0].y);
+    const tz = Math.abs(tangents[0].z);
+    if (tx <= min) {
+      min = tx;
+      normal.set(1, 0, 0);
+    }
+    if (ty <= min) {
+      min = ty;
+      normal.set(0, 1, 0);
+    }
+    if (tz <= min) {
+      normal.set(0, 0, 1);
+    }
+    vec.crossVectors(tangents[0], normal).normalize();
+    normals[0].crossVectors(tangents[0], vec);
+    binormals[0].crossVectors(tangents[0], normals[0]);
+    for (let i = 1; i <= segments; i++) {
+      normals[i] = normals[i - 1].clone();
+      binormals[i] = binormals[i - 1].clone();
+      vec.crossVectors(tangents[i - 1], tangents[i]);
+      if (vec.length() > Number.EPSILON) {
+        vec.normalize();
+        const theta = Math.acos(clamp(tangents[i - 1].dot(tangents[i]), -1, 1));
+        normals[i].applyMatrix4(mat.makeRotationAxis(vec, theta));
+      }
+      binormals[i].crossVectors(tangents[i], normals[i]);
+    }
+    if (closed === true) {
+      let theta = Math.acos(clamp(normals[0].dot(normals[segments]), -1, 1));
+      theta /= segments;
+      if (tangents[0].dot(vec.crossVectors(normals[0], normals[segments])) > 0) {
+        theta = -theta;
+      }
+      for (let i = 1; i <= segments; i++) {
+        normals[i].applyMatrix4(mat.makeRotationAxis(tangents[i], theta * i));
+        binormals[i].crossVectors(tangents[i], normals[i]);
+      }
+    }
+    return {
+      tangents,
+      normals,
+      binormals
+    };
+  }
+  /**
+   * Returns a new curve with copied values from this instance.
+   *
+   * @return {Curve} A clone of this instance.
+   */
+  clone() {
+    return new this.constructor().copy(this);
+  }
+  /**
+   * Copies the values of the given curve to this instance.
+   *
+   * @param {Curve} source - The curve to copy.
+   * @return {Curve} A reference to this curve.
+   */
+  copy(source) {
+    this.arcLengthDivisions = source.arcLengthDivisions;
+    this.cacheArcLengths = null;
+    return this;
+  }
+  /**
+   * Serializes the curve into JSON.
+   *
+   * @return {Object} A JSON object representing the serialized curve.
+   * @see {@link ObjectLoader#parse}
+   */
+  toJSON() {
+    const data = {
+      metadata: {
+        version: 4.7,
+        type: "Curve",
+        generator: "Curve.toJSON"
+      }
+    };
+    data.arcLengthDivisions = this.arcLengthDivisions;
+    data.type = this.type;
+    return data;
+  }
+  /**
+   * Deserializes the curve from the given JSON.
+   *
+   * @param {Object} json - The JSON holding the serialized curve.
+   * @return {Curve} A reference to this curve.
+   */
+  fromJSON(json) {
+    this.arcLengthDivisions = json.arcLengthDivisions;
+    this.cacheArcLengths = null;
+    return this;
+  }
+}
+class EllipseCurve extends Curve {
+  /**
+   * Constructs a new ellipse curve.
+   *
+   * @param {number} [aX=0] - The X center of the ellipse.
+   * @param {number} [aY=0] - The Y center of the ellipse.
+   * @param {number} [xRadius=1] - The radius of the ellipse in the x direction.
+   * @param {number} [yRadius=1] - The radius of the ellipse in the y direction.
+   * @param {number} [aStartAngle=0] - The start angle of the curve in radians starting from the positive X axis.
+   * @param {number} [aEndAngle=Math.PI*2] - The end angle of the curve in radians starting from the positive X axis.
+   * @param {boolean} [aClockwise=false] - Whether the ellipse is drawn clockwise or not.
+   * @param {number} [aRotation=0] - The rotation angle of the ellipse in radians, counterclockwise from the positive X axis.
+   */
+  constructor(aX = 0, aY = 0, xRadius = 1, yRadius = 1, aStartAngle = 0, aEndAngle = Math.PI * 2, aClockwise = false, aRotation = 0) {
+    super();
+    this.isEllipseCurve = true;
+    this.type = "EllipseCurve";
+    this.aX = aX;
+    this.aY = aY;
+    this.xRadius = xRadius;
+    this.yRadius = yRadius;
+    this.aStartAngle = aStartAngle;
+    this.aEndAngle = aEndAngle;
+    this.aClockwise = aClockwise;
+    this.aRotation = aRotation;
+  }
+  /**
+   * Returns a point on the curve.
+   *
+   * @param {number} t - A interpolation factor representing a position on the curve. Must be in the range `[0,1]`.
+   * @param {Vector2} [optionalTarget] - The optional target vector the result is written to.
+   * @return {Vector2} The position on the curve.
+   */
+  getPoint(t, optionalTarget = new Vector2()) {
+    const point = optionalTarget;
+    const twoPi = Math.PI * 2;
+    let deltaAngle = this.aEndAngle - this.aStartAngle;
+    const samePoints = Math.abs(deltaAngle) < Number.EPSILON;
+    while (deltaAngle < 0) deltaAngle += twoPi;
+    while (deltaAngle > twoPi) deltaAngle -= twoPi;
+    if (deltaAngle < Number.EPSILON) {
+      if (samePoints) {
+        deltaAngle = 0;
+      } else {
+        deltaAngle = twoPi;
+      }
+    }
+    if (this.aClockwise === true && !samePoints) {
+      if (deltaAngle === twoPi) {
+        deltaAngle = -twoPi;
+      } else {
+        deltaAngle = deltaAngle - twoPi;
+      }
+    }
+    const angle = this.aStartAngle + t * deltaAngle;
+    let x = this.aX + this.xRadius * Math.cos(angle);
+    let y = this.aY + this.yRadius * Math.sin(angle);
+    if (this.aRotation !== 0) {
+      const cos = Math.cos(this.aRotation);
+      const sin = Math.sin(this.aRotation);
+      const tx = x - this.aX;
+      const ty = y - this.aY;
+      x = tx * cos - ty * sin + this.aX;
+      y = tx * sin + ty * cos + this.aY;
+    }
+    return point.set(x, y);
+  }
+  copy(source) {
+    super.copy(source);
+    this.aX = source.aX;
+    this.aY = source.aY;
+    this.xRadius = source.xRadius;
+    this.yRadius = source.yRadius;
+    this.aStartAngle = source.aStartAngle;
+    this.aEndAngle = source.aEndAngle;
+    this.aClockwise = source.aClockwise;
+    this.aRotation = source.aRotation;
+    return this;
+  }
+  toJSON() {
+    const data = super.toJSON();
+    data.aX = this.aX;
+    data.aY = this.aY;
+    data.xRadius = this.xRadius;
+    data.yRadius = this.yRadius;
+    data.aStartAngle = this.aStartAngle;
+    data.aEndAngle = this.aEndAngle;
+    data.aClockwise = this.aClockwise;
+    data.aRotation = this.aRotation;
+    return data;
+  }
+  fromJSON(json) {
+    super.fromJSON(json);
+    this.aX = json.aX;
+    this.aY = json.aY;
+    this.xRadius = json.xRadius;
+    this.yRadius = json.yRadius;
+    this.aStartAngle = json.aStartAngle;
+    this.aEndAngle = json.aEndAngle;
+    this.aClockwise = json.aClockwise;
+    this.aRotation = json.aRotation;
+    return this;
+  }
+}
+class ArcCurve extends EllipseCurve {
+  /**
+   * Constructs a new arc curve.
+   *
+   * @param {number} [aX=0] - The X center of the ellipse.
+   * @param {number} [aY=0] - The Y center of the ellipse.
+   * @param {number} [aRadius=1] - The radius of the ellipse in the x direction.
+   * @param {number} [aStartAngle=0] - The start angle of the curve in radians starting from the positive X axis.
+   * @param {number} [aEndAngle=Math.PI*2] - The end angle of the curve in radians starting from the positive X axis.
+   * @param {boolean} [aClockwise=false] - Whether the ellipse is drawn clockwise or not.
+   */
+  constructor(aX, aY, aRadius, aStartAngle, aEndAngle, aClockwise) {
+    super(aX, aY, aRadius, aRadius, aStartAngle, aEndAngle, aClockwise);
+    this.isArcCurve = true;
+    this.type = "ArcCurve";
+  }
+}
+function CubicPoly() {
+  let c0 = 0, c1 = 0, c2 = 0, c3 = 0;
+  function init(x0, x1, t0, t1) {
+    c0 = x0;
+    c1 = t0;
+    c2 = -3 * x0 + 3 * x1 - 2 * t0 - t1;
+    c3 = 2 * x0 - 2 * x1 + t0 + t1;
+  }
+  return {
+    initCatmullRom: function(x0, x1, x2, x3, tension) {
+      init(x1, x2, tension * (x2 - x0), tension * (x3 - x1));
+    },
+    initNonuniformCatmullRom: function(x0, x1, x2, x3, dt0, dt1, dt2) {
+      let t1 = (x1 - x0) / dt0 - (x2 - x0) / (dt0 + dt1) + (x2 - x1) / dt1;
+      let t2 = (x2 - x1) / dt1 - (x3 - x1) / (dt1 + dt2) + (x3 - x2) / dt2;
+      t1 *= dt1;
+      t2 *= dt1;
+      init(x1, x2, t1, t2);
+    },
+    calc: function(t) {
+      const t2 = t * t;
+      const t3 = t2 * t;
+      return c0 + c1 * t + c2 * t2 + c3 * t3;
+    }
+  };
+}
+const tmp = /* @__PURE__ */ new Vector3();
+const tmp2 = /* @__PURE__ */ new Vector3();
+const px = /* @__PURE__ */ new CubicPoly();
+const py = /* @__PURE__ */ new CubicPoly();
+const pz = /* @__PURE__ */ new CubicPoly();
+class CatmullRomCurve3 extends Curve {
+  /**
+   * Constructs a new Catmull-Rom curve.
+   *
+   * @param {Array<Vector3>} [points] - An array of 3D points defining the curve.
+   * @param {boolean} [closed=false] - Whether the curve is closed or not.
+   * @param {('centripetal'|'chordal'|'catmullrom')} [curveType='centripetal'] - The curve type.
+   * @param {number} [tension=0.5] - Tension of the curve.
+   */
+  constructor(points = [], closed = false, curveType = "centripetal", tension = 0.5) {
+    super();
+    this.isCatmullRomCurve3 = true;
+    this.type = "CatmullRomCurve3";
+    this.points = points;
+    this.closed = closed;
+    this.curveType = curveType;
+    this.tension = tension;
+  }
+  /**
+   * Returns a point on the curve.
+   *
+   * @param {number} t - A interpolation factor representing a position on the curve. Must be in the range `[0,1]`.
+   * @param {Vector3} [optionalTarget] - The optional target vector the result is written to.
+   * @return {Vector3} The position on the curve.
+   */
+  getPoint(t, optionalTarget = new Vector3()) {
+    const point = optionalTarget;
+    const points = this.points;
+    const l = points.length;
+    const p = (l - (this.closed ? 0 : 1)) * t;
+    let intPoint = Math.floor(p);
+    let weight = p - intPoint;
+    if (this.closed) {
+      intPoint += intPoint > 0 ? 0 : (Math.floor(Math.abs(intPoint) / l) + 1) * l;
+    } else if (weight === 0 && intPoint === l - 1) {
+      intPoint = l - 2;
+      weight = 1;
+    }
+    let p0, p3;
+    if (this.closed || intPoint > 0) {
+      p0 = points[(intPoint - 1) % l];
+    } else {
+      tmp2.subVectors(points[0], points[1]).add(points[0]);
+      p0 = tmp2;
+    }
+    const p1 = points[intPoint % l];
+    const p2 = points[(intPoint + 1) % l];
+    if (this.closed || intPoint + 2 < l) {
+      p3 = points[(intPoint + 2) % l];
+    } else {
+      tmp.subVectors(points[l - 1], points[l - 2]).add(points[l - 1]);
+      p3 = tmp;
+    }
+    if (this.curveType === "centripetal" || this.curveType === "chordal") {
+      const pow = this.curveType === "chordal" ? 0.5 : 0.25;
+      let dt0 = Math.pow(p0.distanceToSquared(p1), pow);
+      let dt1 = Math.pow(p1.distanceToSquared(p2), pow);
+      let dt2 = Math.pow(p2.distanceToSquared(p3), pow);
+      if (dt1 < 1e-4) dt1 = 1;
+      if (dt0 < 1e-4) dt0 = dt1;
+      if (dt2 < 1e-4) dt2 = dt1;
+      px.initNonuniformCatmullRom(p0.x, p1.x, p2.x, p3.x, dt0, dt1, dt2);
+      py.initNonuniformCatmullRom(p0.y, p1.y, p2.y, p3.y, dt0, dt1, dt2);
+      pz.initNonuniformCatmullRom(p0.z, p1.z, p2.z, p3.z, dt0, dt1, dt2);
+    } else if (this.curveType === "catmullrom") {
+      px.initCatmullRom(p0.x, p1.x, p2.x, p3.x, this.tension);
+      py.initCatmullRom(p0.y, p1.y, p2.y, p3.y, this.tension);
+      pz.initCatmullRom(p0.z, p1.z, p2.z, p3.z, this.tension);
+    }
+    point.set(
+      px.calc(weight),
+      py.calc(weight),
+      pz.calc(weight)
+    );
+    return point;
+  }
+  copy(source) {
+    super.copy(source);
+    this.points = [];
+    for (let i = 0, l = source.points.length; i < l; i++) {
+      const point = source.points[i];
+      this.points.push(point.clone());
+    }
+    this.closed = source.closed;
+    this.curveType = source.curveType;
+    this.tension = source.tension;
+    return this;
+  }
+  toJSON() {
+    const data = super.toJSON();
+    data.points = [];
+    for (let i = 0, l = this.points.length; i < l; i++) {
+      const point = this.points[i];
+      data.points.push(point.toArray());
+    }
+    data.closed = this.closed;
+    data.curveType = this.curveType;
+    data.tension = this.tension;
+    return data;
+  }
+  fromJSON(json) {
+    super.fromJSON(json);
+    this.points = [];
+    for (let i = 0, l = json.points.length; i < l; i++) {
+      const point = json.points[i];
+      this.points.push(new Vector3().fromArray(point));
+    }
+    this.closed = json.closed;
+    this.curveType = json.curveType;
+    this.tension = json.tension;
+    return this;
+  }
+}
+function CatmullRom(t, p0, p1, p2, p3) {
+  const v0 = (p2 - p0) * 0.5;
+  const v1 = (p3 - p1) * 0.5;
+  const t2 = t * t;
+  const t3 = t * t2;
+  return (2 * p1 - 2 * p2 + v0 + v1) * t3 + (-3 * p1 + 3 * p2 - 2 * v0 - v1) * t2 + v0 * t + p1;
+}
+function QuadraticBezierP0(t, p) {
+  const k = 1 - t;
+  return k * k * p;
+}
+function QuadraticBezierP1(t, p) {
+  return 2 * (1 - t) * t * p;
+}
+function QuadraticBezierP2(t, p) {
+  return t * t * p;
+}
+function QuadraticBezier(t, p0, p1, p2) {
+  return QuadraticBezierP0(t, p0) + QuadraticBezierP1(t, p1) + QuadraticBezierP2(t, p2);
+}
+function CubicBezierP0(t, p) {
+  const k = 1 - t;
+  return k * k * k * p;
+}
+function CubicBezierP1(t, p) {
+  const k = 1 - t;
+  return 3 * k * k * t * p;
+}
+function CubicBezierP2(t, p) {
+  return 3 * (1 - t) * t * t * p;
+}
+function CubicBezierP3(t, p) {
+  return t * t * t * p;
+}
+function CubicBezier(t, p0, p1, p2, p3) {
+  return CubicBezierP0(t, p0) + CubicBezierP1(t, p1) + CubicBezierP2(t, p2) + CubicBezierP3(t, p3);
+}
+class CubicBezierCurve extends Curve {
+  /**
+   * Constructs a new Cubic Bezier curve.
+   *
+   * @param {Vector2} [v0] - The start point.
+   * @param {Vector2} [v1] - The first control point.
+   * @param {Vector2} [v2] - The second control point.
+   * @param {Vector2} [v3] - The end point.
+   */
+  constructor(v0 = new Vector2(), v1 = new Vector2(), v2 = new Vector2(), v3 = new Vector2()) {
+    super();
+    this.isCubicBezierCurve = true;
+    this.type = "CubicBezierCurve";
+    this.v0 = v0;
+    this.v1 = v1;
+    this.v2 = v2;
+    this.v3 = v3;
+  }
+  /**
+   * Returns a point on the curve.
+   *
+   * @param {number} t - A interpolation factor representing a position on the curve. Must be in the range `[0,1]`.
+   * @param {Vector2} [optionalTarget] - The optional target vector the result is written to.
+   * @return {Vector2} The position on the curve.
+   */
+  getPoint(t, optionalTarget = new Vector2()) {
+    const point = optionalTarget;
+    const v0 = this.v0, v1 = this.v1, v2 = this.v2, v3 = this.v3;
+    point.set(
+      CubicBezier(t, v0.x, v1.x, v2.x, v3.x),
+      CubicBezier(t, v0.y, v1.y, v2.y, v3.y)
+    );
+    return point;
+  }
+  copy(source) {
+    super.copy(source);
+    this.v0.copy(source.v0);
+    this.v1.copy(source.v1);
+    this.v2.copy(source.v2);
+    this.v3.copy(source.v3);
+    return this;
+  }
+  toJSON() {
+    const data = super.toJSON();
+    data.v0 = this.v0.toArray();
+    data.v1 = this.v1.toArray();
+    data.v2 = this.v2.toArray();
+    data.v3 = this.v3.toArray();
+    return data;
+  }
+  fromJSON(json) {
+    super.fromJSON(json);
+    this.v0.fromArray(json.v0);
+    this.v1.fromArray(json.v1);
+    this.v2.fromArray(json.v2);
+    this.v3.fromArray(json.v3);
+    return this;
+  }
+}
+class CubicBezierCurve3 extends Curve {
+  /**
+   * Constructs a new Cubic Bezier curve.
+   *
+   * @param {Vector3} [v0] - The start point.
+   * @param {Vector3} [v1] - The first control point.
+   * @param {Vector3} [v2] - The second control point.
+   * @param {Vector3} [v3] - The end point.
+   */
+  constructor(v0 = new Vector3(), v1 = new Vector3(), v2 = new Vector3(), v3 = new Vector3()) {
+    super();
+    this.isCubicBezierCurve3 = true;
+    this.type = "CubicBezierCurve3";
+    this.v0 = v0;
+    this.v1 = v1;
+    this.v2 = v2;
+    this.v3 = v3;
+  }
+  /**
+   * Returns a point on the curve.
+   *
+   * @param {number} t - A interpolation factor representing a position on the curve. Must be in the range `[0,1]`.
+   * @param {Vector3} [optionalTarget] - The optional target vector the result is written to.
+   * @return {Vector3} The position on the curve.
+   */
+  getPoint(t, optionalTarget = new Vector3()) {
+    const point = optionalTarget;
+    const v0 = this.v0, v1 = this.v1, v2 = this.v2, v3 = this.v3;
+    point.set(
+      CubicBezier(t, v0.x, v1.x, v2.x, v3.x),
+      CubicBezier(t, v0.y, v1.y, v2.y, v3.y),
+      CubicBezier(t, v0.z, v1.z, v2.z, v3.z)
+    );
+    return point;
+  }
+  copy(source) {
+    super.copy(source);
+    this.v0.copy(source.v0);
+    this.v1.copy(source.v1);
+    this.v2.copy(source.v2);
+    this.v3.copy(source.v3);
+    return this;
+  }
+  toJSON() {
+    const data = super.toJSON();
+    data.v0 = this.v0.toArray();
+    data.v1 = this.v1.toArray();
+    data.v2 = this.v2.toArray();
+    data.v3 = this.v3.toArray();
+    return data;
+  }
+  fromJSON(json) {
+    super.fromJSON(json);
+    this.v0.fromArray(json.v0);
+    this.v1.fromArray(json.v1);
+    this.v2.fromArray(json.v2);
+    this.v3.fromArray(json.v3);
+    return this;
+  }
+}
+class LineCurve extends Curve {
+  /**
+   * Constructs a new line curve.
+   *
+   * @param {Vector2} [v1] - The start point.
+   * @param {Vector2} [v2] - The end point.
+   */
+  constructor(v1 = new Vector2(), v2 = new Vector2()) {
+    super();
+    this.isLineCurve = true;
+    this.type = "LineCurve";
+    this.v1 = v1;
+    this.v2 = v2;
+  }
+  /**
+   * Returns a point on the line.
+   *
+   * @param {number} t - A interpolation factor representing a position on the line. Must be in the range `[0,1]`.
+   * @param {Vector2} [optionalTarget] - The optional target vector the result is written to.
+   * @return {Vector2} The position on the line.
+   */
+  getPoint(t, optionalTarget = new Vector2()) {
+    const point = optionalTarget;
+    if (t === 1) {
+      point.copy(this.v2);
+    } else {
+      point.copy(this.v2).sub(this.v1);
+      point.multiplyScalar(t).add(this.v1);
+    }
+    return point;
+  }
+  // Line curve is linear, so we can overwrite default getPointAt
+  getPointAt(u, optionalTarget) {
+    return this.getPoint(u, optionalTarget);
+  }
+  getTangent(t, optionalTarget = new Vector2()) {
+    return optionalTarget.subVectors(this.v2, this.v1).normalize();
+  }
+  getTangentAt(u, optionalTarget) {
+    return this.getTangent(u, optionalTarget);
+  }
+  copy(source) {
+    super.copy(source);
+    this.v1.copy(source.v1);
+    this.v2.copy(source.v2);
+    return this;
+  }
+  toJSON() {
+    const data = super.toJSON();
+    data.v1 = this.v1.toArray();
+    data.v2 = this.v2.toArray();
+    return data;
+  }
+  fromJSON(json) {
+    super.fromJSON(json);
+    this.v1.fromArray(json.v1);
+    this.v2.fromArray(json.v2);
+    return this;
+  }
+}
+class LineCurve3 extends Curve {
+  /**
+   * Constructs a new line curve.
+   *
+   * @param {Vector3} [v1] - The start point.
+   * @param {Vector3} [v2] - The end point.
+   */
+  constructor(v1 = new Vector3(), v2 = new Vector3()) {
+    super();
+    this.isLineCurve3 = true;
+    this.type = "LineCurve3";
+    this.v1 = v1;
+    this.v2 = v2;
+  }
+  /**
+   * Returns a point on the line.
+   *
+   * @param {number} t - A interpolation factor representing a position on the line. Must be in the range `[0,1]`.
+   * @param {Vector3} [optionalTarget] - The optional target vector the result is written to.
+   * @return {Vector3} The position on the line.
+   */
+  getPoint(t, optionalTarget = new Vector3()) {
+    const point = optionalTarget;
+    if (t === 1) {
+      point.copy(this.v2);
+    } else {
+      point.copy(this.v2).sub(this.v1);
+      point.multiplyScalar(t).add(this.v1);
+    }
+    return point;
+  }
+  // Line curve is linear, so we can overwrite default getPointAt
+  getPointAt(u, optionalTarget) {
+    return this.getPoint(u, optionalTarget);
+  }
+  getTangent(t, optionalTarget = new Vector3()) {
+    return optionalTarget.subVectors(this.v2, this.v1).normalize();
+  }
+  getTangentAt(u, optionalTarget) {
+    return this.getTangent(u, optionalTarget);
+  }
+  copy(source) {
+    super.copy(source);
+    this.v1.copy(source.v1);
+    this.v2.copy(source.v2);
+    return this;
+  }
+  toJSON() {
+    const data = super.toJSON();
+    data.v1 = this.v1.toArray();
+    data.v2 = this.v2.toArray();
+    return data;
+  }
+  fromJSON(json) {
+    super.fromJSON(json);
+    this.v1.fromArray(json.v1);
+    this.v2.fromArray(json.v2);
+    return this;
+  }
+}
+class QuadraticBezierCurve extends Curve {
+  /**
+   * Constructs a new Quadratic Bezier curve.
+   *
+   * @param {Vector2} [v0] - The start point.
+   * @param {Vector2} [v1] - The control point.
+   * @param {Vector2} [v2] - The end point.
+   */
+  constructor(v0 = new Vector2(), v1 = new Vector2(), v2 = new Vector2()) {
+    super();
+    this.isQuadraticBezierCurve = true;
+    this.type = "QuadraticBezierCurve";
+    this.v0 = v0;
+    this.v1 = v1;
+    this.v2 = v2;
+  }
+  /**
+   * Returns a point on the curve.
+   *
+   * @param {number} t - A interpolation factor representing a position on the curve. Must be in the range `[0,1]`.
+   * @param {Vector2} [optionalTarget] - The optional target vector the result is written to.
+   * @return {Vector2} The position on the curve.
+   */
+  getPoint(t, optionalTarget = new Vector2()) {
+    const point = optionalTarget;
+    const v0 = this.v0, v1 = this.v1, v2 = this.v2;
+    point.set(
+      QuadraticBezier(t, v0.x, v1.x, v2.x),
+      QuadraticBezier(t, v0.y, v1.y, v2.y)
+    );
+    return point;
+  }
+  copy(source) {
+    super.copy(source);
+    this.v0.copy(source.v0);
+    this.v1.copy(source.v1);
+    this.v2.copy(source.v2);
+    return this;
+  }
+  toJSON() {
+    const data = super.toJSON();
+    data.v0 = this.v0.toArray();
+    data.v1 = this.v1.toArray();
+    data.v2 = this.v2.toArray();
+    return data;
+  }
+  fromJSON(json) {
+    super.fromJSON(json);
+    this.v0.fromArray(json.v0);
+    this.v1.fromArray(json.v1);
+    this.v2.fromArray(json.v2);
+    return this;
+  }
+}
+class QuadraticBezierCurve3 extends Curve {
+  /**
+   * Constructs a new Quadratic Bezier curve.
+   *
+   * @param {Vector3} [v0] - The start point.
+   * @param {Vector3} [v1] - The control point.
+   * @param {Vector3} [v2] - The end point.
+   */
+  constructor(v0 = new Vector3(), v1 = new Vector3(), v2 = new Vector3()) {
+    super();
+    this.isQuadraticBezierCurve3 = true;
+    this.type = "QuadraticBezierCurve3";
+    this.v0 = v0;
+    this.v1 = v1;
+    this.v2 = v2;
+  }
+  /**
+   * Returns a point on the curve.
+   *
+   * @param {number} t - A interpolation factor representing a position on the curve. Must be in the range `[0,1]`.
+   * @param {Vector3} [optionalTarget] - The optional target vector the result is written to.
+   * @return {Vector3} The position on the curve.
+   */
+  getPoint(t, optionalTarget = new Vector3()) {
+    const point = optionalTarget;
+    const v0 = this.v0, v1 = this.v1, v2 = this.v2;
+    point.set(
+      QuadraticBezier(t, v0.x, v1.x, v2.x),
+      QuadraticBezier(t, v0.y, v1.y, v2.y),
+      QuadraticBezier(t, v0.z, v1.z, v2.z)
+    );
+    return point;
+  }
+  copy(source) {
+    super.copy(source);
+    this.v0.copy(source.v0);
+    this.v1.copy(source.v1);
+    this.v2.copy(source.v2);
+    return this;
+  }
+  toJSON() {
+    const data = super.toJSON();
+    data.v0 = this.v0.toArray();
+    data.v1 = this.v1.toArray();
+    data.v2 = this.v2.toArray();
+    return data;
+  }
+  fromJSON(json) {
+    super.fromJSON(json);
+    this.v0.fromArray(json.v0);
+    this.v1.fromArray(json.v1);
+    this.v2.fromArray(json.v2);
+    return this;
+  }
+}
+class SplineCurve extends Curve {
+  /**
+   * Constructs a new 2D spline curve.
+   *
+   * @param {Array<Vector2>} [points] -  An array of 2D points defining the curve.
+   */
+  constructor(points = []) {
+    super();
+    this.isSplineCurve = true;
+    this.type = "SplineCurve";
+    this.points = points;
+  }
+  /**
+   * Returns a point on the curve.
+   *
+   * @param {number} t - A interpolation factor representing a position on the curve. Must be in the range `[0,1]`.
+   * @param {Vector2} [optionalTarget] - The optional target vector the result is written to.
+   * @return {Vector2} The position on the curve.
+   */
+  getPoint(t, optionalTarget = new Vector2()) {
+    const point = optionalTarget;
+    const points = this.points;
+    const p = (points.length - 1) * t;
+    const intPoint = Math.floor(p);
+    const weight = p - intPoint;
+    const p0 = points[intPoint === 0 ? intPoint : intPoint - 1];
+    const p1 = points[intPoint];
+    const p2 = points[intPoint > points.length - 2 ? points.length - 1 : intPoint + 1];
+    const p3 = points[intPoint > points.length - 3 ? points.length - 1 : intPoint + 2];
+    point.set(
+      CatmullRom(weight, p0.x, p1.x, p2.x, p3.x),
+      CatmullRom(weight, p0.y, p1.y, p2.y, p3.y)
+    );
+    return point;
+  }
+  copy(source) {
+    super.copy(source);
+    this.points = [];
+    for (let i = 0, l = source.points.length; i < l; i++) {
+      const point = source.points[i];
+      this.points.push(point.clone());
+    }
+    return this;
+  }
+  toJSON() {
+    const data = super.toJSON();
+    data.points = [];
+    for (let i = 0, l = this.points.length; i < l; i++) {
+      const point = this.points[i];
+      data.points.push(point.toArray());
+    }
+    return data;
+  }
+  fromJSON(json) {
+    super.fromJSON(json);
+    this.points = [];
+    for (let i = 0, l = json.points.length; i < l; i++) {
+      const point = json.points[i];
+      this.points.push(new Vector2().fromArray(point));
+    }
+    return this;
+  }
+}
+var Curves = /* @__PURE__ */ Object.freeze({
+  __proto__: null,
+  ArcCurve,
+  CatmullRomCurve3,
+  CubicBezierCurve,
+  CubicBezierCurve3,
+  EllipseCurve,
+  LineCurve,
+  LineCurve3,
+  QuadraticBezierCurve,
+  QuadraticBezierCurve3,
+  SplineCurve
+});
 class LatheGeometry extends BufferGeometry {
   /**
    * Constructs a new lathe geometry.
@@ -32738,6 +33783,78 @@ class LatheGeometry extends BufferGeometry {
    */
   static fromJSON(data) {
     return new LatheGeometry(data.points, data.segments, data.phiStart, data.phiLength);
+  }
+}
+class OctahedronGeometry extends PolyhedronGeometry {
+  /**
+   * Constructs a new octahedron geometry.
+   *
+   * @param {number} [radius=1] - Radius of the octahedron.
+   * @param {number} [detail=0] - Setting this to a value greater than `0` adds vertices making it no longer a octahedron.
+   */
+  constructor(radius = 1, detail = 0) {
+    const vertices = [
+      1,
+      0,
+      0,
+      -1,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      -1,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      -1
+    ];
+    const indices = [
+      0,
+      2,
+      4,
+      0,
+      4,
+      3,
+      0,
+      3,
+      5,
+      0,
+      5,
+      2,
+      1,
+      2,
+      5,
+      1,
+      5,
+      3,
+      1,
+      3,
+      4,
+      1,
+      4,
+      2
+    ];
+    super(vertices, indices, radius, detail);
+    this.type = "OctahedronGeometry";
+    this.parameters = {
+      radius,
+      detail
+    };
+  }
+  /**
+   * Factory method for creating an instance of this class from the given
+   * JSON object.
+   *
+   * @param {Object} data - A JSON object representing the serialized geometry.
+   * @return {OctahedronGeometry} A new instance.
+   */
+  static fromJSON(data) {
+    return new OctahedronGeometry(data.radius, data.detail);
   }
 }
 class PlaneGeometry extends BufferGeometry {
@@ -33160,6 +34277,119 @@ class TorusKnotGeometry extends BufferGeometry {
     return new TorusKnotGeometry(data.radius, data.tube, data.tubularSegments, data.radialSegments, data.p, data.q);
   }
 }
+class TubeGeometry extends BufferGeometry {
+  /**
+   * Constructs a new tube geometry.
+   *
+   * @param {Curve} [path=QuadraticBezierCurve3] - A 3D curve defining the path of the tube.
+   * @param {number} [tubularSegments=64] - The number of segments that make up the tube.
+   * @param {number} [radius=1] -The radius of the tube.
+   * @param {number} [radialSegments=8] - The number of segments that make up the cross-section.
+   * @param {boolean} [closed=false] - Whether the tube is closed or not.
+   */
+  constructor(path = new QuadraticBezierCurve3(new Vector3(-1, -1, 0), new Vector3(-1, 1, 0), new Vector3(1, 1, 0)), tubularSegments = 64, radius = 1, radialSegments = 8, closed = false) {
+    super();
+    this.type = "TubeGeometry";
+    this.parameters = {
+      path,
+      tubularSegments,
+      radius,
+      radialSegments,
+      closed
+    };
+    const frames = path.computeFrenetFrames(tubularSegments, closed);
+    this.tangents = frames.tangents;
+    this.normals = frames.normals;
+    this.binormals = frames.binormals;
+    const vertex2 = new Vector3();
+    const normal = new Vector3();
+    const uv = new Vector2();
+    let P = new Vector3();
+    const vertices = [];
+    const normals = [];
+    const uvs = [];
+    const indices = [];
+    generateBufferData();
+    this.setIndex(indices);
+    this.setAttribute("position", new Float32BufferAttribute(vertices, 3));
+    this.setAttribute("normal", new Float32BufferAttribute(normals, 3));
+    this.setAttribute("uv", new Float32BufferAttribute(uvs, 2));
+    function generateBufferData() {
+      for (let i = 0; i < tubularSegments; i++) {
+        generateSegment(i);
+      }
+      generateSegment(closed === false ? tubularSegments : 0);
+      generateUVs();
+      generateIndices();
+    }
+    function generateSegment(i) {
+      P = path.getPointAt(i / tubularSegments, P);
+      const N = frames.normals[i];
+      const B = frames.binormals[i];
+      for (let j = 0; j <= radialSegments; j++) {
+        const v2 = j / radialSegments * Math.PI * 2;
+        const sin = Math.sin(v2);
+        const cos = -Math.cos(v2);
+        normal.x = cos * N.x + sin * B.x;
+        normal.y = cos * N.y + sin * B.y;
+        normal.z = cos * N.z + sin * B.z;
+        normal.normalize();
+        normals.push(normal.x, normal.y, normal.z);
+        vertex2.x = P.x + radius * normal.x;
+        vertex2.y = P.y + radius * normal.y;
+        vertex2.z = P.z + radius * normal.z;
+        vertices.push(vertex2.x, vertex2.y, vertex2.z);
+      }
+    }
+    function generateIndices() {
+      for (let j = 1; j <= tubularSegments; j++) {
+        for (let i = 1; i <= radialSegments; i++) {
+          const a = (radialSegments + 1) * (j - 1) + (i - 1);
+          const b = (radialSegments + 1) * j + (i - 1);
+          const c = (radialSegments + 1) * j + i;
+          const d = (radialSegments + 1) * (j - 1) + i;
+          indices.push(a, b, d);
+          indices.push(b, c, d);
+        }
+      }
+    }
+    function generateUVs() {
+      for (let i = 0; i <= tubularSegments; i++) {
+        for (let j = 0; j <= radialSegments; j++) {
+          uv.x = i / tubularSegments;
+          uv.y = j / radialSegments;
+          uvs.push(uv.x, uv.y);
+        }
+      }
+    }
+  }
+  copy(source) {
+    super.copy(source);
+    this.parameters = Object.assign({}, source.parameters);
+    return this;
+  }
+  toJSON() {
+    const data = super.toJSON();
+    data.path = this.parameters.path.toJSON();
+    return data;
+  }
+  /**
+   * Factory method for creating an instance of this class from the given
+   * JSON object.
+   *
+   * @param {Object} data - A JSON object representing the serialized geometry.
+   * @return {TubeGeometry} A new instance.
+   */
+  static fromJSON(data) {
+    return new TubeGeometry(
+      new Curves[data.path.type]().fromJSON(data.path),
+      data.tubularSegments,
+      data.radius,
+      data.radialSegments,
+      data.closed
+    );
+  }
+}
 function cloneUniforms(src) {
   const dst = {};
   for (const u in src) {
@@ -33193,9 +34423,9 @@ function cloneUniforms(src) {
 function mergeUniforms(uniforms) {
   const merged2 = {};
   for (let u = 0; u < uniforms.length; u++) {
-    const tmp = cloneUniforms(uniforms[u]);
-    for (const p in tmp) {
-      merged2[p] = tmp[p];
+    const tmp3 = cloneUniforms(uniforms[u]);
+    for (const p in tmp3) {
+      merged2[p] = tmp3[p];
     }
   }
   return merged2;
@@ -47316,8 +48546,8 @@ function floorCanvas(layout, p) {
   const canvas = canvasOf((x1 - x0) * s, (z1 - z0) * s);
   const ctx = canvas.getContext("2d");
   if (!ctx) return canvas;
-  const px = (x) => (x - x0) * s;
-  const pz = (z) => (z - z0) * s;
+  const px2 = (x) => (x - x0) * s;
+  const pz2 = (z) => (z - z0) * s;
   ctx.fillStyle = hex(p.floor);
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   for (let i = 0; i < canvas.width * canvas.height * 16e-4; i++) {
@@ -47328,8 +48558,8 @@ function floorCanvas(layout, p) {
   ctx.lineWidth = 1;
   for (let x = Math.ceil(x0 / 4) * 4; x < x1; x += 4) {
     ctx.beginPath();
-    ctx.moveTo(px(x), 0);
-    ctx.lineTo(px(x), canvas.height);
+    ctx.moveTo(px2(x), 0);
+    ctx.lineTo(px2(x), canvas.height);
     ctx.stroke();
   }
   ctx.fillStyle = hex(p.lane);
@@ -47339,13 +48569,13 @@ function floorCanvas(layout, p) {
   zones.forEach((zone, i) => {
     const next = zones[i + 1];
     const right = next ? next.x0 : layout.booth.x0 - 0.1;
-    ctx.fillRect(px(zone.x1 + 0.08) - line / 2, pz(z0 + 0.15), line, pz(front) - pz(z0 + 0.15));
-    ctx.fillRect(px(right - 0.08) - line / 2, pz(z0 + 0.15), line, pz(front) - pz(z0 + 0.15));
+    ctx.fillRect(px2(zone.x1 + 0.08) - line / 2, pz2(z0 + 0.15), line, pz2(front) - pz2(z0 + 0.15));
+    ctx.fillRect(px2(right - 0.08) - line / 2, pz2(z0 + 0.15), line, pz2(front) - pz2(z0 + 0.15));
   });
   ctx.fillRect(
-    px(layout.bay.x1 + 0.1),
-    pz(front) - line / 2,
-    px(x1 - 0.15) - px(layout.bay.x1 + 0.1),
+    px2(layout.bay.x1 + 0.1),
+    pz2(front) - line / 2,
+    px2(x1 - 0.15) - px2(layout.bay.x1 + 0.1),
     line
   );
   ctx.fillStyle = p.paint;
@@ -47359,12 +48589,12 @@ function floorCanvas(layout, p) {
     const measured = ctx.measureText(zone.label).width;
     if (measured > width) size *= width / measured;
     ctx.font = `800 ${size}px ${FONT}`;
-    ctx.fillText(zone.label, px((zone.x0 + zone.x1) / 2), pz(z));
+    ctx.fillText(zone.label, px2((zone.x0 + zone.x1) / 2), pz2(z));
   }
   const bay = layout.bay;
   ctx.save();
   ctx.beginPath();
-  ctx.rect(px(bay.x0), pz(bay.z0), (bay.x1 - bay.x0) * s, (bay.z1 - bay.z0) * s);
+  ctx.rect(px2(bay.x0), pz2(bay.z0), (bay.x1 - bay.x0) * s, (bay.z1 - bay.z0) * s);
   ctx.clip();
   ctx.fillStyle = p.dark ? "rgba(0,0,0,0.25)" : "rgba(0,0,0,0.06)";
   ctx.fill();
@@ -47373,18 +48603,18 @@ function floorCanvas(layout, p) {
   const edge = s * 0.18;
   for (let i = -canvas.height; i < canvas.width; i += band * 2) {
     ctx.beginPath();
-    ctx.moveTo(i, pz(bay.z1));
-    ctx.lineTo(i + band, pz(bay.z1));
-    ctx.lineTo(i + band + canvas.height, pz(bay.z1) - canvas.height);
-    ctx.lineTo(i + canvas.height, pz(bay.z1) - canvas.height);
+    ctx.moveTo(i, pz2(bay.z1));
+    ctx.lineTo(i + band, pz2(bay.z1));
+    ctx.lineTo(i + band + canvas.height, pz2(bay.z1) - canvas.height);
+    ctx.lineTo(i + canvas.height, pz2(bay.z1) - canvas.height);
     ctx.closePath();
     ctx.fill();
   }
   ctx.restore();
   ctx.fillStyle = hex(p.floor);
   ctx.fillRect(
-    px(bay.x0) + edge,
-    pz(bay.z0) + edge,
+    px2(bay.x0) + edge,
+    pz2(bay.z0) + edge,
     (bay.x1 - bay.x0) * s - edge * 2,
     (bay.z1 - bay.z0) * s - edge * 2
   );
@@ -47392,9 +48622,9 @@ function floorCanvas(layout, p) {
   ctx.lineWidth = Math.max(1.5, s * 0.03);
   for (const seat of layout.seats.ship) {
     const half = 0.32 * s;
-    ctx.strokeRect(px(seat.stand.x) - half, pz(seat.stand.z) - half, half * 2, half * 2);
+    ctx.strokeRect(px2(seat.stand.x) - half, pz2(seat.stand.z) - half, half * 2, half * 2);
   }
-  ctx.strokeRect(px(layout.booth.x0) - 3, pz(layout.booth.z0), BOOTH.w * s + 6, BOOTH.d * s + 3);
+  ctx.strokeRect(px2(layout.booth.x0) - 3, pz2(layout.booth.z0), BOOTH.w * s + 6, BOOTH.d * s + 3);
   return canvas;
 }
 function signAtlas(labels, p, aspect2 = 4) {
@@ -50211,9 +51441,9 @@ class FloorStage {
     this.coarse = on;
   }
   /** Keeps the fit clear of `px` CSS pixels on the left (the open roster), and refits. */
-  setInset(px) {
-    if (this.rig.insetPx === px) return;
-    this.rig.insetPx = px;
+  setInset(px2) {
+    if (this.rig.insetPx === px2) return;
+    this.rig.insetPx = px2;
     if (this.framing) this.fit(true);
   }
   /** Shows `content`, rebuilding only what changed. */
@@ -51677,6 +52907,387 @@ function createFloor3DComponent(ctx) {
     );
   };
 }
+function hashHue(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i += 1) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  const palette = [
+    [0.32, 0.58, 0.92],
+    [0.24, 0.78, 0.58],
+    [0.92, 0.58, 0.24],
+    [0.64, 0.45, 0.92],
+    [0.86, 0.36, 0.44],
+    [0.88, 0.78, 0.24],
+    [0.24, 0.74, 0.84]
+  ];
+  return palette[(h >>> 0) % palette.length];
+}
+function resolveAvatarArchetype(name, role = "", p) {
+  const txt = `${name} ${role}`.toLowerCase();
+  if (/iris|ceo\s*master|bestie/.test(txt)) {
+    return { kind: "iris_ceo", bodyRgb: [0.88, 0.28, 0.28], accentRgb: [0.22, 0.82, 0.96], visorRgb: [0.12, 0.16, 0.24] };
+  }
+  if (/bento|arquit/.test(txt)) {
+    return { kind: "bento_tall", bodyRgb: [0.26, 0.56, 0.92], accentRgb: [0.88, 0.94, 1] };
+  }
+  if (/cro|risco|compliance|auditor/.test(txt)) {
+    return { kind: "giraffe_cro", bodyRgb: [0.34, 0.66, 0.94], accentRgb: [0.95, 0.84, 0.32] };
+  }
+  if (/cgo|growth/.test(txt)) {
+    return { kind: "hover_cgo", bodyRgb: [0.32, 0.48, 0.76], accentRgb: [0.36, 0.88, 0.98] };
+  }
+  if (/cto|coo/.test(txt)) {
+    return { kind: "horned_cto", bodyRgb: [0.84, 0.34, 0.24], accentRgb: [0.98, 0.72, 0.24] };
+  }
+  if (/cpo|produto|po\b/.test(txt)) {
+    return { kind: "hat_cpo", bodyRgb: [0.58, 0.38, 0.86], accentRgb: [0.76, 0.94, 0.34] };
+  }
+  if (/or[aá]culo|scout|sol\b/.test(txt)) {
+    return { kind: "owl_oracle", bodyRgb: [0.56, 0.44, 0.72], accentRgb: [0.96, 0.82, 0.36] };
+  }
+  if (/lumen\s*dev|lumen\s*qa|atlas|ravi|hugo|otto|teo/.test(txt)) {
+    const isDark = /lumen\s*(dev|qa)/.test(txt);
+    return {
+      kind: isDark ? "stealth_dev" : "classic_bot",
+      bodyRgb: isDark ? [0.18, 0.2, 0.25] : /atlas|hugo|ravi|livia|lia/.test(txt) ? [0.88, 0.78, 0.22] : hashHue(name),
+      accentRgb: isDark ? [0.28, 0.88, 0.62] : p.lane
+    };
+  }
+  return { kind: "classic_bot", bodyRgb: hashHue(name), accentRgb: p.lane };
+}
+function buildPortraitBadge(kit, name, picture, ringColorCss) {
+  const c = canvasOf(128, 128);
+  const g = c.getContext("2d");
+  const drawFallback = () => {
+    g.clearRect(0, 0, 128, 128);
+    g.fillStyle = "#141821";
+    g.beginPath();
+    g.arc(64, 64, 58, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = "#f1f5f9";
+    g.font = "700 44px -apple-system, BlinkMacSystemFont, sans-serif";
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map((s) => s[0].toUpperCase()).join("");
+    g.fillText(initials || "AI", 64, 66);
+    g.strokeStyle = ringColorCss;
+    g.lineWidth = 8;
+    g.beginPath();
+    g.arc(64, 64, 58, 0, Math.PI * 2);
+    g.stroke();
+  };
+  drawFallback();
+  const tex = kit.canvasTexture(c);
+  if (picture && typeof Image !== "undefined") {
+    try {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        try {
+          g.clearRect(0, 0, 128, 128);
+          g.save();
+          g.beginPath();
+          g.arc(64, 64, 56, 0, Math.PI * 2);
+          g.closePath();
+          g.clip();
+          g.drawImage(img, 8, 8, 112, 112);
+          g.restore();
+          g.strokeStyle = ringColorCss;
+          g.lineWidth = 8;
+          g.beginPath();
+          g.arc(64, 64, 58, 0, Math.PI * 2);
+          g.stroke();
+          tex.needsUpdate = true;
+        } catch {
+        }
+      };
+      img.src = picture;
+    } catch {
+    }
+  }
+  const badge = new Mesh(
+    kit.own(new CircleGeometry(0.145, 24)),
+    kit.own(new MeshBasicMaterial({ map: tex, transparent: true, side: DoubleSide }))
+  );
+  return badge;
+}
+function buildCustomAvatar3D(kit, p, input, opts) {
+  const root = new Group();
+  const seatHeight = (opts == null ? void 0 : opts.seatHeight) ?? 0.45;
+  const scale = (opts == null ? void 0 : opts.scale) ?? 1.05;
+  const isPlanned = input.status === "planned";
+  const isWorking = input.status === "working";
+  const isError = input.status === "error";
+  const style = resolveAvatarArchetype(input.name, input.role, p);
+  const bodyRgb = isPlanned ? [0.5, 0.54, 0.6] : style.bodyRgb;
+  const accentRgb = isError ? [0.95, 0.32, 0.34] : isWorking ? p.accent.reviewer : isPlanned ? [0.45, 0.48, 0.54] : style.accentRgb;
+  const matBody = kit.matte(bodyRgb, {
+    roughness: 0.52,
+    transparent: isPlanned,
+    opacity: isPlanned ? 0.42 : 1
+  });
+  const matDark = kit.matte([0.1, 0.12, 0.16], { roughness: 0.38 });
+  const matWhite = kit.matte([0.97, 0.98, 1], { roughness: 0.3 });
+  const matAccent = kit.matte(accentRgb, {
+    roughness: 0.3,
+    emissive: colour(accentRgb),
+    emissiveIntensity: isPlanned ? 0.08 : isWorking || isError ? 0.85 : 0.42
+  });
+  const bodyGroup = new Group();
+  bodyGroup.position.set(0, seatHeight, 0.04);
+  bodyGroup.scale.setScalar(scale);
+  root.add(bodyGroup);
+  const eyesGroup = new Group();
+  let eyeY = 0.42;
+  let eyeZ = 0.19;
+  let headTopY = 0.68;
+  if (style.kind === "bento_tall") {
+    const torso = new Mesh(kit.own(new CapsuleGeometry(0.165, 0.36, 8, 16)), matBody);
+    torso.position.y = 0.36;
+    torso.castShadow = !isPlanned;
+    bodyGroup.add(torso);
+    for (const ax of [-0.075, 0.075]) {
+      const stalk = new Mesh(kit.own(new CylinderGeometry(0.016, 0.02, 0.18, 8)), matBody);
+      stalk.position.set(ax, 0.72, 0);
+      bodyGroup.add(stalk);
+      const bulb = new Mesh(kit.own(new SphereGeometry(0.032, 10, 10)), matAccent);
+      bulb.position.set(ax, 0.82, 0);
+      bodyGroup.add(bulb);
+    }
+    eyeY = 0.52;
+    eyeZ = 0.155;
+    headTopY = 0.86;
+  } else if (style.kind === "giraffe_cro") {
+    const baseBody = new Mesh(kit.own(new SphereGeometry(0.19, 14, 14)), matBody);
+    baseBody.position.y = 0.2;
+    baseBody.scale.set(1, 0.95, 1.05);
+    baseBody.castShadow = !isPlanned;
+    bodyGroup.add(baseBody);
+    const neck = new Mesh(kit.own(new CylinderGeometry(0.075, 0.11, 0.34, 12)), matBody);
+    neck.position.set(0, 0.44, 0.02);
+    neck.castShadow = !isPlanned;
+    bodyGroup.add(neck);
+    const head = new Mesh(kit.own(new SphereGeometry(0.135, 14, 14)), matBody);
+    head.position.set(0, 0.64, 0.06);
+    head.scale.set(0.95, 0.9, 1.2);
+    head.castShadow = !isPlanned;
+    bodyGroup.add(head);
+    for (const hx of [-0.06, 0.06]) {
+      const horn = new Mesh(kit.own(new CylinderGeometry(0.015, 0.02, 0.11, 8)), matBody);
+      horn.position.set(hx, 0.77, 0.03);
+      bodyGroup.add(horn);
+      const tip = new Mesh(kit.own(new SphereGeometry(0.026, 8, 8)), matAccent);
+      tip.position.set(hx, 0.83, 0.03);
+      bodyGroup.add(tip);
+    }
+    eyeY = 0.65;
+    eyeZ = 0.19;
+    headTopY = 0.86;
+  } else if (style.kind === "hover_cgo") {
+    const hull = new Mesh(kit.own(new BoxGeometry(0.46, 0.22, 0.44)), matBody);
+    hull.position.set(0, 0.2, 0);
+    hull.castShadow = !isPlanned;
+    bodyGroup.add(hull);
+    const canopy = new Mesh(kit.own(new SphereGeometry(0.19, 14, 12)), matDark);
+    canopy.position.set(0, 0.32, 0.02);
+    canopy.scale.set(1.1, 0.72, 1);
+    bodyGroup.add(canopy);
+    for (const lx of [-0.14, 0.14]) {
+      const light = new Mesh(kit.own(new SphereGeometry(0.038, 10, 10)), matAccent);
+      light.position.set(lx, 0.2, 0.225);
+      bodyGroup.add(light);
+    }
+    eyeY = 0.33;
+    eyeZ = 0.19;
+    headTopY = 0.56;
+  } else if (style.kind === "iris_ceo") {
+    const torso = new Mesh(kit.own(new CylinderGeometry(0.16, 0.22, 0.3, 16)), matBody);
+    torso.position.y = 0.18;
+    torso.castShadow = !isPlanned;
+    bodyGroup.add(torso);
+    const head = new Mesh(kit.own(new SphereGeometry(0.21, 18, 16)), matBody);
+    head.position.y = 0.46;
+    head.castShadow = !isPlanned;
+    bodyGroup.add(head);
+    const visor = new Mesh(kit.own(new BoxGeometry(0.28, 0.12, 0.08)), matDark);
+    visor.position.set(0, 0.46, 0.165);
+    bodyGroup.add(visor);
+    for (const sx of [-0.21, 0.21]) {
+      const ear = new Mesh(kit.own(new CylinderGeometry(0.035, 0.035, 0.06, 10)), matAccent);
+      ear.rotation.z = Math.PI / 2;
+      ear.position.set(sx, 0.47, 0);
+      bodyGroup.add(ear);
+    }
+    const crown = new Mesh(
+      kit.own(new TorusGeometry(0.13, 0.018, 8, 24)),
+      kit.matte([0.98, 0.8, 0.24], { roughness: 0.25, emissive: colour([0.98, 0.8, 0.24]), emissiveIntensity: 0.65 })
+    );
+    crown.rotation.x = Math.PI / 2;
+    crown.position.y = 0.74;
+    bodyGroup.add(crown);
+    eyeY = 0.46;
+    eyeZ = 0.21;
+    headTopY = 0.78;
+  } else if (style.kind === "stealth_dev") {
+    const cube = new Mesh(kit.own(new BoxGeometry(0.36, 0.44, 0.34)), matBody);
+    cube.position.y = 0.28;
+    cube.castShadow = !isPlanned;
+    bodyGroup.add(cube);
+    const trim = new Mesh(kit.own(new BoxGeometry(0.38, 0.04, 0.36)), matAccent);
+    trim.position.y = 0.48;
+    bodyGroup.add(trim);
+    eyeY = 0.36;
+    eyeZ = 0.175;
+    headTopY = 0.58;
+  } else if (style.kind === "horned_cto") {
+    const torso = new Mesh(kit.own(new CapsuleGeometry(0.19, 0.2, 8, 16)), matBody);
+    torso.position.y = 0.3;
+    torso.castShadow = !isPlanned;
+    bodyGroup.add(torso);
+    for (const sx of [-0.12, 0.12]) {
+      const horn = new Mesh(kit.own(new ConeGeometry(0.045, 0.15, 10)), matAccent);
+      horn.position.set(sx, 0.6, 0);
+      horn.rotation.z = sx < 0 ? 0.32 : -0.32;
+      bodyGroup.add(horn);
+    }
+    eyeY = 0.4;
+    eyeZ = 0.185;
+    headTopY = 0.7;
+  } else {
+    const torso = new Mesh(kit.own(new CapsuleGeometry(0.19, 0.22, 8, 16)), matBody);
+    torso.position.y = 0.31;
+    torso.castShadow = !isPlanned;
+    bodyGroup.add(torso);
+    if (style.kind === "hat_cpo") {
+      const hat = new Mesh(kit.own(new CylinderGeometry(0.13, 0.17, 0.16, 14)), matDark);
+      hat.position.y = 0.62;
+      bodyGroup.add(hat);
+      const band = new Mesh(kit.own(new CylinderGeometry(0.162, 0.168, 0.03, 14)), matAccent);
+      band.position.y = 0.56;
+      bodyGroup.add(band);
+      headTopY = 0.74;
+    } else {
+      const ant = new Mesh(kit.own(new CylinderGeometry(0.014, 0.018, 0.14, 8)), matDark);
+      ant.position.y = 0.62;
+      bodyGroup.add(ant);
+      const orb = new Mesh(kit.own(new SphereGeometry(0.04, 10, 10)), matAccent);
+      orb.position.y = 0.7;
+      bodyGroup.add(orb);
+      headTopY = 0.76;
+    }
+    eyeY = 0.41;
+    eyeZ = 0.185;
+  }
+  const useGlowEyes = style.kind === "iris_ceo" || style.kind === "stealth_dev" || style.kind === "hover_cgo";
+  eyesGroup.position.set(0, eyeY, eyeZ);
+  for (const ex of [-0.068, 0.068]) {
+    if (useGlowEyes) {
+      const eye = new Mesh(kit.own(new SphereGeometry(0.028, 10, 10)), matAccent);
+      eye.position.set(ex, 0, 0);
+      eyesGroup.add(eye);
+    } else {
+      const sclera = new Mesh(kit.own(new SphereGeometry(0.042, 10, 10)), matWhite);
+      sclera.position.set(ex, 0, 0);
+      eyesGroup.add(sclera);
+      const pupil = new Mesh(kit.own(new SphereGeometry(0.022, 8, 8)), matDark);
+      pupil.position.set(ex, 0, 0.026);
+      eyesGroup.add(pupil);
+    }
+  }
+  bodyGroup.add(eyesGroup);
+  const leftHand = new Mesh(kit.own(new SphereGeometry(0.055, 10, 10)), matBody);
+  leftHand.position.set(-0.22, 0.22, 0.14);
+  leftHand.castShadow = !isPlanned;
+  bodyGroup.add(leftHand);
+  const rightHand = new Mesh(kit.own(new SphereGeometry(0.055, 10, 10)), matBody);
+  rightHand.position.set(0.22, 0.22, 0.14);
+  rightHand.castShadow = !isPlanned;
+  bodyGroup.add(rightHand);
+  let haloMesh = null;
+  if ((opts == null ? void 0 : opts.showPortraitMedallion) !== false) {
+    const ringCss = isError ? "#f87171" : isWorking ? "#60a5fa" : "#3dd68c";
+    const badge = buildPortraitBadge(kit, input.name, input.picture, ringCss);
+    badge.position.set(0, headTopY + 0.18, 0.02);
+    bodyGroup.add(badge);
+    haloMesh = badge;
+  }
+  const ringMesh = new Mesh(
+    kit.own(new RingGeometry(0.32, 0.39, 28)),
+    kit.own(
+      new MeshBasicMaterial({
+        color: colour(accentRgb),
+        transparent: true,
+        opacity: isPlanned ? 0.25 : 0.78,
+        side: DoubleSide
+      })
+    )
+  );
+  ringMesh.rotation.x = -Math.PI / 2;
+  ringMesh.position.y = 0.022;
+  root.add(ringMesh);
+  const failoverRing = new Mesh(
+    kit.own(new RingGeometry(0.42, 0.49, 28)),
+    kit.own(
+      new MeshBasicMaterial({
+        color: 16281969,
+        transparent: true,
+        opacity: isError ? 0.85 : 0,
+        side: DoubleSide
+      })
+    )
+  );
+  failoverRing.rotation.x = -Math.PI / 2;
+  failoverRing.position.y = 0.028;
+  root.add(failoverRing);
+  const baseY = seatHeight;
+  const animate = (t, phase, animOpts) => {
+    const working = (animOpts == null ? void 0 : animOpts.working) ?? isWorking;
+    const err = (animOpts == null ? void 0 : animOpts.error) ?? isError;
+    const celebrating = (animOpts == null ? void 0 : animOpts.celebrating) ?? false;
+    if (celebrating) {
+      bodyGroup.position.y = baseY + Math.abs(Math.sin(t * 7.5 + phase)) * 0.16;
+      leftHand.position.y = 0.36 + Math.sin(t * 10) * 0.04;
+      rightHand.position.y = 0.36 + Math.cos(t * 10) * 0.04;
+    } else if (working) {
+      bodyGroup.position.y = baseY + Math.sin(t * 3.4 + phase) * 0.018;
+      leftHand.position.y = 0.21 + Math.sin(t * 14 + phase) * 0.025;
+      rightHand.position.y = 0.21 + Math.cos(t * 14 + phase) * 0.025;
+      leftHand.position.z = 0.16 + Math.sin(t * 7 + phase) * 0.015;
+      rightHand.position.z = 0.16 + Math.cos(t * 7 + phase) * 0.015;
+    } else {
+      bodyGroup.position.y = baseY + Math.sin(t * 1.6 + phase) * (isPlanned ? 4e-3 : 0.014);
+      leftHand.position.y = 0.22;
+      rightHand.position.y = 0.22;
+    }
+    const blinkCycle = (t + phase * 0.7) % 4.4;
+    eyesGroup.scale.y = blinkCycle > 4.26 ? 0.12 : 1;
+    if (working) {
+      const s = 1 + Math.sin(t * 3.8 + phase) * 0.09;
+      ringMesh.scale.set(s, s, 1);
+    }
+    if (err) {
+      const pulse = 1 + (t * 1.4 + phase) % 1 * 0.35;
+      failoverRing.scale.set(pulse, pulse, 1);
+      failoverRing.material.opacity = Math.max(0, 0.9 - (t * 1.4 + phase) % 1 * 0.9);
+    } else {
+      failoverRing.material.opacity = 0;
+    }
+  };
+  return {
+    root,
+    bodyGroup,
+    eyesGroup,
+    leftHand,
+    rightHand,
+    haloMesh,
+    ringMesh,
+    failoverRing,
+    baseY,
+    animate
+  };
+}
 const BOARDROOM_BUBBLE_TTL_MS = 3 * 60 * 1e3;
 function fmtBoardroomClock(tsMs) {
   if (!tsMs || !Number.isFinite(tsMs)) return "0s";
@@ -51699,7 +53310,7 @@ function fmtBoardroomElapsed(tsMs) {
   if (hours < 24) return `${hours}h ${mins % 60}m`;
   return `${Math.floor(hours / 24)}d`;
 }
-function rgbToCss([r, g, b], alpha = 1) {
+function rgbToCss$1([r, g, b], alpha = 1) {
   const rr = Math.round(Math.max(0, Math.min(1, r)) * 255);
   const gg = Math.round(Math.max(0, Math.min(1, g)) * 255);
   const bb = Math.round(Math.max(0, Math.min(1, b)) * 255);
@@ -51708,12 +53319,12 @@ function rgbToCss([r, g, b], alpha = 1) {
 function makeWallSignTexture(kit, text, p) {
   const c = canvasOf(512, 112);
   const g = c.getContext("2d");
-  g.fillStyle = rgbToCss(p.sign);
+  g.fillStyle = rgbToCss$1(p.sign);
   g.fillRect(0, 0, c.width, c.height);
   g.strokeStyle = "rgba(255,255,255,0.14)";
   g.lineWidth = 4;
   g.strokeRect(4, 4, c.width - 8, c.height - 8);
-  g.fillStyle = rgbToCss(p.lane);
+  g.fillStyle = rgbToCss$1(p.lane);
   g.fillRect(18, c.height - 14, c.width - 36, 7);
   g.fillStyle = p.signInk;
   g.font = "700 40px ui-monospace, SFMono-Regular, Menlo, monospace";
@@ -51722,12 +53333,13 @@ function makeWallSignTexture(kit, text, p) {
   g.fillText(text.toUpperCase(), c.width / 2, c.height / 2 - 4);
   return kit.canvasTexture(c);
 }
-function makeExecutiveScreenTexture(kit, seats, p) {
+function makeExecutiveScreenTexture(kit, seats, p, slideIndex = 0, status, holding) {
+  var _a, _b, _c, _d, _e, _f;
   const c = canvasOf(1024, 420);
   const g = c.getContext("2d");
-  const accent = rgbToCss(p.lane);
-  const accentSoft = rgbToCss(p.lane, 0.16);
-  const blue = rgbToCss(p.accent.reviewer);
+  const accent = rgbToCss$1(p.lane);
+  const accentSoft = rgbToCss$1(p.lane, 0.16);
+  const blue = rgbToCss$1(p.accent.reviewer);
   g.fillStyle = p.dark ? "#0e1116" : "#161922";
   g.fillRect(0, 0, c.width, c.height);
   g.strokeStyle = "rgba(255,255,255,0.035)";
@@ -51750,7 +53362,12 @@ function makeExecutiveScreenTexture(kit, seats, p) {
   g.fillRect(0, 56, c.width, 3);
   g.fillStyle = "#f4f6fb";
   g.font = "700 22px -apple-system, BlinkMacSystemFont, sans-serif";
-  g.fillText("CONSELHO DA HOLDING · PAINEL EXECUTIVO", 28, 37);
+  const slideTitles = [
+    "CONSELHO DA HOLDING · PAINEL EXECUTIVO (1/3)",
+    "FINOPS & NEXUSMIND GATEWAY · AUTOPILOTO VIP (2/3)",
+    "PORTFÓLIO DAS SUBSIDIÁRIAS · HOLDING CORTEXX (3/3)"
+  ];
+  g.fillText(slideTitles[slideIndex % 3], 28, 37);
   g.fillStyle = accentSoft;
   g.fillRect(c.width - 170, 14, 142, 30);
   g.strokeStyle = accent;
@@ -51765,7 +53382,19 @@ function makeExecutiveScreenTexture(kit, seats, p) {
   const activeCnt = seats.filter((s) => s.status === "active").length;
   const workingCnt = seats.filter((s) => s.status === "working").length;
   const plannedCnt = seats.filter((s) => s.status === "planned").length;
-  const kpis = [
+  const spendUsd = ((_a = status == null ? void 0 : status.spendToday) == null ? void 0 : _a.usd) ?? 0;
+  const budgetUsd = ((_c = (_b = status == null ? void 0 : status.limits) == null ? void 0 : _b.dailyBudget) == null ? void 0 : _c.usd) ?? 50;
+  const merges7d = ((_d = status == null ? void 0 : status.stats) == null ? void 0 : _d.merged7d) ?? 0;
+  const empresas = Array.isArray(holding == null ? void 0 : holding.empresas) ? holding.empresas : [];
+  const kpis = slideIndex % 3 === 1 ? [
+    { label: "GASTO HOJE", val: `$${spendUsd.toFixed(2)}`, sub: `orçamento $${budgetUsd}/dia`, col: accent },
+    { label: "MERGES (7D)", val: String(merges7d), sub: "esteira determinística", col: blue },
+    { label: "ESCUDO VIP", val: "ATIVO", sub: "Iris & Conselho isolados", col: "#fbbf24" }
+  ] : slideIndex % 3 === 2 ? [
+    { label: "SUBSIDIÁRIAS", val: String(empresas.length || 3), sub: "no portfólio Cortexx", col: accent },
+    { label: "OPERACIONAIS", val: String(empresas.filter((e) => e.estagio === "operacional").length || 2), sub: "rodando no Buzz", col: blue },
+    { label: "WIP ATIVO", val: String(((_e = status == null ? void 0 : status.wip) == null ? void 0 : _e.openPrs) ?? 0), sub: `limite ${((_f = status == null ? void 0 : status.wip) == null ? void 0 : _f.limit) ?? 6} PRs`, col: "#9ca3af" }
+  ] : [
     { label: "ASSENTOS ATIVOS", val: String(activeCnt + workingCnt), sub: `${seats.length} no conselho`, col: accent },
     { label: "EM EXECUÇÃO", val: String(workingCnt), sub: "turnos ao vivo", col: blue },
     { label: "PLANEJADOS", val: String(plannedCnt), sub: "em incubação", col: "#9ca3af" }
@@ -51829,7 +53458,7 @@ function makeExecutiveScreenTexture(kit, seats, p) {
     const bx = chartX + 24 + i * (bw + gap);
     const bh = Math.round(v2 * 116);
     const by = listY + 168 - bh;
-    g.fillStyle = i >= 8 ? accent : rgbToCss(p.lane, 0.42 + i * 0.05);
+    g.fillStyle = i >= 8 ? accent : rgbToCss$1(p.lane, 0.42 + i * 0.05);
     g.fillRect(bx, by, bw, bh);
   });
   return kit.canvasTexture(c);
@@ -51858,7 +53487,7 @@ function makeTableVisionBoardTexture(kit, seats, p) {
     g.stroke();
   }
   const paletteBlocks = [
-    rgbToCss(p.lane, 0.35),
+    rgbToCss$1(p.lane, 0.35),
     "rgba(96, 165, 250, 0.32)",
     "rgba(192, 132, 252, 0.3)",
     "rgba(251, 191, 36, 0.32)"
@@ -51880,7 +53509,7 @@ function makeTableVisionBoardTexture(kit, seats, p) {
     g.fillRect(bx + 8, by + 44, bw - 20, 7);
     g.fillRect(bx + 8, by + 60, bw - 34, 7);
     g.fillRect(bx + 8, by + 76, bw - 16, 7);
-    g.fillStyle = rgbToCss(p.lane);
+    g.fillStyle = rgbToCss$1(p.lane);
     g.fillRect(bx + 8, by + 124, Math.round((bw - 16) * 0.72), 10);
   }
   return kit.canvasTexture(c);
@@ -51928,89 +53557,6 @@ function buildExecutiveChair(kit, matLeather, matSteel, matChrome) {
     chair.add(pad);
   }
   return chair;
-}
-function buildCodeDenDirector(kit, crew, p, seat, index) {
-  const root = new Group();
-  const isCeo = index === 0 || /ceo|iris|holding/i.test(`${seat.label} ${seat.role}`);
-  const isPlanned = seat.status === "planned";
-  const isWorking = seat.status === "working";
-  const bodyRgb = isCeo ? [0.46, 0.66, 0.94] : isPlanned ? [0.55, 0.58, 0.64] : [0.92, 0.93, 0.95];
-  const matBody = kit.matte(bodyRgb, {
-    roughness: 0.62,
-    transparent: isPlanned,
-    opacity: isPlanned ? 0.42 : 1
-  });
-  const matInk = kit.matte(p.ink, { roughness: 0.4 });
-  const matWhite = kit.matte([1, 1, 1], { roughness: 0.3 });
-  const accentRgb = isWorking ? p.accent.reviewer : isCeo ? p.lane : isPlanned ? [0.45, 0.48, 0.54] : p.lane;
-  const matAccent = kit.matte(accentRgb, {
-    roughness: 0.35,
-    emissive: colour(accentRgb),
-    emissiveIntensity: isPlanned ? 0.08 : isWorking ? 0.72 : 0.45
-  });
-  const bodyGroup = new Group();
-  bodyGroup.position.set(0, 0.45, 0.04);
-  bodyGroup.scale.setScalar(1.18);
-  root.add(bodyGroup);
-  const bodyMesh = new Mesh(crew.body, matBody);
-  bodyMesh.castShadow = !isPlanned;
-  bodyMesh.receiveShadow = true;
-  bodyGroup.add(bodyMesh);
-  const tipMesh = new Mesh(crew.tip, matAccent);
-  bodyGroup.add(tipMesh);
-  const eyesMesh = new Mesh(crew.eyes, matInk);
-  bodyGroup.add(eyesMesh);
-  const catchMesh = new Mesh(crew.catchlights, matWhite);
-  bodyGroup.add(catchMesh);
-  const mouthGeo = isPlanned ? crew["mouth:flat-short"] : isCeo ? crew["mouth:wide-smile"] : crew["mouth:smile"];
-  const mouthMesh = new Mesh(mouthGeo, matInk);
-  bodyGroup.add(mouthMesh);
-  const leftHand = new Mesh(crew.hand, matBody);
-  leftHand.position.set(-0.21, 0.24, 0.14);
-  leftHand.castShadow = !isPlanned;
-  bodyGroup.add(leftHand);
-  const rightHand = new Mesh(crew.hand, matBody);
-  rightHand.position.set(0.21, 0.24, 0.14);
-  rightHand.castShadow = !isPlanned;
-  bodyGroup.add(rightHand);
-  for (const fx of [-0.09, 0.09]) {
-    const foot = new Mesh(crew.foot, matBody);
-    foot.position.set(fx, 0.03, 0.08);
-    bodyGroup.add(foot);
-  }
-  const matAccessory = kit.matte(isCeo ? p.ink : accentRgb, { roughness: 0.45 });
-  if (isCeo) {
-    bodyGroup.add(new Mesh(crew.headset, matAccessory));
-    bodyGroup.add(new Mesh(crew.mic, matAccessory));
-  } else if (index % 3 === 1) {
-    bodyGroup.add(new Mesh(crew.neckerchief, matAccessory));
-  } else if (index % 3 === 2) {
-    bodyGroup.add(new Mesh(crew.glasses, matInk));
-    bodyGroup.add(new Mesh(crew.collar, matAccessory));
-  } else {
-    bodyGroup.add(new Mesh(crew.collar, matAccessory));
-  }
-  const rimMesh = new Mesh(crew.rim, matAccent);
-  bodyGroup.add(rimMesh);
-  let dotsMesh = null;
-  if (isWorking) {
-    dotsMesh = new Mesh(crew.dots, matAccent);
-    dotsMesh.position.set(0, 0.72, 0);
-    bodyGroup.add(dotsMesh);
-  }
-  const matRing = kit.own(
-    new MeshBasicMaterial({
-      color: colour(accentRgb),
-      transparent: true,
-      opacity: isPlanned ? 0.32 : 0.85,
-      side: DoubleSide
-    })
-  );
-  const ringMesh = new Mesh(crew.ring, matRing);
-  ringMesh.scale.setScalar(1.38);
-  ringMesh.position.y = 0.025;
-  root.add(ringMesh);
-  return { root, bodyGroup, eyesMesh, dotsMesh, ringMesh };
 }
 function buildSeatDeskProps(kit, p, status) {
   const g = new Group();
@@ -52093,6 +53639,7 @@ function createBoardroom3DComponent(ctx) {
     const prevActiveByPubkeyRef = React.useRef({});
     const [fitTick, setFitTick] = React.useState(0);
     const [themeVersion, setThemeVersion] = React.useState(0);
+    const [screenSlide, setScreenSlide] = React.useState(0);
     const [isFullscreen, setIsFullscreen] = React.useState(false);
     const [rosterOpen, setRosterOpen] = React.useState(false);
     const [rosterFilter, setRosterFilter] = React.useState("all");
@@ -52305,12 +53852,13 @@ function createBoardroom3DComponent(ctx) {
       screenBezel.position.set(0, 1.68, -3.5);
       screenBezel.castShadow = true;
       scene.add(screenBezel);
-      const screenTex = makeExecutiveScreenTexture(kit, seats, palette);
+      const screenTex = makeExecutiveScreenTexture(kit, seats, palette, screenSlide, props.status, props.holding);
       const screenDisplay = new Mesh(
         kit.own(new PlaneGeometry(4.84, 1.78)),
         kit.own(new MeshBasicMaterial({ map: screenTex }))
       );
       screenDisplay.position.set(0, 1.68, -3.435);
+      screenDisplay.userData.isExecutiveScreen = true;
       scene.add(screenDisplay);
       const screenTrim = new Mesh(kit.own(new BoxGeometry(5.1, 0.05, 0.14)), matLane);
       screenTrim.position.set(0, 0.65, -3.49);
@@ -52418,10 +53966,39 @@ function createBoardroom3DComponent(ctx) {
         { pos: [1.55, 0, -1.48], rotY: 0, deskPos: [1.55, 0.89, -0.65] },
         { pos: [3.42, 0, 0.15], rotY: -Math.PI / 2, deskPos: [2.32, 0.89, 0.15] }
       ];
+      const holoGroup = new Group();
+      holoGroup.position.set(0, 1.62, 0.15);
+      scene.add(holoGroup);
+      const holoCore = new Mesh(
+        kit.own(new OctahedronGeometry(0.32, 0)),
+        kit.own(
+          new MeshBasicMaterial({
+            color: colour(palette.lane),
+            wireframe: true,
+            transparent: true,
+            opacity: 0.72
+          })
+        )
+      );
+      holoGroup.add(holoCore);
+      const holoRing = new Mesh(
+        kit.own(new TorusGeometry(0.48, 0.014, 8, 32)),
+        kit.own(
+          new MeshBasicMaterial({
+            color: colour(palette.accent.reviewer),
+            transparent: true,
+            opacity: 0.55
+          })
+        )
+      );
+      holoRing.rotation.x = Math.PI / 2;
+      holoGroup.add(holoRing);
       const animated = [];
-      const hitTargets = [];
+      const hitTargets = [screenDisplay];
       const seatByObject = /* @__PURE__ */ new WeakMap();
+      const crewList = props.liveCrew || [];
       seats.slice(0, seatSlots.length).forEach((seat, idx) => {
+        var _a2;
         const slot = seatSlots[idx];
         const seatGroup = new Group();
         seatGroup.position.set(...slot.pos);
@@ -52429,8 +54006,40 @@ function createBoardroom3DComponent(ctx) {
         scene.add(seatGroup);
         const chair = buildExecutiveChair(kit, matLeather, matSteel, matChrome);
         seatGroup.add(chair);
-        const director = buildCodeDenDirector(kit, crew, palette, seat, idx);
-        seatGroup.add(director.root);
+        const displayName = seat.agentName || seat.role || seat.label;
+        const pk = (seat.pubkey || "").toLowerCase();
+        const crewMatch = crewList.find(
+          (c) => {
+            var _a3;
+            return pk && ((_a3 = c.pubkey) == null ? void 0 : _a3.toLowerCase()) === pk || c.name.toLowerCase() === displayName.toLowerCase();
+          }
+        );
+        const liveTurn = pk && ((_a2 = props.telemetry) == null ? void 0 : _a2.byPubkey) ? props.telemetry.byPubkey[pk] : void 0;
+        const avStatus = (liveTurn == null ? void 0 : liveTurn.state) === "error" ? "error" : seat.status;
+        const avatar = buildCustomAvatar3D(
+          kit,
+          palette,
+          { name: displayName, role: seat.role, picture: crewMatch == null ? void 0 : crewMatch.picture, status: avStatus },
+          { seatHeight: 0.44, scale: 1.08, showPortraitMedallion: true }
+        );
+        seatGroup.add(avatar.root);
+        if (seat.status === "working") {
+          const startPt = new Vector3(slot.pos[0], 1.15, slot.pos[2]);
+          const midPt = new Vector3(slot.pos[0] * 0.45, 1.85, (slot.pos[2] + 0.15) * 0.45);
+          const endPt = new Vector3(0, 1.62, 0.15);
+          const curve = new QuadraticBezierCurve3(startPt, midPt, endPt);
+          const beam = new Mesh(
+            kit.own(new TubeGeometry(curve, 20, 0.018, 6, false)),
+            kit.own(
+              new MeshBasicMaterial({
+                color: colour(palette.accent.reviewer),
+                transparent: true,
+                opacity: 0.65
+              })
+            )
+          );
+          scene.add(beam);
+        }
         const propsGroup = buildSeatDeskProps(kit, palette, seat.status);
         propsGroup.position.set(...slot.deskPos);
         propsGroup.rotation.y = slot.rotY;
@@ -52442,33 +54051,37 @@ function createBoardroom3DComponent(ctx) {
         hitBox.position.set(0, 0.72, 0);
         seatGroup.add(hitBox);
         hitTargets.push(hitBox);
-        seatByObject.set(hitBox, seat);
+        seatByObject.set(hitBox, { seat, pos: slot.pos });
         animated.push({
           seat,
           seatGroup,
-          bodyGroup: director.bodyGroup,
-          eyesMesh: director.eyesMesh,
-          dotsMesh: director.dotsMesh,
-          ringMesh: director.ringMesh,
+          avatar,
           phase: idx * 1.37,
-          baseY: director.bodyGroup.position.y,
+          pos: slot.pos,
           hitTarget: hitBox
         });
       });
+      const defaultTarget = new Vector3(0, 0.72, -0.15);
+      const desiredTarget = defaultTarget.clone();
+      let desiredFrustum = 9.4;
       const raycaster = new Raycaster();
       const pointer = new Vector2();
       let dragging = false;
       let moved = false;
       let lastX = 0;
       let lastY = 0;
-      const pickSeat = (e) => {
+      const pickHit = (e) => {
+        var _a2;
         const rect = renderer.domElement.getBoundingClientRect();
         pointer.x = (e.clientX - rect.left) / rect.width * 2 - 1;
         pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
         raycaster.setFromCamera(pointer, camera);
         const hits = raycaster.intersectObjects(hitTargets, false);
         if (hits.length === 0) return null;
-        return seatByObject.get(hits[0].object) || null;
+        const obj = hits[0].object;
+        if ((_a2 = obj.userData) == null ? void 0 : _a2.isExecutiveScreen) return { kind: "screen" };
+        const entry = seatByObject.get(obj);
+        return entry ? { kind: "seat", ...entry } : null;
       };
       const onDown = (e) => {
         dragging = true;
@@ -52489,21 +54102,33 @@ function createBoardroom3DComponent(ctx) {
           updateCamera();
           return;
         }
-        const hit2 = pickSeat(e);
-        setHoveredSeatId((cur) => cur === ((hit2 == null ? void 0 : hit2.id) || null) ? cur : (hit2 == null ? void 0 : hit2.id) || null);
+        const hit2 = pickHit(e);
+        const hitSeatId = (hit2 == null ? void 0 : hit2.kind) === "seat" ? hit2.seat.id : null;
+        setHoveredSeatId((cur) => cur === hitSeatId ? cur : hitSeatId);
         renderer.domElement.style.cursor = hit2 ? "pointer" : "grab";
       };
       const onUp = (e) => {
         if (dragging && !moved) {
-          const hit2 = pickSeat(e);
-          setSelectedSeatId(hit2 ? hit2.id : null);
+          const hit2 = pickHit(e);
+          if ((hit2 == null ? void 0 : hit2.kind) === "screen") {
+            setScreenSlide((s) => (s + 1) % 3);
+          } else if ((hit2 == null ? void 0 : hit2.kind) === "seat") {
+            setSelectedSeatId(hit2.seat.id);
+            desiredTarget.set(hit2.pos[0] * 0.65, 0.9, hit2.pos[2] * 0.65);
+            desiredFrustum = 6.6;
+          } else {
+            setSelectedSeatId(null);
+            desiredTarget.copy(defaultTarget);
+            desiredFrustum = 9.4;
+          }
         }
         dragging = false;
         renderer.domElement.style.cursor = "grab";
       };
       const onWheel = (e) => {
         e.preventDefault();
-        frustum = Math.max(5.8, Math.min(14.5, frustum + e.deltaY * 8e-3));
+        frustum = Math.max(5.4, Math.min(14.5, frustum + e.deltaY * 8e-3));
+        desiredFrustum = frustum;
         updateCamera();
       };
       const onLeave = () => {
@@ -52524,20 +54149,22 @@ function createBoardroom3DComponent(ctx) {
         const t = clock.getElapsedTime();
         const cw = container.clientWidth || width;
         const ch = container.clientHeight || height;
+        let camDirty = false;
+        if (target.distanceTo(desiredTarget) > 0.01) {
+          target.lerp(desiredTarget, 0.09);
+          camDirty = true;
+        }
+        if (Math.abs(frustum - desiredFrustum) > 0.015) {
+          frustum += (desiredFrustum - frustum) * 0.09;
+          camDirty = true;
+        }
+        if (camDirty) updateCamera();
+        holoCore.rotation.y = t * 0.85;
+        holoCore.rotation.x = Math.sin(t * 0.6) * 0.28;
+        holoGroup.position.y = 1.62 + Math.sin(t * 1.8) * 0.05;
+        holoRing.rotation.z = -t * 0.6;
         for (const a of animated) {
-          const speed = a.seat.status === "working" ? 3.2 : 1.7;
-          const amp = a.seat.status === "planned" ? 4e-3 : 0.015;
-          a.bodyGroup.position.y = a.baseY + Math.sin(t * speed + a.phase) * amp;
-          const blinkCycle = (t + a.phase) % 4.2;
-          const blinkScale = blinkCycle > 4.06 ? 0.14 : 1;
-          a.eyesMesh.scale.y = blinkScale;
-          if (a.dotsMesh) {
-            a.dotsMesh.rotation.y = t * 2.4;
-          }
-          if (a.seat.status === "working") {
-            const s = 1.38 + Math.sin(t * 3.6 + a.phase) * 0.08;
-            a.ringMesh.scale.set(s, s, 1);
-          }
+          a.avatar.animate(t, a.phase, { working: a.seat.status === "working" });
           const bubbleNode = bubbleNodesRef.current.get(a.seat.id);
           if (bubbleNode) {
             headVec.set(0, 1.55, 0).applyMatrix4(a.seatGroup.matrixWorld).project(camera);
@@ -52574,7 +54201,7 @@ function createBoardroom3DComponent(ctx) {
         kit.dispose();
         renderer.dispose();
       };
-    }, [seatsKey, fitTick, themeVersion]);
+    }, [seatsKey, fitTick, themeVersion, screenSlide]);
     const liveCrew = props.liveCrew || [];
     const resolveSeatMeta = (s) => {
       var _a2;
@@ -53156,6 +54783,700 @@ function createBoardroom3DComponent(ctx) {
         "div",
         { className: "of-muted", style: { textAlign: "center", fontSize: "11px" } },
         `Conselho da Holding (board) · ${inBuzzCount}/${enrichedSeats.length} no Buzz · ${workingNowCount} respondendo agora · Sala de Reunião 3D`
+      )
+    );
+  };
+}
+function rgbToCss([r, g, b], alpha = 1) {
+  const rr = Math.round(Math.max(0, Math.min(1, r)) * 255);
+  const gg = Math.round(Math.max(0, Math.min(1, g)) * 255);
+  const bb = Math.round(Math.max(0, Math.min(1, b)) * 255);
+  return alpha >= 1 ? `rgb(${rr}, ${gg}, ${bb})` : `rgba(${rr}, ${gg}, ${bb}, ${alpha})`;
+}
+function makeFloorSignTexture(kit, title, subtitle, accent, isDark) {
+  const c = canvasOf(512, 112);
+  const g = c.getContext("2d");
+  g.fillStyle = isDark ? "#11151d" : "#1d222c";
+  g.fillRect(0, 0, c.width, c.height);
+  g.fillStyle = rgbToCss(accent);
+  g.fillRect(0, 0, 12, c.height);
+  g.fillRect(12, c.height - 8, c.width - 12, 8);
+  g.fillStyle = "#f8fafc";
+  g.font = "700 32px -apple-system, BlinkMacSystemFont, sans-serif";
+  g.fillText(title.toUpperCase().slice(0, 22), 28, 48);
+  g.fillStyle = "#94a3b8";
+  g.font = "600 18px ui-monospace, Menlo, monospace";
+  g.fillText(subtitle.slice(0, 34), 28, 82);
+  return kit.canvasTexture(c);
+}
+function createHoldingTower3DComponent(ctx) {
+  const React = ctx.react;
+  const h = React.createElement;
+  return function HoldingTower3DCanvas(props) {
+    const hostRef = React.useRef(null);
+    const mountRef = React.useRef(null);
+    const [selectedSlug, setSelectedSlug] = React.useState(null);
+    const [hoveredSlug, setHoveredSlug] = React.useState(null);
+    const [fitTick, setFitTick] = React.useState(0);
+    const [darkFactoryMode, setDarkFactoryMode] = React.useState(true);
+    const [isFullscreen, setIsFullscreen] = React.useState(false);
+    const floors = React.useMemo(() => {
+      var _a, _b;
+      const byPk = ((_a = props.telemetry) == null ? void 0 : _a.byPubkey) || {};
+      const crew = props.liveCrew || [];
+      const empresas = ((_b = props.holding) == null ? void 0 : _b.empresas) && props.holding.empresas.length > 0 ? props.holding.empresas : [
+        { slug: "orgfy", nome: "OrgFy Core", estagio: "operacional", agentesTotal: 16, agentesProntos: 16 },
+        { slug: "lumen-iptv", nome: "Lumen IPTV", estagio: "operacional", agentesTotal: 6, agentesProntos: 6 },
+        { slug: "saas-tributario", nome: "SaaS Tributário", estagio: "planejado", agentesTotal: 0, agentesProntos: 0 }
+      ];
+      const subsidiaryFloors = empresas.map((emp) => {
+        const slugLower = String(emp.slug || "").toLowerCase();
+        const matchingCrew = crew.filter((a) => {
+          const n = a.name.toLowerCase();
+          if (slugLower === "orgfy") return n.startsWith("orgfy") && !n.includes("iris");
+          if (slugLower.includes("lumen")) return n.includes("lumen");
+          return n.includes(slugLower);
+        });
+        let workingCount = 0;
+        let errorCount = 0;
+        const agents = matchingCrew.slice(0, 6).map((a) => {
+          const turn = a.pubkey ? byPk[a.pubkey.toLowerCase()] : void 0;
+          const isErr = (turn == null ? void 0 : turn.state) === "error";
+          const isWork = Boolean(turn && !isErr);
+          if (isErr) errorCount += 1;
+          if (isWork) workingCount += 1;
+          return {
+            name: a.name,
+            picture: a.picture,
+            status: isErr ? "error" : isWork ? "working" : "active"
+          };
+        });
+        return {
+          slug: emp.slug,
+          nome: emp.nome || emp.slug,
+          estagio: emp.estagio || "operacional",
+          agentesCount: matchingCrew.length || emp.agentesTotal || 0,
+          workingCount,
+          errorCount,
+          agents: agents.length > 0 ? agents : emp.estagio === "planejado" ? [{ name: `${emp.nome} PO`, status: "planned" }] : [{ name: `${emp.nome} Dev`, status: "active" }]
+        };
+      });
+      const boardCrew = crew.filter((a) => /iris|conselho/i.test(a.name));
+      let boardWork = 0;
+      let boardErr = 0;
+      const boardAgents = boardCrew.length > 0 ? boardCrew.slice(0, 6).map((a) => {
+        const turn = a.pubkey ? byPk[a.pubkey.toLowerCase()] : void 0;
+        const isErr = (turn == null ? void 0 : turn.state) === "error";
+        const isWork = Boolean(turn && !isErr);
+        if (isErr) boardErr += 1;
+        if (isWork) boardWork += 1;
+        return {
+          name: a.name,
+          picture: a.picture,
+          status: isErr ? "error" : isWork ? "working" : "active"
+        };
+      }) : [
+        { name: "OrgFy Iris", role: "CEO Master", status: "active" },
+        { name: "Conselho CTO", role: "CTO", status: "active" },
+        { name: "Conselho CRO", role: "CRO", status: "active" },
+        { name: "Conselho CPO", role: "CPO", status: "active" },
+        { name: "Conselho COO", role: "COO", status: "active" },
+        { name: "Conselho CGO", role: "CGO", status: "active" }
+      ];
+      const penthouse = {
+        slug: "board",
+        nome: "Conselho da Holding & Iris",
+        estagio: "cobertura",
+        isBoard: true,
+        agentesCount: boardAgents.length,
+        workingCount: boardWork,
+        errorCount: boardErr,
+        agents: boardAgents
+      };
+      return [...subsidiaryFloors, penthouse];
+    }, [props.holding, props.liveCrew, props.telemetry]);
+    const floorsSignature = floors.map((f) => `${f.slug}:${f.workingCount}:${f.errorCount}:${f.agentesCount}`).join("|");
+    const targetFloorYRef = React.useRef(null);
+    const targetFrustumRef = React.useRef(null);
+    React.useEffect(() => {
+      const container = mountRef.current;
+      if (!container) return;
+      const palette = readPalette();
+      const kit = new Kit();
+      const width = Math.max(320, container.clientWidth || 780);
+      const height = Math.max(320, container.clientHeight || 520);
+      const scene = new Scene();
+      scene.background = darkFactoryMode ? new Color(592656) : new Color(15659767);
+      const FLOOR_H = 3.2;
+      const totalH = floors.length * FLOOR_H;
+      const defaultCenterY = Math.max(2.2, totalH * 0.45);
+      const defaultFrustum = Math.max(12.5, totalH * 1.15);
+      let theta = 0.68;
+      let phi = 1.02;
+      let frustum = defaultFrustum;
+      const target = new Vector3(0, defaultCenterY, 0);
+      targetFloorYRef.current = defaultCenterY;
+      targetFrustumRef.current = defaultFrustum;
+      const aspect2 = width / height;
+      const camera = new OrthographicCamera(
+        -frustum * aspect2 / 2,
+        frustum * aspect2 / 2,
+        frustum / 2,
+        -frustum / 2,
+        0.1,
+        160
+      );
+      const updateCamera = () => {
+        const w = Math.max(320, container.clientWidth || width);
+        const hh = Math.max(320, container.clientHeight || height);
+        const asp = w / hh;
+        camera.left = -frustum * asp / 2;
+        camera.right = frustum * asp / 2;
+        camera.top = frustum / 2;
+        camera.bottom = -frustum / 2;
+        const dist = 36;
+        camera.position.set(
+          target.x + dist * Math.sin(phi) * Math.sin(theta),
+          target.y + dist * Math.cos(phi),
+          target.z + dist * Math.sin(phi) * Math.cos(theta)
+        );
+        camera.lookAt(target);
+        camera.updateProjectionMatrix();
+      };
+      updateCamera();
+      let renderer;
+      try {
+        renderer = new WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
+      } catch {
+        kit.dispose();
+        return;
+      }
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.setSize(width, height);
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = PCFSoftShadowMap;
+      renderer.toneMapping = ACESFilmicToneMapping;
+      renderer.toneMappingExposure = darkFactoryMode ? 1.15 : 1.02;
+      renderer.outputColorSpace = SRGBColorSpace;
+      container.innerHTML = "";
+      container.appendChild(renderer.domElement);
+      const lights = new Lights();
+      scene.add(lights.hemi, lights.sun, lights.sun.target);
+      lights.set([{ x0: -6.5, x1: 6.5, y0: 0, y1: totalH + 2, z0: -4.5, z1: 4.5 }], palette, false);
+      if (!darkFactoryMode) {
+        const dayFill = new DirectionalLight(16777215, 0.85);
+        dayFill.position.set(-10, 18, 12);
+        scene.add(dayFill);
+      }
+      const matSlab = kit.matte(darkFactoryMode ? [0.13, 0.15, 0.19] : [0.82, 0.84, 0.88], { roughness: 0.82 });
+      const matWall = kit.matte(darkFactoryMode ? [0.16, 0.18, 0.22] : [0.89, 0.9, 0.93], { roughness: 0.85 });
+      const matSteel = kit.matte(palette.steel, { roughness: 0.42, metalness: 0.45 });
+      const matWood = kit.matte(palette.wood, { roughness: 0.55 });
+      const matGlass = kit.own(
+        new MeshPhysicalMaterial({
+          color: darkFactoryMode ? 6333946 : 3900150,
+          transparent: true,
+          opacity: 0.16,
+          roughness: 0.1
+        })
+      );
+      const shaftX = -4.2;
+      const shaftZ = -2.2;
+      const shaft = new Mesh(kit.own(new BoxGeometry(0.95, totalH + 0.6, 0.95)), matGlass);
+      shaft.position.set(shaftX, totalH / 2, shaftZ);
+      scene.add(shaft);
+      for (const sx of [-0.46, 0.46]) {
+        for (const sz of [-0.46, 0.46]) {
+          const rail = new Mesh(kit.own(new CylinderGeometry(0.03, 0.03, totalH + 0.7, 8)), matSteel);
+          rail.position.set(shaftX + sx, totalH / 2, shaftZ + sz);
+          scene.add(rail);
+        }
+      }
+      const dataCapsules = [];
+      for (let i = 0; i < 4; i += 1) {
+        const cap = new Mesh(
+          kit.own(new BoxGeometry(0.42, 0.24, 0.42)),
+          kit.matte(palette.lane, { roughness: 0.2, emissive: colour(palette.lane), emissiveIntensity: 0.85 })
+        );
+        cap.position.set(shaftX, 0.5, shaftZ);
+        scene.add(cap);
+        dataCapsules.push({ mesh: cap, speed: 0.22 + i * 0.06, offset: i * 0.25 });
+      }
+      const avatars = [];
+      const conveyorPackets = [];
+      const warningBeacons = [];
+      const holoCores = [];
+      const hitTargets = [];
+      const floorByHit = /* @__PURE__ */ new WeakMap();
+      const floorW = 10.6;
+      const floorD = 6.2;
+      floors.forEach((floor, fIdx) => {
+        const y0 = fIdx * FLOOR_H;
+        const floorGroup = new Group();
+        floorGroup.position.set(0, y0, 0);
+        scene.add(floorGroup);
+        const floorAccent = floor.errorCount > 0 ? [0.95, 0.32, 0.34] : floor.isBoard ? [0.96, 0.78, 0.24] : floor.workingCount > 0 ? palette.accent.reviewer : floor.estagio === "planejado" ? [0.45, 0.48, 0.55] : palette.lane;
+        const matAccent = kit.matte(floorAccent, {
+          roughness: 0.3,
+          emissive: colour(floorAccent),
+          emissiveIntensity: darkFactoryMode ? 0.65 : 0.35
+        });
+        const slab = new Mesh(kit.own(new BoxGeometry(floorW, 0.26, floorD)), matSlab);
+        slab.position.set(0, -0.13, 0);
+        slab.receiveShadow = true;
+        slab.castShadow = true;
+        floorGroup.add(slab);
+        const trimFront = new Mesh(kit.own(new BoxGeometry(floorW + 0.04, 0.07, 0.07)), matAccent);
+        trimFront.position.set(0, -0.02, floorD / 2);
+        floorGroup.add(trimFront);
+        const trimRight = new Mesh(kit.own(new BoxGeometry(0.07, 0.07, floorD + 0.04)), matAccent);
+        trimRight.position.set(floorW / 2, -0.02, 0);
+        floorGroup.add(trimRight);
+        const wallH = FLOOR_H - 0.32;
+        const backWall = new Mesh(kit.own(new BoxGeometry(floorW, wallH, 0.18)), matWall);
+        backWall.position.set(0, wallH / 2, -floorD / 2 + 0.09);
+        backWall.receiveShadow = true;
+        floorGroup.add(backWall);
+        const leftWall = new Mesh(kit.own(new BoxGeometry(0.18, wallH, floorD)), matWall);
+        leftWall.position.set(-floorW / 2 + 0.09, wallH / 2, 0);
+        leftWall.receiveShadow = true;
+        floorGroup.add(leftWall);
+        for (const [px2, pz2] of [
+          [floorW / 2 - 0.14, -floorD / 2 + 0.14],
+          [floorW / 2 - 0.14, floorD / 2 - 0.14],
+          [-floorW / 2 + 0.14, floorD / 2 - 0.14]
+        ]) {
+          const col = new Mesh(kit.own(new BoxGeometry(0.14, wallH, 0.14)), matSteel);
+          col.position.set(px2, wallH / 2, pz2);
+          floorGroup.add(col);
+        }
+        const subText = floor.isBoard ? `${floor.agentesCount} conselheiros · ${floor.workingCount} em turno` : `${floor.estagio.toUpperCase()} · ${floor.agentesCount} agentes · ${floor.workingCount} ativos`;
+        const signTex = makeFloorSignTexture(kit, `${fIdx + 1}F · ${floor.nome}`, subText, floorAccent, darkFactoryMode);
+        const signMesh = new Mesh(
+          kit.own(new PlaneGeometry(3.4, 0.74)),
+          kit.own(new MeshBasicMaterial({ map: signTex }))
+        );
+        signMesh.position.set(1.4, wallH - 0.62, -floorD / 2 + 0.21);
+        floorGroup.add(signMesh);
+        if (floor.errorCount > 0) {
+          const beacon = new Mesh(
+            kit.own(new CylinderGeometry(0.14, 0.18, 0.24, 12)),
+            kit.matte([0.98, 0.25, 0.28], { roughness: 0.2, emissive: 15680580, emissiveIntensity: 1.2 })
+          );
+          beacon.position.set(4.5, 0.14, 2.3);
+          floorGroup.add(beacon);
+          warningBeacons.push({ mesh: beacon, phase: fIdx * 1.1 });
+        }
+        if (floor.isBoard) {
+          const table = new Mesh(kit.own(new BoxGeometry(4.4, 0.12, 1.9)), matWood);
+          table.position.set(0.6, 0.62, 0.2);
+          table.castShadow = true;
+          table.receiveShadow = true;
+          floorGroup.add(table);
+          const holo = new Mesh(
+            kit.own(new OctahedronGeometry(0.38, 0)),
+            kit.own(
+              new MeshBasicMaterial({
+                color: colour(floorAccent),
+                wireframe: true,
+                transparent: true,
+                opacity: 0.85
+              })
+            )
+          );
+          holo.position.set(0.6, 1.38, 0.2);
+          floorGroup.add(holo);
+          holoCores.push(holo);
+          const slots = [
+            [-2, 0, 0.2],
+            [-0.5, 0, 1.55],
+            [0.7, 0, 1.55],
+            [1.9, 0, 1.55],
+            [-0.2, 0, -1.15],
+            [1.4, 0, -1.15]
+          ];
+          floor.agents.slice(0, slots.length).forEach((ag, idx) => {
+            const av = buildCustomAvatar3D(kit, palette, ag, { seatHeight: 0.12, scale: 0.92, showPortraitMedallion: true });
+            const [ax, ay, az] = slots[idx];
+            av.root.position.set(ax, ay, az);
+            av.root.rotation.y = idx === 0 ? Math.PI / 2 : az > 0.2 ? Math.PI : 0;
+            floorGroup.add(av.root);
+            avatars.push({ handle: av, phase: idx * 0.9, working: ag.status === "working", error: ag.status === "error" });
+          });
+        } else {
+          const belt = new Mesh(kit.own(new BoxGeometry(7.2, 0.12, 0.85)), matSteel);
+          belt.position.set(0.8, 0.18, 1.45);
+          belt.receiveShadow = true;
+          floorGroup.add(belt);
+          const pktCount = floor.estagio === "planejado" ? 1 : 3;
+          for (let pIdx = 0; pIdx < pktCount; pIdx += 1) {
+            const pkt = new Mesh(
+              kit.own(new BoxGeometry(0.44, 0.28, 0.44)),
+              kit.matte(floorAccent, { roughness: 0.35, emissive: colour(floorAccent), emissiveIntensity: 0.45 })
+            );
+            pkt.position.set(0, y0 + 0.38, 1.45);
+            pkt.castShadow = true;
+            scene.add(pkt);
+            conveyorPackets.push({
+              mesh: pkt,
+              y: y0 + 0.38,
+              z: 1.45,
+              speed: floor.workingCount > 0 ? 1.5 : 0.65,
+              offset: pIdx / pktCount
+            });
+          }
+          floor.agents.slice(0, 6).forEach((ag, idx) => {
+            const dx = -2.2 + idx * 1.35;
+            const dz = -0.85;
+            const desk = new Mesh(kit.own(new BoxGeometry(0.92, 0.56, 0.54)), matWood);
+            desk.position.set(dx, 0.28, dz + 0.42);
+            desk.castShadow = true;
+            floorGroup.add(desk);
+            const av = buildCustomAvatar3D(kit, palette, ag, { seatHeight: 0.08, scale: 0.86, showPortraitMedallion: true });
+            av.root.position.set(dx, 0, dz - 0.15);
+            floorGroup.add(av.root);
+            avatars.push({ handle: av, phase: fIdx * 1.7 + idx * 0.8, working: ag.status === "working", error: ag.status === "error" });
+          });
+        }
+        const hitBox = new Mesh(
+          kit.own(new BoxGeometry(floorW, FLOOR_H - 0.2, floorD)),
+          kit.own(new MeshBasicMaterial({ visible: false }))
+        );
+        hitBox.position.set(0, FLOOR_H / 2 - 0.1, 0);
+        floorGroup.add(hitBox);
+        hitTargets.push(hitBox);
+        floorByHit.set(hitBox, { floor, y: y0 + 1.1 });
+      });
+      const raycaster = new Raycaster();
+      const pointer = new Vector2();
+      let dragging = false;
+      let moved = false;
+      let lastX = 0;
+      let lastY = 0;
+      const pickFloor = (e) => {
+        const rect = renderer.domElement.getBoundingClientRect();
+        pointer.x = (e.clientX - rect.left) / rect.width * 2 - 1;
+        pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        raycaster.setFromCamera(pointer, camera);
+        const hits = raycaster.intersectObjects(hitTargets, false);
+        if (hits.length === 0) return null;
+        return floorByHit.get(hits[0].object) || null;
+      };
+      const onDown = (e) => {
+        dragging = true;
+        moved = false;
+        lastX = e.clientX;
+        lastY = e.clientY;
+        renderer.domElement.style.cursor = "grabbing";
+      };
+      const onMove = (e) => {
+        if (dragging) {
+          const dx = e.clientX - lastX;
+          const dy = e.clientY - lastY;
+          if (Math.abs(dx) > 2 || Math.abs(dy) > 2) moved = true;
+          theta -= dx * 8e-3;
+          phi = Math.max(0.42, Math.min(1.3, phi - dy * 6e-3));
+          lastX = e.clientX;
+          lastY = e.clientY;
+          updateCamera();
+          return;
+        }
+        const hit2 = pickFloor(e);
+        setHoveredSlug(hit2 ? hit2.floor.slug : null);
+        renderer.domElement.style.cursor = hit2 ? "pointer" : "grab";
+      };
+      const onUp = (e) => {
+        if (dragging && !moved) {
+          const hit2 = pickFloor(e);
+          if (hit2) {
+            setSelectedSlug(hit2.floor.slug);
+            targetFloorYRef.current = hit2.y;
+            targetFrustumRef.current = 8.4;
+          } else {
+            setSelectedSlug(null);
+            targetFloorYRef.current = defaultCenterY;
+            targetFrustumRef.current = defaultFrustum;
+          }
+        }
+        dragging = false;
+        renderer.domElement.style.cursor = "grab";
+      };
+      const onDblClick = (e) => {
+        const hit2 = pickFloor(e);
+        if (hit2) props.onEnterFloor(hit2.floor.slug);
+      };
+      const onWheel = (e) => {
+        e.preventDefault();
+        const nextF = Math.max(6.2, Math.min(24, frustum + e.deltaY * 0.01));
+        frustum = nextF;
+        targetFrustumRef.current = nextF;
+        updateCamera();
+      };
+      const dom = renderer.domElement;
+      dom.style.cursor = "grab";
+      dom.addEventListener("mousedown", onDown);
+      dom.addEventListener("mousemove", onMove);
+      dom.addEventListener("dblclick", onDblClick);
+      window.addEventListener("mouseup", onUp);
+      dom.addEventListener("wheel", onWheel, { passive: false });
+      let rafId = 0;
+      const clock = new Clock();
+      const animate = () => {
+        rafId = requestAnimationFrame(animate);
+        const t = clock.getElapsedTime();
+        let camDirty = false;
+        if (targetFloorYRef.current !== null && Math.abs(target.y - targetFloorYRef.current) > 0.01) {
+          target.y += (targetFloorYRef.current - target.y) * 0.09;
+          camDirty = true;
+        }
+        if (targetFrustumRef.current !== null && Math.abs(frustum - targetFrustumRef.current) > 0.02) {
+          frustum += (targetFrustumRef.current - frustum) * 0.09;
+          camDirty = true;
+        }
+        if (camDirty) updateCamera();
+        for (const a of avatars) {
+          a.handle.animate(t, a.phase, { working: a.working, error: a.error });
+        }
+        for (const cap of dataCapsules) {
+          const frac = (t * cap.speed + cap.offset) % 1;
+          const pingPong = frac < 0.5 ? frac * 2 : (1 - frac) * 2;
+          cap.mesh.position.y = 0.4 + pingPong * Math.max(1, totalH - 0.9);
+          cap.mesh.rotation.y = t * 1.4;
+        }
+        for (const pkt of conveyorPackets) {
+          const frac = (t * pkt.speed * 0.16 + pkt.offset) % 1;
+          pkt.mesh.position.x = -2.4 + frac * 6.4;
+          pkt.mesh.position.y = pkt.y + Math.sin(t * 4 + pkt.offset * 6) * 0.02;
+        }
+        for (const holo of holoCores) {
+          holo.rotation.y = t * 0.9;
+          holo.rotation.x = Math.sin(t * 0.7) * 0.25;
+        }
+        for (const b of warningBeacons) {
+          b.mesh.scale.setScalar(1 + Math.sin(t * 7 + b.phase) * 0.14);
+        }
+        renderer.render(scene, camera);
+      };
+      animate();
+      const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => {
+        const w = Math.max(320, container.clientWidth || width);
+        const hh = Math.max(320, container.clientHeight || height);
+        renderer.setSize(w, hh);
+        updateCamera();
+      }) : null;
+      ro == null ? void 0 : ro.observe(container);
+      return () => {
+        cancelAnimationFrame(rafId);
+        ro == null ? void 0 : ro.disconnect();
+        dom.removeEventListener("mousedown", onDown);
+        dom.removeEventListener("mousemove", onMove);
+        dom.removeEventListener("dblclick", onDblClick);
+        window.removeEventListener("mouseup", onUp);
+        dom.removeEventListener("wheel", onWheel);
+        lights.dispose();
+        kit.dispose();
+        renderer.dispose();
+      };
+    }, [floorsSignature, fitTick, darkFactoryMode]);
+    const focusedFloor = floors.find((f) => f.slug === (selectedSlug || hoveredSlug)) || null;
+    const focusFloorBySlug = (slug) => {
+      setSelectedSlug(slug);
+      if (!slug) {
+        setFitTick((n) => n + 1);
+        return;
+      }
+      const idx = floors.findIndex((f) => f.slug === slug);
+      if (idx >= 0) {
+        targetFloorYRef.current = idx * 3.2 + 1.1;
+        targetFrustumRef.current = 8.4;
+      }
+    };
+    return h(
+      "div",
+      {
+        "data-holding-tower-3d": "true",
+        style: { display: "flex", flexDirection: "column", gap: "8px", flex: 1, minHeight: "560px" }
+      },
+      h(
+        "div",
+        {
+          ref: hostRef,
+          style: {
+            position: "relative",
+            flex: 1,
+            minHeight: "520px",
+            borderRadius: "12px",
+            border: "1px solid var(--border)",
+            background: darkFactoryMode ? "#090b10" : "#eef2f7",
+            overflow: "hidden"
+          }
+        },
+        h("div", { ref: mountRef, style: { width: "100%", height: "100%" } }),
+        // Seletor rápido de andares (Elevador na esquerda)
+        h(
+          "div",
+          {
+            style: {
+              position: "absolute",
+              top: "12px",
+              left: "12px",
+              zIndex: 20,
+              display: "flex",
+              flexDirection: "column",
+              gap: "4px",
+              padding: "8px",
+              borderRadius: "10px",
+              border: "1px solid var(--border)",
+              background: "rgba(14, 17, 24, 0.9)",
+              backdropFilter: "blur(10px)"
+            }
+          },
+          h("div", { style: { fontSize: "9.5px", fontWeight: 700, letterSpacing: "0.06em", color: "var(--muted-foreground)", padding: "0 4px 3px" } }, "TORRE CORTEXX"),
+          [...floors].reverse().map((f, revIdx) => {
+            const floorNum = floors.length - revIdx;
+            const active = selectedSlug === f.slug;
+            return h(
+              "button",
+              {
+                key: f.slug,
+                type: "button",
+                className: "of-btn",
+                "data-variant": active ? "primary" : void 0,
+                style: { justifyContent: "space-between", fontSize: "11px", padding: "4px 8px", minWidth: "164px" },
+                onClick: () => focusFloorBySlug(active ? null : f.slug)
+              },
+              h("span", null, `${floorNum}F · ${f.isBoard ? "Conselho" : f.nome}`),
+              h(
+                "span",
+                { className: "of-mono", style: { fontSize: "10px", opacity: 0.85 } },
+                f.errorCount > 0 ? `!${f.errorCount}` : f.workingCount > 0 ? `⚡${f.workingCount}` : `${f.agentesCount}`
+              )
+            );
+          })
+        ),
+        // Card flutuante do andar selecionado/hover no canto superior direito
+        focusedFloor && h(
+          "div",
+          {
+            style: {
+              position: "absolute",
+              top: "12px",
+              right: "12px",
+              zIndex: 22,
+              width: "268px",
+              borderRadius: "10px",
+              border: "1px solid var(--border-strong)",
+              background: "rgba(15, 18, 24, 0.94)",
+              backdropFilter: "blur(10px)",
+              padding: "11px 13px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "8px"
+            }
+          },
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" } },
+            h("strong", { style: { fontSize: "12.5px" } }, focusedFloor.nome),
+            h(
+              "span",
+              {
+                className: "of-pill",
+                "data-tone": focusedFloor.errorCount > 0 ? "failed" : focusedFloor.workingCount > 0 ? "running" : "done",
+                style: { fontSize: "10px" }
+              },
+              focusedFloor.estagio
+            )
+          ),
+          h(
+            "div",
+            { className: "of-muted", style: { fontSize: "11px" } },
+            `${focusedFloor.agentesCount} agentes · ${focusedFloor.workingCount} respondendo${focusedFloor.errorCount > 0 ? ` · ${focusedFloor.errorCount} com erro` : ""}`
+          ),
+          h(
+            "div",
+            { style: { display: "flex", gap: "6px" } },
+            h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                "data-variant": "primary",
+                style: { flex: 1, justifyContent: "center", fontSize: "11px" },
+                onClick: () => props.onEnterFloor(focusedFloor.slug)
+              },
+              focusedFloor.isBoard ? "Entrar na Sala 3D ↗" : "Entrar no Andar 3D ↗"
+            ),
+            props.onOpenChannel && h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                style: { fontSize: "11px" },
+                onClick: () => props.onOpenChannel(focusedFloor.slug)
+              },
+              "Canal"
+            )
+          )
+        ),
+        // Controles no canto inferior direito (Dia/Noite Dark Factory, Tela cheia, Fit)
+        h(
+          "div",
+          { style: { position: "absolute", right: "12px", bottom: "12px", zIndex: 20, display: "inline-flex", gap: "6px" } },
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              style: { background: "rgba(18, 20, 26, 0.88)" },
+              onClick: () => setDarkFactoryMode((v2) => !v2),
+              title: "Alternar iluminação Dia vs. Dark Factory"
+            },
+            darkFactoryMode ? "☀ Modo Dia" : "☾ Dark Factory"
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              style: { background: "rgba(18, 20, 26, 0.88)" },
+              onClick: () => {
+                var _a, _b;
+                const el = hostRef.current;
+                if (!el) return;
+                try {
+                  if (document.fullscreenElement) {
+                    void ((_a = document.exitFullscreen) == null ? void 0 : _a.call(document));
+                    setIsFullscreen(false);
+                  } else {
+                    void ((_b = el.requestFullscreen) == null ? void 0 : _b.call(el));
+                    setIsFullscreen(true);
+                  }
+                } catch {
+                }
+              }
+            },
+            isFullscreen ? "↙ Sair" : "⛶ Tela cheia"
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              style: { background: "rgba(18, 20, 26, 0.88)" },
+              onClick: () => {
+                setSelectedSlug(null);
+                setFitTick((n) => n + 1);
+              }
+            },
+            "⤢ Fit"
+          )
+        )
+      ),
+      h(
+        "div",
+        { className: "of-muted", style: { textAlign: "center", fontSize: "11px" } },
+        `Torre da Holding Cortexx · ${floors.length} andares ao vivo · Clique no andar para aproximar · Duplo clique para entrar`
       )
     );
   };
@@ -60882,7 +63203,7 @@ const PINNED_HOST_COMMANDS = Object.freeze([
   {
     id: "fabrica-status",
     scriptPath: "ferramentas/esteira/fabrica_status.py",
-    sha256: "3e720b87982d8633566d40638bb386e95f2077085cee37c13d89d022d12912aa"
+    sha256: "9cd75762a90c1fe8e234f5f8aa1eee575a90a127d537d0cb3cbd6ea46d628a95"
   },
   {
     id: "orgfy-kpis",
@@ -60998,6 +63319,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
   const h = React.createElement;
   const Floor3D = createFloor3DComponent(ctx);
   const Boardroom3D = createBoardroom3DComponent(ctx);
+  const HoldingTower3D = createHoldingTower3DComponent(ctx);
   const CodeDenInspectorDrawer = createCodeDenInspectorDrawer(React);
   const QuestionCardsPanel = createQuestionCardsPanel(React);
   const crdtStore = getOrgfyCrdtStore(ctx);
@@ -63181,6 +65503,14 @@ Nota: ${evidence.note}`
                 onRefresh: () => refresh(tenant, false, false),
                 loading,
                 Floor3D,
+                HoldingTower3D,
+                holding,
+                onEnterTowerFloor: (slug) => {
+                  setTenant(slug);
+                  setStoreyFocus("both");
+                  setTab("floor");
+                },
+                onOpenChannelInBuzz: handleOpenChannelInBuzz,
                 isBoardTenant,
                 Boardroom3D,
                 boardroomSeats

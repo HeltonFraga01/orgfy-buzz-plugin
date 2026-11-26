@@ -27,8 +27,8 @@ export interface BoardAndFloorProps {
   telemetry?: BuzzLiveTelemetrySnapshot;
   viewMode: "board" | "floor";
   onChangeViewMode: (m: "board" | "floor") => void;
-  storeyFocus: "workshop" | "lookout" | "both";
-  onChangeStoreyFocus: (s: "workshop" | "lookout" | "both") => void;
+  storeyFocus: "workshop" | "lookout" | "both" | "tower";
+  onChangeStoreyFocus: (s: "workshop" | "lookout" | "both" | "tower") => void;
   selectedAgentKey: string | null;
   onSelectAgentKey: (k: string | null) => void;
   onSelectItem: (item: FactoryWorkItem) => void;
@@ -42,6 +42,10 @@ export interface BoardAndFloorProps {
   onRefresh: () => void;
   loading: boolean;
   Floor3D?: any;
+  HoldingTower3D?: any;
+  holding?: any;
+  onEnterTowerFloor?: (slug: string) => void;
+  onOpenChannelInBuzz?: (slug: string) => void;
   isBoardTenant?: boolean;
   Boardroom3D?: any;
   boardroomSeats?: Array<{ id: string; label: string; role: string; status: "active" | "working" | "planned"; onClick?: () => void }>;
@@ -197,15 +201,22 @@ export function renderFactoryBoardAndFloor(props: BoardAndFloorProps) {
       h(
         "div",
         { style: { marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
-        viewMode === "floor" && !props.isBoardTenant &&
+        viewMode === "floor" &&
           h(
             "div",
             { className: "of-segmented", role: "radiogroup", "aria-label": "Andares da fábrica" },
-            ([
-              { id: "workshop", label: "Oficina" },
-              { id: "lookout", label: "Mirante" },
-              { id: "both", label: "Ambos" },
-            ] as const).map((st) =>
+            (props.isBoardTenant
+              ? ([
+                  { id: "both", label: "Sala 3D" },
+                  { id: "tower", label: "Torre Holding" },
+                ] as const)
+              : ([
+                  { id: "workshop", label: "Oficina" },
+                  { id: "lookout", label: "Mirante" },
+                  { id: "both", label: "Ambos" },
+                  { id: "tower", label: "Torre Holding" },
+                ] as const)
+            ).map((st) =>
               h(
                 "button",
                 {
@@ -431,12 +442,24 @@ export function renderFactoryBoardAndFloor(props: BoardAndFloorProps) {
             })
           )
         )
-      : props.isBoardTenant && props.Boardroom3D
+      : storeyFocus === "tower" && props.HoldingTower3D
+        ? h(props.HoldingTower3D, {
+            holding: props.holding,
+            liveCrew,
+            telemetry: props.telemetry,
+            activeTenant: tenant,
+            onEnterFloor: (slug: string) => {
+              props.onEnterTowerFloor?.(slug);
+            },
+            onOpenChannel: (slug: string) => props.onOpenChannelInBuzz?.(slug),
+          })
+        : props.isBoardTenant && props.Boardroom3D
         ? h(props.Boardroom3D, {
             seats: props.boardroomSeats || [],
             title: "Sala de Reunião do Conselho · Conselheiros & Bestie (OrgFy Iris)",
             fullHeight: true,
             status,
+            holding: props.holding,
             liveCrew,
             telemetry: props.telemetry,
             onOpenAgentDm: (ag: any) => props.onOpenAgentDm?.(ag),
@@ -454,7 +477,7 @@ export function renderFactoryBoardAndFloor(props: BoardAndFloorProps) {
             status,
             liveCrew,
             telemetry: props.telemetry,
-            focus: storeyFocus,
+            focus: storeyFocus === "tower" ? "both" : storeyFocus,
             onSelectItem,
             onOpenAgentDm: (ag: any) => props.onOpenAgentDm?.(ag),
             onOpenTurnInSideChat: (turn: LiveAgentTurn) => props.onOpenTurnInSideChat?.(turn),

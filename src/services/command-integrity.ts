@@ -37,7 +37,7 @@ export const PINNED_HOST_COMMANDS: readonly PinnedHostCommandSpec[] = Object.fre
   {
     id: "fabrica-status",
     scriptPath: "ferramentas/esteira/fabrica_status.py",
-    sha256: "3e720b87982d8633566d40638bb386e95f2077085cee37c13d89d022d12912aa",
+    sha256: "9cd75762a90c1fe8e234f5f8aa1eee575a90a127d537d0cb3cbd6ea46d628a95",
   },
   {
     id: "orgfy-kpis",

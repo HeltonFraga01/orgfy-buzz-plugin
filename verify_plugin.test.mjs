@@ -2433,4 +2433,17 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
       assert.ok(Array.isArray(board.conselho) && board.conselho.length >= 6, "board.json deve declarar os 6 comitês do Conselho");
     }
   });
+
+  test("v18.8: Torre da Holding 3D Multi-Andares + Avatares 3D Personalizados + Holograma & Telão 3-Slides no Conselho", () => {
+    const bundle = fs.readFileSync(path.resolve(__dirname, "plugin.js"), "utf8");
+    const boardSrc = fs.readFileSync(path.resolve(__dirname, "src", "factory", "Boardroom3DCanvas.tsx"), "utf8");
+    const towerSrc = fs.readFileSync(path.resolve(__dirname, "src", "factory", "HoldingTower3DCanvas.tsx"), "utf8");
+    assert.ok(bundle.includes("data-holding-tower-3d"), "Torre da Holding 3D multi-andares deve estar no bundle");
+    assert.ok(bundle.includes("Torre Holding"), "Botão Torre Holding deve estar no seletor 3D");
+    assert.ok(bundle.includes("FINOPS & NEXUSMIND GATEWAY"), "Telão 3-slides interativo do Conselho deve estar no bundle");
+    assert.ok(boardSrc.includes("buildCustomAvatar3D"), "Boardroom3DCanvas deve usar avatares 3D personalizados");
+    assert.ok(boardSrc.includes("holoCore"), "Boardroom3DCanvas deve renderizar holograma central de reunião");
+    assert.ok(towerSrc.includes("conveyorPackets"), "HoldingTower3DCanvas deve animar pacotes trafegando nas esteiras");
+    assert.ok(towerSrc.includes("dataCapsules"), "HoldingTower3DCanvas deve animar elevador de dados entre andares");
+  });
 }

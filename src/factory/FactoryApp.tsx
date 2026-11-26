@@ -17,6 +17,7 @@ import { renderAgentProfileDrawer, renderFactoryBoardAndFloor, type LiveCrewAgen
 import { createCodeDenInspectorDrawer } from "../components/CodeDenInspectorDrawer";
 import { createFloor3DComponent } from "./codeden-floor/Floor3DCanvas";
 import { createBoardroom3DComponent } from "./Boardroom3DCanvas";
+import { createHoldingTower3DComponent } from "./HoldingTower3DCanvas";
 import { renderFactorySecondaryPage } from "./FactoryPages";
 import {
   dismissErrorTurn,
@@ -108,6 +109,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
   const h = React.createElement;
   const Floor3D = createFloor3DComponent(ctx);
   const Boardroom3D = createBoardroom3DComponent(ctx);
+  const HoldingTower3D = createHoldingTower3DComponent(ctx);
   const CodeDenInspectorDrawer = createCodeDenInspectorDrawer(React);
   const QuestionCardsPanel = createQuestionCardsPanel(React);
   const crdtStore = getOrgfyCrdtStore(ctx);
@@ -415,7 +417,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     // Estados das páginas
     const [scorecardView, setScorecardView] = React.useState<"builders" | "reviewers" | "pairs">("builders");
     const [scorecardDays, setScorecardDays] = React.useState<7 | 30 | 90>(30);
-    const [storeyFocus, setStoreyFocus] = React.useState<"workshop" | "lookout" | "both">("both");
+    const [storeyFocus, setStoreyFocus] = React.useState<"workshop" | "lookout" | "both" | "tower">("both");
     const [selectedAgentKey, setSelectedAgentKey] = React.useState<string | null>(null);
     const [inboxFilter, setInboxFilter] = React.useState<"all" | "asks" | "reviews" | "problems">("all");
     const [inboxDismissedIds, setInboxDismissedIds] = React.useState<string[]>(() => {
@@ -2503,6 +2505,14 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                     onRefresh: () => refresh(tenant, false, false),
                     loading,
                     Floor3D,
+                    HoldingTower3D,
+                    holding,
+                    onEnterTowerFloor: (slug: string) => {
+                      setTenant(slug);
+                      setStoreyFocus("both");
+                      setTab("floor");
+                    },
+                    onOpenChannelInBuzz: handleOpenChannelInBuzz,
                     isBoardTenant,
                     Boardroom3D,
                     boardroomSeats,
