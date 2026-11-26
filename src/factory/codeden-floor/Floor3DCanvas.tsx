@@ -693,13 +693,40 @@ export function createFloor3DComponent(ctx: Context) {
         h(
           "div",
           { style: { display: "flex", alignItems: "center", gap: "6px", minWidth: 0 } },
-          liveMatch?.picture
-            ? h("img", { src: liveMatch.picture, alt: ag.name, style: { width: "16px", height: "16px", borderRadius: "4px", objectFit: "cover", flexShrink: 0 } })
-            : h("span", {
-                className: "of-dot",
-                "data-tone": liveTurn ? (liveTurn.state === "error" ? "failed" : "running") : ag.inBuzz ? "done" : "idle",
-              }),
-          h("span", { style: { fontSize: "11.5px", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 } }, ag.name),
+          h(
+            "button",
+            {
+              type: "button",
+              "data-agent-profile-trigger": ag.name,
+              title: `Abrir perfil de ${ag.name} na coluna lateral`,
+              style: {
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                flex: 1,
+                minWidth: 0,
+                border: "none",
+                background: "transparent",
+                color: "inherit",
+                font: "inherit",
+                padding: 0,
+                cursor: onOpenAgentProfile ? "pointer" : "inherit",
+                textAlign: "left",
+              },
+              onClick: (ev: any) => {
+                if (!onOpenAgentProfile) return;
+                ev.stopPropagation();
+                onOpenAgentProfile({ key: ag.agentKey, pubkey: ag.pubkey, name: ag.name });
+              },
+            },
+            liveMatch?.picture
+              ? h("img", { src: liveMatch.picture, alt: ag.name, style: { width: "16px", height: "16px", borderRadius: "4px", objectFit: "cover", flexShrink: 0 } })
+              : h("span", {
+                  className: "of-dot",
+                  "data-tone": liveTurn ? (liveTurn.state === "error" ? "failed" : "running") : ag.inBuzz ? "done" : "idle",
+                }),
+            h("span", { style: { fontSize: "11.5px", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 } }, ag.name)
+          ),
           assignedItem &&
             h("span", { className: "of-mono of-muted", style: { fontSize: "9.5px", flexShrink: 0 } }, `#${assignedItem.id.slice(0, 6)}`)
         ),
@@ -1311,8 +1338,33 @@ export function createFloor3DComponent(ctx: Context) {
               "div",
               { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", borderBottom: "1px solid var(--border)", paddingBottom: "7px" } },
               h(
-                "div",
-                { style: { display: "inline-flex", alignItems: "center", gap: "7px", minWidth: 0 } },
+                "button",
+                {
+                  type: "button",
+                  title: `Abrir perfil de ${displayTitle} na coluna lateral`,
+                  style: {
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "7px",
+                    minWidth: 0,
+                    border: "none",
+                    background: "transparent",
+                    color: "inherit",
+                    font: "inherit",
+                    padding: 0,
+                    cursor: onOpenAgentProfile && (matchedTenantAg || matchedLive) ? "pointer" : "default",
+                    textAlign: "left",
+                  },
+                  onClick: () => {
+                    if (onOpenAgentProfile && (matchedTenantAg || matchedLive)) {
+                      onOpenAgentProfile({
+                        key: matchedTenantAg?.agentKey || matchedLive?.key,
+                        pubkey: matchedTenantAg?.pubkey || matchedLive?.pubkey,
+                        name: displayTitle,
+                      });
+                    }
+                  },
+                },
                 matchedLive?.picture && h("img", { src: matchedLive.picture, alt: displayTitle, style: { width: "20px", height: "20px", borderRadius: "5px", objectFit: "cover" } }),
                 h("strong", { style: { fontSize: "12.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, displayTitle)
               ),

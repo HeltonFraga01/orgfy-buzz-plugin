@@ -16293,8 +16293,35 @@ function renderFactoryOverviewPanel(props) {
               h(
                 "div",
                 { style: { display: "flex", alignItems: "center", gap: "7px", minWidth: 0 } },
-                (turnCrew == null ? void 0 : turnCrew.picture) ? h("img", { src: turnCrew.picture, alt: t.agentName, style: { width: "18px", height: "18px", borderRadius: "5px", objectFit: "cover", border: "1px solid var(--status-running)", flexShrink: 0 } }) : h("span", { className: "of-dot", "data-tone": t.state === "error" ? "failed" : "running" }),
-                h("strong", { style: { fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 } }, t.agentName),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    "data-agent-profile-trigger": t.agentName,
+                    title: `Abrir perfil de ${t.agentName} na coluna lateral`,
+                    style: {
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "7px",
+                      flex: 1,
+                      minWidth: 0,
+                      border: "none",
+                      background: "transparent",
+                      color: "inherit",
+                      font: "inherit",
+                      padding: 0,
+                      cursor: props.onOpenAgentProfile ? "pointer" : "inherit",
+                      textAlign: "left"
+                    },
+                    onClick: (e) => {
+                      if (!props.onOpenAgentProfile) return;
+                      e.stopPropagation();
+                      props.onOpenAgentProfile({ pubkey: t.agentPubkey, name: t.agentName });
+                    }
+                  },
+                  (turnCrew == null ? void 0 : turnCrew.picture) ? h("img", { src: turnCrew.picture, alt: t.agentName, style: { width: "18px", height: "18px", borderRadius: "5px", objectFit: "cover", border: "1px solid var(--status-running)", flexShrink: 0 } }) : h("span", { className: "of-dot", "data-tone": t.state === "error" ? "failed" : "running" }),
+                  h("strong", { style: { fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 } }, t.agentName)
+                ),
                 onInterruptTurn && t.stoppable && h(
                   "button",
                   {
@@ -17003,8 +17030,28 @@ function renderFactoryOverviewPanel(props) {
                             "td",
                             { style: { fontWeight: 600 } },
                             h(
-                              "span",
-                              { style: { display: "inline-flex", alignItems: "center", gap: "8px" } },
+                              "button",
+                              {
+                                type: "button",
+                                "data-agent-profile-trigger": ag.name,
+                                title: `Abrir perfil de ${ag.name} na coluna lateral`,
+                                style: {
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "8px",
+                                  border: "none",
+                                  background: "transparent",
+                                  color: "inherit",
+                                  font: "inherit",
+                                  padding: 0,
+                                  cursor: props.onOpenAgentProfile ? "pointer" : "default",
+                                  textAlign: "left"
+                                },
+                                onClick: () => {
+                                  var _a3;
+                                  return (_a3 = props.onOpenAgentProfile) == null ? void 0 : _a3.call(props, { key: ag.agentKey, pubkey: ag.pubkey, name: ag.name });
+                                }
+                              },
                               (liveMatch == null ? void 0 : liveMatch.picture) ? h("img", {
                                 src: liveMatch.picture,
                                 alt: ag.name,
@@ -17194,22 +17241,56 @@ function renderFactoryOverviewPanel(props) {
           const liveTurn = pkLower && (telemetry == null ? void 0 : telemetry.byPubkey) ? telemetry.byPubkey[pkLower] : null;
           const presence = pkLower && (telemetry == null ? void 0 : telemetry.presenceByPubkey) ? telemetry.presenceByPubkey[pkLower] : void 0;
           return h(
-            "button",
+            "div",
             {
               key: ag.agentKey || ag.name,
-              type: "button",
+              role: "button",
+              tabIndex: 0,
               className: "of-list-row",
-              onClick: () => onOpenAgentDm == null ? void 0 : onOpenAgentDm({ key: ag.agentKey, pubkey: ag.pubkey, name: ag.name })
+              onClick: () => onOpenAgentDm == null ? void 0 : onOpenAgentDm({ key: ag.agentKey, pubkey: ag.pubkey, name: ag.name }),
+              onKeyDown: (e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onOpenAgentDm == null ? void 0 : onOpenAgentDm({ key: ag.agentKey, pubkey: ag.pubkey, name: ag.name });
+                }
+              }
             },
-            (liveMatch == null ? void 0 : liveMatch.picture) ? h("img", { src: liveMatch.picture, alt: ag.name, style: { width: "22px", height: "22px", borderRadius: "6px", objectFit: "cover", border: liveTurn ? "1.5px solid var(--status-running)" : "1px solid var(--border)", flexShrink: 0 } }) : h("span", { className: "of-dot", "data-tone": liveTurn ? liveTurn.state === "error" ? "failed" : "running" : ag.inBuzz ? "done" : "idle" }),
             h(
-              "div",
-              { style: { flex: 1, minWidth: 0 } },
-              h("div", { style: { fontWeight: 600, fontSize: "12.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, ag.name),
+              "button",
+              {
+                type: "button",
+                "data-agent-profile-trigger": ag.name,
+                title: `Abrir perfil de ${ag.name} na coluna lateral`,
+                style: {
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "9px",
+                  flex: 1,
+                  minWidth: 0,
+                  border: "none",
+                  background: "transparent",
+                  color: "inherit",
+                  font: "inherit",
+                  padding: 0,
+                  cursor: props.onOpenAgentProfile ? "pointer" : "inherit",
+                  textAlign: "left"
+                },
+                onClick: (e) => {
+                  if (!props.onOpenAgentProfile) return;
+                  e.stopPropagation();
+                  props.onOpenAgentProfile({ key: ag.agentKey, pubkey: ag.pubkey, name: ag.name });
+                }
+              },
+              (liveMatch == null ? void 0 : liveMatch.picture) ? h("img", { src: liveMatch.picture, alt: ag.name, style: { width: "22px", height: "22px", borderRadius: "6px", objectFit: "cover", border: liveTurn ? "1.5px solid var(--status-running)" : "1px solid var(--border)", flexShrink: 0 } }) : h("span", { className: "of-dot", "data-tone": liveTurn ? liveTurn.state === "error" ? "failed" : "running" : ag.inBuzz ? "done" : "idle" }),
               h(
                 "div",
-                { className: "of-mono of-muted", style: { fontSize: "10.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
-                liveTurn ? `⚡ ${liveTurn.stepLabel}` : `${ag.papel} · ${ag.model}`
+                { style: { flex: 1, minWidth: 0 } },
+                h("div", { style: { fontWeight: 600, fontSize: "12.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, ag.name),
+                h(
+                  "div",
+                  { className: "of-mono of-muted", style: { fontSize: "10.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
+                  liveTurn ? `⚡ ${liveTurn.stepLabel}` : `${ag.papel} · ${ag.model}`
+                )
               )
             ),
             h("span", { className: "of-muted", style: { fontSize: "11px", flexShrink: 0 } }, liveTurn ? "Respondendo" : presence === "online" ? "Online" : "Disponível"),
@@ -50743,11 +50824,38 @@ function createFloor3DComponent(ctx) {
         h(
           "div",
           { style: { display: "flex", alignItems: "center", gap: "6px", minWidth: 0 } },
-          (liveMatch == null ? void 0 : liveMatch.picture) ? h("img", { src: liveMatch.picture, alt: ag.name, style: { width: "16px", height: "16px", borderRadius: "4px", objectFit: "cover", flexShrink: 0 } }) : h("span", {
-            className: "of-dot",
-            "data-tone": liveTurn ? liveTurn.state === "error" ? "failed" : "running" : ag.inBuzz ? "done" : "idle"
-          }),
-          h("span", { style: { fontSize: "11.5px", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 } }, ag.name),
+          h(
+            "button",
+            {
+              type: "button",
+              "data-agent-profile-trigger": ag.name,
+              title: `Abrir perfil de ${ag.name} na coluna lateral`,
+              style: {
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                flex: 1,
+                minWidth: 0,
+                border: "none",
+                background: "transparent",
+                color: "inherit",
+                font: "inherit",
+                padding: 0,
+                cursor: onOpenAgentProfile ? "pointer" : "inherit",
+                textAlign: "left"
+              },
+              onClick: (ev) => {
+                if (!onOpenAgentProfile) return;
+                ev.stopPropagation();
+                onOpenAgentProfile({ key: ag.agentKey, pubkey: ag.pubkey, name: ag.name });
+              }
+            },
+            (liveMatch == null ? void 0 : liveMatch.picture) ? h("img", { src: liveMatch.picture, alt: ag.name, style: { width: "16px", height: "16px", borderRadius: "4px", objectFit: "cover", flexShrink: 0 } }) : h("span", {
+              className: "of-dot",
+              "data-tone": liveTurn ? liveTurn.state === "error" ? "failed" : "running" : ag.inBuzz ? "done" : "idle"
+            }),
+            h("span", { style: { fontSize: "11.5px", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 } }, ag.name)
+          ),
           assignedItem && h("span", { className: "of-mono of-muted", style: { fontSize: "9.5px", flexShrink: 0 } }, `#${assignedItem.id.slice(0, 6)}`)
         ),
         assignedItem && h(
@@ -51297,8 +51405,33 @@ function createFloor3DComponent(ctx) {
               "div",
               { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", borderBottom: "1px solid var(--border)", paddingBottom: "7px" } },
               h(
-                "div",
-                { style: { display: "inline-flex", alignItems: "center", gap: "7px", minWidth: 0 } },
+                "button",
+                {
+                  type: "button",
+                  title: `Abrir perfil de ${displayTitle} na coluna lateral`,
+                  style: {
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "7px",
+                    minWidth: 0,
+                    border: "none",
+                    background: "transparent",
+                    color: "inherit",
+                    font: "inherit",
+                    padding: 0,
+                    cursor: onOpenAgentProfile && (matchedTenantAg || matchedLive) ? "pointer" : "default",
+                    textAlign: "left"
+                  },
+                  onClick: () => {
+                    if (onOpenAgentProfile && (matchedTenantAg || matchedLive)) {
+                      onOpenAgentProfile({
+                        key: (matchedTenantAg == null ? void 0 : matchedTenantAg.agentKey) || (matchedLive == null ? void 0 : matchedLive.key),
+                        pubkey: (matchedTenantAg == null ? void 0 : matchedTenantAg.pubkey) || (matchedLive == null ? void 0 : matchedLive.pubkey),
+                        name: displayTitle
+                      });
+                    }
+                  }
+                },
                 (matchedLive == null ? void 0 : matchedLive.picture) && h("img", { src: matchedLive.picture, alt: displayTitle, style: { width: "20px", height: "20px", borderRadius: "5px", objectFit: "cover" } }),
                 h("strong", { style: { fontSize: "12.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, displayTitle)
               ),
@@ -52398,11 +52531,38 @@ function createBoardroom3DComponent(ctx) {
         h(
           "div",
           { style: { display: "flex", alignItems: "center", gap: "6px", minWidth: 0 } },
-          e.picture ? h("img", { src: e.picture, alt: e.displayName, style: { width: "16px", height: "16px", borderRadius: "4px", objectFit: "cover", flexShrink: 0 } }) : h("span", {
-            className: "of-dot",
-            "data-tone": e.liveTurn ? e.liveTurn.state === "error" ? "failed" : "running" : e.inBuzz ? "done" : "idle"
-          }),
-          h("span", { style: { fontSize: "11.5px", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 } }, e.displayName)
+          h(
+            "button",
+            {
+              type: "button",
+              "data-agent-profile-trigger": e.displayName,
+              title: `Abrir perfil de ${e.displayName} na coluna lateral`,
+              style: {
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                flex: 1,
+                minWidth: 0,
+                border: "none",
+                background: "transparent",
+                color: "inherit",
+                font: "inherit",
+                padding: 0,
+                cursor: props.onOpenAgentProfile ? "pointer" : "inherit",
+                textAlign: "left"
+              },
+              onClick: (ev) => {
+                if (!props.onOpenAgentProfile) return;
+                ev.stopPropagation();
+                props.onOpenAgentProfile({ key: e.agentKey, pubkey: e.pubkey, name: e.displayName });
+              }
+            },
+            e.picture ? h("img", { src: e.picture, alt: e.displayName, style: { width: "16px", height: "16px", borderRadius: "4px", objectFit: "cover", flexShrink: 0 } }) : h("span", {
+              className: "of-dot",
+              "data-tone": e.liveTurn ? e.liveTurn.state === "error" ? "failed" : "running" : e.inBuzz ? "done" : "idle"
+            }),
+            h("span", { style: { fontSize: "11.5px", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 } }, e.displayName)
+          )
         ),
         h(
           "div",
@@ -52735,8 +52895,29 @@ function createBoardroom3DComponent(ctx) {
             "div",
             { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", borderBottom: "1px solid var(--border)", paddingBottom: "7px" } },
             h(
-              "div",
-              { style: { display: "inline-flex", alignItems: "center", gap: "7px", minWidth: 0 } },
+              "button",
+              {
+                type: "button",
+                title: `Abrir perfil de ${focusedMeta.displayName} na coluna lateral`,
+                style: {
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "7px",
+                  minWidth: 0,
+                  border: "none",
+                  background: "transparent",
+                  color: "inherit",
+                  font: "inherit",
+                  padding: 0,
+                  cursor: props.onOpenAgentProfile && focusedMeta.pubkey ? "pointer" : "default",
+                  textAlign: "left"
+                },
+                onClick: () => {
+                  if (props.onOpenAgentProfile && focusedMeta.pubkey) {
+                    props.onOpenAgentProfile({ key: focusedMeta.agentKey, pubkey: focusedMeta.pubkey, name: focusedMeta.displayName });
+                  }
+                }
+              },
               focusedMeta.picture && h("img", { src: focusedMeta.picture, alt: focusedMeta.displayName, style: { width: "20px", height: "20px", borderRadius: "5px", objectFit: "cover" } }),
               h("strong", { style: { fontSize: "12.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, focusedMeta.displayName)
             ),
@@ -57669,8 +57850,28 @@ function renderFactorySecondaryPage(props) {
                     "td",
                     { style: { fontWeight: 600, whiteSpace: "nowrap" } },
                     h(
-                      "span",
-                      { style: { display: "inline-flex", alignItems: "center", gap: "7px" } },
+                      "button",
+                      {
+                        type: "button",
+                        "data-agent-profile-trigger": a.name,
+                        title: `Abrir perfil de ${a.name} na coluna lateral`,
+                        style: {
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "7px",
+                          border: "none",
+                          background: "transparent",
+                          color: "inherit",
+                          font: "inherit",
+                          padding: 0,
+                          cursor: props.onOpenAgentProfile ? "pointer" : "default",
+                          textAlign: "left"
+                        },
+                        onClick: () => {
+                          var _a3;
+                          return (_a3 = props.onOpenAgentProfile) == null ? void 0 : _a3.call(props, { key: a.agentKey, pubkey: a.pubkey, name: a.name });
+                        }
+                      },
                       (liveMatch == null ? void 0 : liveMatch.picture) ? h("img", { src: liveMatch.picture, alt: a.name, style: { width: "22px", height: "22px", borderRadius: "6px", objectFit: "cover", border: liveTurn ? "1.5px solid var(--status-running)" : "1px solid var(--border)", flexShrink: 0 } }) : h("span", { className: "of-dot", "data-tone": liveTurn ? liveTurn.state === "error" ? "failed" : "running" : a.inBuzz ? "done" : "idle" }),
                       a.name
                     )
@@ -57967,8 +58168,28 @@ function renderFactorySecondaryPage(props) {
                       "td",
                       { style: { fontWeight: 600 } },
                       h(
-                        "span",
-                        { style: { display: "inline-flex", alignItems: "center", gap: "7px" } },
+                        "button",
+                        {
+                          type: "button",
+                          "data-agent-profile-trigger": m.agente,
+                          title: `Abrir perfil de ${m.agente} na coluna lateral`,
+                          style: {
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "7px",
+                            border: "none",
+                            background: "transparent",
+                            color: "inherit",
+                            font: "inherit",
+                            padding: 0,
+                            cursor: props.onOpenAgentProfile ? "pointer" : "default",
+                            textAlign: "left"
+                          },
+                          onClick: () => {
+                            var _a2;
+                            return (_a2 = props.onOpenAgentProfile) == null ? void 0 : _a2.call(props, { key: agSpec == null ? void 0 : agSpec.agentKey, pubkey: agSpec == null ? void 0 : agSpec.pubkey, name: m.agente });
+                          }
+                        },
                         h("span", { className: "of-dot", "data-tone": tone }),
                         m.agente
                       )
@@ -58093,9 +58314,29 @@ function renderFactorySecondaryPage(props) {
                     )
                   ),
                   h(
-                    "div",
-                    { style: { display: "flex", alignItems: "center", gap: "9px" } },
-                    (liveMatch == null ? void 0 : liveMatch.picture) ? h("img", { src: liveMatch.picture, alt: revisor, style: { width: "28px", height: "28px", borderRadius: "7px", objectFit: "cover", border: "1px solid var(--border)" } }) : h("span", { className: "of-project-tile", style: { width: "28px", height: "28px", fontSize: "12px" } }, String(revisor).replace(/^OrgFy\s+/i, "").charAt(0).toUpperCase()),
+                    "button",
+                    {
+                      type: "button",
+                      "data-agent-profile-trigger": revisor,
+                      title: `Abrir perfil de ${revisor} na coluna lateral`,
+                      style: {
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "9px",
+                        border: "none",
+                        background: "transparent",
+                        color: "inherit",
+                        font: "inherit",
+                        padding: 0,
+                        textAlign: "left",
+                        cursor: props.onOpenAgentProfile ? "pointer" : "default"
+                      },
+                      onClick: () => {
+                        var _a4;
+                        return (_a4 = props.onOpenAgentProfile) == null ? void 0 : _a4.call(props, { key: (agSpec == null ? void 0 : agSpec.agentKey) || (liveMatch == null ? void 0 : liveMatch.key), pubkey: (agSpec == null ? void 0 : agSpec.pubkey) || (liveMatch == null ? void 0 : liveMatch.pubkey), name: revisor });
+                      }
+                    },
+                    (liveMatch == null ? void 0 : liveMatch.picture) ? h("img", { src: liveMatch.picture, alt: revisor, style: { width: "28px", height: "28px", borderRadius: "7px", objectFit: "cover", border: "1px solid var(--border)", flexShrink: 0 } }) : h("span", { className: "of-project-tile", style: { width: "28px", height: "28px", fontSize: "12px", flexShrink: 0 } }, String(revisor).replace(/^OrgFy\s+/i, "").charAt(0).toUpperCase()),
                     h(
                       "div",
                       { style: { minWidth: 0, flex: 1 } },
@@ -58137,7 +58378,7 @@ function renderFactorySecondaryPage(props) {
                         style: { padding: "3px 8px", fontSize: "11px" },
                         onClick: () => props.onOpenAgentProfile({ key: (agSpec == null ? void 0 : agSpec.agentKey) || (liveMatch == null ? void 0 : liveMatch.key), pubkey: (agSpec == null ? void 0 : agSpec.pubkey) || (liveMatch == null ? void 0 : liveMatch.pubkey), name: revisor })
                       },
-                      "Perfil Buzz ↗"
+                      "Perfil"
                     ),
                     trustCat && h("span", { className: "of-mono of-muted", style: { marginLeft: "auto", fontSize: "10px" } }, `Escape ${trustCat.escapeRatePct.toFixed(1)}%`)
                   )
@@ -58662,8 +58903,9 @@ function renderFactorySecondaryPage(props) {
                   type: "button",
                   className: "of-pill",
                   "data-tone": m.isWorking ? "running" : "idle",
-                  style: { fontSize: "10.5px", cursor: onOpenAgentDm ? "pointer" : "default", display: "inline-flex", alignItems: "center", gap: "4px" },
-                  onClick: () => onOpenAgentDm == null ? void 0 : onOpenAgentDm({ pubkey: m.pk, name: m.name })
+                  title: `Abrir perfil de ${m.name} na coluna lateral`,
+                  style: { fontSize: "10.5px", cursor: props.onOpenAgentProfile || onOpenAgentDm ? "pointer" : "default", display: "inline-flex", alignItems: "center", gap: "4px" },
+                  onClick: () => props.onOpenAgentProfile ? props.onOpenAgentProfile({ pubkey: m.pk, name: m.name }) : onOpenAgentDm == null ? void 0 : onOpenAgentDm({ pubkey: m.pk, name: m.name })
                 },
                 h("span", { className: "of-dot", "data-tone": m.isWorking ? "running" : "done" }),
                 m.name
@@ -60222,6 +60464,8 @@ function createFactoryAppComponent(ctx, opts = {}) {
     const [editingAgentKey, setEditingAgentKey] = React.useState(null);
     const [syncingPromptKey, setSyncingPromptKey] = React.useState(null);
     const [agentPromptSyncMap, setAgentPromptSyncMap] = React.useState({});
+    const [sideProfileTabs, setSideProfileTabs] = React.useState([]);
+    const [activeSideProfileKey, setActiveSideProfileKey] = React.useState(null);
     const [agentEditDraft, setAgentEditDraftState] = React.useState({ provider: "", model: "", instructions: "" });
     const setAgentEditDraft = React.useCallback((patch) => {
       setAgentEditDraftState((prev) => ({ ...prev, ...patch }));
@@ -61191,38 +61435,94 @@ function createFactoryAppComponent(ctx, opts = {}) {
       },
       [selectedDmAgent, resolveBuzzScope, notify2]
     );
+    const closeSideProfileTab = React.useCallback((targetUrl) => {
+      setSideProfileTabs((prev) => {
+        const idx = prev.findIndex((t) => t.target === targetUrl);
+        const next = prev.filter((t) => t.target !== targetUrl);
+        setActiveSideProfileKey((cur) => {
+          var _a2, _b2;
+          if (cur !== targetUrl) return cur;
+          if (next.length === 0) return null;
+          const fallbackIdx = Math.max(0, Math.min(idx - 1, next.length - 1));
+          return ((_a2 = next[fallbackIdx]) == null ? void 0 : _a2.target) || ((_b2 = next[0]) == null ? void 0 : _b2.target) || null;
+        });
+        return next;
+      });
+    }, []);
+    const openProfileTargetInSideColumn = React.useCallback(
+      (targetUrl, meta) => {
+        const panelsApi = ctx == null ? void 0 : ctx.panels;
+        const resolvedPanel = typeof (panelsApi == null ? void 0 : panelsApi.resolve) === "function" ? panelsApi.resolve(targetUrl) : null;
+        if (!(resolvedPanel == null ? void 0 : resolvedPanel.component)) return false;
+        const pkMatch = /^buzz:agent-profile:([0-9a-f]{64})$/i.exec(targetUrl);
+        const pk = pkMatch ? pkMatch[1].toLowerCase() : "";
+        const crewMatch = pk ? liveCrew.find((c) => {
+          var _a2;
+          return ((_a2 = c.pubkey) == null ? void 0 : _a2.toLowerCase()) === pk;
+        }) : void 0;
+        const tenantMatch = pk ? tenantAgents.find((a) => {
+          var _a2;
+          return ((_a2 = a.pubkey) == null ? void 0 : _a2.toLowerCase()) === pk;
+        }) : void 0;
+        const name = (meta == null ? void 0 : meta.name) || (crewMatch == null ? void 0 : crewMatch.name) || (tenantMatch == null ? void 0 : tenantMatch.name) || (pk ? `Agente ${pk.slice(0, 8)}` : resolvedPanel.title || "Perfil");
+        const picture = (meta == null ? void 0 : meta.picture) || (crewMatch == null ? void 0 : crewMatch.picture);
+        setSideProfileTabs((prev) => {
+          const exists = prev.some((t) => t.target === targetUrl);
+          if (exists) {
+            return prev.map((t) => t.target === targetUrl ? { ...t, name, picture: picture || t.picture } : t);
+          }
+          return [...prev, { pubkey: pk, name, picture, target: targetUrl }];
+        });
+        setActiveSideProfileKey(targetUrl);
+        return true;
+      },
+      [liveCrew, tenantAgents]
+    );
     const handleOpenNativeAgentProfile = React.useCallback(
       async (target) => {
-        var _a2, _b2;
+        var _a2, _b2, _c2;
         const resolved = typeof target === "string" ? liveCrew.find((a) => a.key === target) || tenantAgents.find((a) => a.agentKey === target) : target;
-        const rawPubkey = (resolved && "pubkey" in resolved ? resolved.pubkey : "") || (resolved && "key" in resolved && resolved.key ? ((_a2 = liveCrew.find((a) => a.key === resolved.key)) == null ? void 0 : _a2.pubkey) || "" : "") || "";
+        const resolvedKey = resolved && "key" in resolved ? resolved.key : resolved && "agentKey" in resolved ? resolved.agentKey : void 0;
+        const crewByKey = resolvedKey ? liveCrew.find((a) => a.key === resolvedKey) : void 0;
+        const rawPubkey = (resolved && "pubkey" in resolved ? resolved.pubkey : "") || (crewByKey == null ? void 0 : crewByKey.pubkey) || (resolved && "name" in resolved && resolved.name ? ((_a2 = liveCrew.find((a) => a.name.toLowerCase() === String(resolved.name).toLowerCase())) == null ? void 0 : _a2.pubkey) || ((_b2 = tenantAgents.find((a) => a.name.toLowerCase() === String(resolved.name).toLowerCase())) == null ? void 0 : _b2.pubkey) || "" : "") || "";
         const pubkey = String(rawPubkey).trim().toLowerCase();
-        const agentName = (resolved && "name" in resolved ? resolved.name : "") || "Agente";
-        const scope = resolveBuzzScope();
-        if (/^[0-9a-f]{64}$/.test(pubkey) && ((_b2 = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _b2.open)) {
-          try {
-            const res = await ctx.navigation.open({
-              version: 1,
-              kind: "page",
-              pluginId: "buzz.agents",
-              pageId: "agents",
-              ...scope ? { scope } : {},
-              route: { version: 1, params: { agent: pubkey } }
-            });
-            if (!res || res.status === "opened") {
-              notify2(`Perfil nativo de ${agentName} aberto no Buzz.`);
-              return;
+        const crewByPk = pubkey ? liveCrew.find((a) => {
+          var _a3;
+          return ((_a3 = a.pubkey) == null ? void 0 : _a3.toLowerCase()) === pubkey;
+        }) : void 0;
+        const agentName = (resolved && "name" in resolved ? resolved.name : "") || (crewByPk == null ? void 0 : crewByPk.name) || (crewByKey == null ? void 0 : crewByKey.name) || "Agente";
+        const picture = (crewByPk == null ? void 0 : crewByPk.picture) || (crewByKey == null ? void 0 : crewByKey.picture);
+        if (/^[0-9a-f]{64}$/.test(pubkey)) {
+          const profileTarget = `buzz:agent-profile:${pubkey}`;
+          if (openProfileTargetInSideColumn(profileTarget, { name: agentName, picture })) {
+            return;
+          }
+          const scope = resolveBuzzScope();
+          if ((_c2 = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _c2.open) {
+            try {
+              const res = await ctx.navigation.open({
+                version: 1,
+                kind: "page",
+                pluginId: "buzz.agents",
+                pageId: "agents",
+                ...scope ? { scope } : {},
+                route: { version: 1, params: { agent: pubkey } }
+              });
+              if (!res || res.status === "opened") {
+                notify2(`Perfil nativo de ${agentName} aberto no Buzz.`);
+                return;
+              }
+            } catch {
             }
-          } catch {
           }
         }
-        if (resolved && "key" in resolved && resolved.key) {
-          setSelectedAgentKey(resolved.key);
+        if (resolvedKey) {
+          setSelectedAgentKey(resolvedKey);
         } else {
-          notify2(`Pubkey de ${agentName} indisponível para abrir o perfil nativo.`);
+          notify2(`Pubkey de ${agentName} indisponível para abrir o perfil lateral.`);
         }
       },
-      [liveCrew, tenantAgents, resolveBuzzScope, notify2]
+      [liveCrew, tenantAgents, openProfileTargetInSideColumn, resolveBuzzScope, notify2]
     );
     const wakeAgentInBuzz = React.useCallback(
       async (opts2) => {
@@ -62325,7 +62625,120 @@ Nota: ${evidence.note}`
                 onResumeFactory: () => handleControlUpdate({ killSwitch: false, pausedReason: null }, "Fábrica retomada (Kill Switch liberado)."),
                 onOpenFactoryPanel: () => setTab("overview")
               })
-            )
+            ),
+            sideProfileTabs.length > 0 && activeSideProfileKey && (() => {
+              var _a2;
+              const panelsApi = ctx == null ? void 0 : ctx.panels;
+              const PanelWorkspace = (_a2 = panelsApi == null ? void 0 : panelsApi.ui) == null ? void 0 : _a2.Workspace;
+              const activeChannel = resolveActiveChannelId(tenant) || "";
+              const workspaceItems = sideProfileTabs.map((pt) => {
+                const resolvedPanel = typeof (panelsApi == null ? void 0 : panelsApi.resolve) === "function" ? panelsApi.resolve(pt.target) : null;
+                if (!(resolvedPanel == null ? void 0 : resolvedPanel.component)) return null;
+                return {
+                  id: pt.target,
+                  label: pt.name,
+                  icon: pt.picture ? h("img", {
+                    src: pt.picture,
+                    alt: pt.name,
+                    style: { width: "16px", height: "16px", borderRadius: "4px", objectFit: "cover", display: "block" }
+                  }) : void 0,
+                  close: () => closeSideProfileTab(pt.target),
+                  content: h(resolvedPanel.component, {
+                    key: pt.target,
+                    target: pt.target,
+                    close: () => closeSideProfileTab(pt.target),
+                    context: {
+                      channelId: activeChannel,
+                      canOpen: (nextTarget) => Boolean(typeof (panelsApi == null ? void 0 : panelsApi.resolve) === "function" && panelsApi.resolve(nextTarget)),
+                      open: (nextTarget) => openProfileTargetInSideColumn(nextTarget)
+                    }
+                  })
+                };
+              }).filter(Boolean);
+              if (workspaceItems.length === 0) return null;
+              const activeItem = workspaceItems.find((i) => i.id === activeSideProfileKey) || workspaceItems[0];
+              return h(
+                "aside",
+                {
+                  "data-agent-side-profile-column": "true",
+                  "aria-label": "Perfil do agente",
+                  style: {
+                    width: "410px",
+                    minWidth: "340px",
+                    maxWidth: "460px",
+                    flexShrink: 0,
+                    borderLeft: "1px solid var(--border)",
+                    background: "var(--card, var(--surface-base))",
+                    display: "flex",
+                    flexDirection: "column",
+                    minHeight: 0,
+                    overflow: "hidden"
+                  }
+                },
+                PanelWorkspace ? h(PanelWorkspace, {
+                  value: activeItem.id,
+                  select: (nextId) => setActiveSideProfileKey(nextId),
+                  label: "Perfis de agentes",
+                  focusOnMount: false,
+                  items: workspaceItems
+                }) : h(
+                  React.Fragment,
+                  null,
+                  h(
+                    "div",
+                    {
+                      style: {
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "4px",
+                        padding: "6px 8px",
+                        borderBottom: "1px solid var(--border)",
+                        overflowX: "auto",
+                        flexShrink: 0
+                      }
+                    },
+                    workspaceItems.map(
+                      (it) => h(
+                        "div",
+                        {
+                          key: it.id,
+                          style: {
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "5px",
+                            padding: "4px 8px",
+                            borderRadius: "6px",
+                            fontSize: "12px",
+                            fontWeight: it.id === activeItem.id ? 600 : 400,
+                            background: it.id === activeItem.id ? "var(--muted)" : "transparent",
+                            color: it.id === activeItem.id ? "var(--foreground)" : "var(--muted-foreground)",
+                            cursor: "pointer",
+                            whiteSpace: "nowrap"
+                          },
+                          onClick: () => setActiveSideProfileKey(it.id)
+                        },
+                        it.icon,
+                        h("span", null, it.label),
+                        h(
+                          "button",
+                          {
+                            type: "button",
+                            "aria-label": `Fechar ${it.label}`,
+                            style: { border: "none", background: "transparent", color: "inherit", cursor: "pointer", padding: "0 2px", fontSize: "13px", lineHeight: 1 },
+                            onClick: (e) => {
+                              e.stopPropagation();
+                              it.close();
+                            }
+                          },
+                          "×"
+                        )
+                      )
+                    )
+                  ),
+                  h("div", { style: { flex: 1, minHeight: 0, overflow: "auto" } }, activeItem.content)
+                )
+              );
+            })()
           )
         )
       ),

@@ -1280,13 +1280,40 @@ export function createBoardroom3DComponent(ctx: Context) {
         h(
           "div",
           { style: { display: "flex", alignItems: "center", gap: "6px", minWidth: 0 } },
-          e.picture
-            ? h("img", { src: e.picture, alt: e.displayName, style: { width: "16px", height: "16px", borderRadius: "4px", objectFit: "cover", flexShrink: 0 } })
-            : h("span", {
-                className: "of-dot",
-                "data-tone": e.liveTurn ? (e.liveTurn.state === "error" ? "failed" : "running") : e.inBuzz ? "done" : "idle",
-              }),
-          h("span", { style: { fontSize: "11.5px", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 } }, e.displayName)
+          h(
+            "button",
+            {
+              type: "button",
+              "data-agent-profile-trigger": e.displayName,
+              title: `Abrir perfil de ${e.displayName} na coluna lateral`,
+              style: {
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                flex: 1,
+                minWidth: 0,
+                border: "none",
+                background: "transparent",
+                color: "inherit",
+                font: "inherit",
+                padding: 0,
+                cursor: props.onOpenAgentProfile ? "pointer" : "inherit",
+                textAlign: "left",
+              },
+              onClick: (ev: any) => {
+                if (!props.onOpenAgentProfile) return;
+                ev.stopPropagation();
+                props.onOpenAgentProfile({ key: e.agentKey, pubkey: e.pubkey, name: e.displayName });
+              },
+            },
+            e.picture
+              ? h("img", { src: e.picture, alt: e.displayName, style: { width: "16px", height: "16px", borderRadius: "4px", objectFit: "cover", flexShrink: 0 } })
+              : h("span", {
+                  className: "of-dot",
+                  "data-tone": e.liveTurn ? (e.liveTurn.state === "error" ? "failed" : "running") : e.inBuzz ? "done" : "idle",
+                }),
+            h("span", { style: { fontSize: "11.5px", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 } }, e.displayName)
+          )
         ),
         h(
           "div",
@@ -1635,8 +1662,29 @@ export function createBoardroom3DComponent(ctx: Context) {
               "div",
               { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", borderBottom: "1px solid var(--border)", paddingBottom: "7px" } },
               h(
-                "div",
-                { style: { display: "inline-flex", alignItems: "center", gap: "7px", minWidth: 0 } },
+                "button",
+                {
+                  type: "button",
+                  title: `Abrir perfil de ${focusedMeta.displayName} na coluna lateral`,
+                  style: {
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "7px",
+                    minWidth: 0,
+                    border: "none",
+                    background: "transparent",
+                    color: "inherit",
+                    font: "inherit",
+                    padding: 0,
+                    cursor: props.onOpenAgentProfile && focusedMeta.pubkey ? "pointer" : "default",
+                    textAlign: "left",
+                  },
+                  onClick: () => {
+                    if (props.onOpenAgentProfile && focusedMeta.pubkey) {
+                      props.onOpenAgentProfile({ key: focusedMeta.agentKey, pubkey: focusedMeta.pubkey, name: focusedMeta.displayName });
+                    }
+                  },
+                },
                 focusedMeta.picture && h("img", { src: focusedMeta.picture, alt: focusedMeta.displayName, style: { width: "20px", height: "20px", borderRadius: "5px", objectFit: "cover" } }),
                 h("strong", { style: { fontSize: "12.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, focusedMeta.displayName)
               ),

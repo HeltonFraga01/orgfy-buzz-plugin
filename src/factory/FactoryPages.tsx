@@ -939,8 +939,25 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                             "td",
                             { style: { fontWeight: 600, whiteSpace: "nowrap" } },
                             h(
-                              "span",
-                              { style: { display: "inline-flex", alignItems: "center", gap: "7px" } },
+                              "button",
+                              {
+                                type: "button",
+                                "data-agent-profile-trigger": a.name,
+                                title: `Abrir perfil de ${a.name} na coluna lateral`,
+                                style: {
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "7px",
+                                  border: "none",
+                                  background: "transparent",
+                                  color: "inherit",
+                                  font: "inherit",
+                                  padding: 0,
+                                  cursor: props.onOpenAgentProfile ? "pointer" : "default",
+                                  textAlign: "left",
+                                },
+                                onClick: () => props.onOpenAgentProfile?.({ key: a.agentKey, pubkey: a.pubkey, name: a.name }),
+                              },
                               liveMatch?.picture
                                 ? h("img", { src: liveMatch.picture, alt: a.name, style: { width: "22px", height: "22px", borderRadius: "6px", objectFit: "cover", border: liveTurn ? "1.5px solid var(--status-running)" : "1px solid var(--border)", flexShrink: 0 } })
                                 : h("span", { className: "of-dot", "data-tone": liveTurn ? (liveTurn.state === "error" ? "failed" : "running") : a.inBuzz ? "done" : "idle" }),
@@ -1268,8 +1285,25 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                               "td",
                               { style: { fontWeight: 600 } },
                               h(
-                                "span",
-                                { style: { display: "inline-flex", alignItems: "center", gap: "7px" } },
+                                "button",
+                                {
+                                  type: "button",
+                                  "data-agent-profile-trigger": m.agente,
+                                  title: `Abrir perfil de ${m.agente} na coluna lateral`,
+                                  style: {
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: "7px",
+                                    border: "none",
+                                    background: "transparent",
+                                    color: "inherit",
+                                    font: "inherit",
+                                    padding: 0,
+                                    cursor: props.onOpenAgentProfile ? "pointer" : "default",
+                                    textAlign: "left",
+                                  },
+                                  onClick: () => props.onOpenAgentProfile?.({ key: agSpec?.agentKey, pubkey: agSpec?.pubkey, name: m.agente }),
+                                },
                                 h("span", { className: "of-dot", "data-tone": tone }),
                                 m.agente
                               )
@@ -1402,11 +1436,28 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                               )
                           ),
                           h(
-                            "div",
-                            { style: { display: "flex", alignItems: "center", gap: "9px" } },
+                            "button",
+                            {
+                              type: "button",
+                              "data-agent-profile-trigger": revisor,
+                              title: `Abrir perfil de ${revisor} na coluna lateral`,
+                              style: {
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "9px",
+                                border: "none",
+                                background: "transparent",
+                                color: "inherit",
+                                font: "inherit",
+                                padding: 0,
+                                textAlign: "left",
+                                cursor: props.onOpenAgentProfile ? "pointer" : "default",
+                              },
+                              onClick: () => props.onOpenAgentProfile?.({ key: agSpec?.agentKey || liveMatch?.key, pubkey: agSpec?.pubkey || liveMatch?.pubkey, name: revisor }),
+                            },
                             liveMatch?.picture
-                              ? h("img", { src: liveMatch.picture, alt: revisor, style: { width: "28px", height: "28px", borderRadius: "7px", objectFit: "cover", border: "1px solid var(--border)" } })
-                              : h("span", { className: "of-project-tile", style: { width: "28px", height: "28px", fontSize: "12px" } }, String(revisor).replace(/^OrgFy\s+/i, "").charAt(0).toUpperCase()),
+                              ? h("img", { src: liveMatch.picture, alt: revisor, style: { width: "28px", height: "28px", borderRadius: "7px", objectFit: "cover", border: "1px solid var(--border)", flexShrink: 0 } })
+                              : h("span", { className: "of-project-tile", style: { width: "28px", height: "28px", fontSize: "12px", flexShrink: 0 } }, String(revisor).replace(/^OrgFy\s+/i, "").charAt(0).toUpperCase()),
                             h(
                               "div",
                               { style: { minWidth: 0, flex: 1 } },
@@ -1450,7 +1501,7 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                                   style: { padding: "3px 8px", fontSize: "11px" },
                                   onClick: () => props.onOpenAgentProfile!({ key: agSpec?.agentKey || liveMatch?.key, pubkey: agSpec?.pubkey || liveMatch?.pubkey, name: revisor }),
                                 },
-                                "Perfil Buzz ↗"
+                                "Perfil"
                               ),
                             trustCat &&
                               h("span", { className: "of-mono of-muted", style: { marginLeft: "auto", fontSize: "10px" } }, `Escape ${trustCat.escapeRatePct.toFixed(1)}%`)
@@ -1987,8 +2038,12 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                     type: "button",
                     className: "of-pill",
                     "data-tone": m.isWorking ? "running" : "idle",
-                    style: { fontSize: "10.5px", cursor: onOpenAgentDm ? "pointer" : "default", display: "inline-flex", alignItems: "center", gap: "4px" },
-                    onClick: () => onOpenAgentDm?.({ pubkey: m.pk, name: m.name }),
+                    title: `Abrir perfil de ${m.name} na coluna lateral`,
+                    style: { fontSize: "10.5px", cursor: props.onOpenAgentProfile || onOpenAgentDm ? "pointer" : "default", display: "inline-flex", alignItems: "center", gap: "4px" },
+                    onClick: () =>
+                      props.onOpenAgentProfile
+                        ? props.onOpenAgentProfile({ pubkey: m.pk, name: m.name })
+                        : onOpenAgentDm?.({ pubkey: m.pk, name: m.name }),
                   },
                   h("span", { className: "of-dot", "data-tone": m.isWorking ? "running" : "done" }),
                   m.name

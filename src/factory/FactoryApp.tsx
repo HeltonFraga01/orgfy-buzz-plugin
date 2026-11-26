@@ -129,6 +129,8 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     const [editingAgentKey, setEditingAgentKey] = React.useState<string | null>(null);
     const [syncingPromptKey, setSyncingPromptKey] = React.useState<string | null>(null);
     const [agentPromptSyncMap, setAgentPromptSyncMap] = React.useState<Record<string, { status: "synced" | "outdated" | "unversioned"; version: string; liveVersion?: string; sourcePath?: string; content?: string }>>({});
+    const [sideProfileTabs, setSideProfileTabs] = React.useState<Array<{ pubkey: string; name: string; picture?: string; target: string }>>([]);
+    const [activeSideProfileKey, setActiveSideProfileKey] = React.useState<string | null>(null);
     const [agentEditDraft, setAgentEditDraftState] = React.useState<{ provider: string; model: string; instructions: string }>({ provider: "", model: "", instructions: "" });
     const setAgentEditDraft = React.useCallback((patch: Partial<{ provider: string; model: string; instructions: string }>) => {
       setAgentEditDraftState((prev) => ({ ...prev, ...patch }));
@@ -1159,7 +1161,45 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       [selectedDmAgent, resolveBuzzScope, notify]
     );
 
-    // Abre o Perfil NATIVO do agente no Buzz Desktop (Identity | Memory | Activity | Bestie | Attention | OrgFy | Settings)
+    const closeSideProfileTab = React.useCallback((targetUrl: string) => {
+      setSideProfileTabs((prev) => {
+        const idx = prev.findIndex((t) => t.target === targetUrl);
+        const next = prev.filter((t) => t.target !== targetUrl);
+        setActiveSideProfileKey((cur) => {
+          if (cur !== targetUrl) return cur;
+          if (next.length === 0) return null;
+          const fallbackIdx = Math.max(0, Math.min(idx - 1, next.length - 1));
+          return next[fallbackIdx]?.target || next[0]?.target || null;
+        });
+        return next;
+      });
+    }, []);
+
+    const openProfileTargetInSideColumn = React.useCallback(
+      (targetUrl: string, meta?: { name?: string; picture?: string }): boolean => {
+        const panelsApi = (ctx as any)?.panels;
+        const resolvedPanel = typeof panelsApi?.resolve === "function" ? panelsApi.resolve(targetUrl) : null;
+        if (!resolvedPanel?.component) return false;
+        const pkMatch = /^buzz:agent-profile:([0-9a-f]{64})$/i.exec(targetUrl);
+        const pk = pkMatch ? pkMatch[1].toLowerCase() : "";
+        const crewMatch = pk ? liveCrew.find((c) => c.pubkey?.toLowerCase() === pk) : undefined;
+        const tenantMatch = pk ? tenantAgents.find((a) => a.pubkey?.toLowerCase() === pk) : undefined;
+        const name = meta?.name || crewMatch?.name || tenantMatch?.name || (pk ? `Agente ${pk.slice(0, 8)}` : resolvedPanel.title || "Perfil");
+        const picture = meta?.picture || crewMatch?.picture;
+        setSideProfileTabs((prev) => {
+          const exists = prev.some((t) => t.target === targetUrl);
+          if (exists) {
+            return prev.map((t) => (t.target === targetUrl ? { ...t, name, picture: picture || t.picture } : t));
+          }
+          return [...prev, { pubkey: pk, name, picture, target: targetUrl }];
+        });
+        setActiveSideProfileKey(targetUrl);
+        return true;
+      },
+      [liveCrew, tenantAgents]
+    );
+
+    // Abre o Perfil NATIVO do agente na coluna lateral direita (sem sair da OrgFy Factory), com fallback para buzz.agents
     const handleOpenNativeAgentProfile = React.useCallback(
       async (target?: { key?: string; pubkey?: string; name?: string } | string | null) => {
         const resolved =
@@ -1167,38 +1207,51 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
             ? liveCrew.find((a) => a.key === target) ||
               tenantAgents.find((a) => a.agentKey === target)
             : target;
+        const resolvedKey = resolved && "key" in resolved ? resolved.key : resolved && "agentKey" in resolved ? (resolved as any).agentKey : undefined;
+        const crewByKey = resolvedKey ? liveCrew.find((a) => a.key === resolvedKey) : undefined;
         const rawPubkey =
           (resolved && "pubkey" in resolved ? resolved.pubkey : "") ||
-          (resolved && "key" in resolved && resolved.key
-            ? liveCrew.find((a) => a.key === resolved.key)?.pubkey || ""
+          crewByKey?.pubkey ||
+          (resolved && "name" in resolved && resolved.name
+            ? liveCrew.find((a) => a.name.toLowerCase() === String(resolved.name).toLowerCase())?.pubkey ||
+              tenantAgents.find((a) => a.name.toLowerCase() === String(resolved.name).toLowerCase())?.pubkey ||
+              ""
             : "") ||
           "";
         const pubkey = String(rawPubkey).trim().toLowerCase();
-        const agentName = (resolved && "name" in resolved ? resolved.name : "") || "Agente";
-        const scope = resolveBuzzScope();
-        if (/^[0-9a-f]{64}$/.test(pubkey) && (ctx as any)?.navigation?.open) {
-          try {
-            const res = await (ctx as any).navigation.open({
-              version: 1,
-              kind: "page",
-              pluginId: "buzz.agents",
-              pageId: "agents",
-              ...(scope ? { scope } : {}),
-              route: { version: 1, params: { agent: pubkey } },
-            });
-            if (!res || res.status === "opened") {
-              notify(`Perfil nativo de ${agentName} aberto no Buzz.`);
-              return;
-            }
-          } catch {}
+        const crewByPk = pubkey ? liveCrew.find((a) => a.pubkey?.toLowerCase() === pubkey) : undefined;
+        const agentName = (resolved && "name" in resolved ? resolved.name : "") || crewByPk?.name || crewByKey?.name || "Agente";
+        const picture = crewByPk?.picture || crewByKey?.picture;
+        if (/^[0-9a-f]{64}$/.test(pubkey)) {
+          const profileTarget = `buzz:agent-profile:${pubkey}`;
+          if (openProfileTargetInSideColumn(profileTarget, { name: agentName, picture })) {
+            return;
+          }
+          const scope = resolveBuzzScope();
+          if ((ctx as any)?.navigation?.open) {
+            try {
+              const res = await (ctx as any).navigation.open({
+                version: 1,
+                kind: "page",
+                pluginId: "buzz.agents",
+                pageId: "agents",
+                ...(scope ? { scope } : {}),
+                route: { version: 1, params: { agent: pubkey } },
+              });
+              if (!res || res.status === "opened") {
+                notify(`Perfil nativo de ${agentName} aberto no Buzz.`);
+                return;
+              }
+            } catch {}
+          }
         }
-        if (resolved && "key" in resolved && resolved.key) {
-          setSelectedAgentKey(resolved.key);
+        if (resolvedKey) {
+          setSelectedAgentKey(resolvedKey);
         } else {
-          notify(`Pubkey de ${agentName} indisponível para abrir o perfil nativo.`);
+          notify(`Pubkey de ${agentName} indisponível para abrir o perfil lateral.`);
         }
       },
-      [liveCrew, tenantAgents, resolveBuzzScope, notify]
+      [liveCrew, tenantAgents, openProfileTargetInSideColumn, resolveBuzzScope, notify]
     );
 
     // Helper oficial de entrega no Buzz: posta mensagem real Kind 9 com NIP-27 (nostr:npub1... + tag p)
@@ -2414,7 +2467,126 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                       handleControlUpdate({ killSwitch: false, pausedReason: null }, "Fábrica retomada (Kill Switch liberado)."),
                     onOpenFactoryPanel: () => setTab("overview"),
                   })
-            )
+            ),
+            sideProfileTabs.length > 0 && activeSideProfileKey &&
+              (() => {
+                const panelsApi = (ctx as any)?.panels;
+                const PanelWorkspace = panelsApi?.ui?.Workspace;
+                const activeChannel = resolveActiveChannelId(tenant) || "";
+                const workspaceItems = sideProfileTabs
+                  .map((pt) => {
+                    const resolvedPanel = typeof panelsApi?.resolve === "function" ? panelsApi.resolve(pt.target) : null;
+                    if (!resolvedPanel?.component) return null;
+                    return {
+                      id: pt.target,
+                      label: pt.name,
+                      icon: pt.picture
+                        ? h("img", {
+                            src: pt.picture,
+                            alt: pt.name,
+                            style: { width: "16px", height: "16px", borderRadius: "4px", objectFit: "cover", display: "block" },
+                          })
+                        : undefined,
+                      close: () => closeSideProfileTab(pt.target),
+                      content: h(resolvedPanel.component, {
+                        key: pt.target,
+                        target: pt.target,
+                        close: () => closeSideProfileTab(pt.target),
+                        context: {
+                          channelId: activeChannel,
+                          canOpen: (nextTarget: string) => Boolean(typeof panelsApi?.resolve === "function" && panelsApi.resolve(nextTarget)),
+                          open: (nextTarget: string) => openProfileTargetInSideColumn(nextTarget),
+                        },
+                      }),
+                    };
+                  })
+                  .filter(Boolean) as Array<{ id: string; label: string; icon?: any; close: () => void; content: any }>;
+                if (workspaceItems.length === 0) return null;
+                const activeItem = workspaceItems.find((i) => i.id === activeSideProfileKey) || workspaceItems[0];
+                return h(
+                  "aside",
+                  {
+                    "data-agent-side-profile-column": "true",
+                    "aria-label": "Perfil do agente",
+                    style: {
+                      width: "410px",
+                      minWidth: "340px",
+                      maxWidth: "460px",
+                      flexShrink: 0,
+                      borderLeft: "1px solid var(--border)",
+                      background: "var(--card, var(--surface-base))",
+                      display: "flex",
+                      flexDirection: "column",
+                      minHeight: 0,
+                      overflow: "hidden",
+                    },
+                  },
+                  PanelWorkspace
+                    ? h(PanelWorkspace, {
+                        value: activeItem.id,
+                        select: (nextId: string) => setActiveSideProfileKey(nextId),
+                        label: "Perfis de agentes",
+                        focusOnMount: false,
+                        items: workspaceItems,
+                      })
+                    : h(
+                        React.Fragment,
+                        null,
+                        h(
+                          "div",
+                          {
+                            style: {
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "4px",
+                              padding: "6px 8px",
+                              borderBottom: "1px solid var(--border)",
+                              overflowX: "auto",
+                              flexShrink: 0,
+                            },
+                          },
+                          workspaceItems.map((it) =>
+                            h(
+                              "div",
+                              {
+                                key: it.id,
+                                style: {
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "5px",
+                                  padding: "4px 8px",
+                                  borderRadius: "6px",
+                                  fontSize: "12px",
+                                  fontWeight: it.id === activeItem.id ? 600 : 400,
+                                  background: it.id === activeItem.id ? "var(--muted)" : "transparent",
+                                  color: it.id === activeItem.id ? "var(--foreground)" : "var(--muted-foreground)",
+                                  cursor: "pointer",
+                                  whiteSpace: "nowrap",
+                                },
+                                onClick: () => setActiveSideProfileKey(it.id),
+                              },
+                              it.icon,
+                              h("span", null, it.label),
+                              h(
+                                "button",
+                                {
+                                  type: "button",
+                                  "aria-label": `Fechar ${it.label}`,
+                                  style: { border: "none", background: "transparent", color: "inherit", cursor: "pointer", padding: "0 2px", fontSize: "13px", lineHeight: 1 },
+                                  onClick: (e: any) => {
+                                    e.stopPropagation();
+                                    it.close();
+                                  },
+                                },
+                                "×"
+                              )
+                            )
+                          )
+                        ),
+                        h("div", { style: { flex: 1, minHeight: 0, overflow: "auto" } }, activeItem.content)
+                      )
+                );
+              })()
           )
         )
       ),

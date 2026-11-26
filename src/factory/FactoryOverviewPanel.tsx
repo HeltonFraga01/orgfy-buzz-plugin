@@ -247,10 +247,37 @@ export function renderFactoryOverviewPanel(props: FactoryOverviewProps) {
                   h(
                     "div",
                     { style: { display: "flex", alignItems: "center", gap: "7px", minWidth: 0 } },
-                    turnCrew?.picture
-                      ? h("img", { src: turnCrew.picture, alt: t.agentName, style: { width: "18px", height: "18px", borderRadius: "5px", objectFit: "cover", border: "1px solid var(--status-running)", flexShrink: 0 } })
-                      : h("span", { className: "of-dot", "data-tone": t.state === "error" ? "failed" : "running" }),
-                    h("strong", { style: { fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 } }, t.agentName),
+                    h(
+                      "button",
+                      {
+                        type: "button",
+                        "data-agent-profile-trigger": t.agentName,
+                        title: `Abrir perfil de ${t.agentName} na coluna lateral`,
+                        style: {
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "7px",
+                          flex: 1,
+                          minWidth: 0,
+                          border: "none",
+                          background: "transparent",
+                          color: "inherit",
+                          font: "inherit",
+                          padding: 0,
+                          cursor: props.onOpenAgentProfile ? "pointer" : "inherit",
+                          textAlign: "left",
+                        },
+                        onClick: (e: any) => {
+                          if (!props.onOpenAgentProfile) return;
+                          e.stopPropagation();
+                          props.onOpenAgentProfile({ pubkey: t.agentPubkey, name: t.agentName });
+                        },
+                      },
+                      turnCrew?.picture
+                        ? h("img", { src: turnCrew.picture, alt: t.agentName, style: { width: "18px", height: "18px", borderRadius: "5px", objectFit: "cover", border: "1px solid var(--status-running)", flexShrink: 0 } })
+                        : h("span", { className: "of-dot", "data-tone": t.state === "error" ? "failed" : "running" }),
+                      h("strong", { style: { fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 } }, t.agentName)
+                    ),
                     onInterruptTurn && t.stoppable &&
                       h(
                         "button",
@@ -1026,8 +1053,25 @@ export function renderFactoryOverviewPanel(props: FactoryOverviewProps) {
                         "td",
                         { style: { fontWeight: 600 } },
                         h(
-                          "span",
-                          { style: { display: "inline-flex", alignItems: "center", gap: "8px" } },
+                          "button",
+                          {
+                            type: "button",
+                            "data-agent-profile-trigger": ag.name,
+                            title: `Abrir perfil de ${ag.name} na coluna lateral`,
+                            style: {
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "8px",
+                              border: "none",
+                              background: "transparent",
+                              color: "inherit",
+                              font: "inherit",
+                              padding: 0,
+                              cursor: props.onOpenAgentProfile ? "pointer" : "default",
+                              textAlign: "left",
+                            },
+                            onClick: () => props.onOpenAgentProfile?.({ key: ag.agentKey, pubkey: ag.pubkey, name: ag.name }),
+                          },
                           liveMatch?.picture
                             ? h("img", {
                                 src: liveMatch.picture,
@@ -1230,24 +1274,58 @@ export function renderFactoryOverviewPanel(props: FactoryOverviewProps) {
               const liveTurn = pkLower && telemetry?.byPubkey ? telemetry.byPubkey[pkLower] : null;
               const presence = pkLower && telemetry?.presenceByPubkey ? telemetry.presenceByPubkey[pkLower] : undefined;
               return h(
-                "button",
+                "div",
                 {
                   key: ag.agentKey || ag.name,
-                  type: "button",
+                  role: "button",
+                  tabIndex: 0,
                   className: "of-list-row",
                   onClick: () => onOpenAgentDm?.({ key: ag.agentKey, pubkey: ag.pubkey, name: ag.name }),
+                  onKeyDown: (e: any) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onOpenAgentDm?.({ key: ag.agentKey, pubkey: ag.pubkey, name: ag.name });
+                    }
+                  },
                 },
-                liveMatch?.picture
-                  ? h("img", { src: liveMatch.picture, alt: ag.name, style: { width: "22px", height: "22px", borderRadius: "6px", objectFit: "cover", border: liveTurn ? "1.5px solid var(--status-running)" : "1px solid var(--border)", flexShrink: 0 } })
-                  : h("span", { className: "of-dot", "data-tone": liveTurn ? (liveTurn.state === "error" ? "failed" : "running") : ag.inBuzz ? "done" : "idle" }),
                 h(
-                  "div",
-                  { style: { flex: 1, minWidth: 0 } },
-                  h("div", { style: { fontWeight: 600, fontSize: "12.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, ag.name),
+                  "button",
+                  {
+                    type: "button",
+                    "data-agent-profile-trigger": ag.name,
+                    title: `Abrir perfil de ${ag.name} na coluna lateral`,
+                    style: {
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "9px",
+                      flex: 1,
+                      minWidth: 0,
+                      border: "none",
+                      background: "transparent",
+                      color: "inherit",
+                      font: "inherit",
+                      padding: 0,
+                      cursor: props.onOpenAgentProfile ? "pointer" : "inherit",
+                      textAlign: "left",
+                    },
+                    onClick: (e: any) => {
+                      if (!props.onOpenAgentProfile) return;
+                      e.stopPropagation();
+                      props.onOpenAgentProfile({ key: ag.agentKey, pubkey: ag.pubkey, name: ag.name });
+                    },
+                  },
+                  liveMatch?.picture
+                    ? h("img", { src: liveMatch.picture, alt: ag.name, style: { width: "22px", height: "22px", borderRadius: "6px", objectFit: "cover", border: liveTurn ? "1.5px solid var(--status-running)" : "1px solid var(--border)", flexShrink: 0 } })
+                    : h("span", { className: "of-dot", "data-tone": liveTurn ? (liveTurn.state === "error" ? "failed" : "running") : ag.inBuzz ? "done" : "idle" }),
                   h(
                     "div",
-                    { className: "of-mono of-muted", style: { fontSize: "10.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
-                    liveTurn ? `⚡ ${liveTurn.stepLabel}` : `${ag.papel} · ${ag.model}`
+                    { style: { flex: 1, minWidth: 0 } },
+                    h("div", { style: { fontWeight: 600, fontSize: "12.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, ag.name),
+                    h(
+                      "div",
+                      { className: "of-mono of-muted", style: { fontSize: "10.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
+                      liveTurn ? `⚡ ${liveTurn.stepLabel}` : `${ag.papel} · ${ag.model}`
+                    )
                   )
                 ),
                 h("span", { className: "of-muted", style: { fontSize: "11px", flexShrink: 0 } }, liveTurn ? "Respondendo" : presence === "online" ? "Online" : "Disponível"),
