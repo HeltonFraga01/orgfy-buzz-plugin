@@ -54,7 +54,7 @@ export interface UnifiedOrgfyTool {
   name: string;
   description: string;
   inputSchema: Record<string, any>;
-  execute: (args: any) => Promise<{ text: string; isError?: boolean }>;
+  execute: (args: any, meta?: { client?: any; context?: any }) => Promise<{ text: string; isError?: boolean }>;
 }
 
 /**
@@ -819,21 +819,47 @@ export function buildUnifiedOrgfyTools(ctx: Context | any): UnifiedOrgfyTool[] {
         },
         required: ["title", "question"],
       },
-      execute: async (args: any) => {
+      execute: async (args: any, meta?: { client?: any; context?: any }) => {
         const title = String(args?.title || "").trim();
         const question = String(args?.question || "").trim();
         if (!title || !question) {
           return { text: JSON.stringify({ ok: false, error: "title e question são obrigatórios." }), isError: true };
         }
+        const isUuidLike = (v: unknown) =>
+          typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v.trim());
+        const isHex64 = (v: unknown) => typeof v === "string" && /^[0-9a-f]{64}$/i.test(v.trim());
+        const ctxChannel = meta?.context?.channel;
+        const argChannel = args?.channel_id || args?.channelId;
+        const resolvedChannelId = isUuidLike(ctxChannel)
+          ? String(ctxChannel).trim()
+          : isUuidLike(argChannel)
+            ? String(argChannel).trim()
+            : undefined;
+        const ctxRoot = meta?.context?.root;
+        const argRoot = args?.thread_root || args?.threadRoot;
+        const resolvedThreadRoot = isHex64(ctxRoot)
+          ? String(ctxRoot).trim().toLowerCase()
+          : isHex64(argRoot)
+            ? String(argRoot).trim().toLowerCase()
+            : undefined;
+        const resolvedPubkey = isHex64(meta?.client?.pubkey)
+          ? String(meta?.client?.pubkey).trim().toLowerCase()
+          : isHex64(args?.requested_by_pubkey || args?.requestedByPubkey)
+            ? String(args?.requested_by_pubkey || args?.requestedByPubkey).trim().toLowerCase()
+            : undefined;
+        const resolvedRequestedBy = String(
+          args?.requested_by || args?.requestedBy || meta?.client?.name || "OrgFy Bento"
+        ).trim();
+
         const store = getOrgfyCrdtStore(ctx);
         const card = await store.createQuestionCard({
           tenant: args?.tenant || "orgfy",
           title,
           question,
-          requestedBy: args?.requested_by || args?.requestedBy || "OrgFy Bento",
-          requestedByPubkey: args?.requested_by_pubkey || args?.requestedByPubkey,
-          channelId: args?.channel_id || args?.channelId,
-          threadRoot: args?.thread_root || args?.threadRoot,
+          requestedBy: resolvedRequestedBy,
+          requestedByPubkey: resolvedPubkey,
+          channelId: resolvedChannelId,
+          threadRoot: resolvedThreadRoot,
           selectionMode: args?.selection_mode === "multi" ? "multi" : "single",
           allowFreeText: args?.allow_free_text !== false,
           timeoutMinutes: typeof args?.timeout_minutes === "number" ? args.timeout_minutes : undefined,
@@ -864,13 +890,13 @@ export function buildUnifiedOrgfyTools(ctx: Context | any): UnifiedOrgfyTool[] {
     },
   ];
 
-  // Instrumentação OTel GenAI automática (execute_tool) em todas as 20 tools
+  // Instrumentação OTel GenAI automática (execute_tool) em todas as tools
   return rawTools.map((tool) => ({
     ...tool,
-    execute: async (args: any) => {
+    execute: async (args: any, meta?: { client?: any; context?: any }) => {
       const t0 = Date.now();
       try {
-        const out = await tool.execute(args);
+        const out = await tool.execute(args, meta);
         recordGenAISpan({
           operationName: "execute_tool",
           agentName: "orgfy-tool-registry",

@@ -5906,21 +5906,34 @@ function buildUnifiedOrgfyTools(ctx) {
         },
         required: ["title", "question"]
       },
-      execute: async (args) => {
+      execute: async (args, meta) => {
+        var _a, _b, _c, _d, _e;
         const title = String((args == null ? void 0 : args.title) || "").trim();
         const question = String((args == null ? void 0 : args.question) || "").trim();
         if (!title || !question) {
           return { text: JSON.stringify({ ok: false, error: "title e question são obrigatórios." }), isError: true };
         }
+        const isUuidLike = (v2) => typeof v2 === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v2.trim());
+        const isHex64 = (v2) => typeof v2 === "string" && /^[0-9a-f]{64}$/i.test(v2.trim());
+        const ctxChannel = (_a = meta == null ? void 0 : meta.context) == null ? void 0 : _a.channel;
+        const argChannel = (args == null ? void 0 : args.channel_id) || (args == null ? void 0 : args.channelId);
+        const resolvedChannelId = isUuidLike(ctxChannel) ? String(ctxChannel).trim() : isUuidLike(argChannel) ? String(argChannel).trim() : void 0;
+        const ctxRoot = (_b = meta == null ? void 0 : meta.context) == null ? void 0 : _b.root;
+        const argRoot = (args == null ? void 0 : args.thread_root) || (args == null ? void 0 : args.threadRoot);
+        const resolvedThreadRoot = isHex64(ctxRoot) ? String(ctxRoot).trim().toLowerCase() : isHex64(argRoot) ? String(argRoot).trim().toLowerCase() : void 0;
+        const resolvedPubkey = isHex64((_c = meta == null ? void 0 : meta.client) == null ? void 0 : _c.pubkey) ? String((_d = meta == null ? void 0 : meta.client) == null ? void 0 : _d.pubkey).trim().toLowerCase() : isHex64((args == null ? void 0 : args.requested_by_pubkey) || (args == null ? void 0 : args.requestedByPubkey)) ? String((args == null ? void 0 : args.requested_by_pubkey) || (args == null ? void 0 : args.requestedByPubkey)).trim().toLowerCase() : void 0;
+        const resolvedRequestedBy = String(
+          (args == null ? void 0 : args.requested_by) || (args == null ? void 0 : args.requestedBy) || ((_e = meta == null ? void 0 : meta.client) == null ? void 0 : _e.name) || "OrgFy Bento"
+        ).trim();
         const store = getOrgfyCrdtStore(ctx);
         const card = await store.createQuestionCard({
           tenant: (args == null ? void 0 : args.tenant) || "orgfy",
           title,
           question,
-          requestedBy: (args == null ? void 0 : args.requested_by) || (args == null ? void 0 : args.requestedBy) || "OrgFy Bento",
-          requestedByPubkey: (args == null ? void 0 : args.requested_by_pubkey) || (args == null ? void 0 : args.requestedByPubkey),
-          channelId: (args == null ? void 0 : args.channel_id) || (args == null ? void 0 : args.channelId),
-          threadRoot: (args == null ? void 0 : args.thread_root) || (args == null ? void 0 : args.threadRoot),
+          requestedBy: resolvedRequestedBy,
+          requestedByPubkey: resolvedPubkey,
+          channelId: resolvedChannelId,
+          threadRoot: resolvedThreadRoot,
           selectionMode: (args == null ? void 0 : args.selection_mode) === "multi" ? "multi" : "single",
           allowFreeText: (args == null ? void 0 : args.allow_free_text) !== false,
           timeoutMinutes: typeof (args == null ? void 0 : args.timeout_minutes) === "number" ? args.timeout_minutes : void 0,
@@ -5953,10 +5966,10 @@ function buildUnifiedOrgfyTools(ctx) {
   ];
   return rawTools.map((tool) => ({
     ...tool,
-    execute: async (args) => {
+    execute: async (args, meta) => {
       const t0 = Date.now();
       try {
-        const out = await tool.execute(args);
+        const out = await tool.execute(args, meta);
         recordGenAISpan({
           operationName: "execute_tool",
           agentName: "orgfy-tool-registry",
@@ -52864,13 +52877,79 @@ function createFactoryAppComponent(ctx, opts = {}) {
       },
       [liveCrew, tenantAgents, resolveBuzzScope, notify2]
     );
+    const wakeAgentInBuzz = React.useCallback(
+      async (opts2) => {
+        var _a2, _b2, _c2, _d2, _e2;
+        const agentsApi = ctx == null ? void 0 : ctx.agents;
+        if (typeof (agentsApi == null ? void 0 : agentsApi.wake) !== "function" || !opts2.agentKey) {
+          return { ok: false, error: "ctx.agents.wake indisponível ou agente sem key" };
+        }
+        const isUuid = (v2) => typeof v2 === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v2.trim());
+        const isHex64 = (v2) => typeof v2 === "string" && /^[0-9a-f]{64}$/i.test(v2.trim());
+        const session = (_c2 = (_b2 = (_a2 = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a2.snapshot) == null ? void 0 : _b2.call(_a2)) == null ? void 0 : _c2.session;
+        const channelsList = (() => {
+          var _a3, _b3, _c3;
+          try {
+            return ((_c3 = (_b3 = (_a3 = session == null ? void 0 : session.channels) == null ? void 0 : _a3.list) == null ? void 0 : _b3.call(_a3)) == null ? void 0 : _c3.channels) || [];
+          } catch {
+            return [];
+          }
+        })();
+        const findDmChannelId = async () => {
+          var _a3;
+          const pkLower = (opts2.pubkey || "").trim().toLowerCase();
+          const nameLower = (opts2.agentName || "").trim().toLowerCase();
+          const existing = channelsList.find((ch) => {
+            if ((ch == null ? void 0 : ch.channelType) !== "dm" && (ch == null ? void 0 : ch.channelType) !== "solo") return false;
+            if (pkLower) {
+              const members = [...ch.participants || [], ...ch.members || []];
+              if (members.some((m) => String(m).toLowerCase() === pkLower)) return true;
+            }
+            return Boolean(nameLower && typeof (ch == null ? void 0 : ch.name) === "string" && ch.name.toLowerCase().includes(nameLower));
+          });
+          if (existing == null ? void 0 : existing.id) return String(existing.id);
+          if (pkLower && ((_a3 = session == null ? void 0 : session.directMessages) == null ? void 0 : _a3.available) && typeof session.directMessages.open === "function") {
+            const ac = new AbortController();
+            const timer = setTimeout(() => ac.abort(), 6e3);
+            try {
+              const opened = await session.directMessages.open([pkLower], ac.signal);
+              if (opened) return String(opened);
+            } catch {
+            } finally {
+              clearTimeout(timer);
+            }
+          }
+          return null;
+        };
+        let resolvedChannel = isUuid(opts2.channelId) ? opts2.channelId.trim() : null;
+        if (!resolvedChannel && opts2.preferDm) {
+          resolvedChannel = await findDmChannelId();
+        }
+        if (!resolvedChannel) {
+          const fallbackCanal = ((_d2 = status.tenantManifest) == null ? void 0 : _d2.canal) || ((_e2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _e2.canal) || null;
+          resolvedChannel = isUuid(fallbackCanal) ? fallbackCanal.trim() : await findDmChannelId();
+        }
+        if (!resolvedChannel) {
+          return { ok: false, error: "Nenhum canal/DM válido encontrado para acordar o agente" };
+        }
+        const matchedCh = channelsList.find((ch) => String((ch == null ? void 0 : ch.id) || "") === resolvedChannel);
+        const isDmOrSolo = (matchedCh == null ? void 0 : matchedCh.channelType) === "dm" || (matchedCh == null ? void 0 : matchedCh.channelType) === "solo";
+        const validRoot = !isDmOrSolo && isHex64(opts2.threadRoot) ? opts2.threadRoot.trim().toLowerCase() : void 0;
+        const payload = {
+          channel: resolvedChannel,
+          text: opts2.text,
+          ...validRoot ? { root: validRoot } : isDmOrSolo ? {} : { topLevel: true }
+        };
+        try {
+          await agentsApi.wake(opts2.agentKey, payload);
+          return { ok: true, channel: resolvedChannel };
+        } catch (err) {
+          return { ok: false, error: (err == null ? void 0 : err.message) || String(err) };
+        }
+      },
+      [status.tenantManifest, holding, tenant]
+    );
     const handleRunScoutNow = React.useCallback(async () => {
-      var _a2, _b2;
-      const agentsApi = ctx == null ? void 0 : ctx.agents;
-      if (typeof (agentsApi == null ? void 0 : agentsApi.wake) !== "function") {
-        notify2("API ctx.agents.wake indisponível nesta versão do Buzz.");
-        return;
-      }
       const scoutTenant = tenantAgents.find((a) => a.papel === "oraculo" || /or[aá]culo|scout/i.test(a.name));
       const scoutLive = liveCrew.find((a) => a.key === (scoutTenant == null ? void 0 : scoutTenant.agentKey) || /or[aá]culo|scout/i.test(a.name));
       const agentKey = (scoutTenant == null ? void 0 : scoutTenant.agentKey) || (scoutLive == null ? void 0 : scoutLive.key);
@@ -52878,20 +52957,19 @@ function createFactoryAppComponent(ctx, opts = {}) {
         notify2(`Nenhum agente Oráculo/Scout encontrado em ${tenant}.`);
         return;
       }
-      const canal = ((_a2 = status.tenantManifest) == null ? void 0 : _a2.canal) || ((_b2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _b2.canal) || void 0;
       setRunningScout(true);
       try {
-        await agentsApi.wake(agentKey, {
-          ...canal ? { channelId: canal } : {},
+        const res = await wakeAgentInBuzz({
+          agentKey,
+          agentName: (scoutTenant == null ? void 0 : scoutTenant.name) || (scoutLive == null ? void 0 : scoutLive.name) || "Oráculo",
+          pubkey: (scoutTenant == null ? void 0 : scoutTenant.pubkey) || (scoutLive == null ? void 0 : scoutLive.pubkey),
           text: `[ORGFY SCOUT ONE-SHOT · ${tenant}] Audite o workspace atual contra o Canvas/Visão da empresa, identifique gaps de maior impacto (segurança, testes, UX ou dívida técnica) e proponha os próximos cards canônicos.`
         });
-        notify2(`${(scoutTenant == null ? void 0 : scoutTenant.name) || (scoutLive == null ? void 0 : scoutLive.name) || "Oráculo"} acionado via ctx.agents.wake.`);
-      } catch (err) {
-        notify2(`Falha ao acionar Oráculo: ${(err == null ? void 0 : err.message) || err}`);
+        notify2(res.ok ? `${(scoutTenant == null ? void 0 : scoutTenant.name) || (scoutLive == null ? void 0 : scoutLive.name) || "Oráculo"} acionado via ctx.agents.wake.` : `Falha ao acionar Oráculo: ${res.error}`);
       } finally {
         setRunningScout(false);
       }
-    }, [tenantAgents, liveCrew, tenant, status.tenantManifest, holding, notify2]);
+    }, [tenantAgents, liveCrew, tenant, wakeAgentInBuzz, notify2]);
     React.useEffect(() => {
       var _a2, _b2;
       const key = `orgfy_automations_${tenant}`;
@@ -52968,30 +53046,26 @@ function createFactoryAppComponent(ctx, opts = {}) {
     }, [persistAutomations, notify2]);
     const handleRunAutomationNow = React.useCallback(
       async (auto) => {
-        var _a2, _b2, _c2, _d2, _e2;
+        var _a2, _b2, _c2;
         setRunningAutomationId(auto.id);
         const nowLabel = (/* @__PURE__ */ new Date()).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
         const resolvedPrompt = auto.prompt.replace(/\{\{project\.name\}\}/g, ((_a2 = status.tenantManifest) == null ? void 0 : _a2.nome) || tenant).replace(/\{\{date\}\}/g, (/* @__PURE__ */ new Date()).toISOString().slice(0, 10)).replace(/\{\{tenant\}\}/g, tenant).replace(/\{\{repo\}\}/g, ((_b2 = status.tenantManifest) == null ? void 0 : _b2.repoId) || tenant).replace(/\{\{channel\}\}/g, ((_c2 = status.tenantManifest) == null ? void 0 : _c2.canal) || "");
-        const agentsApi = ctx == null ? void 0 : ctx.agents;
         const targetAg = tenantAgents.find((a) => a.name.toLowerCase() === auto.targetAgent.toLowerCase()) || liveCrew.find((a) => a.name.toLowerCase() === auto.targetAgent.toLowerCase());
         const agentKey = (targetAg && "agentKey" in targetAg ? targetAg.agentKey : targetAg == null ? void 0 : targetAg.key) || "";
-        const canal = ((_d2 = status.tenantManifest) == null ? void 0 : _d2.canal) || ((_e2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _e2.canal) || void 0;
         let statusRun = "ok";
         let detail = `Disparado para ${auto.targetAgent} via Buzz.`;
         try {
-          if (typeof (agentsApi == null ? void 0 : agentsApi.wake) === "function" && agentKey) {
-            await agentsApi.wake(agentKey, {
-              ...canal ? { channelId: canal } : {},
-              text: `[ORGFY AUTOMATION · ${auto.name}]
+          const wakeRes = await wakeAgentInBuzz({
+            agentKey,
+            agentName: auto.targetAgent,
+            pubkey: targetAg == null ? void 0 : targetAg.pubkey,
+            text: `[ORGFY AUTOMATION · ${auto.name}]
 ${resolvedPrompt}`
-            });
-          } else {
+          });
+          if (!wakeRes.ok) {
             statusRun = "error";
-            detail = "ctx.agents.wake indisponível ou agente não provisionado.";
+            detail = wakeRes.error || "Falha ao acordar agente.";
           }
-        } catch (err) {
-          statusRun = "error";
-          detail = (err == null ? void 0 : err.message) || String(err);
         } finally {
           setRunningAutomationId(null);
         }
@@ -53004,7 +53078,7 @@ ${resolvedPrompt}`
         });
         notify2(statusRun === "ok" ? `Automação "${auto.name}" disparada para ${auto.targetAgent}.` : `Falha ao rodar "${auto.name}": ${detail}`);
       },
-      [tenant, status.tenantManifest, holding, tenantAgents, liveCrew, persistAutomations, notify2]
+      [tenant, status.tenantManifest, tenantAgents, liveCrew, wakeAgentInBuzz, persistAutomations, notify2]
     );
     const handleExportAutomationYaml = React.useCallback(
       (auto) => {
@@ -53036,57 +53110,50 @@ ${resolvedPrompt}`
     );
     const handleSendUpdatesToCoo = React.useCallback(
       async (entries) => {
-        var _a2, _b2, _c2;
-        const agentsApi = ctx == null ? void 0 : ctx.agents;
+        var _a2;
         const cooName = ((_a2 = status.tenantManifest) == null ? void 0 : _a2.coo) || "OrgFy Bento";
         const cooAg = tenantAgents.find((a) => a.papel === "coo" || a.name.toLowerCase() === cooName.toLowerCase()) || liveCrew.find((a) => a.name.toLowerCase().includes("bento"));
         const agentKey = (cooAg && "agentKey" in cooAg ? cooAg.agentKey : cooAg == null ? void 0 : cooAg.key) || "";
-        if (typeof (agentsApi == null ? void 0 : agentsApi.wake) !== "function" || !agentKey) {
-          notify2(`Não foi possível acordar ${cooName} (ctx.agents.wake indisponível).`);
-          return;
-        }
-        const canal = ((_b2 = status.tenantManifest) == null ? void 0 : _b2.canal) || ((_c2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _c2.canal) || void 0;
         const lines = entries.map((e) => `- [${e.badge}] ${e.title}${e.subtitle ? ` (${e.subtitle})` : ""}`).join("\n");
         setSendingCooUpdates(true);
         try {
-          await agentsApi.wake(agentKey, {
-            ...canal ? { channelId: canal } : {},
+          const res = await wakeAgentInBuzz({
+            agentKey,
+            agentName: cooName,
+            pubkey: cooAg == null ? void 0 : cooAg.pubkey,
+            preferDm: true,
             text: `[ORGFY FACTORY UPDATES · ${tenant}]
 ${entries.length} atualização(ões) recente(s):
 ${lines}`
           });
-          notify2(`${entries.length} update(s) enviado(s) para ${cooName}.`);
-        } catch (err) {
-          notify2(`Falha ao enviar updates ao COO: ${(err == null ? void 0 : err.message) || err}`);
+          notify2(res.ok ? `${entries.length} update(s) enviado(s) para ${cooName}.` : `Falha ao enviar updates ao COO: ${res.error}`);
         } finally {
           setSendingCooUpdates(false);
         }
       },
-      [tenant, status.tenantManifest, holding, tenantAgents, liveCrew, notify2]
+      [tenant, status.tenantManifest, tenantAgents, liveCrew, wakeAgentInBuzz, notify2]
     );
     const handleSendDiffReview = React.useCallback(
       async (comments, item, executorName) => {
-        var _a2, _b2, _c2;
-        const agentsApi = ctx == null ? void 0 : ctx.agents;
+        var _a2;
         const targetName = executorName || ((_a2 = status.tenantManifest) == null ? void 0 : _a2.coo) || "OrgFy Bento";
         const targetAg = tenantAgents.find((a) => a.name.toLowerCase().includes(targetName.toLowerCase())) || liveCrew.find((a) => a.name.toLowerCase().includes(targetName.toLowerCase()));
         const agentKey = (targetAg && "agentKey" in targetAg ? targetAg.agentKey : targetAg == null ? void 0 : targetAg.key) || "";
-        if (typeof (agentsApi == null ? void 0 : agentsApi.wake) !== "function" || !agentKey) {
-          notify2(`Comentários prontos, mas ctx.agents.wake indisponível para ${targetName}.`);
-          return;
-        }
-        const canal = ((_b2 = status.tenantManifest) == null ? void 0 : _b2.canal) || ((_c2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _c2.canal) || void 0;
         const body = comments.map((c, idx) => `${idx + 1}. \`${c.file}:${c.line}\` — ${c.comment}
    > ${c.lineText.trim().slice(0, 100)}`).join("\n");
-        await agentsApi.wake(agentKey, {
-          ...canal ? { channelId: canal } : {},
+        const res = await wakeAgentInBuzz({
+          agentKey,
+          agentName: targetName,
+          pubkey: targetAg == null ? void 0 : targetAg.pubkey,
           text: `[ORGFY DIFF REVIEW · #${item.id.slice(0, 8)} ${item.title}]
 Ajustes solicitados em ${comments.length} linha(s):
 ${body}`
         });
-        notify2(`Revisão com ${comments.length} comentário(s) ancorado(s) enviada para ${targetName}.`);
+        notify2(
+          res.ok ? `Revisão com ${comments.length} comentário(s) ancorado(s) enviada para ${targetName}.` : `Falha ao enviar revisão para ${targetName}: ${res.error}`
+        );
       },
-      [tenant, status.tenantManifest, holding, tenantAgents, liveCrew, notify2]
+      [tenant, status.tenantManifest, tenantAgents, liveCrew, wakeAgentInBuzz, notify2]
     );
     const refreshQuestionCards = React.useCallback(async () => {
       try {
@@ -53103,7 +53170,6 @@ ${body}`
     }, [refreshQuestionCards]);
     const handleAnswerQuestionCard = React.useCallback(
       async (card, answer) => {
-        var _a2, _b2;
         const updated = await crdtStore.answerQuestionCard(card.id, answer);
         await refreshQuestionCards();
         if (!updated) {
@@ -53111,37 +53177,37 @@ ${body}`
           return;
         }
         const selectedLabels = (answer.selectedIds || []).map((id) => {
-          var _a3;
-          return ((_a3 = card.options.find((o) => o.id === id)) == null ? void 0 : _a3.label) || id;
+          var _a2;
+          return ((_a2 = card.options.find((o) => o.id === id)) == null ? void 0 : _a2.label) || id;
         }).join(", ");
-        const agentsApi = ctx == null ? void 0 : ctx.agents;
         const targetAg = card.requestedByPubkey && (tenantAgents.find((a) => {
-          var _a3, _b3;
-          return ((_a3 = a.pubkey) == null ? void 0 : _a3.toLowerCase()) === ((_b3 = card.requestedByPubkey) == null ? void 0 : _b3.toLowerCase());
+          var _a2, _b2;
+          return ((_a2 = a.pubkey) == null ? void 0 : _a2.toLowerCase()) === ((_b2 = card.requestedByPubkey) == null ? void 0 : _b2.toLowerCase());
         }) || liveCrew.find((a) => {
-          var _a3, _b3;
-          return ((_a3 = a.pubkey) == null ? void 0 : _a3.toLowerCase()) === ((_b3 = card.requestedByPubkey) == null ? void 0 : _b3.toLowerCase());
+          var _a2, _b2;
+          return ((_a2 = a.pubkey) == null ? void 0 : _a2.toLowerCase()) === ((_b2 = card.requestedByPubkey) == null ? void 0 : _b2.toLowerCase());
         })) || tenantAgents.find((a) => a.name.toLowerCase().includes(card.requestedBy.toLowerCase())) || liveCrew.find((a) => a.name.toLowerCase().includes(card.requestedBy.toLowerCase()));
         const agentKey = (targetAg && "agentKey" in targetAg ? targetAg.agentKey : targetAg == null ? void 0 : targetAg.key) || "";
-        const canal = card.channelId || ((_a2 = status.tenantManifest) == null ? void 0 : _a2.canal) || ((_b2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === card.tenant)) == null ? void 0 : _b2.canal) || void 0;
-        if (typeof (agentsApi == null ? void 0 : agentsApi.wake) === "function" && agentKey) {
-          try {
-            await agentsApi.wake(agentKey, {
-              ...canal ? { channelId: canal } : {},
-              ...card.threadRoot ? { threadRoot: card.threadRoot } : {},
-              text: `[ORGFY QUESTION CARD RESPONDIDO · ${card.id}]
+        const targetPubkey = card.requestedByPubkey || (targetAg == null ? void 0 : targetAg.pubkey);
+        const wakeRes = await wakeAgentInBuzz({
+          agentKey,
+          agentName: card.requestedBy,
+          pubkey: targetPubkey,
+          channelId: card.channelId,
+          threadRoot: card.threadRoot,
+          preferDm: true,
+          text: `[ORGFY QUESTION CARD RESPONDIDO · ${card.id}]
 Decisão: ${card.title}
 Opções selecionadas: ${selectedLabels || "(texto livre)"}${answer.freeText ? `
 Observação do Fundador: ${answer.freeText}` : ""}`
-            });
-            notify2(`Resposta salva no CRDT e enviada para ${card.requestedBy} via ctx.agents.wake.`);
-            return;
-          } catch {
-          }
+        });
+        if (wakeRes.ok) {
+          notify2(`Resposta salva e ${card.requestedBy} acordado via Buzz.`);
+        } else {
+          notify2(`Resposta salva no CRDT, mas não foi possível acordar ${card.requestedBy}: ${wakeRes.error}`);
         }
-        notify2(`Resposta registrada para "${card.title}" (CRDT sincronizado).`);
       },
-      [refreshQuestionCards, tenantAgents, liveCrew, status.tenantManifest, holding, notify2]
+      [refreshQuestionCards, tenantAgents, liveCrew, wakeAgentInBuzz, notify2]
     );
     const handleDismissQuestionCard = React.useCallback(
       async (card) => {
@@ -53153,7 +53219,7 @@ Observação do Fundador: ${answer.freeText}` : ""}`
     );
     const handleRecordVisualEvidence = React.useCallback(
       async (evidence, item, executorName) => {
-        var _a2, _b2, _c2;
+        var _a2;
         await crdtStore.recordVisualEvidence({
           tenant,
           itemId: item.id,
@@ -53161,27 +53227,22 @@ Observação do Fundador: ${answer.freeText}` : ""}`
           note: evidence.note,
           verdict: evidence.verdict
         });
-        const agentsApi = ctx == null ? void 0 : ctx.agents;
         const targetName = executorName || ((_a2 = status.tenantManifest) == null ? void 0 : _a2.coo) || "OrgFy Bento";
         const targetAg = tenantAgents.find((a) => a.name.toLowerCase().includes(targetName.toLowerCase())) || liveCrew.find((a) => a.name.toLowerCase().includes(targetName.toLowerCase()));
         const agentKey = (targetAg && "agentKey" in targetAg ? targetAg.agentKey : targetAg == null ? void 0 : targetAg.key) || "";
-        const canal = ((_b2 = status.tenantManifest) == null ? void 0 : _b2.canal) || ((_c2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _c2.canal) || void 0;
-        if (typeof (agentsApi == null ? void 0 : agentsApi.wake) === "function" && agentKey) {
-          try {
-            await agentsApi.wake(agentKey, {
-              ...canal ? { channelId: canal } : {},
-              text: `[ORGFY VISUAL PREVIEW · ${evidence.verdict === "approved" ? "APROVADO ✓" : "AJUSTE SOLICITADO"} · #${item.id.slice(0, 8)} ${item.title}]
+        await wakeAgentInBuzz({
+          agentKey,
+          agentName: targetName,
+          pubkey: targetAg == null ? void 0 : targetAg.pubkey,
+          text: `[ORGFY VISUAL PREVIEW · ${evidence.verdict === "approved" ? "APROVADO ✓" : "AJUSTE SOLICITADO"} · #${item.id.slice(0, 8)} ${item.title}]
 URL: ${evidence.url}
 Nota: ${evidence.note}`
-            });
-          } catch {
-          }
-        }
+        });
         notify2(
           evidence.verdict === "approved" ? `Evidência visual aprovada e sincronizada (CRDT) para #${item.id.slice(0, 8)}.` : `Ajuste visual enviado para ${targetName}.`
         );
       },
-      [tenant, status.tenantManifest, holding, tenantAgents, liveCrew, notify2]
+      [tenant, status.tenantManifest, tenantAgents, liveCrew, wakeAgentInBuzz, notify2]
     );
     const masterLive = mainAgentPubkey && liveCrew.find((a) => {
       var _a2;
@@ -54076,8 +54137,8 @@ REGRAS POR PAPEL (APLIQUE APENAS O SEU):
           name: tool.name,
           description: tool.description,
           inputSchema: tool.inputSchema,
-          call: async (_client, _context, args) => {
-            const res = await tool.execute(args || {});
+          call: async (client, context, args) => {
+            const res = await tool.execute(args || {}, { client, context });
             return res.text;
           }
         });

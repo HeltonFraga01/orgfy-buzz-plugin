@@ -1994,18 +1994,31 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
 
     unsub();
 
-    // 3. agentTool orgfy_question_card registrada em h1 cria Question Card com sucesso
+    // 3. agentTool orgfy_question_card registrada em h1 cria Question Card e auto-captura context.channel / client.pubkey
     const qTool = h1.tools.get("orgfy_question_card");
     assert.ok(qTool, "agentTool orgfy_question_card deve estar registrada");
-    const toolRes = JSON.parse(await qTool.call({}, {}, {
-      title: "Escolher estratégia de cache",
-      question: "Qual TTL padrão usar no feed do COO?",
-      requested_by: "OrgFy Otto",
-      tenant: "orgfy",
-      options: [{ label: "5 minutos" }, { label: "15 minutos" }],
-    }));
+    const realDmUuid = "11112222-3333-4444-5555-666677778888";
+    const bentoPubkey = "a".repeat(64);
+    const toolRes = JSON.parse(await qTool.call(
+      { pubkey: bentoPubkey, name: "OrgFy Bento" },
+      { channel: realDmUuid },
+      {
+        title: "Escolher estratégia de cache",
+        question: "Qual TTL padrão usar no feed do COO?",
+        channel_id: "Registered",
+        tenant: "orgfy",
+        options: [{ label: "5 minutos" }, { label: "15 minutos" }],
+      }
+    ));
     assert.equal(toolRes.ok, true);
-    assert.equal(toolRes.card.requestedBy, "OrgFy Otto");
+    assert.equal(toolRes.card.requestedBy, "OrgFy Bento");
+    assert.equal(toolRes.card.requestedByPubkey, bentoPubkey);
+    assert.equal(toolRes.card.channelId, realDmUuid, "context.channel UUID deve prevalecer sobre channel_id inválido ('Registered')");
     assert.equal(toolRes.card.options.length, 2);
+
+    // 4. Regressão: FactoryApp.tsx usa assinatura oficial AgentWake ({ channel, root?, topLevel?, text })
+    const factoryAppSrc = fs.readFileSync(path.resolve(__dirname, "src", "factory", "FactoryApp.tsx"), "utf8");
+    assert.ok(factoryAppSrc.includes("wakeAgentInBuzz"), "FactoryApp deve centralizar wakes em wakeAgentInBuzz");
+    assert.ok(!factoryAppSrc.includes("threadRoot: card.threadRoot } : {}"), "não deve passar threadRoot em vez de root para ctx.agents.wake");
   });
 }

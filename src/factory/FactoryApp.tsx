@@ -853,13 +853,95 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       [liveCrew, tenantAgents, resolveBuzzScope, notify]
     );
 
+    // Helper oficial para ctx.agents.wake(agentKey, { channel, root?, topLevel?, text })
+    // Resolve DM existente (quando preferDm=true ou channelId ausente/inválido) ou canal da empresa com topLevel: true.
+    const wakeAgentInBuzz = React.useCallback(
+      async (opts: {
+        agentKey: string;
+        agentName?: string;
+        pubkey?: string;
+        channelId?: string | null;
+        threadRoot?: string | null;
+        preferDm?: boolean;
+        text: string;
+      }): Promise<{ ok: boolean; channel?: string; error?: string }> => {
+        const agentsApi = (ctx as any)?.agents;
+        if (typeof agentsApi?.wake !== "function" || !opts.agentKey) {
+          return { ok: false, error: "ctx.agents.wake indisponível ou agente sem key" };
+        }
+        const isUuid = (v: unknown): v is string =>
+          typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v.trim());
+        const isHex64 = (v: unknown): v is string =>
+          typeof v === "string" && /^[0-9a-f]{64}$/i.test(v.trim());
+
+        const session = (ctx as any)?.relay?.snapshot?.()?.session;
+        const channelsList: any[] = (() => {
+          try {
+            return session?.channels?.list?.()?.channels || [];
+          } catch {
+            return [];
+          }
+        })();
+
+        const findDmChannelId = async (): Promise<string | null> => {
+          const pkLower = (opts.pubkey || "").trim().toLowerCase();
+          const nameLower = (opts.agentName || "").trim().toLowerCase();
+          const existing = channelsList.find((ch: any) => {
+            if (ch?.channelType !== "dm" && ch?.channelType !== "solo") return false;
+            if (pkLower) {
+              const members = [...(ch.participants || []), ...(ch.members || [])];
+              if (members.some((m: string) => String(m).toLowerCase() === pkLower)) return true;
+            }
+            return Boolean(nameLower && typeof ch?.name === "string" && ch.name.toLowerCase().includes(nameLower));
+          });
+          if (existing?.id) return String(existing.id);
+          if (pkLower && session?.directMessages?.available && typeof session.directMessages.open === "function") {
+            const ac = new AbortController();
+            const timer = setTimeout(() => ac.abort(), 6000);
+            try {
+              const opened = await session.directMessages.open([pkLower], ac.signal);
+              if (opened) return String(opened);
+            } catch {} finally {
+              clearTimeout(timer);
+            }
+          }
+          return null;
+        };
+
+        let resolvedChannel: string | null = isUuid(opts.channelId) ? opts.channelId.trim() : null;
+        if (!resolvedChannel && opts.preferDm) {
+          resolvedChannel = await findDmChannelId();
+        }
+        if (!resolvedChannel) {
+          const fallbackCanal = status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === tenant)?.canal || null;
+          resolvedChannel = isUuid(fallbackCanal) ? fallbackCanal.trim() : await findDmChannelId();
+        }
+        if (!resolvedChannel) {
+          return { ok: false, error: "Nenhum canal/DM válido encontrado para acordar o agente" };
+        }
+
+        const matchedCh = channelsList.find((ch: any) => String(ch?.id || "") === resolvedChannel);
+        const isDmOrSolo = matchedCh?.channelType === "dm" || matchedCh?.channelType === "solo";
+        const validRoot = !isDmOrSolo && isHex64(opts.threadRoot) ? opts.threadRoot.trim().toLowerCase() : undefined;
+
+        const payload: any = {
+          channel: resolvedChannel,
+          text: opts.text,
+          ...(validRoot ? { root: validRoot } : isDmOrSolo ? {} : { topLevel: true as const }),
+        };
+
+        try {
+          await agentsApi.wake(opts.agentKey, payload);
+          return { ok: true, channel: resolvedChannel };
+        } catch (err: any) {
+          return { ok: false, error: err?.message || String(err) };
+        }
+      },
+      [status.tenantManifest, holding, tenant]
+    );
+
     // Dispara auditoria one-shot do Oráculo (Scout) via ctx.agents.wake
     const handleRunScoutNow = React.useCallback(async () => {
-      const agentsApi = (ctx as any)?.agents;
-      if (typeof agentsApi?.wake !== "function") {
-        notify("API ctx.agents.wake indisponível nesta versão do Buzz.");
-        return;
-      }
       const scoutTenant = tenantAgents.find((a) => a.papel === "oraculo" || /or[aá]culo|scout/i.test(a.name));
       const scoutLive = liveCrew.find((a) => a.key === scoutTenant?.agentKey || /or[aá]culo|scout/i.test(a.name));
       const agentKey = scoutTenant?.agentKey || scoutLive?.key;
@@ -867,20 +949,19 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         notify(`Nenhum agente Oráculo/Scout encontrado em ${tenant}.`);
         return;
       }
-      const canal = status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === tenant)?.canal || undefined;
       setRunningScout(true);
       try {
-        await agentsApi.wake(agentKey, {
-          ...(canal ? { channelId: canal } : {}),
+        const res = await wakeAgentInBuzz({
+          agentKey,
+          agentName: scoutTenant?.name || scoutLive?.name || "Oráculo",
+          pubkey: scoutTenant?.pubkey || scoutLive?.pubkey,
           text: `[ORGFY SCOUT ONE-SHOT · ${tenant}] Audite o workspace atual contra o Canvas/Visão da empresa, identifique gaps de maior impacto (segurança, testes, UX ou dívida técnica) e proponha os próximos cards canônicos.`,
         });
-        notify(`${scoutTenant?.name || scoutLive?.name || "Oráculo"} acionado via ctx.agents.wake.`);
-      } catch (err: any) {
-        notify(`Falha ao acionar Oráculo: ${err?.message || err}`);
+        notify(res.ok ? `${scoutTenant?.name || scoutLive?.name || "Oráculo"} acionado via ctx.agents.wake.` : `Falha ao acionar Oráculo: ${res.error}`);
       } finally {
         setRunningScout(false);
       }
-    }, [tenantAgents, liveCrew, tenant, status.tenantManifest, holding, notify]);
+    }, [tenantAgents, liveCrew, tenant, wakeAgentInBuzz, notify]);
 
     // Carrega automacoes persistidas por empresa (localStorage + fallback defaults)
     React.useEffect(() => {
@@ -967,27 +1048,23 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
           .replace(/\{\{tenant\}\}/g, tenant)
           .replace(/\{\{repo\}\}/g, status.tenantManifest?.repoId || tenant)
           .replace(/\{\{channel\}\}/g, status.tenantManifest?.canal || "");
-        const agentsApi = (ctx as any)?.agents;
         const targetAg =
           tenantAgents.find((a) => a.name.toLowerCase() === auto.targetAgent.toLowerCase()) ||
           liveCrew.find((a) => a.name.toLowerCase() === auto.targetAgent.toLowerCase());
         const agentKey = (targetAg && "agentKey" in targetAg ? targetAg.agentKey : targetAg?.key) || "";
-        const canal = status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === tenant)?.canal || undefined;
         let statusRun: "ok" | "error" = "ok";
         let detail = `Disparado para ${auto.targetAgent} via Buzz.`;
         try {
-          if (typeof agentsApi?.wake === "function" && agentKey) {
-            await agentsApi.wake(agentKey, {
-              ...(canal ? { channelId: canal } : {}),
-              text: `[ORGFY AUTOMATION · ${auto.name}]\n${resolvedPrompt}`,
-            });
-          } else {
+          const wakeRes = await wakeAgentInBuzz({
+            agentKey,
+            agentName: auto.targetAgent,
+            pubkey: targetAg?.pubkey,
+            text: `[ORGFY AUTOMATION · ${auto.name}]\n${resolvedPrompt}`,
+          });
+          if (!wakeRes.ok) {
             statusRun = "error";
-            detail = "ctx.agents.wake indisponível ou agente não provisionado.";
+            detail = wakeRes.error || "Falha ao acordar agente.";
           }
-        } catch (err: any) {
-          statusRun = "error";
-          detail = err?.message || String(err);
         } finally {
           setRunningAutomationId(null);
         }
@@ -1002,7 +1079,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         });
         notify(statusRun === "ok" ? `Automação "${auto.name}" disparada para ${auto.targetAgent}.` : `Falha ao rodar "${auto.name}": ${detail}`);
       },
-      [tenant, status.tenantManifest, holding, tenantAgents, liveCrew, persistAutomations, notify]
+      [tenant, status.tenantManifest, tenantAgents, liveCrew, wakeAgentInBuzz, persistAutomations, notify]
     );
 
     const handleExportAutomationYaml = React.useCallback(
@@ -1037,57 +1114,52 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
 
     const handleSendUpdatesToCoo = React.useCallback(
       async (entries: Array<{ badge: string; title: string; subtitle?: string; item?: FactoryWorkItem }>) => {
-        const agentsApi = (ctx as any)?.agents;
         const cooName = status.tenantManifest?.coo || "OrgFy Bento";
         const cooAg =
           tenantAgents.find((a) => a.papel === "coo" || a.name.toLowerCase() === cooName.toLowerCase()) ||
           liveCrew.find((a) => a.name.toLowerCase().includes("bento"));
         const agentKey = (cooAg && "agentKey" in cooAg ? cooAg.agentKey : cooAg?.key) || "";
-        if (typeof agentsApi?.wake !== "function" || !agentKey) {
-          notify(`Não foi possível acordar ${cooName} (ctx.agents.wake indisponível).`);
-          return;
-        }
-        const canal = status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === tenant)?.canal || undefined;
         const lines = entries.map((e) => `- [${e.badge}] ${e.title}${e.subtitle ? ` (${e.subtitle})` : ""}`).join("\n");
         setSendingCooUpdates(true);
         try {
-          await agentsApi.wake(agentKey, {
-            ...(canal ? { channelId: canal } : {}),
+          const res = await wakeAgentInBuzz({
+            agentKey,
+            agentName: cooName,
+            pubkey: cooAg?.pubkey,
+            preferDm: true,
             text: `[ORGFY FACTORY UPDATES · ${tenant}]\n${entries.length} atualização(ões) recente(s):\n${lines}`,
           });
-          notify(`${entries.length} update(s) enviado(s) para ${cooName}.`);
-        } catch (err: any) {
-          notify(`Falha ao enviar updates ao COO: ${err?.message || err}`);
+          notify(res.ok ? `${entries.length} update(s) enviado(s) para ${cooName}.` : `Falha ao enviar updates ao COO: ${res.error}`);
         } finally {
           setSendingCooUpdates(false);
         }
       },
-      [tenant, status.tenantManifest, holding, tenantAgents, liveCrew, notify]
+      [tenant, status.tenantManifest, tenantAgents, liveCrew, wakeAgentInBuzz, notify]
     );
 
     const handleSendDiffReview = React.useCallback(
       async (comments: Array<{ file: string; line: number; lineText: string; comment: string }>, item: FactoryWorkItem, executorName?: string) => {
-        const agentsApi = (ctx as any)?.agents;
         const targetName = executorName || status.tenantManifest?.coo || "OrgFy Bento";
         const targetAg =
           tenantAgents.find((a) => a.name.toLowerCase().includes(targetName.toLowerCase())) ||
           liveCrew.find((a) => a.name.toLowerCase().includes(targetName.toLowerCase()));
         const agentKey = (targetAg && "agentKey" in targetAg ? targetAg.agentKey : targetAg?.key) || "";
-        if (typeof agentsApi?.wake !== "function" || !agentKey) {
-          notify(`Comentários prontos, mas ctx.agents.wake indisponível para ${targetName}.`);
-          return;
-        }
-        const canal = status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === tenant)?.canal || undefined;
         const body = comments
           .map((c, idx) => `${idx + 1}. \`${c.file}:${c.line}\` — ${c.comment}\n   > ${c.lineText.trim().slice(0, 100)}`)
           .join("\n");
-        await agentsApi.wake(agentKey, {
-          ...(canal ? { channelId: canal } : {}),
+        const res = await wakeAgentInBuzz({
+          agentKey,
+          agentName: targetName,
+          pubkey: targetAg?.pubkey,
           text: `[ORGFY DIFF REVIEW · #${item.id.slice(0, 8)} ${item.title}]\nAjustes solicitados em ${comments.length} linha(s):\n${body}`,
         });
-        notify(`Revisão com ${comments.length} comentário(s) ancorado(s) enviada para ${targetName}.`);
+        notify(
+          res.ok
+            ? `Revisão com ${comments.length} comentário(s) ancorado(s) enviada para ${targetName}.`
+            : `Falha ao enviar revisão para ${targetName}: ${res.error}`
+        );
       },
-      [tenant, status.tenantManifest, holding, tenantAgents, liveCrew, notify]
+      [tenant, status.tenantManifest, tenantAgents, liveCrew, wakeAgentInBuzz, notify]
     );
 
     // Carrega e assina Question Cards via OrgfyCrdtStore (ctx.artifactStorage.open + fallback)
@@ -1116,7 +1188,6 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         const selectedLabels = (answer.selectedIds || [])
           .map((id) => card.options.find((o) => o.id === id)?.label || id)
           .join(", ");
-        const agentsApi = (ctx as any)?.agents;
         const targetAg =
           (card.requestedByPubkey &&
             (tenantAgents.find((a) => a.pubkey?.toLowerCase() === card.requestedByPubkey?.toLowerCase()) ||
@@ -1124,21 +1195,23 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
           tenantAgents.find((a) => a.name.toLowerCase().includes(card.requestedBy.toLowerCase())) ||
           liveCrew.find((a) => a.name.toLowerCase().includes(card.requestedBy.toLowerCase()));
         const agentKey = (targetAg && "agentKey" in targetAg ? targetAg.agentKey : targetAg?.key) || "";
-        const canal = card.channelId || status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === card.tenant)?.canal || undefined;
-        if (typeof agentsApi?.wake === "function" && agentKey) {
-          try {
-            await agentsApi.wake(agentKey, {
-              ...(canal ? { channelId: canal } : {}),
-              ...(card.threadRoot ? { threadRoot: card.threadRoot } : {}),
-              text: `[ORGFY QUESTION CARD RESPONDIDO · ${card.id}]\nDecisão: ${card.title}\nOpções selecionadas: ${selectedLabels || "(texto livre)"}${answer.freeText ? `\nObservação do Fundador: ${answer.freeText}` : ""}`,
-            });
-            notify(`Resposta salva no CRDT e enviada para ${card.requestedBy} via ctx.agents.wake.`);
-            return;
-          } catch {}
+        const targetPubkey = card.requestedByPubkey || targetAg?.pubkey;
+        const wakeRes = await wakeAgentInBuzz({
+          agentKey,
+          agentName: card.requestedBy,
+          pubkey: targetPubkey,
+          channelId: card.channelId,
+          threadRoot: card.threadRoot,
+          preferDm: true,
+          text: `[ORGFY QUESTION CARD RESPONDIDO · ${card.id}]\nDecisão: ${card.title}\nOpções selecionadas: ${selectedLabels || "(texto livre)"}${answer.freeText ? `\nObservação do Fundador: ${answer.freeText}` : ""}`,
+        });
+        if (wakeRes.ok) {
+          notify(`Resposta salva e ${card.requestedBy} acordado via Buzz.`);
+        } else {
+          notify(`Resposta salva no CRDT, mas não foi possível acordar ${card.requestedBy}: ${wakeRes.error}`);
         }
-        notify(`Resposta registrada para "${card.title}" (CRDT sincronizado).`);
       },
-      [refreshQuestionCards, tenantAgents, liveCrew, status.tenantManifest, holding, notify]
+      [refreshQuestionCards, tenantAgents, liveCrew, wakeAgentInBuzz, notify]
     );
 
     const handleDismissQuestionCard = React.useCallback(
@@ -1159,28 +1232,24 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
           note: evidence.note,
           verdict: evidence.verdict,
         });
-        const agentsApi = (ctx as any)?.agents;
         const targetName = executorName || status.tenantManifest?.coo || "OrgFy Bento";
         const targetAg =
           tenantAgents.find((a) => a.name.toLowerCase().includes(targetName.toLowerCase())) ||
           liveCrew.find((a) => a.name.toLowerCase().includes(targetName.toLowerCase()));
         const agentKey = (targetAg && "agentKey" in targetAg ? targetAg.agentKey : targetAg?.key) || "";
-        const canal = status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === tenant)?.canal || undefined;
-        if (typeof agentsApi?.wake === "function" && agentKey) {
-          try {
-            await agentsApi.wake(agentKey, {
-              ...(canal ? { channelId: canal } : {}),
-              text: `[ORGFY VISUAL PREVIEW · ${evidence.verdict === "approved" ? "APROVADO ✓" : "AJUSTE SOLICITADO"} · #${item.id.slice(0, 8)} ${item.title}]\nURL: ${evidence.url}\nNota: ${evidence.note}`,
-            });
-          } catch {}
-        }
+        await wakeAgentInBuzz({
+          agentKey,
+          agentName: targetName,
+          pubkey: targetAg?.pubkey,
+          text: `[ORGFY VISUAL PREVIEW · ${evidence.verdict === "approved" ? "APROVADO ✓" : "AJUSTE SOLICITADO"} · #${item.id.slice(0, 8)} ${item.title}]\nURL: ${evidence.url}\nNota: ${evidence.note}`,
+        });
         notify(
           evidence.verdict === "approved"
             ? `Evidência visual aprovada e sincronizada (CRDT) para #${item.id.slice(0, 8)}.`
             : `Ajuste visual enviado para ${targetName}.`
         );
       },
-      [tenant, status.tenantManifest, holding, tenantAgents, liveCrew, notify]
+      [tenant, status.tenantManifest, tenantAgents, liveCrew, wakeAgentInBuzz, notify]
     );
 
     // CEO Master dinâmico: respeita session.mainAgent do Buzz se configurado, senão board.json (OrgFy Iris)
