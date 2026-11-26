@@ -1901,7 +1901,6 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                 background: settingsForm.mode === m.id ? "var(--primary-soft)" : undefined,
               },
               onClick: () => {
-                setSettingsForm({ mode: m.id });
                 onSelectModeQuick(m.id);
               },
             },
@@ -1926,6 +1925,49 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
       "div",
       { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "12px" } },
       h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Limites operacionais · controle-${tenant}.json`),
+      h(
+        "label",
+        {
+          className: "of-surface",
+          "data-automerge-setting": "true",
+          style: {
+            display: "flex",
+            alignItems: "flex-start",
+            gap: "10px",
+            padding: "10px 12px",
+            cursor: "pointer",
+            borderColor: settingsForm.autoMerge ? "var(--primary)" : undefined,
+          },
+        },
+        h("input", {
+          type: "checkbox",
+          checked: Boolean(settingsForm.autoMerge),
+          disabled: settingsForm.mode === "manual" || settingsForm.mode === "assisted",
+          style: { marginTop: "2px" },
+          onChange: (e: any) => setSettingsForm({ autoMerge: Boolean(e.target.checked) }),
+        }),
+        h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: "2px" } },
+          h(
+            "div",
+            { style: { fontSize: "12.5px", fontWeight: 600, display: "flex", alignItems: "center", gap: "6px" } },
+            "Auto-merge automático (Fábrica de Software / Dark Factory)",
+            h(
+              "span",
+              { className: "of-pill", "data-tone": settingsForm.autoMerge ? "done" : "idle", style: { fontSize: "10px" } },
+              settingsForm.autoMerge ? "LIGADO" : "DESLIGADO"
+            )
+          ),
+          h(
+            "div",
+            { className: "of-muted", style: { fontSize: "11px", lineHeight: 1.4 } },
+            settingsForm.mode === "manual" || settingsForm.mode === "assisted"
+              ? "Disponível apenas nos modos Fábrica de Software e Dark Factory. Em Manual/Assistido todo merge exige GATE humano."
+              : "Quando ligado, PRs com CI + Revisor L-01 verdes integram sozinhos na main. Áreas protegidas (CI/runner/segurança) continuam exigindo GATE humano."
+          )
+        )
+      ),
       h(
         "div",
         { className: "of-grid-3" },

@@ -58573,7 +58573,6 @@ function renderFactorySecondaryPage(props) {
                   background: settingsForm.mode === m.id ? "var(--primary-soft)" : void 0
                 },
                 onClick: () => {
-                  setSettingsForm({ mode: m.id });
                   onSelectModeQuick(m.id);
                 }
               },
@@ -58598,6 +58597,47 @@ function renderFactorySecondaryPage(props) {
         "div",
         { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "12px" } },
         h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Limites operacionais · controle-${tenant}.json`),
+        h(
+          "label",
+          {
+            className: "of-surface",
+            "data-automerge-setting": "true",
+            style: {
+              display: "flex",
+              alignItems: "flex-start",
+              gap: "10px",
+              padding: "10px 12px",
+              cursor: "pointer",
+              borderColor: settingsForm.autoMerge ? "var(--primary)" : void 0
+            }
+          },
+          h("input", {
+            type: "checkbox",
+            checked: Boolean(settingsForm.autoMerge),
+            disabled: settingsForm.mode === "manual" || settingsForm.mode === "assisted",
+            style: { marginTop: "2px" },
+            onChange: (e) => setSettingsForm({ autoMerge: Boolean(e.target.checked) })
+          }),
+          h(
+            "div",
+            { style: { display: "flex", flexDirection: "column", gap: "2px" } },
+            h(
+              "div",
+              { style: { fontSize: "12.5px", fontWeight: 600, display: "flex", alignItems: "center", gap: "6px" } },
+              "Auto-merge automático (Fábrica de Software / Dark Factory)",
+              h(
+                "span",
+                { className: "of-pill", "data-tone": settingsForm.autoMerge ? "done" : "idle", style: { fontSize: "10px" } },
+                settingsForm.autoMerge ? "LIGADO" : "DESLIGADO"
+              )
+            ),
+            h(
+              "div",
+              { className: "of-muted", style: { fontSize: "11px", lineHeight: 1.4 } },
+              settingsForm.mode === "manual" || settingsForm.mode === "assisted" ? "Disponível apenas nos modos Fábrica de Software e Dark Factory. Em Manual/Assistido todo merge exige GATE humano." : "Quando ligado, PRs com CI + Revisor L-01 verdes integram sozinhos na main. Áreas protegidas (CI/runner/segurança) continuam exigindo GATE humano."
+            )
+          )
+        ),
         h(
           "div",
           { className: "of-grid-3" },
@@ -60062,6 +60102,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
     const [activeHelpKey, setActiveHelpKey] = React.useState(null);
     const [selectedItem, setSelectedItem] = React.useState(null);
     const [confirmKill, setConfirmKill] = React.useState(false);
+    const [autonomyModal, setAutonomyModal] = React.useState(null);
     const [sidebarCollapsed, setSidebarCollapsed] = React.useState(() => {
       try {
         return localStorage.getItem("orgfy_factory_sidebar_collapsed") === "1";
@@ -61827,7 +61868,17 @@ Nota: ${evidence.note}`
                   },
                   `Configurações salvas em controle-${tenant}.json.`
                 ),
-                onSelectModeQuick: (mode) => handleControlUpdate({ mode }, `Modo alterado para ${PT_BR.modes[mode]}.`),
+                onSelectModeQuick: (mode) => {
+                  const isFactory = mode === "software_factory" || mode === "dark_factory";
+                  const existingTpls = new Set(automations.map((a) => a.templateId).filter(Boolean));
+                  const hasMissingStarter = ORGFY_AUTOMATION_TEMPLATES.some((t) => t.starter && !existingTpls.has(t.id));
+                  setAutonomyModal({
+                    open: true,
+                    targetMode: mode,
+                    autoMerge: isFactory ? Boolean(settingsForm.autoMerge) : false,
+                    enableStarterSet: mode === "dark_factory" && hasMissingStarter
+                  });
+                },
                 onOpenChannelInBuzz: handleOpenChannelInBuzz,
                 onOpenChannelFullPage: handleOpenChannelFullPage,
                 onOpenBuzzLink: handleOpenBuzzLink,
@@ -62077,6 +62128,167 @@ Nota: ${evidence.note}`
         paletteQuery,
         setPaletteQuery
       ),
+      (autonomyModal == null ? void 0 : autonomyModal.open) && (() => {
+        var _a2, _b2;
+        const targetMode = autonomyModal.targetMode;
+        const isFactoryTarget = targetMode === "software_factory" || targetMode === "dark_factory";
+        const hasRepo = Boolean(((_a2 = status.tenantManifest) == null ? void 0 : _a2.repoId) || tenant);
+        const hasVision = Boolean(channelCanvas && channelCanvas.trim().length > 0 || ((_b2 = status.orgfyVision) == null ? void 0 : _b2.projectMd) && status.orgfyVision.projectMd.trim().length > 0);
+        const hasBudget = Number(settingsForm.gastoDiaUsd || 0) > 0;
+        const existingTpls = new Set(automations.map((a) => a.templateId).filter(Boolean));
+        const missingStarterCount = ORGFY_AUTOMATION_TEMPLATES.filter((t) => t.starter && !existingTpls.has(t.id)).length;
+        const canConfirm = !isFactoryTarget || hasRepo && hasBudget;
+        return h(
+          "div",
+          {
+            className: "of-sheet-backdrop",
+            "data-orgfy-autonomy-modal": "true",
+            style: { alignItems: "center", justifyContent: "center", padding: "20px" },
+            onClick: (e) => {
+              if (e.target === e.currentTarget) setAutonomyModal(null);
+            }
+          },
+          h(
+            "div",
+            {
+              className: "of-card-pad",
+              role: "dialog",
+              "aria-modal": "true",
+              "aria-label": `Ativar modo ${PT_BR.modes[targetMode] || targetMode}`,
+              style: {
+                width: "min(560px, 94vw)",
+                maxHeight: "88vh",
+                overflowY: "auto",
+                display: "flex",
+                flexDirection: "column",
+                gap: "14px",
+                background: "var(--card)",
+                border: "1px solid var(--border)",
+                boxShadow: "0 20px 60px rgba(0,0,0,0.45)"
+              }
+            },
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "10px" } },
+              h(
+                "div",
+                null,
+                h("div", { style: { fontSize: "15px", fontWeight: 700 } }, `Ativar ${PT_BR.modes[targetMode] || targetMode} · ${empresaNome}`),
+                h("div", { className: "of-muted", style: { fontSize: "12px", marginTop: "3px" } }, "Revise os pré-requisitos e escolha o nível de automação antes de aplicar em controle-" + tenant + ".json.")
+              ),
+              h("button", { type: "button", className: "of-btn", style: { padding: "3px 9px" }, onClick: () => setAutonomyModal(null) }, "×")
+            ),
+            isFactoryTarget ? h(
+              "div",
+              { className: "of-surface", style: { padding: "12px", display: "flex", flexDirection: "column", gap: "8px" } },
+              h("div", { className: "of-meter-label" }, "Pré-requisitos da Fábrica"),
+              [
+                { ok: hasRepo, label: `Repositório & manifesto configurados (repo: ${empresaRepo})` },
+                { ok: hasVision, label: hasVision ? "Visão / Canvas carregado para orientar agentes e Oráculo" : "Visão / Canvas ainda vazio (recomendado preencher na aba Canvas / Visão)" },
+                { ok: hasBudget, label: `Orçamento diário ativo (US$ ${settingsForm.gastoDiaUsd}/dia · máx ${settingsForm.mergesDia} merges/dia)` }
+              ].map(
+                (req, idx) => h(
+                  "div",
+                  { key: idx, style: { display: "flex", alignItems: "center", gap: "8px", fontSize: "12px" } },
+                  h("span", { className: "of-pill", "data-tone": req.ok ? "done" : "waiting", style: { fontSize: "10px", padding: "1px 6px" } }, req.ok ? "✓" : "!"),
+                  h("span", null, req.label)
+                )
+              )
+            ) : h(
+              "div",
+              { className: "of-surface", style: { padding: "12px", fontSize: "12px", lineHeight: 1.5 } },
+              targetMode === "manual" ? "No modo Manual, o coordenador pausa automações agendadas, despachos automáticos e auto-merge. Você conduz cada passo manualmente." : "No modo Assistido, o COO e as automações continuam encontrando e preparando trabalho, mas todo merge na main exige sua aprovação (GATE humano)."
+            ),
+            isFactoryTarget && h(
+              "div",
+              { style: { display: "flex", flexDirection: "column", gap: "8px" } },
+              h(
+                "label",
+                {
+                  className: "of-surface",
+                  style: {
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: "10px",
+                    padding: "10px 12px",
+                    cursor: "pointer",
+                    borderColor: autonomyModal.autoMerge ? "var(--primary)" : void 0
+                  }
+                },
+                h("input", {
+                  type: "checkbox",
+                  checked: autonomyModal.autoMerge,
+                  style: { marginTop: "2px" },
+                  onChange: (e) => setAutonomyModal((prev) => prev ? { ...prev, autoMerge: Boolean(e.target.checked) } : prev)
+                }),
+                h(
+                  "div",
+                  null,
+                  h("div", { style: { fontSize: "12.5px", fontWeight: 600 } }, "Habilitar Auto-merge agora"),
+                  h("div", { className: "of-muted", style: { fontSize: "11px", marginTop: "2px", lineHeight: 1.4 } }, "Permite que a esteira integre PRs aprovados (CI + Revisor L-01) automaticamente. Áreas protegidas (CI/runner/segurança) e regra L-01 continuam exigindo GATE humano.")
+                )
+              ),
+              h(
+                "label",
+                {
+                  className: "of-surface",
+                  style: {
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: "10px",
+                    padding: "10px 12px",
+                    cursor: missingStarterCount > 0 ? "pointer" : "default",
+                    opacity: missingStarterCount > 0 ? 1 : 0.7,
+                    borderColor: autonomyModal.enableStarterSet && missingStarterCount > 0 ? "var(--primary)" : void 0
+                  }
+                },
+                h("input", {
+                  type: "checkbox",
+                  checked: autonomyModal.enableStarterSet && missingStarterCount > 0,
+                  disabled: missingStarterCount === 0,
+                  style: { marginTop: "2px" },
+                  onChange: (e) => setAutonomyModal((prev) => prev ? { ...prev, enableStarterSet: Boolean(e.target.checked) } : prev)
+                }),
+                h(
+                  "div",
+                  null,
+                  h("div", { style: { fontSize: "12.5px", fontWeight: 600 } }, missingStarterCount > 0 ? `Ativar Starter Set de automações (${missingStarterCount} templates)` : "Starter Set de automações já instalado"),
+                  h("div", { className: "of-muted", style: { fontSize: "11px", marginTop: "2px", lineHeight: 1.4 } }, "Adiciona e liga as rotinas iniciais (Segurança, Dependências, Cobertura de Testes, PRs parados). Triagem duplicada é pulada automaticamente em modo fábrica.")
+                )
+              )
+            ),
+            h(
+              "div",
+              { style: { display: "flex", justifyContent: "flex-end", gap: "8px", paddingTop: "6px", borderTop: "1px solid var(--border)" } },
+              h("button", { type: "button", className: "of-btn", onClick: () => setAutonomyModal(null) }, "Cancelar"),
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "of-btn",
+                  "data-variant": "primary",
+                  disabled: !canConfirm,
+                  onClick: async () => {
+                    const chosen = autonomyModal;
+                    if (!chosen) return;
+                    const nextAutoMerge = isFactoryTarget ? chosen.autoMerge : false;
+                    setAutonomyModal(null);
+                    setSettingsForm({ mode: chosen.targetMode, autoMerge: nextAutoMerge });
+                    await handleControlUpdate(
+                      { mode: chosen.targetMode, autoMerge: nextAutoMerge },
+                      `Modo ${PT_BR.modes[chosen.targetMode]} ativado (auto-merge ${nextAutoMerge ? "ligado" : "desligado"}).`
+                    );
+                    if (isFactoryTarget && chosen.enableStarterSet && missingStarterCount > 0) {
+                      handleAddStarterSet();
+                    }
+                  }
+                },
+                `Confirmar e ativar ${PT_BR.modes[targetMode] || targetMode}`
+              )
+            )
+          )
+        );
+      })(),
       guideOpen && h(
         "div",
         {
