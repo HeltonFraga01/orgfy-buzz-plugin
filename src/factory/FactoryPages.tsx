@@ -6,6 +6,7 @@ import type { BuzzCanvasHistoryEntry, BuzzLiveTelemetrySnapshot } from "./buzz-l
 import type { LiveCrewAgent } from "./FactoryBoardAndFloor";
 import type { HoldingControlPlaneSnapshot } from "../services/holding-service";
 import type { BuzzChannelLiveInfo } from "../services/buzz-channel-live";
+import type { BuzzWorkspaceDetails, BuzzWorkspacesCatalog } from "../services/buzz-workspace-live";
 import { renderBuzzCanvasViewer } from "../components/BuzzCanvasViewer";
 import { renderAutomationEditor, type OrgfyAutomation } from "./AutomationEditor";
 import type {
@@ -160,6 +161,17 @@ export interface FactorySecondaryPagesProps {
   onRetryInboxItem?: (item: FactoryWorkItem) => void;
   onResumeFactory?: () => void;
   onOpenFactoryPanel?: () => void;
+  buzzCatalog?: BuzzWorkspacesCatalog;
+  linkedWorkspaceId?: string;
+  linkedChannelId?: string;
+  tenantAgentsSource?: "buzz_channel_live" | "manifest";
+  onLinkEnterpriseWorkspaceChannel?: (wsId: string, chId: string) => Promise<void> | void;
+  savingEnterpriseLink?: boolean;
+  workspaceDetails?: BuzzWorkspaceDetails | null;
+  workspaceDraft?: { foldersText: string; worktreeLocation: string; worktreeBranch: string; instructions: string };
+  setWorkspaceDraft?: (patch: Partial<{ foldersText: string; worktreeLocation: string; worktreeBranch: string; instructions: string }>) => void;
+  savingWorkspaceDetails?: boolean;
+  onSaveWorkspaceSettings?: () => Promise<void> | void;
 }
 
 const CHART_COLORS = ["var(--chart-2)", "var(--chart-1)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"];
@@ -834,7 +846,9 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
           h(
             "span",
             { className: "of-muted" },
-            `Fonte: empresas/${tenant}.json × Buzz Desktop (${tenantAgents.filter((a) => a.inBuzz).length}/${tenantAgents.length} provisionados)`
+            props.tenantAgentsSource === "buzz_channel_live"
+              ? `Time vivo do canal #${props.channelInfo?.name || tenant} (${tenantAgents.length} agentes no Buzz)`
+              : `Fonte: empresas/${tenant}.json × Buzz Desktop (${tenantAgents.filter((a) => a.inBuzz).length}/${tenantAgents.length} provisionados)`
           ),
           props.onReconcileAgents &&
             h(
@@ -1746,6 +1760,85 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
     return h(
       "div",
       { style: { display: "flex", flexDirection: "column", gap: "14px" } },
+      props.workspaceDetails && props.workspaceDraft && props.setWorkspaceDraft &&
+        h(
+          "section",
+          { className: "of-card-pad", "data-buzz-workspace-vision": "true", style: { display: "flex", flexDirection: "column", gap: "10px", borderColor: "var(--primary-border)" } },
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" } },
+            h(
+              "div",
+              null,
+              h("div", { style: { fontSize: "14px", fontWeight: 700, display: "flex", alignItems: "center", gap: "7px" } }, `Workspace do Buzz · ${props.workspaceDetails.workspaceName}`, h("span", { className: "of-pill", "data-tone": "done", style: { fontSize: "10px" } }, "channelKit nativo")),
+              h("div", { className: "of-muted", style: { fontSize: "11.5px", marginTop: "2px" } }, "Repositórios, regra de Worktree e Instructions injetadas nativamente pelo Buzz em todos os agentes deste Workspace.")
+            ),
+            props.workspaceDetails.writable && props.onSaveWorkspaceSettings &&
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "of-btn",
+                  "data-variant": "primary",
+                  disabled: props.savingWorkspaceDetails,
+                  onClick: props.onSaveWorkspaceSettings,
+                },
+                props.savingWorkspaceDetails ? "Salvando no Buzz..." : "Salvar no Workspace"
+              )
+          ),
+          h(
+            "div",
+            { className: "of-grid-2" },
+            h(
+              "label",
+              { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+              "Repositórios / Folders (1 por linha)",
+              h("textarea", {
+                className: "of-textarea of-mono",
+                style: { minHeight: "68px", fontSize: "11.5px" },
+                placeholder: "~/.buzz/REPOS/lumen-iptv",
+                value: props.workspaceDraft.foldersText,
+                onChange: (e: any) => props.setWorkspaceDraft!({ foldersText: e.target.value }),
+              })
+            ),
+            h(
+              "div",
+              { style: { display: "grid", gridTemplateColumns: "1fr 120px", gap: "8px", alignContent: "start" } },
+              h(
+                "label",
+                { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+                "Worktree location",
+                h("input", {
+                  className: "of-input of-mono",
+                  value: props.workspaceDraft.worktreeLocation,
+                  onChange: (e: any) => props.setWorkspaceDraft!({ worktreeLocation: e.target.value }),
+                })
+              ),
+              h(
+                "label",
+                { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+                "Base branch",
+                h("input", {
+                  className: "of-input of-mono",
+                  value: props.workspaceDraft.worktreeBranch,
+                  onChange: (e: any) => props.setWorkspaceDraft!({ worktreeBranch: e.target.value }),
+                })
+              )
+            )
+          ),
+          h(
+            "label",
+            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+            "Instructions / Visão da Empresa (injetada no prompt de todos os agentes do Workspace)",
+            h("textarea", {
+              className: "of-textarea",
+              style: { minHeight: "110px", fontSize: "12px", lineHeight: 1.5 },
+              placeholder: "Descreva a visão, regras arquiteturais e direção do produto...",
+              value: props.workspaceDraft.instructions,
+              onChange: (e: any) => props.setWorkspaceDraft!({ instructions: e.target.value }),
+            })
+          )
+        ),
       renderBuzzCanvasViewer({
         h,
         tenant,
@@ -1908,13 +2001,22 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
         h(
           "div",
           null,
-          h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Canal da Empresa no Buzz · #${chInfo?.name || status.tenantManifest?.nome || tenant}`),
+          h(
+            "div",
+            { style: { fontSize: "14px", fontWeight: 700, display: "flex", alignItems: "center", gap: "7px", flexWrap: "wrap" } },
+            `Workspace & Canal no Buzz · #${chInfo?.name || status.tenantManifest?.nome || tenant}`,
+            h(
+              "span",
+              { className: "of-pill", "data-tone": props.tenantAgentsSource === "buzz_channel_live" ? "done" : "waiting", style: { fontSize: "10px" } },
+              props.tenantAgentsSource === "buzz_channel_live" ? `Time vivo (${settingsTenantAgents.length})` : "Manifesto JSON"
+            )
+          ),
           h(
             "div",
             { className: "of-muted", style: { marginTop: "2px" } },
             chInfo?.available
               ? `Stream: ${chInfo.liveStatus} · Roster: ${chInfo.rosterTotalChannels} canais · Papel: ${chInfo.viewerRole || "member"}`
-              : "Conecte o canal da empresa no Buzz para sincronizar descrição, membros, leitura e diagnósticos."
+              : "Vincule um Workspace e o Canal Principal abaixo para sincronizar automaticamente time, repositório e Visão."
           )
         ),
         h(
@@ -1934,6 +2036,83 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
             )
         )
       ),
+      props.buzzCatalog?.available && props.onLinkEnterpriseWorkspaceChannel &&
+        (() => {
+          const catalog = props.buzzCatalog!;
+          const selectedWsId = props.linkedWorkspaceId || "";
+          const selectedChId = props.linkedChannelId || "";
+          const selectedWs = catalog.workspaces.find((w) => w.id === selectedWsId);
+          const channelOptions = selectedWs && selectedWs.channels.length > 0 ? selectedWs.channels : catalog.allChannels;
+          return h(
+            "div",
+            { className: "of-surface", "data-workspace-channel-linker": "true", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "8px" } },
+            h("div", { className: "of-meter-label" }, "Vínculo Nativo · Workspace (Repo/Visão) + Canal Principal (Time Vivo)"),
+            h(
+              "div",
+              { style: { display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: "8px", alignItems: "end" } },
+              h(
+                "label",
+                { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11px" } },
+                "Workspace do Buzz",
+                h(
+                  "select",
+                  {
+                    className: "of-tenant-select",
+                    value: selectedWsId,
+                    onChange: (e: any) => {
+                      const nextWs = e.target.value;
+                      const wsObj = catalog.workspaces.find((w) => w.id === nextWs);
+                      const nextCh = wsObj?.channels[0]?.id || selectedChId;
+                      void props.onLinkEnterpriseWorkspaceChannel!(nextWs, nextCh);
+                    },
+                  },
+                  h("option", { value: "" }, "— Selecionar Workspace —"),
+                  catalog.workspaces.map((w) =>
+                    h("option", { key: w.id, value: w.id }, `${w.icon ? `${w.icon} ` : ""}${w.name} (${w.channels.length} canal${w.channels.length === 1 ? "" : "is"})`)
+                  )
+                )
+              ),
+              h(
+                "label",
+                { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11px" } },
+                "Canal Principal (Time Vivo)",
+                h(
+                  "select",
+                  {
+                    className: "of-tenant-select",
+                    value: selectedChId,
+                    onChange: (e: any) => {
+                      const nextCh = e.target.value;
+                      const inferredWs = catalog.assignments[nextCh] || selectedWsId;
+                      void props.onLinkEnterpriseWorkspaceChannel!(inferredWs, nextCh);
+                    },
+                  },
+                  h("option", { value: "" }, "— Selecionar Canal —"),
+                  channelOptions.map((c) =>
+                    h("option", { key: c.id, value: c.id }, `#${c.name} (${c.memberCount} membros)`)
+                  )
+                )
+              ),
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "of-btn",
+                  disabled: props.savingEnterpriseLink || (!selectedWsId && !selectedChId),
+                  style: { height: "30px", fontSize: "11px", whiteSpace: "nowrap" },
+                  onClick: () => props.onLinkEnterpriseWorkspaceChannel!(selectedWsId, selectedChId),
+                },
+                props.savingEnterpriseLink ? "Sincronizando..." : "↻ Sincronizar"
+              )
+            ),
+            props.workspaceDetails &&
+              h(
+                "div",
+                { className: "of-mono of-muted", style: { fontSize: "10.5px" } },
+                `Folders: ${props.workspaceDetails.folders.length > 0 ? props.workspaceDetails.folders.join(", ") : "nenhum"} · Worktree: ${props.workspaceDetails.worktree ? `${props.workspaceDetails.worktree.location} (${props.workspaceDetails.worktree.baseBranch})` : "desligado"}`
+              )
+          );
+        })(),
       chInfo?.available &&
         h(
           "div",

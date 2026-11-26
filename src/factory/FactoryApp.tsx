@@ -49,6 +49,16 @@ import {
   saveBuzzChannelDetailsLive,
   type BuzzChannelLiveInfo,
 } from "../services/buzz-channel-live";
+import {
+  autoMatchBuzzWorkspace,
+  buildEffectiveTenantAgents,
+  listBuzzWorkspaces,
+  loadBuzzWorkspaceDetails,
+  loadLiveChannelAgentRoster,
+  saveBuzzWorkspaceDetails,
+  type BuzzWorkspaceDetails,
+  type BuzzWorkspacesCatalog,
+} from "../services/buzz-workspace-live";
 import { openIssueInBuzz, openSystemUri } from "../services/orgfy-bridge";
 import { fetchHoldingControlPlane, type HoldingControlPlaneSnapshot } from "../services/holding-service";
 import { executeCardProgress } from "../services/card-progress";
@@ -131,6 +141,22 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     const [agentPromptSyncMap, setAgentPromptSyncMap] = React.useState<Record<string, { status: "synced" | "outdated" | "unversioned"; version: string; liveVersion?: string; sourcePath?: string; content?: string }>>({});
     const [sideProfileTabs, setSideProfileTabs] = React.useState<Array<{ pubkey: string; name: string; picture?: string; target: string }>>([]);
     const [activeSideProfileKey, setActiveSideProfileKey] = React.useState<string | null>(null);
+    const [buzzCatalog, setBuzzCatalog] = React.useState<BuzzWorkspacesCatalog>({ available: false, workspaces: [], allChannels: [], assignments: {} });
+    const [linkedWorkspaceId, setLinkedWorkspaceId] = React.useState<string>("");
+    const [linkedChannelId, setLinkedChannelId] = React.useState<string>("");
+    const [workspaceDetails, setWorkspaceDetails] = React.useState<BuzzWorkspaceDetails | null>(null);
+    const [workspaceDraft, setWorkspaceDraftState] = React.useState<{ foldersText: string; worktreeLocation: string; worktreeBranch: string; instructions: string }>({
+      foldersText: "",
+      worktreeLocation: "~/.buzz/worktrees",
+      worktreeBranch: "main",
+      instructions: "",
+    });
+    const setWorkspaceDraft = React.useCallback((patch: Partial<{ foldersText: string; worktreeLocation: string; worktreeBranch: string; instructions: string }>) => {
+      setWorkspaceDraftState((prev) => ({ ...prev, ...patch }));
+    }, []);
+    const [savingWorkspaceDetails, setSavingWorkspaceDetails] = React.useState<boolean>(false);
+    const [liveChannelAgents, setLiveChannelAgents] = React.useState<LiveCrewAgent[]>([]);
+    const [savingEnterpriseLink, setSavingEnterpriseLink] = React.useState<boolean>(false);
     const [agentEditDraft, setAgentEditDraftState] = React.useState<{ provider: string; model: string; instructions: string }>({ provider: "", model: "", instructions: "" });
     const setAgentEditDraft = React.useCallback((patch: Partial<{ provider: string; model: string; instructions: string }>) => {
       setAgentEditDraftState((prev) => ({ ...prev, ...patch }));
@@ -245,10 +271,81 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       };
     }, [relayTick]);
 
+    // Carrega catálogo ao vivo de Workspaces (sidebarPreferences) e Canais do Buzz Desktop
+    React.useEffect(() => {
+      let cancelled = false;
+      listBuzzWorkspaces(ctx)
+        .then((cat) => {
+          if (!cancelled) setBuzzCatalog(cat);
+        })
+        .catch(() => {});
+      return () => {
+        cancelled = true;
+      };
+    }, [relayTick, activityTick]);
+
+    // Resolve vínculo ativo Workspace + Canal Principal para a empresa selecionada (localStorage -> manifesto -> auto-match)
+    React.useEffect(() => {
+      let savedWs = "";
+      let savedCh = "";
+      try {
+        savedWs = localStorage.getItem(`orgfy_tenant_ws_${tenant}`) || "";
+        savedCh = localStorage.getItem(`orgfy_tenant_ch_${tenant}`) || "";
+      } catch {}
+      const manifestCanal =
+        status.tenantManifest?.canal ||
+        holding?.empresas.find((e) => e.slug === tenant)?.canal ||
+        "";
+      const manifestCanalExists = Boolean(manifestCanal && buzzCatalog.allChannels.some((c) => c.id === manifestCanal));
+      const savedChExists = Boolean(savedCh && buzzCatalog.allChannels.some((c) => c.id === savedCh));
+      const matchedWs =
+        (savedWs && buzzCatalog.workspaces.find((w) => w.id === savedWs)) ||
+        (savedChExists && buzzCatalog.assignments[savedCh] && buzzCatalog.workspaces.find((w) => w.id === buzzCatalog.assignments[savedCh])) ||
+        (manifestCanalExists && buzzCatalog.assignments[manifestCanal] && buzzCatalog.workspaces.find((w) => w.id === buzzCatalog.assignments[manifestCanal])) ||
+        autoMatchBuzzWorkspace(buzzCatalog, tenant, status.tenantManifest?.nome || tenant);
+      const resolvedWsId = matchedWs?.id || savedWs || "";
+      const resolvedChId =
+        (savedChExists ? savedCh : "") ||
+        (manifestCanalExists ? manifestCanal : "") ||
+        matchedWs?.channels[0]?.id ||
+        manifestCanal ||
+        "";
+      setLinkedWorkspaceId(resolvedWsId);
+      setLinkedChannelId(resolvedChId);
+    }, [tenant, buzzCatalog, status.tenantManifest?.canal, status.tenantManifest?.nome, holding]);
+
+    // Carrega detalhes do Workspace vinculado (folders, worktree, Instructions) via session.channelKit
+    React.useEffect(() => {
+      let cancelled = false;
+      if (!linkedWorkspaceId) {
+        setWorkspaceDetails(null);
+        return;
+      }
+      const wsObj = buzzCatalog.workspaces.find((w) => w.id === linkedWorkspaceId);
+      loadBuzzWorkspaceDetails(ctx, linkedWorkspaceId, wsObj?.name || status.tenantManifest?.nome || tenant)
+        .then((det) => {
+          if (cancelled) return;
+          setWorkspaceDetails(det);
+          if (det) {
+            setWorkspaceDraftState({
+              foldersText: det.folders.join("\n"),
+              worktreeLocation: det.worktree?.location || "~/.buzz/worktrees",
+              worktreeBranch: det.worktree?.baseBranch || "main",
+              instructions: det.instructions || "",
+            });
+          }
+        })
+        .catch(() => {});
+      return () => {
+        cancelled = true;
+      };
+    }, [linkedWorkspaceId, buzzCatalog.workspaces, tenant, status.tenantManifest?.nome]);
+
     // Lê Canvas ao vivo + histórico (session.canvas.read/history), metadados do canal (session.channels/channelDetails) e Buzz Repos NIP-34
     React.useEffect(() => {
       let cancelled = false;
       const canal =
+        linkedChannelId ||
         status.tenantManifest?.canal ||
         holding?.empresas.find((e) => e.slug === tenant)?.canal ||
         (tenant === "board" ? findBuzzChannelIdByName(ctx, ["Conselho", "Board", "Conselho da Holding"]) : null);
@@ -281,7 +378,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       return () => {
         cancelled = true;
       };
-    }, [tenant, status.tenantManifest?.canal, status.tenantManifest?.repoId, holding, relayTick, activityTick]);
+    }, [tenant, linkedChannelId, status.tenantManifest?.canal, status.tenantManifest?.repoId, holding, relayTick, activityTick]);
 
     // Ao abrir um card no ItemSheetDrawer, carrega conteúdo NIP-34, comentários e diff Git via Buzz Repos
     React.useEffect(() => {
@@ -500,6 +597,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         const slug = typeof targetSlug === "string" && targetSlug ? targetSlug : tenant;
         const emp = holding?.empresas.find((e) => e.slug === slug);
         return (
+          (slug === tenant && linkedChannelId ? linkedChannelId : null) ||
           (slug === tenant ? status.tenantManifest?.canal : null) ||
           emp?.canal ||
           (slug === "board"
@@ -509,7 +607,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
             : null)
         );
       },
-      [tenant, status.tenantManifest, holding]
+      [tenant, linkedChannelId, status.tenantManifest, holding]
     );
 
     const handleSaveCanvas = React.useCallback(async () => {
@@ -651,7 +749,140 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       }
     }, [status.lastTickAt, relayTick]);
 
-    const tenantAgents = status.tenantManifest?.agentes || [];
+    // Carrega o roster vivo de agentes membros do Canal Principal vinculado (fonte de verdade do time)
+    React.useEffect(() => {
+      let cancelled = false;
+      const activeCh = linkedChannelId || status.tenantManifest?.canal || null;
+      if (!activeCh || liveCrew.length === 0) {
+        setLiveChannelAgents([]);
+        return;
+      }
+      loadLiveChannelAgentRoster(ctx, activeCh, liveCrew)
+        .then((list) => {
+          if (!cancelled) setLiveChannelAgents(list);
+        })
+        .catch(() => {});
+      return () => {
+        cancelled = true;
+      };
+    }, [linkedChannelId, status.tenantManifest?.canal, liveCrew, relayTick, activityTick]);
+
+    const { agents: tenantAgents, source: tenantAgentsSource } = React.useMemo(
+      () => buildEffectiveTenantAgents(status.tenantManifest?.agentes || [], liveChannelAgents),
+      [status.tenantManifest?.agentes, liveChannelAgents]
+    );
+
+    const effectiveStatus = React.useMemo(
+      () =>
+        status.tenantManifest
+          ? {
+              ...status,
+              tenantManifest: {
+                ...status.tenantManifest,
+                canal: linkedChannelId || status.tenantManifest.canal,
+                agentes: tenantAgents,
+              },
+            }
+          : status,
+      [status, linkedChannelId, tenantAgents]
+    );
+
+    const handleLinkEnterpriseWorkspaceChannel = React.useCallback(
+      async (nextWsId: string, nextChId: string) => {
+        setSavingEnterpriseLink(true);
+        try {
+          setLinkedWorkspaceId(nextWsId);
+          setLinkedChannelId(nextChId);
+          try {
+            if (nextWsId) localStorage.setItem(`orgfy_tenant_ws_${tenant}`, nextWsId);
+            else localStorage.removeItem(`orgfy_tenant_ws_${tenant}`);
+            if (nextChId) localStorage.setItem(`orgfy_tenant_ch_${tenant}`, nextChId);
+            else localStorage.removeItem(`orgfy_tenant_ch_${tenant}`);
+          } catch {}
+
+          const wsObj = buzzCatalog.workspaces.find((w) => w.id === nextWsId);
+          const chObj = buzzCatalog.allChannels.find((c) => c.id === nextChId);
+          const [det, roster] = await Promise.all([
+            nextWsId ? loadBuzzWorkspaceDetails(ctx, nextWsId, wsObj?.name || tenant) : Promise.resolve(null),
+            nextChId ? loadLiveChannelAgentRoster(ctx, nextChId, liveCrew) : Promise.resolve([]),
+          ]);
+          if (det) {
+            setWorkspaceDetails(det);
+            setWorkspaceDraftState({
+              foldersText: det.folders.join("\n"),
+              worktreeLocation: det.worktree?.location || "~/.buzz/worktrees",
+              worktreeBranch: det.worktree?.baseBranch || "main",
+              instructions: det.instructions || "",
+            });
+          }
+          setLiveChannelAgents(roster);
+          if (nextChId) {
+            loadBuzzChannelLiveInfo(ctx, nextChId).then(setChannelInfo).catch(() => {});
+          }
+
+          const { agents: merged } = buildEffectiveTenantAgents(status.tenantManifest?.agentes || [], roster);
+          const host = (ctx as any)?.host;
+          if (typeof host?.runCommand === "function") {
+            await host
+              .runCommand(
+                "orgfy-controle-write",
+                JSON.stringify({
+                  kind: "empresa_link",
+                  tenant,
+                  canal: nextChId || undefined,
+                  canalNome: chObj?.name || undefined,
+                  workspaceId: nextWsId || undefined,
+                  workspaceName: wsObj?.name || undefined,
+                  folders: det?.folders,
+                  worktree: det?.worktree,
+                  agentes: roster.length > 0 ? merged.map((a) => ({ name: a.name, pubkey: a.pubkey, papel: a.papel, model: a.model })) : undefined,
+                })
+              )
+              .catch(() => {});
+          }
+          notify(
+            roster.length > 0
+              ? `Vínculo salvo: ${wsObj?.name || "Workspace"} · #${chObj?.name || nextChId.slice(0, 8)} (${roster.length} agentes vivos sincronizados) ✓`
+              : `Vínculo salvo: ${wsObj?.name || "Workspace"}${chObj ? ` · #${chObj.name}` : ""} ✓`
+          );
+          await refresh(tenant, false, true);
+        } finally {
+          setSavingEnterpriseLink(false);
+        }
+      },
+      [tenant, buzzCatalog, liveCrew, status.tenantManifest?.agentes, notify, refresh]
+    );
+
+    const handleSaveWorkspaceSettings = React.useCallback(async () => {
+      if (!workspaceDetails) {
+        notify("Nenhum Workspace do Buzz vinculado para salvar.");
+        return;
+      }
+      setSavingWorkspaceDetails(true);
+      try {
+        const folders = workspaceDraft.foldersText
+          .split(/\r?\n/)
+          .map((l) => l.trim())
+          .filter(Boolean);
+        const worktree = workspaceDraft.worktreeLocation.trim()
+          ? { location: workspaceDraft.worktreeLocation.trim(), baseBranch: workspaceDraft.worktreeBranch.trim() || "main" }
+          : undefined;
+        const res = await saveBuzzWorkspaceDetails(ctx, workspaceDetails, {
+          folders,
+          worktree,
+          instructions: workspaceDraft.instructions,
+        });
+        if (res.ok) {
+          notify(`Workspace ${workspaceDetails.workspaceName} atualizado no Buzz (Folders · Worktree · Instructions) ✓`);
+          const fresh = await loadBuzzWorkspaceDetails(ctx, workspaceDetails.workspaceId, workspaceDetails.workspaceName);
+          if (fresh) setWorkspaceDetails(fresh);
+        } else {
+          notify(`Falha ao salvar Workspace: ${res.error || "indisponível"}`);
+        }
+      } finally {
+        setSavingWorkspaceDetails(false);
+      }
+    }, [workspaceDetails, workspaceDraft, notify]);
 
     // Mapa pubkey -> nome amigável para enriquecer a telemetria ao vivo do Buzz e membros do canal
     const nameByPubkey = React.useMemo(() => {
@@ -2222,7 +2453,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                     h,
                     tenant,
                     isBoardTenant,
-                    status,
+                    status: effectiveStatus,
                     liveCrew,
                     telemetry,
                     workingNowCount: tenantWorkingNowCount,
@@ -2264,7 +2495,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                 ? renderFactoryBoardAndFloor({
                     h,
                     tenant,
-                    status,
+                    status: effectiveStatus,
                     liveCrew,
                     telemetry,
                     viewMode: tab,
@@ -2304,7 +2535,18 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                       setTab("overview");
                     },
                     onOpenAgentDm: handleOpenAgentDmInBuzz,
-                    status,
+                    status: effectiveStatus,
+                    buzzCatalog,
+                    linkedWorkspaceId,
+                    linkedChannelId,
+                    tenantAgentsSource,
+                    onLinkEnterpriseWorkspaceChannel: handleLinkEnterpriseWorkspaceChannel,
+                    savingEnterpriseLink,
+                    workspaceDetails,
+                    workspaceDraft,
+                    setWorkspaceDraft,
+                    savingWorkspaceDetails,
+                    onSaveWorkspaceSettings: handleSaveWorkspaceSettings,
                     liveCrew,
                     onSelectItem: setSelectedItem,
                     inboxFilter,

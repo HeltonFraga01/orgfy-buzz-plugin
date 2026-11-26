@@ -57223,7 +57223,7 @@ function fmtTokens(n) {
   return String(n);
 }
 function renderFactorySecondaryPage(props) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x2, _y2, _z2, _A, _B, _C, _D;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x2, _y2, _z2, _A, _B, _C, _D, _E, _F;
   const {
     h,
     tab,
@@ -57832,7 +57832,7 @@ function renderFactorySecondaryPage(props) {
           h(
             "span",
             { className: "of-muted" },
-            `Fonte: empresas/${tenant}.json × Buzz Desktop (${tenantAgents.filter((a) => a.inBuzz).length}/${tenantAgents.length} provisionados)`
+            props.tenantAgentsSource === "buzz_channel_live" ? `Time vivo do canal #${((_s = props.channelInfo) == null ? void 0 : _s.name) || tenant} (${tenantAgents.length} agentes no Buzz)` : `Fonte: empresas/${tenant}.json × Buzz Desktop (${tenantAgents.filter((a) => a.inBuzz).length}/${tenantAgents.length} provisionados)`
           ),
           props.onReconcileAgents && h(
             "button",
@@ -58699,11 +58699,88 @@ function renderFactorySecondaryPage(props) {
     return h(
       "div",
       { style: { display: "flex", flexDirection: "column", gap: "14px" } },
+      props.workspaceDetails && props.workspaceDraft && props.setWorkspaceDraft && h(
+        "section",
+        { className: "of-card-pad", "data-buzz-workspace-vision": "true", style: { display: "flex", flexDirection: "column", gap: "10px", borderColor: "var(--primary-border)" } },
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" } },
+          h(
+            "div",
+            null,
+            h("div", { style: { fontSize: "14px", fontWeight: 700, display: "flex", alignItems: "center", gap: "7px" } }, `Workspace do Buzz · ${props.workspaceDetails.workspaceName}`, h("span", { className: "of-pill", "data-tone": "done", style: { fontSize: "10px" } }, "channelKit nativo")),
+            h("div", { className: "of-muted", style: { fontSize: "11.5px", marginTop: "2px" } }, "Repositórios, regra de Worktree e Instructions injetadas nativamente pelo Buzz em todos os agentes deste Workspace.")
+          ),
+          props.workspaceDetails.writable && props.onSaveWorkspaceSettings && h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-variant": "primary",
+              disabled: props.savingWorkspaceDetails,
+              onClick: props.onSaveWorkspaceSettings
+            },
+            props.savingWorkspaceDetails ? "Salvando no Buzz..." : "Salvar no Workspace"
+          )
+        ),
+        h(
+          "div",
+          { className: "of-grid-2" },
+          h(
+            "label",
+            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+            "Repositórios / Folders (1 por linha)",
+            h("textarea", {
+              className: "of-textarea of-mono",
+              style: { minHeight: "68px", fontSize: "11.5px" },
+              placeholder: "~/.buzz/REPOS/lumen-iptv",
+              value: props.workspaceDraft.foldersText,
+              onChange: (e) => props.setWorkspaceDraft({ foldersText: e.target.value })
+            })
+          ),
+          h(
+            "div",
+            { style: { display: "grid", gridTemplateColumns: "1fr 120px", gap: "8px", alignContent: "start" } },
+            h(
+              "label",
+              { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+              "Worktree location",
+              h("input", {
+                className: "of-input of-mono",
+                value: props.workspaceDraft.worktreeLocation,
+                onChange: (e) => props.setWorkspaceDraft({ worktreeLocation: e.target.value })
+              })
+            ),
+            h(
+              "label",
+              { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+              "Base branch",
+              h("input", {
+                className: "of-input of-mono",
+                value: props.workspaceDraft.worktreeBranch,
+                onChange: (e) => props.setWorkspaceDraft({ worktreeBranch: e.target.value })
+              })
+            )
+          )
+        ),
+        h(
+          "label",
+          { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+          "Instructions / Visão da Empresa (injetada no prompt de todos os agentes do Workspace)",
+          h("textarea", {
+            className: "of-textarea",
+            style: { minHeight: "110px", fontSize: "12px", lineHeight: 1.5 },
+            placeholder: "Descreva a visão, regras arquiteturais e direção do produto...",
+            value: props.workspaceDraft.instructions,
+            onChange: (e) => props.setWorkspaceDraft({ instructions: e.target.value })
+          })
+        )
+      ),
       renderBuzzCanvasViewer({
         h,
         tenant,
-        channelName: (ch == null ? void 0 : ch.name) || ((_s = status.tenantManifest) == null ? void 0 : _s.nome) || tenant,
-        channelId: (ch == null ? void 0 : ch.channelId) || ((_t = status.tenantManifest) == null ? void 0 : _t.canal) || null,
+        channelName: (ch == null ? void 0 : ch.name) || ((_t = status.tenantManifest) == null ? void 0 : _t.nome) || tenant,
+        channelId: (ch == null ? void 0 : ch.channelId) || ((_u = status.tenantManifest) == null ? void 0 : _u.canal) || null,
         content: props.channelCanvas ?? null,
         draft: props.canvasDraft ?? props.channelCanvas ?? "",
         onChangeDraft: (v2) => {
@@ -58766,7 +58843,7 @@ function renderFactorySecondaryPage(props) {
         h(
           "section",
           { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-          h("div", { className: "of-meter-label" }, `2. Workspace & Arquivos de Contexto (${((_u = status.tenantManifest) == null ? void 0 : _u.nome) || tenant})`),
+          h("div", { className: "of-meter-label" }, `2. Workspace & Arquivos de Contexto (${((_v = status.tenantManifest) == null ? void 0 : _v.nome) || tenant})`),
           papeis.length > 0 && h(
             "div",
             { style: { display: "flex", flexWrap: "wrap", gap: "6px" } },
@@ -58829,7 +58906,7 @@ function renderFactorySecondaryPage(props) {
     );
   }
   const chInfo = props.channelInfo;
-  const settingsTenantAgents = ((_v = status.tenantManifest) == null ? void 0 : _v.agentes) || [];
+  const settingsTenantAgents = ((_w = status.tenantManifest) == null ? void 0 : _w.agentes) || [];
   const resolvedMembers = ((chInfo == null ? void 0 : chInfo.memberPubkeys) || []).map((pk) => {
     var _a2, _b2;
     const pkLow = pk.toLowerCase();
@@ -58871,11 +58948,20 @@ function renderFactorySecondaryPage(props) {
           h(
             "div",
             null,
-            h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Canal da Empresa no Buzz · #${(chInfo == null ? void 0 : chInfo.name) || ((_w = status.tenantManifest) == null ? void 0 : _w.nome) || tenant}`),
+            h(
+              "div",
+              { style: { fontSize: "14px", fontWeight: 700, display: "flex", alignItems: "center", gap: "7px", flexWrap: "wrap" } },
+              `Workspace & Canal no Buzz · #${(chInfo == null ? void 0 : chInfo.name) || ((_x2 = status.tenantManifest) == null ? void 0 : _x2.nome) || tenant}`,
+              h(
+                "span",
+                { className: "of-pill", "data-tone": props.tenantAgentsSource === "buzz_channel_live" ? "done" : "waiting", style: { fontSize: "10px" } },
+                props.tenantAgentsSource === "buzz_channel_live" ? `Time vivo (${settingsTenantAgents.length})` : "Manifesto JSON"
+              )
+            ),
             h(
               "div",
               { className: "of-muted", style: { marginTop: "2px" } },
-              (chInfo == null ? void 0 : chInfo.available) ? `Stream: ${chInfo.liveStatus} · Roster: ${chInfo.rosterTotalChannels} canais · Papel: ${chInfo.viewerRole || "member"}` : "Conecte o canal da empresa no Buzz para sincronizar descrição, membros, leitura e diagnósticos."
+              (chInfo == null ? void 0 : chInfo.available) ? `Stream: ${chInfo.liveStatus} · Roster: ${chInfo.rosterTotalChannels} canais · Papel: ${chInfo.viewerRole || "member"}` : "Vincule um Workspace e o Canal Principal abaixo para sincronizar automaticamente time, repositório e Visão."
             )
           ),
           h(
@@ -58893,6 +58979,82 @@ function renderFactorySecondaryPage(props) {
             )
           )
         ),
+        ((_y2 = props.buzzCatalog) == null ? void 0 : _y2.available) && props.onLinkEnterpriseWorkspaceChannel && (() => {
+          const catalog = props.buzzCatalog;
+          const selectedWsId = props.linkedWorkspaceId || "";
+          const selectedChId = props.linkedChannelId || "";
+          const selectedWs = catalog.workspaces.find((w) => w.id === selectedWsId);
+          const channelOptions = selectedWs && selectedWs.channels.length > 0 ? selectedWs.channels : catalog.allChannels;
+          return h(
+            "div",
+            { className: "of-surface", "data-workspace-channel-linker": "true", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "8px" } },
+            h("div", { className: "of-meter-label" }, "Vínculo Nativo · Workspace (Repo/Visão) + Canal Principal (Time Vivo)"),
+            h(
+              "div",
+              { style: { display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: "8px", alignItems: "end" } },
+              h(
+                "label",
+                { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11px" } },
+                "Workspace do Buzz",
+                h(
+                  "select",
+                  {
+                    className: "of-tenant-select",
+                    value: selectedWsId,
+                    onChange: (e) => {
+                      var _a2;
+                      const nextWs = e.target.value;
+                      const wsObj = catalog.workspaces.find((w) => w.id === nextWs);
+                      const nextCh = ((_a2 = wsObj == null ? void 0 : wsObj.channels[0]) == null ? void 0 : _a2.id) || selectedChId;
+                      void props.onLinkEnterpriseWorkspaceChannel(nextWs, nextCh);
+                    }
+                  },
+                  h("option", { value: "" }, "— Selecionar Workspace —"),
+                  catalog.workspaces.map(
+                    (w) => h("option", { key: w.id, value: w.id }, `${w.icon ? `${w.icon} ` : ""}${w.name} (${w.channels.length} canal${w.channels.length === 1 ? "" : "is"})`)
+                  )
+                )
+              ),
+              h(
+                "label",
+                { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11px" } },
+                "Canal Principal (Time Vivo)",
+                h(
+                  "select",
+                  {
+                    className: "of-tenant-select",
+                    value: selectedChId,
+                    onChange: (e) => {
+                      const nextCh = e.target.value;
+                      const inferredWs = catalog.assignments[nextCh] || selectedWsId;
+                      void props.onLinkEnterpriseWorkspaceChannel(inferredWs, nextCh);
+                    }
+                  },
+                  h("option", { value: "" }, "— Selecionar Canal —"),
+                  channelOptions.map(
+                    (c) => h("option", { key: c.id, value: c.id }, `#${c.name} (${c.memberCount} membros)`)
+                  )
+                )
+              ),
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "of-btn",
+                  disabled: props.savingEnterpriseLink || !selectedWsId && !selectedChId,
+                  style: { height: "30px", fontSize: "11px", whiteSpace: "nowrap" },
+                  onClick: () => props.onLinkEnterpriseWorkspaceChannel(selectedWsId, selectedChId)
+                },
+                props.savingEnterpriseLink ? "Sincronizando..." : "↻ Sincronizar"
+              )
+            ),
+            props.workspaceDetails && h(
+              "div",
+              { className: "of-mono of-muted", style: { fontSize: "10.5px" } },
+              `Folders: ${props.workspaceDetails.folders.length > 0 ? props.workspaceDetails.folders.join(", ") : "nenhum"} · Worktree: ${props.workspaceDetails.worktree ? `${props.workspaceDetails.worktree.location} (${props.workspaceDetails.worktree.baseBranch})` : "desligado"}`
+            )
+          );
+        })(),
         (chInfo == null ? void 0 : chInfo.available) && h(
           "div",
           { className: "of-grid-2" },
@@ -59038,7 +59200,7 @@ function renderFactorySecondaryPage(props) {
       h(
         "div",
         { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-        h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Modo de autonomia · ${((_x2 = status.tenantManifest) == null ? void 0 : _x2.nome) || tenant}`),
+        h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Modo de autonomia · ${((_z2 = status.tenantManifest) == null ? void 0 : _z2.nome) || tenant}`),
         h("div", { className: "of-muted" }, "Suba um degrau por vez. Áreas protegidas e regra L-01 sempre permanecem ativas."),
         h(
           "div",
@@ -59220,8 +59382,8 @@ function renderFactorySecondaryPage(props) {
             h(
               "div",
               { style: { display: "flex", alignItems: "center", gap: "6px" } },
-              h("span", { className: "of-pill", "data-tone": ((_y2 = status.holdoutStatus) == null ? void 0 : _y2.status) === "pass" ? "done" : ((_z2 = status.holdoutStatus) == null ? void 0 : _z2.status) === "fail" ? "failed" : "idle" }, status.holdoutStatus ? `${status.holdoutStatus.passed ?? 0}/${status.holdoutStatus.total ?? 0} ${status.holdoutStatus.status.toUpperCase()}` : "Não executado"),
-              ((_A = status.holdoutStatus) == null ? void 0 : _A.external_verified) && h("span", { className: "of-muted", style: { fontSize: "10.5px" } }, `sha:${status.holdoutStatus.suite_sha256 || "ok"}`)
+              h("span", { className: "of-pill", "data-tone": ((_A = status.holdoutStatus) == null ? void 0 : _A.status) === "pass" ? "done" : ((_B = status.holdoutStatus) == null ? void 0 : _B.status) === "fail" ? "failed" : "idle" }, status.holdoutStatus ? `${status.holdoutStatus.passed ?? 0}/${status.holdoutStatus.total ?? 0} ${status.holdoutStatus.status.toUpperCase()}` : "Não executado"),
+              ((_C = status.holdoutStatus) == null ? void 0 : _C.external_verified) && h("span", { className: "of-muted", style: { fontSize: "10.5px" } }, `sha:${status.holdoutStatus.suite_sha256 || "ok"}`)
             ),
             props.onRunHoldoutNow && h("button", { type: "button", className: "of-btn", disabled: props.runningHoldout, style: { alignSelf: "flex-start", padding: "3px 9px", fontSize: "11px" }, onClick: props.onRunHoldoutNow }, props.runningHoldout ? "Rodando..." : "▶ Rodar Holdout")
           ),
@@ -59247,7 +59409,7 @@ function renderFactorySecondaryPage(props) {
             h(
               "div",
               { style: { fontSize: "12px", fontWeight: 600 } },
-              ((_B = props.focusState) == null ? void 0 : _B.active) ? `🔭 Focus ativo até ${props.focusState.untilFormatted}` : "Focus inativo"
+              ((_D = props.focusState) == null ? void 0 : _D.active) ? `🔭 Focus ativo até ${props.focusState.untilFormatted}` : "Focus inativo"
             ),
             h("div", { className: "of-muted", style: { fontSize: "10.5px" } }, "Notificações não críticas são silenciadas durante o modo Focus; apenas alertas P0/Kill Switch atravessam.")
           )
@@ -59276,7 +59438,7 @@ function renderFactorySecondaryPage(props) {
             props.evaluatingTrust ? "Calculando..." : "↻ Recalcular Escape Rate"
           )
         ),
-        ((_D = (_C = status.trustEngine) == null ? void 0 : _C.categories) == null ? void 0 : _D.length) && h(
+        ((_F = (_E = status.trustEngine) == null ? void 0 : _E.categories) == null ? void 0 : _F.length) && h(
           "div",
           { style: { display: "flex", flexDirection: "column", gap: "8px" } },
           status.trustEngine.categories.map(
@@ -59316,6 +59478,257 @@ function renderFactorySecondaryPage(props) {
       )
     )
   );
+}
+const WS_PREFIX = "<!-- buzz-session-workspace:v1 ";
+const WS_END = "<!-- /buzz-session-workspace -->";
+async function sha256Hex(input) {
+  var _a;
+  if (typeof crypto !== "undefined" && ((_a = crypto.subtle) == null ? void 0 : _a.digest)) {
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
+    return Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  return input.replace(/[^a-z0-9_-]/gi, "_");
+}
+async function projectTemplateId(workspaceId) {
+  return `me-section-${await sha256Hex(workspaceId)}`;
+}
+function parseBuzzWorkspaceCanvas(content) {
+  if (!content || !content.startsWith(WS_PREFIX)) {
+    return { folders: [], instructions: content || "" };
+  }
+  const lineEnd = content.indexOf(" -->\n");
+  const blockEnd = content.indexOf(`
+${WS_END}
+
+`, lineEnd);
+  if (lineEnd < 0 || blockEnd < 0) {
+    return { folders: [], instructions: content };
+  }
+  try {
+    const raw = JSON.parse(content.slice(WS_PREFIX.length, lineEnd));
+    const folders = Array.isArray(raw == null ? void 0 : raw.folders) ? raw.folders.filter((f) => typeof f === "string" && f.trim()).map((f) => f.trim()) : [];
+    const worktree = (raw == null ? void 0 : raw.worktree) && typeof raw.worktree.location === "string" && typeof raw.worktree.baseBranch === "string" ? { location: raw.worktree.location.trim(), baseBranch: raw.worktree.baseBranch.trim() || "main" } : void 0;
+    const instructions = content.slice(blockEnd + WS_END.length + 3);
+    return { folders, worktree, instructions };
+  } catch {
+    return { folders: [], instructions: content };
+  }
+}
+function buildBuzzWorkspaceCanvas(input) {
+  var _a, _b, _c;
+  const folders = Array.from(new Set(input.folders.map((f) => f.trim()).filter(Boolean)));
+  const cleanInstructions = input.instructions || "";
+  if (folders.length === 0) return cleanInstructions;
+  const worktree = ((_b = (_a = input.worktree) == null ? void 0 : _a.location) == null ? void 0 : _b.trim()) ? {
+    location: input.worktree.location.trim(),
+    baseBranch: ((_c = input.worktree.baseBranch) == null ? void 0 : _c.trim()) || "main"
+  } : void 0;
+  const metadata = JSON.stringify({ folders, ...worktree ? { worktree } : {} }).replaceAll("<", "\\u003c").replaceAll(">", "\\u003e");
+  const lines = worktree ? [
+    "## Workspace instructions",
+    "",
+    ...folders.map((folder) => `- Use \`${folder}\` for review only. Do not make changes directly in it.`),
+    `- Before starting new work, fetch the latest \`${worktree.baseBranch}\` branch from origin.`,
+    `- For each repository that needs changes, create a new worktree under \`${worktree.location}\` from \`origin/${worktree.baseBranch}\`.`,
+    "- Make code changes in that new worktree. A task that only reads code, or does not use a repository, usually does not need one."
+  ] : ["## Project folders", "", ...folders.map((folder) => `- \`${folder}\``)];
+  return [`${WS_PREFIX}${metadata} -->`, ...lines, WS_END, "", cleanInstructions].join("\n");
+}
+async function listBuzzWorkspaces(ctx) {
+  var _a, _b, _c, _d, _e, _f, _g;
+  try {
+    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+    if (!session) {
+      return { available: false, workspaces: [], allChannels: [], assignments: {} };
+    }
+    if (typeof ((_d = session.sidebarPreferences) == null ? void 0 : _d.refresh) === "function") {
+      try {
+        await session.sidebarPreferences.refresh();
+      } catch {
+      }
+    }
+    const prefsData = typeof ((_e = session.sidebarPreferences) == null ? void 0 : _e.snapshot) === "function" ? (_f = session.sidebarPreferences.snapshot()) == null ? void 0 : _f.data : null;
+    const rawSections = Array.isArray(prefsData == null ? void 0 : prefsData.sections) ? prefsData.sections : [];
+    const assignments = (prefsData == null ? void 0 : prefsData.assignments) && typeof prefsData.assignments === "object" ? prefsData.assignments : {};
+    const listSnap = typeof ((_g = session.channels) == null ? void 0 : _g.list) === "function" ? session.channels.list() : null;
+    const rawChannels = Array.isArray(listSnap == null ? void 0 : listSnap.channels) ? listSnap.channels : [];
+    const allChannels = rawChannels.filter((ch) => (ch == null ? void 0 : ch.id) && (ch == null ? void 0 : ch.channelType) !== "dm" && !(ch == null ? void 0 : ch.archived)).map((ch) => {
+      const members = Array.isArray(ch == null ? void 0 : ch.members) ? ch.members : Array.isArray(ch == null ? void 0 : ch.participants) ? ch.participants : [];
+      return {
+        id: String(ch.id),
+        name: String(ch.name || ch.id.slice(0, 8)),
+        channelType: String(ch.channelType || "stream"),
+        memberCount: members.length,
+        workspaceId: assignments[String(ch.id)] ? String(assignments[String(ch.id)]) : null
+      };
+    });
+    const workspaces = rawSections.filter((s) => (s == null ? void 0 : s.id) && (s == null ? void 0 : s.name)).map((s) => {
+      const wsId = String(s.id);
+      return {
+        id: wsId,
+        name: String(s.name),
+        icon: typeof s.icon === "string" && s.icon ? s.icon : void 0,
+        channels: allChannels.filter((c) => c.workspaceId === wsId)
+      };
+    });
+    return {
+      available: workspaces.length > 0 || allChannels.length > 0,
+      workspaces,
+      allChannels,
+      assignments
+    };
+  } catch {
+    return { available: false, workspaces: [], allChannels: [], assignments: {} };
+  }
+}
+async function loadBuzzWorkspaceDetails(ctx, workspaceId, workspaceName = "") {
+  var _a, _b, _c, _d, _e, _f, _g;
+  if (!workspaceId) return null;
+  try {
+    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+    if (!(session == null ? void 0 : session.channelKit)) return null;
+    if (typeof session.channelKit.refresh === "function") {
+      try {
+        await session.channelKit.refresh();
+      } catch {
+      }
+    }
+    const kit = typeof session.channelKit.snapshot === "function" ? session.channelKit.snapshot() : null;
+    const entries = Array.isArray(kit == null ? void 0 : kit.entries) ? kit.entries : [];
+    const tplId = await projectTemplateId(workspaceId);
+    const prefsData = typeof ((_d = session.sidebarPreferences) == null ? void 0 : _d.snapshot) === "function" ? (_e = session.sidebarPreferences.snapshot()) == null ? void 0 : _e.data : null;
+    const legacyId = (_f = prefsData == null ? void 0 : prefsData.legacyTemplates) == null ? void 0 : _f[workspaceId];
+    const findEntry = (id) => entries.find((e) => {
+      var _a2, _b2, _c2, _d2, _e2;
+      return !((_a2 = e == null ? void 0 : e.record) == null ? void 0 : _a2.deleted) && ((_c2 = (_b2 = e == null ? void 0 : e.record) == null ? void 0 : _b2.value) == null ? void 0 : _c2.type) === "template" && ((_e2 = (_d2 = e == null ? void 0 : e.record) == null ? void 0 : _d2.value) == null ? void 0 : _e2.id) === id;
+    });
+    const entry = findEntry(tplId) || (legacyId ? findEntry(legacyId) : void 0);
+    const tpl = (_g = entry == null ? void 0 : entry.record) == null ? void 0 : _g.value;
+    const rawCanvas = typeof (tpl == null ? void 0 : tpl.canvas) === "string" ? tpl.canvas : "";
+    const parsed = parseBuzzWorkspaceCanvas(rawCanvas);
+    const lineupAgents = Array.isArray(tpl == null ? void 0 : tpl.agents) ? tpl.agents.map(String) : [];
+    return {
+      workspaceId,
+      workspaceName: workspaceName || String((tpl == null ? void 0 : tpl.name) || workspaceId),
+      folders: parsed.folders,
+      worktree: parsed.worktree,
+      instructions: parsed.instructions,
+      lineupAgents,
+      rawCanvas,
+      templateId: tplId,
+      baseEventId: typeof (entry == null ? void 0 : entry.eventId) === "string" ? entry.eventId : void 0,
+      writable: typeof session.channelKit.save === "function"
+    };
+  } catch {
+    return null;
+  }
+}
+async function saveBuzzWorkspaceDetails(ctx, details, patch) {
+  var _a, _b, _c;
+  try {
+    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+    if (!(session == null ? void 0 : session.channelKit) || typeof session.channelKit.save !== "function") {
+      return { ok: false, error: "API session.channelKit.save indisponível nesta versão do Buzz." };
+    }
+    const canvas = buildBuzzWorkspaceCanvas(patch);
+    const template = {
+      type: "template",
+      id: details.templateId,
+      name: `${details.workspaceName.slice(0, 100)} chats`,
+      description: "Starting workspace and Canvas for new chats in this workspace.",
+      canvas,
+      agents: details.lineupAgents || [],
+      teamIds: []
+    };
+    await session.channelKit.save(template, details.baseEventId);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: (err == null ? void 0 : err.message) || String(err) };
+  }
+}
+async function loadLiveChannelAgentRoster(ctx, channelId, liveCrew) {
+  var _a, _b, _c;
+  if (!channelId) return [];
+  try {
+    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+    if (!(session == null ? void 0 : session.channels)) return [];
+    if (typeof session.channels.refreshRoster === "function") {
+      try {
+        await session.channels.refreshRoster(channelId);
+      } catch {
+      }
+    }
+    const listSnap = typeof session.channels.list === "function" ? session.channels.list() : null;
+    const allChannels = Array.isArray(listSnap == null ? void 0 : listSnap.channels) ? listSnap.channels : [];
+    const summary = (typeof session.channels.get === "function" ? session.channels.get(channelId) : void 0) || allChannels.find((ch) => String((ch == null ? void 0 : ch.id) || "") === channelId) || null;
+    const rawMembers = Array.isArray(summary == null ? void 0 : summary.members) ? summary.members : Array.isArray(summary == null ? void 0 : summary.participants) ? summary.participants : [];
+    const memberSet = new Set(rawMembers.map((m) => String(m || "").toLowerCase()).filter(Boolean));
+    if (memberSet.size === 0) return [];
+    return liveCrew.filter((ag) => ag.pubkey && memberSet.has(ag.pubkey.toLowerCase()));
+  } catch {
+    return [];
+  }
+}
+function inferRoleFromAgentName(name) {
+  const low = name.toLowerCase();
+  if (/\b(ceo|iris)\b/.test(low)) return { papel: "ceo_empresa", funcao: "CEO · Direção & Decisão", categoria: "lideranca" };
+  if (/\b(coo|bento)\b/.test(low) && !/arquit/.test(low)) return { papel: "coo", funcao: "COO · Operações, Despacho & Auto-cura", categoria: "lideranca" };
+  if (/arquit/.test(low)) return { papel: "arquiteto", funcao: "Arquiteto · Design Técnico & Revisão", categoria: "lideranca" };
+  if (/\bcto\b/.test(low)) return { papel: "cto", funcao: "CTO · Arquitetura & Engenharia", categoria: "lideranca" };
+  if (/\bcro\b/.test(low)) return { papel: "cro", funcao: "CRO · Risco, Auditoria & Compliance", categoria: "lideranca" };
+  if (/\bcpo\b/.test(low)) return { papel: "cpo", funcao: "CPO · Produto & Portfólio", categoria: "lideranca" };
+  if (/\bcgo\b/.test(low)) return { papel: "cgo", funcao: "CGO · Growth & Distribuição", categoria: "lideranca" };
+  if (/\bpo\b|product/.test(low)) return { papel: "po", funcao: "Product Owner · Escopo & Critérios L-22", categoria: "operacao" };
+  if (/\bqa\b|test|revis/.test(low)) return { papel: "revisor_codigo", funcao: "QA & Revisão de Código (Gate L-01)", categoria: "revisao" };
+  if (/segur|secur|hugo/.test(low)) return { papel: "revisor_seguranca", funcao: "Segurança & Auditoria", categoria: "revisao" };
+  if (/growth|mkt|distribu/.test(low)) return { papel: "growth", funcao: "Growth & Aquisição", categoria: "execucao" };
+  if (/infra|atlas|devops/.test(low)) return { papel: "infra", funcao: "Infra · CI/CD & Runtime", categoria: "execucao" };
+  if (/ui|front|livia|design/.test(low)) return { papel: "frontend", funcao: "Frontend · Interface & UX", categoria: "execucao" };
+  if (/dev|back|otto|eng/.test(low)) return { papel: "executor", funcao: "Dev · Implementação em Worktree", categoria: "execucao" };
+  return { papel: "executor", funcao: "Agente do Canal (Buzz)", categoria: "execucao" };
+}
+function buildEffectiveTenantAgents(manifestAgents, liveChannelAgents) {
+  if (!liveChannelAgents || liveChannelAgents.length === 0) {
+    return { agents: manifestAgents, source: "manifest" };
+  }
+  const byPk = /* @__PURE__ */ new Map();
+  const byName = /* @__PURE__ */ new Map();
+  for (const m of manifestAgents) {
+    if (m.pubkey) byPk.set(m.pubkey.toLowerCase(), m);
+    byName.set(m.name.toLowerCase(), m);
+  }
+  const merged2 = liveChannelAgents.map((live) => {
+    const pkLow = (live.pubkey || "").toLowerCase();
+    const existing = pkLow && byPk.get(pkLow) || byName.get(live.name.toLowerCase()) || null;
+    const inferred = inferRoleFromAgentName(live.name);
+    return {
+      name: live.name,
+      papel: (existing == null ? void 0 : existing.papel) || inferred.papel,
+      funcao: (existing == null ? void 0 : existing.funcao) || inferred.funcao,
+      categoria: (existing == null ? void 0 : existing.categoria) || inferred.categoria,
+      pubkey: live.pubkey || (existing == null ? void 0 : existing.pubkey) || "",
+      model: live.model || (existing == null ? void 0 : existing.model) || "indisponível",
+      provider: live.provider || (existing == null ? void 0 : existing.provider) || "buzz",
+      parallelism: (existing == null ? void 0 : existing.parallelism) ?? 2,
+      running: live.running,
+      inBuzz: true,
+      agentKey: live.key || (existing == null ? void 0 : existing.agentKey) || live.name
+    };
+  });
+  return { agents: merged2, source: "buzz_channel_live" };
+}
+function autoMatchBuzzWorkspace(catalog, tenantSlug, companyName) {
+  const norm = (s) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "");
+  const targets = [norm(tenantSlug), norm(companyName)].filter(Boolean);
+  for (const t of targets) {
+    const exact = catalog.workspaces.find((w) => norm(w.name) === t);
+    if (exact) return exact;
+  }
+  for (const t of targets) {
+    const partial = catalog.workspaces.find((w) => norm(w.name).includes(t) || t.includes(norm(w.name)));
+    if (partial) return partial;
+  }
+  return null;
 }
 const SESSION_LIMIT = 5;
 function projectHue(slug) {
@@ -60440,7 +60853,7 @@ const PINNED_HOST_COMMANDS = Object.freeze([
   {
     id: "orgfy-controle-write",
     scriptPath: "ferramentas/esteira/controle_fabrica_write.py",
-    sha256: "9289437b3f642f345217703aae1050ffbf1cd6eb846422de4bf5c5d6984a2c4a"
+    sha256: "7a82fb68983294965a42ff93cc805e9340a8ddd96563aec108abe774dae49345"
   },
   {
     id: "orgfy-holdout",
@@ -60550,7 +60963,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
   const QuestionCardsPanel = createQuestionCardsPanel(React);
   const crdtStore = getOrgfyCrdtStore(ctx);
   return function OrgFyFactoryApp() {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u, _v;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x2, _y2, _z2, _A;
     const [tenant, setTenant] = React.useState("orgfy");
     const [tab, setTab] = React.useState("overview");
     const [dmAgentKey, setDmAgentKey] = React.useState("");
@@ -60580,6 +60993,22 @@ function createFactoryAppComponent(ctx, opts = {}) {
     const [agentPromptSyncMap, setAgentPromptSyncMap] = React.useState({});
     const [sideProfileTabs, setSideProfileTabs] = React.useState([]);
     const [activeSideProfileKey, setActiveSideProfileKey] = React.useState(null);
+    const [buzzCatalog, setBuzzCatalog] = React.useState({ available: false, workspaces: [], allChannels: [], assignments: {} });
+    const [linkedWorkspaceId, setLinkedWorkspaceId] = React.useState("");
+    const [linkedChannelId, setLinkedChannelId] = React.useState("");
+    const [workspaceDetails, setWorkspaceDetails] = React.useState(null);
+    const [workspaceDraft, setWorkspaceDraftState] = React.useState({
+      foldersText: "",
+      worktreeLocation: "~/.buzz/worktrees",
+      worktreeBranch: "main",
+      instructions: ""
+    });
+    const setWorkspaceDraft = React.useCallback((patch) => {
+      setWorkspaceDraftState((prev) => ({ ...prev, ...patch }));
+    }, []);
+    const [savingWorkspaceDetails, setSavingWorkspaceDetails] = React.useState(false);
+    const [liveChannelAgents, setLiveChannelAgents] = React.useState([]);
+    const [savingEnterpriseLink, setSavingEnterpriseLink] = React.useState(false);
     const [agentEditDraft, setAgentEditDraftState] = React.useState({ provider: "", model: "", instructions: "" });
     const setAgentEditDraft = React.useCallback((patch) => {
       setAgentEditDraftState((prev) => ({ ...prev, ...patch }));
@@ -60693,9 +61122,63 @@ function createFactoryAppComponent(ctx, opts = {}) {
       };
     }, [relayTick]);
     React.useEffect(() => {
+      let cancelled = false;
+      listBuzzWorkspaces(ctx).then((cat) => {
+        if (!cancelled) setBuzzCatalog(cat);
+      }).catch(() => {
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, [relayTick, activityTick]);
+    React.useEffect(() => {
+      var _a2, _b2, _c2, _d2;
+      let savedWs = "";
+      let savedCh = "";
+      try {
+        savedWs = localStorage.getItem(`orgfy_tenant_ws_${tenant}`) || "";
+        savedCh = localStorage.getItem(`orgfy_tenant_ch_${tenant}`) || "";
+      } catch {
+      }
+      const manifestCanal = ((_a2 = status.tenantManifest) == null ? void 0 : _a2.canal) || ((_b2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _b2.canal) || "";
+      const manifestCanalExists = Boolean(manifestCanal && buzzCatalog.allChannels.some((c) => c.id === manifestCanal));
+      const savedChExists = Boolean(savedCh && buzzCatalog.allChannels.some((c) => c.id === savedCh));
+      const matchedWs = savedWs && buzzCatalog.workspaces.find((w) => w.id === savedWs) || savedChExists && buzzCatalog.assignments[savedCh] && buzzCatalog.workspaces.find((w) => w.id === buzzCatalog.assignments[savedCh]) || manifestCanalExists && buzzCatalog.assignments[manifestCanal] && buzzCatalog.workspaces.find((w) => w.id === buzzCatalog.assignments[manifestCanal]) || autoMatchBuzzWorkspace(buzzCatalog, tenant, ((_c2 = status.tenantManifest) == null ? void 0 : _c2.nome) || tenant);
+      const resolvedWsId = (matchedWs == null ? void 0 : matchedWs.id) || savedWs || "";
+      const resolvedChId = (savedChExists ? savedCh : "") || (manifestCanalExists ? manifestCanal : "") || ((_d2 = matchedWs == null ? void 0 : matchedWs.channels[0]) == null ? void 0 : _d2.id) || manifestCanal || "";
+      setLinkedWorkspaceId(resolvedWsId);
+      setLinkedChannelId(resolvedChId);
+    }, [tenant, buzzCatalog, (_a = status.tenantManifest) == null ? void 0 : _a.canal, (_b = status.tenantManifest) == null ? void 0 : _b.nome, holding]);
+    React.useEffect(() => {
+      var _a2;
+      let cancelled = false;
+      if (!linkedWorkspaceId) {
+        setWorkspaceDetails(null);
+        return;
+      }
+      const wsObj = buzzCatalog.workspaces.find((w) => w.id === linkedWorkspaceId);
+      loadBuzzWorkspaceDetails(ctx, linkedWorkspaceId, (wsObj == null ? void 0 : wsObj.name) || ((_a2 = status.tenantManifest) == null ? void 0 : _a2.nome) || tenant).then((det) => {
+        var _a3, _b2;
+        if (cancelled) return;
+        setWorkspaceDetails(det);
+        if (det) {
+          setWorkspaceDraftState({
+            foldersText: det.folders.join("\n"),
+            worktreeLocation: ((_a3 = det.worktree) == null ? void 0 : _a3.location) || "~/.buzz/worktrees",
+            worktreeBranch: ((_b2 = det.worktree) == null ? void 0 : _b2.baseBranch) || "main",
+            instructions: det.instructions || ""
+          });
+        }
+      }).catch(() => {
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, [linkedWorkspaceId, buzzCatalog.workspaces, tenant, (_c = status.tenantManifest) == null ? void 0 : _c.nome]);
+    React.useEffect(() => {
       var _a2, _b2, _c2;
       let cancelled = false;
-      const canal = ((_a2 = status.tenantManifest) == null ? void 0 : _a2.canal) || ((_b2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _b2.canal) || (tenant === "board" ? findBuzzChannelIdByName(ctx, ["Conselho", "Board", "Conselho da Holding"]) : null);
+      const canal = linkedChannelId || ((_a2 = status.tenantManifest) == null ? void 0 : _a2.canal) || ((_b2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _b2.canal) || (tenant === "board" ? findBuzzChannelIdByName(ctx, ["Conselho", "Board", "Conselho da Holding"]) : null);
       const dtag = ((_c2 = status.tenantManifest) == null ? void 0 : _c2.repoId) || tenant;
       readBuzzChannelCanvasDetailed(ctx, canal).then((st) => {
         if (!cancelled) {
@@ -60721,7 +61204,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
       return () => {
         cancelled = true;
       };
-    }, [tenant, (_a = status.tenantManifest) == null ? void 0 : _a.canal, (_b = status.tenantManifest) == null ? void 0 : _b.repoId, holding, relayTick, activityTick]);
+    }, [tenant, linkedChannelId, (_d = status.tenantManifest) == null ? void 0 : _d.canal, (_e = status.tenantManifest) == null ? void 0 : _e.repoId, holding, relayTick, activityTick]);
     React.useEffect(() => {
       var _a2;
       let cancelled = false;
@@ -60926,9 +61409,9 @@ function createFactoryAppComponent(ctx, opts = {}) {
         var _a2;
         const slug = typeof targetSlug === "string" && targetSlug ? targetSlug : tenant;
         const emp = holding == null ? void 0 : holding.empresas.find((e) => e.slug === slug);
-        return (slug === tenant ? (_a2 = status.tenantManifest) == null ? void 0 : _a2.canal : null) || (emp == null ? void 0 : emp.canal) || (slug === "board" ? (holding == null ? void 0 : holding.boardCanal) || findBuzzChannelIdByName(ctx, ["Conselho-Canal", "Conselho", "Board", "Conselho da Holding"]) || "80529b52-ee97-40d4-ab4c-aa9d13b9bcee" : null);
+        return (slug === tenant && linkedChannelId ? linkedChannelId : null) || (slug === tenant ? (_a2 = status.tenantManifest) == null ? void 0 : _a2.canal : null) || (emp == null ? void 0 : emp.canal) || (slug === "board" ? (holding == null ? void 0 : holding.boardCanal) || findBuzzChannelIdByName(ctx, ["Conselho-Canal", "Conselho", "Board", "Conselho da Holding"]) || "80529b52-ee97-40d4-ab4c-aa9d13b9bcee" : null);
       },
-      [tenant, status.tenantManifest, holding]
+      [tenant, linkedChannelId, status.tenantManifest, holding]
     );
     const handleSaveCanvas = React.useCallback(async () => {
       const canal = resolveActiveChannelId();
@@ -61071,7 +61554,128 @@ function createFactoryAppComponent(ctx, opts = {}) {
         return [];
       }
     }, [status.lastTickAt, relayTick]);
-    const tenantAgents = ((_c = status.tenantManifest) == null ? void 0 : _c.agentes) || [];
+    React.useEffect(() => {
+      var _a2;
+      let cancelled = false;
+      const activeCh = linkedChannelId || ((_a2 = status.tenantManifest) == null ? void 0 : _a2.canal) || null;
+      if (!activeCh || liveCrew.length === 0) {
+        setLiveChannelAgents([]);
+        return;
+      }
+      loadLiveChannelAgentRoster(ctx, activeCh, liveCrew).then((list) => {
+        if (!cancelled) setLiveChannelAgents(list);
+      }).catch(() => {
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, [linkedChannelId, (_f = status.tenantManifest) == null ? void 0 : _f.canal, liveCrew, relayTick, activityTick]);
+    const { agents: tenantAgents, source: tenantAgentsSource } = React.useMemo(
+      () => {
+        var _a2;
+        return buildEffectiveTenantAgents(((_a2 = status.tenantManifest) == null ? void 0 : _a2.agentes) || [], liveChannelAgents);
+      },
+      [(_g = status.tenantManifest) == null ? void 0 : _g.agentes, liveChannelAgents]
+    );
+    const effectiveStatus = React.useMemo(
+      () => status.tenantManifest ? {
+        ...status,
+        tenantManifest: {
+          ...status.tenantManifest,
+          canal: linkedChannelId || status.tenantManifest.canal,
+          agentes: tenantAgents
+        }
+      } : status,
+      [status, linkedChannelId, tenantAgents]
+    );
+    const handleLinkEnterpriseWorkspaceChannel = React.useCallback(
+      async (nextWsId, nextChId) => {
+        var _a2, _b2, _c2;
+        setSavingEnterpriseLink(true);
+        try {
+          setLinkedWorkspaceId(nextWsId);
+          setLinkedChannelId(nextChId);
+          try {
+            if (nextWsId) localStorage.setItem(`orgfy_tenant_ws_${tenant}`, nextWsId);
+            else localStorage.removeItem(`orgfy_tenant_ws_${tenant}`);
+            if (nextChId) localStorage.setItem(`orgfy_tenant_ch_${tenant}`, nextChId);
+            else localStorage.removeItem(`orgfy_tenant_ch_${tenant}`);
+          } catch {
+          }
+          const wsObj = buzzCatalog.workspaces.find((w) => w.id === nextWsId);
+          const chObj = buzzCatalog.allChannels.find((c) => c.id === nextChId);
+          const [det, roster] = await Promise.all([
+            nextWsId ? loadBuzzWorkspaceDetails(ctx, nextWsId, (wsObj == null ? void 0 : wsObj.name) || tenant) : Promise.resolve(null),
+            nextChId ? loadLiveChannelAgentRoster(ctx, nextChId, liveCrew) : Promise.resolve([])
+          ]);
+          if (det) {
+            setWorkspaceDetails(det);
+            setWorkspaceDraftState({
+              foldersText: det.folders.join("\n"),
+              worktreeLocation: ((_a2 = det.worktree) == null ? void 0 : _a2.location) || "~/.buzz/worktrees",
+              worktreeBranch: ((_b2 = det.worktree) == null ? void 0 : _b2.baseBranch) || "main",
+              instructions: det.instructions || ""
+            });
+          }
+          setLiveChannelAgents(roster);
+          if (nextChId) {
+            loadBuzzChannelLiveInfo(ctx, nextChId).then(setChannelInfo).catch(() => {
+            });
+          }
+          const { agents: merged2 } = buildEffectiveTenantAgents(((_c2 = status.tenantManifest) == null ? void 0 : _c2.agentes) || [], roster);
+          const host = ctx == null ? void 0 : ctx.host;
+          if (typeof (host == null ? void 0 : host.runCommand) === "function") {
+            await host.runCommand(
+              "orgfy-controle-write",
+              JSON.stringify({
+                kind: "empresa_link",
+                tenant,
+                canal: nextChId || void 0,
+                canalNome: (chObj == null ? void 0 : chObj.name) || void 0,
+                workspaceId: nextWsId || void 0,
+                workspaceName: (wsObj == null ? void 0 : wsObj.name) || void 0,
+                folders: det == null ? void 0 : det.folders,
+                worktree: det == null ? void 0 : det.worktree,
+                agentes: roster.length > 0 ? merged2.map((a) => ({ name: a.name, pubkey: a.pubkey, papel: a.papel, model: a.model })) : void 0
+              })
+            ).catch(() => {
+            });
+          }
+          notify2(
+            roster.length > 0 ? `Vínculo salvo: ${(wsObj == null ? void 0 : wsObj.name) || "Workspace"} · #${(chObj == null ? void 0 : chObj.name) || nextChId.slice(0, 8)} (${roster.length} agentes vivos sincronizados) ✓` : `Vínculo salvo: ${(wsObj == null ? void 0 : wsObj.name) || "Workspace"}${chObj ? ` · #${chObj.name}` : ""} ✓`
+          );
+          await refresh(tenant, false, true);
+        } finally {
+          setSavingEnterpriseLink(false);
+        }
+      },
+      [tenant, buzzCatalog, liveCrew, (_h = status.tenantManifest) == null ? void 0 : _h.agentes, notify2, refresh]
+    );
+    const handleSaveWorkspaceSettings = React.useCallback(async () => {
+      if (!workspaceDetails) {
+        notify2("Nenhum Workspace do Buzz vinculado para salvar.");
+        return;
+      }
+      setSavingWorkspaceDetails(true);
+      try {
+        const folders = workspaceDraft.foldersText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+        const worktree = workspaceDraft.worktreeLocation.trim() ? { location: workspaceDraft.worktreeLocation.trim(), baseBranch: workspaceDraft.worktreeBranch.trim() || "main" } : void 0;
+        const res = await saveBuzzWorkspaceDetails(ctx, workspaceDetails, {
+          folders,
+          worktree,
+          instructions: workspaceDraft.instructions
+        });
+        if (res.ok) {
+          notify2(`Workspace ${workspaceDetails.workspaceName} atualizado no Buzz (Folders · Worktree · Instructions) ✓`);
+          const fresh = await loadBuzzWorkspaceDetails(ctx, workspaceDetails.workspaceId, workspaceDetails.workspaceName);
+          if (fresh) setWorkspaceDetails(fresh);
+        } else {
+          notify2(`Falha ao salvar Workspace: ${res.error || "indisponível"}`);
+        }
+      } finally {
+        setSavingWorkspaceDetails(false);
+      }
+    }, [workspaceDetails, workspaceDraft, notify2]);
     const nameByPubkey = React.useMemo(() => {
       var _a2, _b2, _c2, _d2;
       const map = /* @__PURE__ */ new Map();
@@ -62049,7 +62653,7 @@ ${body}`
         setAutomationView("detail");
         notify2(`Automação criada em 1 clique a partir da sessão de ${input.agentName}.`);
       },
-      [tenant, (_d = status.tenantManifest) == null ? void 0 : _d.nome, handleCreateAutomation, notify2]
+      [tenant, (_i = status.tenantManifest) == null ? void 0 : _i.nome, handleCreateAutomation, notify2]
     );
     const handleEvaluateTrustEngine = React.useCallback(
       async (override) => {
@@ -62190,7 +62794,7 @@ Nota: ${evidence.note}`
       var _a2;
       return ((_a2 = a.pubkey) == null ? void 0 : _a2.toLowerCase()) === mainAgentPubkey;
     }) || liveCrew.find((a) => a.name.toLowerCase().includes("iris")) || liveCrew[0] || null;
-    const masterAgentName = (masterLive == null ? void 0 : masterLive.name) || ((_e = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _e.nome) || "OrgFy Iris";
+    const masterAgentName = (masterLive == null ? void 0 : masterLive.name) || ((_j = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _j.nome) || "OrgFy Iris";
     const masterTurn = (masterLive == null ? void 0 : masterLive.pubkey) ? telemetry.byPubkey[masterLive.pubkey.toLowerCase()] || null : null;
     const workspaces = (holding == null ? void 0 : holding.empresas) && holding.empresas.length > 0 ? holding.empresas.map((e) => ({
       slug: e.slug,
@@ -62201,8 +62805,8 @@ Nota: ${evidence.note}`
     })) : DEFAULT_WORKSPACES.map((w) => ({ ...w, agentesInfo: "" }));
     const isBoardTenant = tenant === "board";
     const activeWorkspace = workspaces.find((w) => w.slug === tenant) || workspaces[0];
-    const empresaNome = isBoardTenant ? "Conselho da Holding" : ((_f = status.tenantManifest) == null ? void 0 : _f.nome) || (activeWorkspace == null ? void 0 : activeWorkspace.nome) || tenant;
-    const empresaRepo = isBoardTenant ? "holding" : ((_g = status.tenantManifest) == null ? void 0 : _g.repoId) || tenant;
+    const empresaNome = isBoardTenant ? "Conselho da Holding" : ((_k = status.tenantManifest) == null ? void 0 : _k.nome) || (activeWorkspace == null ? void 0 : activeWorkspace.nome) || tenant;
+    const empresaRepo = isBoardTenant ? "holding" : ((_l = status.tenantManifest) == null ? void 0 : _l.repoId) || tenant;
     const isGlobalView = GLOBAL_TABS.has(tab);
     const pendingApprovals = ((holding == null ? void 0 : holding.approvals) || []).filter((a) => a.status === "pendente").length;
     const pendingQuestionCardsCount = questionCards.filter((c) => c.status === "pending").length;
@@ -62267,7 +62871,7 @@ Nota: ${evidence.note}`
       }] : [],
       { id: "settings", label: PT_BR.nav.settings }
     ];
-    const NativeTabs = (_i = (_h = ctx == null ? void 0 : ctx.conversation) == null ? void 0 : _h.ui) == null ? void 0 : _i.Tabs;
+    const NativeTabs = (_n = (_m2 = ctx == null ? void 0 : ctx.conversation) == null ? void 0 : _m2.ui) == null ? void 0 : _n.Tabs;
     const relaySnap = React.useMemo(() => {
       var _a2;
       try {
@@ -62277,7 +62881,7 @@ Nota: ${evidence.note}`
       }
     }, [relayTick, status.lastTickAt]);
     const useNativeSideTabs = Boolean(
-      NativeTabs && (relaySnap == null ? void 0 : relaySnap.session) && typeof (relaySnap == null ? void 0 : relaySnap.scope) === "string" && relaySnap.scope.length > 0 && typeof ((_j = relaySnap == null ? void 0 : relaySnap.session) == null ? void 0 : _j.viewer) === "string" && relaySnap.session.viewer.length > 0
+      NativeTabs && (relaySnap == null ? void 0 : relaySnap.session) && typeof (relaySnap == null ? void 0 : relaySnap.scope) === "string" && relaySnap.scope.length > 0 && typeof ((_o = relaySnap == null ? void 0 : relaySnap.session) == null ? void 0 : _o.viewer) === "string" && relaySnap.session.viewer.length > 0
     );
     const pageContent = h(
       "div",
@@ -62325,7 +62929,7 @@ Nota: ${evidence.note}`
             status,
             telemetry,
             masterAgentName,
-            masterAgentPubkey: (masterLive == null ? void 0 : masterLive.pubkey) || ((_k = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _k.pubkey) || "",
+            masterAgentPubkey: (masterLive == null ? void 0 : masterLive.pubkey) || ((_p = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _p.pubkey) || "",
             masterTurn,
             pendingApprovals,
             inboxCount,
@@ -62484,7 +63088,7 @@ Nota: ${evidence.note}`
                     if (picked) handleOpenAgentDmInBuzz(picked);
                   }
                 },
-                dmPool.length > 0 ? dmPool.map((a) => h("option", { key: a.key, value: a.key }, a.label)) : h("option", { value: "" }, ((_l = status.tenantManifest) == null ? void 0 : _l.coo) || "OrgFy Bento (COO)")
+                dmPool.length > 0 ? dmPool.map((a) => h("option", { key: a.key, value: a.key }, a.label)) : h("option", { value: "" }, ((_q = status.tenantManifest) == null ? void 0 : _q.coo) || "OrgFy Bento (COO)")
               )
             ),
             toast && h("span", { className: "of-pill", "data-tone": "done" }, toast),
@@ -62503,7 +63107,7 @@ Nota: ${evidence.note}`
                 h,
                 tenant,
                 isBoardTenant,
-                status,
+                status: effectiveStatus,
                 liveCrew,
                 telemetry,
                 workingNowCount: tenantWorkingNowCount,
@@ -62541,7 +63145,7 @@ Nota: ${evidence.note}`
               }) : tab === "board" || tab === "floor" ? renderFactoryBoardAndFloor({
                 h,
                 tenant,
-                status,
+                status: effectiveStatus,
                 liveCrew,
                 telemetry,
                 viewMode: tab,
@@ -62579,7 +63183,18 @@ Nota: ${evidence.note}`
                   setTab("overview");
                 },
                 onOpenAgentDm: handleOpenAgentDmInBuzz,
-                status,
+                status: effectiveStatus,
+                buzzCatalog,
+                linkedWorkspaceId,
+                linkedChannelId,
+                tenantAgentsSource,
+                onLinkEnterpriseWorkspaceChannel: handleLinkEnterpriseWorkspaceChannel,
+                savingEnterpriseLink,
+                workspaceDetails,
+                workspaceDraft,
+                setWorkspaceDraft,
+                savingWorkspaceDetails,
+                onSaveWorkspaceSettings: handleSaveWorkspaceSettings,
                 liveCrew,
                 onSelectItem: setSelectedItem,
                 inboxFilter,
@@ -62867,14 +63482,14 @@ Nota: ${evidence.note}`
         repoDtag: (liveRepo == null ? void 0 : liveRepo.dtag) || tenant,
         repoDetail: selectedItemDetail,
         repoLoading: selectedItemDetailLoading,
-        linkedPr: selectedItem && ((_m2 = liveRepo == null ? void 0 : liveRepo.prs) == null ? void 0 : _m2.length) ? liveRepo.prs.find(
+        linkedPr: selectedItem && ((_r = liveRepo == null ? void 0 : liveRepo.prs) == null ? void 0 : _r.length) ? liveRepo.prs.find(
           (pr) => pr.id === selectedItem.id || selectedItem.workKey && pr.title.toLowerCase().includes(selectedItem.workKey.toLowerCase()) || pr.title.toLowerCase().includes(selectedItem.title.slice(0, 24).toLowerCase())
         ) || null : null,
         liveCrew,
         liveTurnsByPubkey: telemetry.byPubkey,
         resolveAuthor: (pk) => resolveBuzzIdentityName(ctx, pk, nameByPubkey),
-        EmbeddedThread: (_o = (_n = ctx == null ? void 0 : ctx.conversation) == null ? void 0 : _n.ui) == null ? void 0 : _o.Thread,
-        threadChannelId: ((_p = status.tenantManifest) == null ? void 0 : _p.canal) || ((_q = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _q.canal) || null,
+        EmbeddedThread: (_t = (_s = ctx == null ? void 0 : ctx.conversation) == null ? void 0 : _s.ui) == null ? void 0 : _t.Thread,
+        threadChannelId: ((_u = status.tenantManifest) == null ? void 0 : _u.canal) || ((_v = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _v.canal) || null,
         relaySession: relaySnap == null ? void 0 : relaySnap.session,
         relayScope: typeof (relaySnap == null ? void 0 : relaySnap.scope) === "string" ? relaySnap.scope : null,
         onOpenInBuzz: handleOpenInBuzz,
@@ -62924,8 +63539,8 @@ Nota: ${evidence.note}`
           const ag = liveCrew.find((a) => a.key === selectedAgentKey);
           return (ag == null ? void 0 : ag.pubkey) ? telemetry.byPubkey[ag.pubkey.toLowerCase()] || null : null;
         })(),
-        TranscriptComponent: (_s = (_r = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _r.ui) == null ? void 0 : _s.Transcript,
-        channelId: ((_t = status.tenantManifest) == null ? void 0 : _t.canal) || ((_u = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _u.canal) || null,
+        TranscriptComponent: (_x2 = (_w = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _w.ui) == null ? void 0 : _x2.Transcript,
+        channelId: ((_y2 = status.tenantManifest) == null ? void 0 : _y2.canal) || ((_z2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _z2.canal) || null,
         onOpenDm: handleOpenAgentDmInBuzz,
         onSessionAction: handleAgentSessionAction,
         onClose: () => setSelectedAgentKey(null)
@@ -62954,7 +63569,7 @@ Nota: ${evidence.note}`
           status,
           telemetry,
           masterAgentName,
-          masterAgentPubkey: (masterLive == null ? void 0 : masterLive.pubkey) || ((_v = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _v.pubkey) || "",
+          masterAgentPubkey: (masterLive == null ? void 0 : masterLive.pubkey) || ((_A = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _A.pubkey) || "",
           masterTurn,
           pendingApprovals,
           inboxCount,
