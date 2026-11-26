@@ -2341,4 +2341,18 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     assert.equal(parsed.get("gemini-3.8-flash-medium")?.score, "0/10");
     assert.equal(parsed.get("gemini-3.8-flash-medium")?.abaixo, true);
   });
+
+  test("v18.2: Port 1:1 CodeDen (Uso e Custo completo + Bloco inferior da Fábrica com Checks, Spot-checks, Lições e Digest)", () => {
+    const bundle = fs.readFileSync(path.resolve(__dirname, "plugin.js"), "utf8");
+    assert.ok(bundle.includes("data-codeden-usage-page"), "Página 1:1 CodeDen Uso e Custo deve estar no bundle");
+    assert.ok(bundle.includes("data-daily-spend-card"), "Card Gasto diário com gráfico SVG empilhado deve estar no bundle");
+    assert.ok(bundle.includes("data-export-usage-csv"), "Botão Exportar CSV deve estar no bundle");
+    assert.ok(bundle.includes("data-subscription-limits"), "Seção Limites de assinatura deve estar no bundle");
+    assert.ok(bundle.includes("data-top-sessions-table"), "Tabela Principais sessões por custo deve estar no bundle");
+    assert.ok(bundle.includes("data-background-work-panel"), "Painel Trabalho em segundo plano + Orçamentos deve estar no bundle");
+    assert.ok(bundle.includes("data-codeden-factory-bottom"), "Bloco inferior 1:1 CodeDen da Fábrica deve estar no bundle");
+    assert.ok(bundle.includes("data-codeden-spot-checks"), "Acordeão Spot-checks deve estar no bundle");
+    assert.ok(bundle.includes("data-codeden-lessons"), "Acordeão Lições deve estar no bundle");
+    assert.ok(bundle.includes("data-codeden-digest"), "Barra colapsável Digest deve estar no bundle");
+  });
 }
