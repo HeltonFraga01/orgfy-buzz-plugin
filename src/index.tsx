@@ -190,6 +190,7 @@ import { renderInfraModals } from "./components/InfraModals";
 import { renderTemplatesRsiSection } from "./components/TemplatesRsiSection";
 import { renderKanbanColumn } from "./components/KanbanColumn";
 import { createFactoryAppComponent } from "./factory/FactoryApp";
+import { parseOrgfyCardStructure } from "./components/CodeDenInspectorDrawer";
 import {
   parseFactoryStatus,
   buildEmptyFactoryStatus,
@@ -204,6 +205,7 @@ export {
   buildEmptyFactoryStatus,
   fetchFactoryStatus,
   writeTenantControl,
+  parseOrgfyCardStructure,
   FACTORY_SHADOW_CSS,
   attachFactoryShadowStyles,
   PT_BR,

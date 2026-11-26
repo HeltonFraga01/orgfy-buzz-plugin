@@ -302,6 +302,12 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
   } catch {
     controle = null;
   }
+  if (!controle && typeof localStorage !== "undefined") {
+    try {
+      const cached = localStorage.getItem(`orgfy_controle_cache_${slug}`);
+      if (cached) controle = JSON.parse(cached);
+    } catch {}
+  }
 
   const snap = (ctx as any)?.agents?.snapshot?.() || {};
   const runningList: any[] = Array.isArray(snap.running) ? snap.running : [];
@@ -551,6 +557,8 @@ export async function writeTenantControl(
     mode?: AutonomyMode;
     killSwitch?: boolean;
     drain?: boolean;
+    autoMerge?: boolean;
+    mergePolicy?: "fast" | "strict";
     pausedReason?: string | null;
     limits?: {
       gastoDiaUsd?: number;
@@ -560,7 +568,7 @@ export async function writeTenantControl(
       falhasSeguidas?: number;
     };
   }
-): Promise<{ ok: boolean; path: string; control: Record<string, any> }> {
+): Promise<{ ok: boolean; path: string; control: Record<string, any>; error?: string }> {
   const slug = (tenant || "orgfy").trim().toLowerCase() || "orgfy";
   const path = getControlePath(slug);
   const host = (ctx as any)?.host;
@@ -569,6 +577,8 @@ export async function writeTenantControl(
     mode: "software_factory",
     killSwitch: false,
     drain: false,
+    autoMerge: false,
+    mergePolicy: "strict",
     limits: { gastoDiaUsd: 50, mergesDia: 20, agentes: 4, prsAbertos: 6, falhasSeguidas: 3 },
     pausedReason: null,
   };
@@ -582,16 +592,35 @@ export async function writeTenantControl(
   } catch {
     // Arquivo ainda não existe
   }
+  const mergedLimits = { ...(current.limits || {}), ...(patch.limits || {}) };
+  const sanitizedLimits = {
+    gastoDiaUsd: Math.max(0, Number.isFinite(Number(mergedLimits.gastoDiaUsd)) ? Number(mergedLimits.gastoDiaUsd) : 50),
+    mergesDia: Math.max(0, Math.round(Number.isFinite(Number(mergedLimits.mergesDia)) ? Number(mergedLimits.mergesDia) : 20)),
+    agentes: Math.max(1, Math.round(Number.isFinite(Number(mergedLimits.agentes)) ? Number(mergedLimits.agentes) : 4)),
+    prsAbertos: Math.max(1, Math.round(Number.isFinite(Number(mergedLimits.prsAbertos)) ? Number(mergedLimits.prsAbertos) : 6)),
+    falhasSeguidas: Math.max(1, Math.round(Number.isFinite(Number(mergedLimits.falhasSeguidas)) ? Number(mergedLimits.falhasSeguidas) : 3)),
+  };
   const next = {
     ...current,
     ...patch,
-    limits: { ...(current.limits || {}), ...(patch.limits || {}) },
+    mergePolicy: (patch.mergePolicy || current.mergePolicy) === "fast" ? "fast" : "strict",
+    limits: sanitizedLimits,
     tenant: slug,
     updatedAt: new Date().toISOString(),
   };
+  const serialized = JSON.stringify(next, null, 2) + "\n";
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(`orgfy_controle_cache_${slug}`, serialized);
+    }
+  } catch {}
   if (host?.writeFile) {
-    await host.writeFile(path, JSON.stringify(next, null, 2) + "\n");
-    return { ok: true, path, control: next };
+    try {
+      await host.writeFile(path, serialized);
+      return { ok: true, path, control: next };
+    } catch (err: any) {
+      return { ok: false, path, control: next, error: err?.message || String(err) };
+    }
   }
-  return { ok: false, path, control: next };
+  return { ok: false, path, control: next, error: "host.writeFile indisponível" };
 }

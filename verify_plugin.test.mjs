@@ -1716,4 +1716,94 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     assert.equal(resFallback.ok, true);
     assert.ok(fallbackTxt.includes(uri), "fallback deve usar insertText se insertResource recusar");
   });
+
+  test("v17.4: fix de persistência de Limites (WIP/mergePolicy), popover 3D interativo, guia Como funciona e card estruturado no Inspector", async () => {
+    const bundle = fs.readFileSync(path.resolve(__dirname, "plugin.js"), "utf8");
+    assert.ok(bundle.includes("data-floor3d-agent-popover"), "Popover interativo ao clicar nos bonequinhos 3D deve estar no bundle");
+    assert.ok(bundle.includes("data-orgfy-factory-guide"), "Modal Como funciona o loop da Fábrica deve estar no bundle");
+    assert.ok(bundle.includes("data-orgfy-structured-card"), "Renderizador estruturado de campos do card OrgFy deve estar no bundle");
+
+    // 1. writeTenantControl persiste prsAbertos (WIP), mergePolicy e autoMerge sem sobrescrever nem falhar silenciosamente
+    const savedFiles = new Map();
+    const okCtx = {
+      host: {
+        readFile: async (p) => {
+          if (savedFiles.has(p)) return new TextEncoder().encode(savedFiles.get(p));
+          throw new Error("ENOENT");
+        },
+        writeFile: async (p, content) => {
+          savedFiles.set(p, String(content));
+        },
+      },
+    };
+    const saveRes = await orgfyMod.writeTenantControl(okCtx, "orgfy", {
+      mode: "software_factory",
+      mergePolicy: "fast",
+      autoMerge: true,
+      limits: { gastoDiaUsd: 80, mergesDia: 30, agentes: 5, prsAbertos: 12, falhasSeguidas: 4 },
+    });
+    assert.equal(saveRes.ok, true);
+    assert.equal(saveRes.control.limits.prsAbertos, 12);
+    assert.equal(saveRes.control.mergePolicy, "fast");
+    assert.equal(saveRes.control.autoMerge, true);
+    const writtenJson = JSON.parse(savedFiles.get(saveRes.path));
+    assert.equal(writtenJson.limits.prsAbertos, 12);
+    assert.equal(writtenJson.mergePolicy, "fast");
+    assert.equal(writtenJson.autoMerge, true);
+
+    // Erro de escrita retorna ok: false com mensagem explícita em error
+    const failCtx = {
+      host: {
+        readFile: async () => { throw new Error("ENOENT"); },
+        writeFile: async () => { throw new Error("EACCES: read-only"); },
+      },
+    };
+    const failRes = await orgfyMod.writeTenantControl(failCtx, "orgfy", { limits: { prsAbertos: 9 } });
+    assert.equal(failRes.ok, false);
+    assert.ok(failRes.error && failRes.error.includes("EACCES"));
+
+    // 2. parseOrgfyCardStructure extrai Estado, Papéis, Escrita exclusiva, Checklist e Aceite L-22
+    const sampleCanonical = [
+      "<!-- orgfy:card v4 -->",
+      "## Objetivo",
+      "Implementar P1: Main-CI Watchdog com auto-revert pós-merge na main.",
+      "",
+      "## Estado",
+      "- **Contexto:** Pontos de inserção confirmados em ferramentas/esteira/porteiro.py.",
+      "- **Autoridade:** OrgFy Iris",
+      "- **Decisão:** DECIDIDO (01:28) - Relatório CodeDen vs OrgFy",
+      "",
+      "## Papéis e ambiente",
+      "- **Tipo:** seguranca",
+      "- **Executor:** OrgFy Otto",
+      "- **Revisor:** OrgFy Vera",
+      "- **Decisor:** OrgFy Iris",
+      "- **Effort:** 4/10",
+      "",
+      "## Escopo",
+      "- **Escrita exclusiva:** `ferramentas/esteira/porteiro.py`, `testes/test_watchdog.py`",
+      "- [x] **P1:** Criar teste RED do watchdog",
+      "- [ ] **P2:** Implementar auto-revert e pausa da esteira",
+      "",
+      "## Aceite (L-22)",
+      "- **Feito quando:** pytest passa com exit 0",
+      "- **Comando de aceite:** `python3 -m pytest -q testes/test_watchdog.py`",
+    ].join("\n");
+
+    const parsed = orgfyMod.parseOrgfyCardStructure(sampleCanonical);
+    assert.ok(parsed, "parseOrgfyCardStructure deve reconhecer card canônico OrgFy");
+    assert.ok(parsed.objetivo.includes("Main-CI Watchdog"));
+    assert.equal(parsed.estado.autoridade, "OrgFy Iris");
+    assert.ok(parsed.estado.decisao.includes("DECIDIDO"));
+    assert.equal(parsed.papeis.tipo, "seguranca");
+    assert.equal(parsed.papeis.executor, "OrgFy Otto");
+    assert.equal(parsed.papeis.revisor, "OrgFy Vera");
+    assert.equal(parsed.papeis.decisor, "OrgFy Iris");
+    assert.equal(parsed.papeis.effort, "4/10");
+    assert.deepEqual(parsed.escopo.escritaExclusiva, ["ferramentas/esteira/porteiro.py", "testes/test_watchdog.py"]);
+    assert.equal(parsed.escopo.passos.length, 2);
+    assert.equal(parsed.escopo.passos[0].done, true);
+    assert.equal(parsed.escopo.passos[1].done, false);
+    assert.equal(parsed.aceite.comandoAceite, "python3 -m pytest -q testes/test_watchdog.py");
+  });
 }

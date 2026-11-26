@@ -126,6 +126,8 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     });
     const [paletteOpen, setPaletteOpen] = React.useState<boolean>(false);
     const [paletteQuery, setPaletteQuery] = React.useState<string>("");
+    const [guideOpen, setGuideOpen] = React.useState<boolean>(false);
+    const [guideSection, setGuideSection] = React.useState<string>("loop");
     const [compactDensity, setCompactDensity] = React.useState<boolean>(false);
     const [expandedProjects, setExpandedProjects] = React.useState<Record<string, boolean>>({ orgfy: true });
     const [showAllByProject, setShowAllByProject] = React.useState<Record<string, boolean>>({});
@@ -148,6 +150,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
           setPaletteOpen((v) => !v);
         } else if (ev.key === "Escape") {
           setPaletteOpen(false);
+          setGuideOpen(false);
         }
       };
       window.addEventListener("keydown", onKey);
@@ -285,7 +288,10 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       falhasSeguidas: 3,
     });
 
+    const settingsDirtyRef = React.useRef<boolean>(false);
+
     const setSettingsForm = React.useCallback((patch: Partial<typeof settingsForm>) => {
+      settingsDirtyRef.current = true;
       setSettingsFormState((prev) => ({ ...prev, ...patch }));
     }, []);
 
@@ -303,7 +309,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     }, []);
 
     const refresh = React.useCallback(
-      async (targetTenant = tenant) => {
+      async (targetTenant = tenant, forceSettingsSync = false) => {
         setLoading(true);
         const [res, holdSnap] = await Promise.all([
           fetchFactoryStatus(ctx, targetTenant),
@@ -312,27 +318,30 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         setStatus(res.status);
         setError(res.error);
         if (holdSnap) setHolding(holdSnap);
-        setSettingsFormState({
-          mode: res.status.mode,
-          autoMerge: res.status.limits.autoMerge,
-          mergePolicy: res.status.limits.mergePolicy,
-          gastoDiaUsd: res.status.limits.dailyBudget?.usd ?? 50,
-          mergesDia: res.status.limits.maxMergesPerDay ?? 20,
-          agentesMax: res.status.limits.maxConcurrentSessions ?? 4,
-          prsAbertos: res.status.wip?.limit ?? 6,
-          falhasSeguidas: res.status.limits.pauseAfterConsecutiveFailures ?? 3,
-        });
+        if (!settingsDirtyRef.current || forceSettingsSync) {
+          setSettingsFormState({
+            mode: res.status.mode,
+            autoMerge: res.status.limits.autoMerge,
+            mergePolicy: res.status.limits.mergePolicy,
+            gastoDiaUsd: res.status.limits.dailyBudget?.usd ?? 50,
+            mergesDia: res.status.limits.maxMergesPerDay ?? 20,
+            agentesMax: res.status.limits.maxConcurrentSessions ?? 4,
+            prsAbertos: res.status.wip?.limit ?? 6,
+            falhasSeguidas: res.status.limits.pauseAfterConsecutiveFailures ?? 3,
+          });
+        }
         setLoading(false);
       },
       [tenant]
     );
 
     React.useEffect(() => {
+      settingsDirtyRef.current = false;
       let disposed = false;
       const run = () => {
-        if (!disposed) refresh(tenant);
+        if (!disposed) refresh(tenant, false);
       };
-      run();
+      refresh(tenant, true);
       const timer = setInterval(run, 5000);
       const unsub = subscribeRelayUpdates(() => run());
       return () => {
@@ -346,10 +355,11 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       async (patch: Parameters<typeof writeTenantControl>[2], message: string) => {
         const res = await writeTenantControl(ctx, tenant, patch);
         if (res.ok) {
+          settingsDirtyRef.current = false;
           notify(message);
-          await refresh(tenant);
+          await refresh(tenant, true);
         } else {
-          notify("Falha ao gravar controle-<tenant>.json (host.writeFile indisponível).");
+          notify(res.error ? `Falha ao gravar controle-${tenant}.json: ${res.error}` : `Falha ao gravar controle-${tenant}.json.`);
         }
       },
       [tenant, notify, refresh]
@@ -1143,6 +1153,12 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                     onSelectAgentKey: setSelectedAgentKey,
                     onSelectItem: setSelectedItem,
                     onOpenAgentDm: handleOpenAgentDmInBuzz,
+                    onOpenGuide: () => setGuideOpen(true),
+                    onToggleKillSwitch: (next) =>
+                      handleControlUpdate(
+                        { killSwitch: next, pausedReason: next ? "Kill Switch acionado pelo operador" : null },
+                        next ? "Kill Switch ativado imediatamente." : "Kill Switch liberado."
+                      ),
                     onRefresh: () => refresh(tenant),
                     loading,
                     Floor3D,
@@ -1176,6 +1192,8 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                       handleControlUpdate(
                         {
                           mode: settingsForm.mode,
+                          autoMerge: settingsForm.autoMerge,
+                          mergePolicy: settingsForm.mergePolicy,
                           limits: {
                             gastoDiaUsd: settingsForm.gastoDiaUsd,
                             mergesDia: settingsForm.mergesDia,
@@ -1321,7 +1339,208 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         } as FactorySidebarProps,
         paletteQuery,
         setPaletteQuery
-      )
+      ),
+      guideOpen &&
+        h(
+          "div",
+          {
+            className: "of-sheet-backdrop",
+            "data-orgfy-factory-guide": "true",
+            style: { alignItems: "center", justifyContent: "center", padding: "24px" },
+            onClick: (e: any) => {
+              if (e.target === e.currentTarget) setGuideOpen(false);
+            },
+          },
+          h(
+            "div",
+            {
+              role: "dialog",
+              "aria-label": "Como funciona o loop da Fábrica OrgFy",
+              style: {
+                width: "min(820px, 96vw)",
+                maxHeight: "min(680px, 88vh)",
+                borderRadius: "12px",
+                border: "1px solid var(--border)",
+                background: "var(--card)",
+                color: "var(--foreground)",
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
+                boxShadow: "0 24px 64px rgba(0,0,0,0.55)",
+              },
+            },
+            h(
+              "div",
+              {
+                style: {
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "14px 18px",
+                  borderBottom: "1px solid var(--border)",
+                },
+              },
+              h(
+                "div",
+                null,
+                h("div", { style: { fontSize: "14px", fontWeight: 700 } }, "Como funciona o loop da Fábrica OrgFy"),
+                h("div", { className: "of-muted", style: { fontSize: "11.5px", marginTop: "2px" } }, "Fábrica de Software e Dark Factory passo a passo (L-01, L-22, WIP e Kill Switch)")
+              ),
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "of-btn",
+                  style: { padding: "4px 10px", fontSize: "12px" },
+                  onClick: () => setGuideOpen(false),
+                },
+                "×"
+              )
+            ),
+            h(
+              "div",
+              { style: { display: "grid", gridTemplateColumns: "210px 1fr", flex: 1, minHeight: 0, overflow: "hidden" } },
+              h(
+                "nav",
+                {
+                  style: {
+                    borderRight: "1px solid var(--border)",
+                    padding: "12px 10px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "4px",
+                    overflowY: "auto",
+                    background: "rgba(0,0,0,0.14)",
+                  },
+                },
+                [
+                  { id: "loop", label: "1. O loop da fábrica" },
+                  { id: "pipelines", label: "2. Raias e L-01 / L-22" },
+                  { id: "merge", label: "3. Fila de merge & CI" },
+                  { id: "slots", label: "4. Slots de agentes & WIP" },
+                  { id: "modes", label: "5. Modos de autonomia" },
+                  { id: "controls", label: "6. Kill Switch & Dreno" },
+                ].map((sec) =>
+                  h(
+                    "button",
+                    {
+                      key: sec.id,
+                      type: "button",
+                      onClick: () => setGuideSection(sec.id),
+                      style: {
+                        textAlign: "left",
+                        padding: "7px 10px",
+                        borderRadius: "6px",
+                        border: "none",
+                        background: guideSection === sec.id ? "var(--affordance-selected, rgba(255,255,255,0.08))" : "transparent",
+                        color: guideSection === sec.id ? "var(--foreground)" : "var(--muted-foreground)",
+                        fontSize: "12px",
+                        fontWeight: guideSection === sec.id ? 600 : 400,
+                        cursor: "pointer",
+                      },
+                    },
+                    sec.label
+                  )
+                )
+              ),
+              h(
+                "div",
+                { style: { padding: "18px 20px", overflowY: "auto", fontSize: "12.5px", lineHeight: 1.6, display: "flex", flexDirection: "column", gap: "12px" } },
+                guideSection === "loop" &&
+                  h(
+                    React.Fragment,
+                    null,
+                    h(
+                      "p",
+                      { style: { margin: 0, color: "var(--muted-foreground)" } },
+                      "O coordenador (Porteiro) executa ciclos contínuos sobre o relay NIP-34 do Buzz e o repositório Git, respeitando imediatamente os controles em ",
+                      h("code", { className: "of-mono" }, `estado/controle-${tenant}.json`),
+                      "."
+                    ),
+                    h(
+                      "pre",
+                      {
+                        className: "of-mono",
+                        style: {
+                          margin: 0,
+                          padding: "14px",
+                          borderRadius: "8px",
+                          border: "1px solid var(--border)",
+                          background: "rgba(0,0,0,0.28)",
+                          fontSize: "11px",
+                          lineHeight: 1.5,
+                          overflowX: "auto",
+                        },
+                      },
+                      [
+                        "Issue NIP-34 (você, COO ou Oráculo)",
+                        "   │",
+                        "   ▼",
+                        "Triagem & Card-Lint (L-01 + L-22 + Escrita Exclusiva)",
+                        "   │ aguarda slot livre (WIP / agentes simultâneos)",
+                        "   ▼",
+                        "┌─────────────────────────────────────────────┐",
+                        "│ Executor trabalha em worktree Git isolada   │",
+                        "│ TDD RED → GREEN + atualiza Checklist P1..Pn │",
+                        "└─────────────────────────────────────────────┘",
+                        "   │ abre PR NIP-34",
+                        "   ▼",
+                        "Revisão Cross-Provider (L-01) + CI isolado ◄──┐",
+                        "   │ GATE: recusado → Executor corrige ───────┘",
+                        "   ▼ GATE: aceito + checks verdes",
+                        "Merge na main (Fast ou Strict) + Watchdog CI",
+                      ].join("\n")
+                    )
+                  ),
+                guideSection === "pipelines" &&
+                  h(
+                    React.Fragment,
+                    null,
+                    h("h4", { style: { margin: 0, fontSize: "13.5px" } }, "Raias Determinísticas & Invariantes"),
+                    h("p", { style: { margin: 0, color: "var(--muted-foreground)" } }, "• L-01 (Cross-Provider): o agente revisor nunca é o executor, garantindo revisão independente."),
+                    h("p", { style: { margin: 0, color: "var(--muted-foreground)" } }, "• L-22 (Aceite Congelado): o comando de aceite do card é protegido por SHA-256; o executor não pode afrouxar testes."),
+                    h("p", { style: { margin: 0, color: "var(--muted-foreground)" } }, "• Escrita Exclusiva: o despacho impede dois agentes editando o mesmo arquivo simultaneamente (WRITE_SET_CONFLICT).")
+                  ),
+                guideSection === "merge" &&
+                  h(
+                    React.Fragment,
+                    null,
+                    h("h4", { style: { margin: 0, fontSize: "13.5px" } }, "Fila de Merge & Políticas"),
+                    h("p", { style: { margin: 0, color: "var(--muted-foreground)" } }, "• Strict (padrão): re-executa o CI já sobre a main antes de concluir o merge, bloqueando regressões."),
+                    h("p", { style: { margin: 0, color: "var(--muted-foreground)" } }, "• Fast: confia no CI aprovado do PR quando não há conflito de rebase."),
+                    h("p", { style: { margin: 0, color: "var(--muted-foreground)" } }, "• Watchdog pós-merge: se a main quebrar após integração, dispara alerta e pausa a esteira automaticamente.")
+                  ),
+                guideSection === "slots" &&
+                  h(
+                    React.Fragment,
+                    null,
+                    h("h4", { style: { margin: 0, fontSize: "13.5px" } }, "Slots de Agentes, WIP & Orçamento"),
+                    h("p", { style: { margin: 0, color: "var(--muted-foreground)" } }, `Limites ativos de ${empresaNome}: WIP máx ${status.wip.limit} PRs abertos · ${status.limits.maxConcurrentSessions} agentes simultâneos · ${status.limits.maxMergesPerDay} merges/dia · orçamento US$ ${status.limits.dailyBudget.usd}/dia.`),
+                    h("p", { style: { margin: 0, color: "var(--muted-foreground)" } }, "Você pode ajustar esses valores a qualquer momento na aba Configurações — eles são gravados diretamente em controle-<empresa>.json.")
+                  ),
+                guideSection === "modes" &&
+                  h(
+                    React.Fragment,
+                    null,
+                    h("h4", { style: { margin: 0, fontSize: "13.5px" } }, "Modos de Autonomia"),
+                    h("p", { style: { margin: 0, color: "var(--muted-foreground)" } }, "• Manual: você conduz cada despacho e revisão."),
+                    h("p", { style: { margin: 0, color: "var(--muted-foreground)" } }, "• Assistido: COO e automações preparam trabalho; você revisa e integra."),
+                    h("p", { style: { margin: 0, color: "var(--muted-foreground)" } }, "• Fábrica de Software: issues confiáveis entram nas raias com worktrees isoladas, CI e Revisor L-01."),
+                    h("p", { style: { margin: 0, color: "var(--muted-foreground)" } }, "• Dark Factory: adiciona o Oráculo (Scout) auditando continuamente o workspace contra o Canvas/Visão e abrindo novas issues.")
+                  ),
+                guideSection === "controls" &&
+                  h(
+                    React.Fragment,
+                    null,
+                    h("h4", { style: { margin: 0, fontSize: "13.5px" } }, "Kill Switch & Modo Dreno"),
+                    h("p", { style: { margin: 0, color: "var(--muted-foreground)" } }, "• Kill Switch: para imediatamente novos despachos e merges no próximo ciclo do coordenador."),
+                    h("p", { style: { margin: 0, color: "var(--muted-foreground)" } }, "• Modo Dreno: não inicia novas issues, mas deixa os PRs que já estão em execução/revisão concluírem com segurança."),
+                    h("p", { style: { margin: 0, color: "var(--muted-foreground)" } }, "• Clique em qualquer bonequinho no Andar 3D para inspecionar o turno ao vivo e abrir o chat lateral nativo do Buzz com aquele agente.")
+                  )
+              )
+            )
+          )
+        )
     );
 
     if (useNativeSideTabs) {
