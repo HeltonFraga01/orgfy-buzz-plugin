@@ -5308,20 +5308,13 @@ function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 function formatTextWithNostrMentions(rawText, targets, prependPrimaryIfMissing = false) {
+  var _a;
   let out = rawText;
-  for (const t of targets) {
-    const npub = hexToNpub(t.pubkey);
-    if (!npub) continue;
-    const token2 = `nostr:${npub}`;
-    if (t.agentName && t.agentName.trim()) {
-      const rx = new RegExp(`@${escapeRegex(t.agentName.trim())}(?=$|[\\s,.;:!?()\\[\\]])`, "gi");
-      if (rx.test(out)) {
-        out = out.replace(rx, token2);
-        continue;
-      }
-    }
-    if (prependPrimaryIfMissing && t === targets[0] && !out.includes(token2)) {
-      out = `${token2} ${out}`;
+  if (prependPrimaryIfMissing && ((_a = targets[0]) == null ? void 0 : _a.agentName)) {
+    const primaryName = targets[0].agentName.trim();
+    const rx = new RegExp(`@${escapeRegex(primaryName)}(?=$|[\\s,.;:!?()\\[\\]])`, "i");
+    if (primaryName && !rx.test(out)) {
+      out = `@${primaryName} ${out}`;
     }
   }
   return out;

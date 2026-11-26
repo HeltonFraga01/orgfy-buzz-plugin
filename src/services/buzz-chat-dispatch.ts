@@ -106,26 +106,18 @@ function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** Substitui `@NomeDoAgente` por `nostr:npub1...` (NIP-27) para renderizar pílula clicável real no Buzz. */
+/** Garante que `@NomeDoAgente` apareça limpo no texto (padrão nativo do Buzz; a marcação real vai em `mentions: [pubkey]` + `wake`). */
 export function formatTextWithNostrMentions(
   rawText: string,
   targets: BuzzMentionTarget[],
   prependPrimaryIfMissing = false
 ): string {
   let out = rawText;
-  for (const t of targets) {
-    const npub = hexToNpub(t.pubkey);
-    if (!npub) continue;
-    const token = `nostr:${npub}`;
-    if (t.agentName && t.agentName.trim()) {
-      const rx = new RegExp(`@${escapeRegex(t.agentName.trim())}(?=$|[\\s,.;:!?()\\[\\]])`, "gi");
-      if (rx.test(out)) {
-        out = out.replace(rx, token);
-        continue;
-      }
-    }
-    if (prependPrimaryIfMissing && t === targets[0] && !out.includes(token)) {
-      out = `${token} ${out}`;
+  if (prependPrimaryIfMissing && targets[0]?.agentName) {
+    const primaryName = targets[0].agentName.trim();
+    const rx = new RegExp(`@${escapeRegex(primaryName)}(?=$|[\\s,.;:!?()\\[\\]])`, "i");
+    if (primaryName && !rx.test(out)) {
+      out = `@${primaryName} ${out}`;
     }
   }
   return out;
