@@ -65,6 +65,7 @@ import { sendBuzzChatMessageOrWake, type BuzzDispatchResult } from "../services/
 import { collectBuzzNativeUsage, type BuzzNativeUsageSnapshot } from "../services/buzz-usage-live";
 import { notifyRespectingFocus, readBuzzFocusState, subscribeBuzzFocus, type BuzzFocusState } from "../services/buzz-focus";
 import { auditAllHostCommandsIntegrity, type CommandIntegrityAuditSummary } from "../services/command-integrity";
+import { buildUnifiedOrgfyTools } from "../tools/registry";
 
 type FactoryTab =
   | "holding"
@@ -310,6 +311,9 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     const [costRange, setCostRange] = React.useState<"7d" | "30d" | "90d">("30d");
     const [autoTab, setAutoTab] = React.useState<"automations" | "runs" | "templates">("automations");
     const [agentTab, setAgentTab] = React.useState<"eval" | "memory" | "skills" | "mcp" | "hooks">("memory");
+    const [evalFilter, setEvalFilter] = React.useState<"all" | "attention" | "approved">("all");
+    const [mcpSearch, setMcpSearch] = React.useState<string>("");
+    const [mcpCategory, setMcpCategory] = React.useState<string>("all");
 
     const [settingsForm, setSettingsFormState] = React.useState<{
       mode: AutonomyMode;
@@ -580,9 +584,20 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
 
     const tenantAgents = status.tenantManifest?.agentes || [];
 
-    // Mapa pubkey -> nome amigável para enriquecer a telemetria ao vivo do Buzz
+    // Mapa pubkey -> nome amigável para enriquecer a telemetria ao vivo do Buzz e membros do canal
     const nameByPubkey = React.useMemo(() => {
       const map = new Map<string, string>();
+      if (holding?.fundador?.pubkey) {
+        map.set(holding.fundador.pubkey.toLowerCase(), `${holding.fundador.nome || "Helton Fraga"} (Fundador)`);
+      }
+      if (holding?.ceoHolding?.pubkey) {
+        map.set(holding.ceoHolding.pubkey.toLowerCase(), holding.ceoHolding.nome || "OrgFy Iris");
+      }
+      try {
+        const rSnap = typeof (ctx as any)?.relay?.snapshot === "function" ? (ctx as any).relay.snapshot() : null;
+        const viewerPk = String(rSnap?.session?.viewer || rSnap?.viewer || "").trim().toLowerCase();
+        if (viewerPk && !map.has(viewerPk)) map.set(viewerPk, "Você (Fundador)");
+      } catch {}
       for (const a of liveCrew) {
         if (a.pubkey) map.set(a.pubkey.toLowerCase(), a.name);
       }
@@ -590,7 +605,30 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         if (a.pubkey) map.set(a.pubkey.toLowerCase(), a.name);
       }
       return map;
-    }, [liveCrew, tenantAgents]);
+    }, [liveCrew, tenantAgents, holding, relayTick]);
+
+    // Catálogo real das 22 agentTools registradas no Unified Tool Registry
+    const mcpTools = React.useMemo(() => {
+      try {
+        const raw = buildUnifiedOrgfyTools(ctx);
+        const categorize = (name: string): string => {
+          if (/gate|lint|governanca|checkout_lock|decision_triage/.test(name)) return "Governança L-01";
+          if (/roster|handoff|smart_dispatch|despachar|reconciliar/.test(name)) return "Orquestração";
+          if (/card|kanban|historico|bind_context|question_card/.test(name)) return "Cards & Relay";
+          if (/loop_radar|session_stop|model_failover|kpis|status|porteiro/.test(name)) return "Radar & Telemetria";
+          return "Geral";
+        };
+        return raw.map((t) => ({
+          name: t.name,
+          description: t.description,
+          category: categorize(t.name),
+          params: Object.keys((t.inputSchema as any)?.properties || {}),
+          required: Array.isArray((t.inputSchema as any)?.required) ? ((t.inputSchema as any).required as string[]) : [],
+        }));
+      } catch {
+        return [];
+      }
+    }, []);
 
     // Snapshot ao vivo de session.agentActivity + session.presence + session.unread
     const telemetry = React.useMemo(
@@ -1229,10 +1267,10 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     }, [notify]);
 
     React.useEffect(() => {
-      if (tab === "settings" && !commandIntegrity) {
+      if ((tab === "settings" || (tab === "agents" && agentTab === "mcp")) && !commandIntegrity) {
         void auditAllHostCommandsIntegrity(ctx).then(setCommandIntegrity).catch(() => {});
       }
-    }, [tab, commandIntegrity]);
+    }, [tab, agentTab, commandIntegrity]);
 
     const handleRunHoldoutNow = React.useCallback(async () => {
       const host = (ctx as any)?.host;
@@ -1934,6 +1972,17 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                     scaffoldingSubsidiary,
                     subsidiaryDraft,
                     setSubsidiaryDraft,
+                    evalFilter,
+                    setEvalFilter,
+                    mcpTools,
+                    mcpSearch,
+                    setMcpSearch,
+                    mcpCategory,
+                    setMcpCategory,
+                    onOpenAgentProfile: handleOpenNativeAgentProfile,
+                    onMigrateSingleAgentModel: async (agentKey: string, target: { provider: string; model: string }) => {
+                      await handleSaveAgentProfile(agentKey, { provider: target.provider, model: target.model });
+                    },
                   })
             )
           )

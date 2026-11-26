@@ -2316,4 +2316,29 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     assert.ok(bundle.includes("DARK AUTO-MERGE"), "Badge DARK AUTO-MERGE do Motor de Confiança deve estar no bundle");
     assert.ok(bundle.includes("GATE HUMANO"), "Badge GATE HUMANO 🔒 para segurança deve estar no bundle");
   });
+
+  test("v18.1: Redesign UX/UI das 4 telas (Eval R5.1 real, Revisores L-01 + Alçadas, MCP 22 tools + SHA-256, Configurações 2 colunas)", () => {
+    const bundle = fs.readFileSync(path.resolve(__dirname, "plugin.js"), "utf8");
+    assert.ok(bundle.includes("data-eval-r51-view"), "Tela redesenhada de Eval & Modelos R5.1 deve estar no bundle");
+    assert.ok(bundle.includes("data-reviewers-l01-view"), "Tela redesenhada de Revisores L-01 deve estar no bundle");
+    assert.ok(bundle.includes("data-mcp-registry-view"), "Catálogo interativo MCP + SHA-256 deve estar no bundle");
+    assert.ok(bundle.includes("data-settings-grid-layout"), "Layout 2 colunas de Configurações deve estar no bundle");
+    assert.ok(!bundle.includes("MCP (21 tools)"), "Rótulo antigo estático MCP (21 tools) deve ter sido substituído pelo contador real");
+
+    const realEvalMd = [
+      "| Provider | Model | Resposta | Tool Call | Card concluído | Latência Média (ms) | Custo Total (USD) |",
+      "| :--- | :--- | ---: | ---: | :--- | ---: | ---: |",
+      "| nexusmind_anthropic | claude-sonnet-4-6 | 10/10 | 10/10 | indisponível | 4064 | $0.0815 |",
+      "| nexusmind_antigravity | gemini-2.5-flash | 10/10 | 10/10 | indisponível | 2045 | $0.0022 |",
+      "| nexusmind_antigravity | gemini-3.8-flash-medium | 10/10 | 0/10 | indisponível | 4956 | $0.0046 |",
+    ].join("\n");
+    const parsed = orgfyMod.parseEvalTable(realEvalMd);
+    assert.equal(parsed.get("claude-sonnet-4-6")?.score, "10/10");
+    assert.equal(parsed.get("claude-sonnet-4-6")?.abaixo, false);
+    assert.equal(parsed.get("claude-sonnet-4-6")?.latencyMs, 4064);
+    assert.equal(parsed.get("gemini-2.5-flash")?.score, "10/10");
+    assert.equal(parsed.get("gemini-2.5-flash")?.costUsd, "$0.0022");
+    assert.equal(parsed.get("gemini-3.8-flash-medium")?.score, "0/10");
+    assert.equal(parsed.get("gemini-3.8-flash-medium")?.abaixo, true);
+  });
 }

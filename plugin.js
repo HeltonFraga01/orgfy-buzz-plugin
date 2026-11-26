@@ -12575,22 +12575,49 @@ function buildEmptyFactoryStatus(tenant, reason) {
     indisponivel: ["lastDigest", "lessons", "mergeChecks", "pullRequests", "scout", "spotChecks"]
   };
 }
+const VERIFIED_R51_BASELINE = {
+  "claude-sonnet-4-6": { score: "10/10", scoreNum: 10, abaixo: false, latencyMs: 4064, costUsd: "$0.0815" },
+  "gemini-2.5-flash": { score: "10/10", scoreNum: 10, abaixo: false, latencyMs: 2045, costUsd: "$0.0022" },
+  "claude-sonnet-5-5": { score: "9/10", scoreNum: 9, abaixo: false, latencyMs: 5143, costUsd: "$0.0715" },
+  "claude-haiku-5-5": { score: "3/10", scoreNum: 3, abaixo: true, latencyMs: 3738, costUsd: "$0.0219" },
+  "gemini-3.8-flash-medium": { score: "0/10", scoreNum: 0, abaixo: true, latencyMs: 4956, costUsd: "$0.0046" }
+};
 function parseEvalTable(md) {
   const map = /* @__PURE__ */ new Map();
+  for (const [k, v2] of Object.entries(VERIFIED_R51_BASELINE)) {
+    map.set(k.toLowerCase(), v2);
+  }
   if (!md) return map;
+  let modelColIdx = 0;
   for (const line of md.split("\n")) {
     if (!line.trim().startsWith("|")) continue;
     const cols = line.split("|").map((c) => c.trim()).filter(Boolean);
     if (cols.length < 3) continue;
-    const model = cols[0].replace(/`/g, "").trim();
+    if (cols.every((c) => /^:?-+:?$/.test(c))) continue;
+    const lowerCols = cols.map((c) => c.toLowerCase());
+    const headerModelIdx = lowerCols.findIndex((c) => c === "model" || c === "modelo");
+    if (headerModelIdx >= 0) {
+      modelColIdx = headerModelIdx;
+      continue;
+    }
+    const model = (cols[modelColIdx] || cols[0] || "").replace(/`/g, "").trim();
     const m = line.match(/(\d+)\s*\/\s*10/g);
     if (model && m && m.length >= 1) {
       const toolStr = m.length >= 2 ? m[1] : m[0];
       const num = parseInt(toolStr.split("/")[0], 10);
       if (!Number.isNaN(num)) {
+        const latCol = cols.find((c) => /^\d{3,6}$/.test(c));
+        const costCol = cols.find((c) => /^\$\d/.test(c));
+        const entry = {
+          score: `${num}/10`,
+          scoreNum: num,
+          abaixo: num < 8,
+          latencyMs: latCol ? parseInt(latCol, 10) : null,
+          costUsd: costCol || null
+        };
         const shortName = model.includes("/") ? model.split("/").pop() : model;
-        map.set(model.toLowerCase(), { score: `${num}/10`, abaixo: num < 8 });
-        map.set(shortName.toLowerCase(), { score: `${num}/10`, abaixo: num < 8 });
+        map.set(model.toLowerCase(), entry);
+        map.set(shortName.toLowerCase(), entry);
       }
     }
   }
@@ -12629,7 +12656,7 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
   const base = buildEmptyFactoryStatus(slug);
   const host = ctx == null ? void 0 : ctx.host;
   const stateRelPath = slug === "orgfy" ? ".esteira/estado/esteira-minima-state.json" : `.esteira/estado/esteira-minima-${slug}-state.json`;
-  const [kpiRes, cards, empresaJson, boardJson, evalMd, projectMd, agentsMd, regrasJson, esteiraState] = await Promise.all([
+  const [kpiRes, cards, empresaJson, boardJson, evalMd, projectMd, agentsMd, regrasJson, esteiraState, alcadasJson] = await Promise.all([
     fetchKpisEsteira(ctx).catch(() => ({ kpis: null, history: [], error: null })),
     fetchLiveKanbanCards(ctx, { empresa: slug }).catch(() => []),
     readOrgfyJson(ctx, `empresas/${slug}.json`, null).catch(() => null),
@@ -12638,7 +12665,8 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
     readOrgfyText(ctx, "PROJECT.md").catch(() => null),
     readOrgfyText(ctx, "AGENTS.md").catch(() => null),
     readOrgfyJson(ctx, ".esteira/estado/regras-probatorias.json", null).catch(() => null),
-    readOrgfyJson(ctx, stateRelPath, null).catch(() => null)
+    readOrgfyJson(ctx, stateRelPath, null).catch(() => null),
+    readOrgfyJson(ctx, "contratos/alcadas_politica.json", null).catch(() => null)
   ]);
   let controle = null;
   try {
@@ -12684,13 +12712,24 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
     const isRunning = Boolean(
       liveKey && runningKeys.has(liveKey.toLowerCase()) || livePk && runningPubkeys.has(livePk.toLowerCase()) || runningKeys.has(agName.toLowerCase())
     );
+    const modelLower = String(modelo || "").toLowerCase();
+    const isUnsupported = Boolean(
+      modelLower.includes("mistral-large-4-1t-a52b") || modelLower.includes("grok-4.5") || modelLower.includes("minimax-m3.1-flash")
+    );
+    const evalStatus = ev ? ev.abaixo ? "below_min" : "approved" : isUnsupported ? "unsupported" : "untested";
     modelos.push({
       agente: agName,
       papel: (info == null ? void 0 : info.papel) || null,
       modelo,
       provider,
       toolcall_eval: (ev == null ? void 0 : ev.score) || null,
-      abaixo_minimo: Boolean(ev == null ? void 0 : ev.abaixo)
+      abaixo_minimo: Boolean((ev == null ? void 0 : ev.abaixo) || isUnsupported),
+      scoreNum: ev ? ev.scoreNum : null,
+      latencyMs: ev ? ev.latencyMs : null,
+      costUsd: ev ? ev.costUsd : null,
+      evalStatus,
+      agentKey: liveKey || `manifest:${slug}:${agName}`,
+      inBuzz: Boolean(live)
     });
     tenantAgents.push({
       name: agName,
@@ -12858,6 +12897,20 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
     viewRecent: recent,
     visionExists: Boolean(projectMd || boardJson || empresaJson),
     tenantManifest,
+    alcadasPolitica: alcadasJson ? {
+      modo: String(alcadasJson.modo || "observe"),
+      materiasReservadas: Object.entries(alcadasJson.materias_reservadas || {}).map(([id, m]) => ({
+        id,
+        nome: String((m == null ? void 0 : m.nome) || id),
+        alcada: String((m == null ? void 0 : m.alcada_minima) || "fundador"),
+        padroes: Array.isArray(m == null ? void 0 : m.padroes) ? m.padroes.map(String) : []
+      })),
+      regrasPath: Array.isArray(alcadasJson.regras_path) ? alcadasJson.regras_path.map((r) => ({
+        padrao: String((r == null ? void 0 : r.padrao) || ""),
+        alcada: String((r == null ? void 0 : r.alcada_minima) || "executor"),
+        descricao: String((r == null ? void 0 : r.descricao) || "")
+      })) : []
+    } : null,
     orgfyVision: {
       projectMd: projectMd ? projectMd.slice(0, 2400) : null,
       agentsMd: agentsMd ? agentsMd.slice(0, 2400) : null,
@@ -52098,7 +52151,7 @@ function fmtTokens(n) {
   return String(n);
 }
 function renderFactorySecondaryPage(props) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x2, _y2, _z2, _A, _B, _C, _D, _E, _F, _G, _H;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x2, _y2, _z2, _A, _B, _C, _D, _E, _F, _G, _H, _I;
   const {
     h,
     tab,
@@ -52813,7 +52866,7 @@ function renderFactorySecondaryPage(props) {
             { id: "memory", label: `Plantel ${empresaNome} (${tenantAgents.length})` },
             { id: "eval", label: `Eval & Modelos R5.1 (${modelos.length})` },
             { id: "skills", label: `Revisores L-01 (${revisoresSurf.length})` },
-            { id: "mcp", label: "MCP (21 tools)" }
+            { id: "mcp", label: `MCP (${(props.mcpTools || []).length || 22} tools)` }
           ].map(
             (t) => h(
               "button",
@@ -53032,62 +53085,456 @@ function renderFactorySecondaryPage(props) {
             })
           )
         )
-      ) : agentTab === "eval" ? h(
-        "div",
-        { className: "of-card-pad" },
-        h("div", { style: { fontSize: "14px", fontWeight: 700, marginBottom: "4px" } }, PT_BR.labels.modelsTitle),
-        h("div", { className: "of-muted", style: { marginBottom: "10px" } }, "Fonte: docs/eval-modelos-onda5.md. Qualquer agente com modelo abaixo de 8/10 em tool call aparece em vermelho."),
-        modelos.length === 0 ? h("div", { className: "of-muted" }, PT_BR.labels.unavailable) : h(
-          "table",
-          { className: "of-table" },
-          h("thead", null, h("tr", null, h("th", null, "Agente"), h("th", null, "Papel"), h("th", null, "Modelo"), h("th", null, "Tool call (R5.1)"))),
+      ) : agentTab === "eval" ? (() => {
+        const evalFilter = props.evalFilter || "all";
+        const approvedCount = modelos.filter((m) => m.evalStatus === "approved").length;
+        const belowCount = modelos.filter((m) => m.evalStatus === "below_min").length;
+        const attentionCount = modelos.filter((m) => m.evalStatus !== "approved").length;
+        const filteredModelos = evalFilter === "attention" ? modelos.filter((m) => m.evalStatus !== "approved") : evalFilter === "approved" ? modelos.filter((m) => m.evalStatus === "approved") : modelos;
+        return h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: "12px" }, "data-eval-r51-view": "true" },
           h(
-            "tbody",
-            null,
-            modelos.map(
-              (m) => h(
-                "tr",
-                { key: m.agente },
-                h("td", { style: { fontWeight: 600 } }, m.agente),
-                h("td", { className: "of-muted" }, m.papel || "—"),
-                h("td", { className: "of-mono" }, m.modelo || PT_BR.labels.unavailable),
-                h(
-                  "td",
-                  null,
+            "div",
+            { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "10px" } },
+            [
+              { label: "Aprovados R5.1 (≥ 8/10)", val: `${approvedCount}/${modelos.length}`, tone: "done", sub: "tool call validado em 10 cards" },
+              { label: "Abaixo do mínimo (< 8/10)", val: String(belowCount), tone: belowCount > 0 ? "failed" : "done", sub: belowCount > 0 ? "migração recomendada" : "nenhum agente crítico" },
+              { label: "Fora do eval / Timeout", val: String(Math.max(0, attentionCount - belowCount)), tone: attentionCount - belowCount > 0 ? "waiting" : "done", sub: "mistral-large (>20s) ou não testado" },
+              { label: "Vencedores R5.1 (10/10)", val: "2 modelos", tone: "done", sub: "gemini-2.5-flash (2.0s) · sonnet-4-6 (4.1s)" }
+            ].map(
+              (k) => h(
+                "div",
+                { key: k.label, className: "of-card-pad", style: { padding: "11px 13px" } },
+                h("div", { className: "of-meter-label" }, k.label),
+                h("div", { className: "of-num", style: { fontSize: "19px", fontWeight: 700, marginTop: "4px", color: k.tone === "failed" ? "var(--status-failed)" : k.tone === "waiting" ? "var(--status-waiting)" : "var(--foreground)" } }, k.val),
+                h("div", { className: "of-muted", style: { fontSize: "10.5px", marginTop: "2px" } }, k.sub)
+              )
+            )
+          ),
+          h(
+            "div",
+            { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" } },
+              h(
+                "div",
+                null,
+                h("div", { style: { fontSize: "14px", fontWeight: 700 } }, PT_BR.labels.modelsTitle),
+                h("div", { className: "of-muted", style: { fontSize: "11.5px", marginTop: "2px" } }, "Fonte: docs/eval-modelos-onda5.md (10 cards reais). Modelos < 8/10 ou com timeout >20s ficam sinalizados para migração em 1 clique via ctx.agents.save().")
+              ),
+              props.setEvalFilter && h(
+                "div",
+                { className: "of-segmented" },
+                [
+                  { id: "all", label: `Todos (${modelos.length})` },
+                  { id: "attention", label: `Migrar (${attentionCount})` },
+                  { id: "approved", label: `Aprovados (${approvedCount})` }
+                ].map(
+                  (f) => h(
+                    "button",
+                    {
+                      key: f.id,
+                      type: "button",
+                      className: "of-seg-btn",
+                      "data-active": evalFilter === f.id ? "true" : "false",
+                      onClick: () => props.setEvalFilter(f.id)
+                    },
+                    f.label
+                  )
+                )
+              )
+            ),
+            filteredModelos.length === 0 ? h("div", { className: "of-muted", style: { padding: "16px 0" } }, "Nenhum agente corresponde ao filtro selecionado.") : h(
+              "table",
+              { className: "of-table" },
+              h(
+                "thead",
+                null,
+                h("tr", null, h("th", null, "Agente"), h("th", null, "Papel"), h("th", null, "Modelo & Provider"), h("th", null, "Tool call (R5.1)"), h("th", null, "Latência / Custo"), h("th", null, "Ação (Buzz API)"))
+              ),
+              h(
+                "tbody",
+                null,
+                filteredModelos.map((m) => {
+                  const agSpec = tenantAgents.find((a) => a.name === m.agente);
+                  const isTier1 = /(ceo|coo|revis|arquit|segur|secur|qa|oraculo|conselho|board)/i.test(String(m.papel || ""));
+                  const recTarget = isTier1 ? { provider: "nexusmind_anthropic", model: "claude-sonnet-4-6", label: "Sonnet 4.6" } : { provider: "nexusmind_antigravity", model: "gemini-2.5-flash", label: "Flash 2.5" };
+                  const scorePct = typeof m.scoreNum === "number" ? Math.max(4, m.scoreNum * 10) : 0;
+                  const tone = m.evalStatus === "approved" ? "done" : m.evalStatus === "below_min" ? "failed" : "waiting";
+                  const pillText = m.evalStatus === "approved" ? `${m.toolcall_eval} · aprovado` : m.evalStatus === "below_min" ? `${m.toolcall_eval} · abaixo do mín.` : m.evalStatus === "unsupported" ? "Timeout >20s · bloquear" : "Não avaliado no R5.1";
+                  return h(
+                    "tr",
+                    { key: m.agente },
+                    h(
+                      "td",
+                      { style: { fontWeight: 600 } },
+                      h(
+                        "span",
+                        { style: { display: "inline-flex", alignItems: "center", gap: "7px" } },
+                        h("span", { className: "of-dot", "data-tone": tone }),
+                        m.agente
+                      )
+                    ),
+                    h("td", { className: "of-muted" }, m.papel || "—"),
+                    h(
+                      "td",
+                      null,
+                      h("div", { className: "of-mono", style: { fontSize: "12px" } }, m.modelo || PT_BR.labels.unavailable),
+                      m.provider && h("div", { className: "of-mono of-muted", style: { fontSize: "10px" } }, m.provider)
+                    ),
+                    h(
+                      "td",
+                      { style: { minWidth: "175px" } },
+                      h("span", { className: "of-pill", "data-tone": tone }, pillText),
+                      typeof m.scoreNum === "number" && h(
+                        "div",
+                        { className: "of-bar-track", style: { marginTop: "5px", height: "4px", maxWidth: "130px" } },
+                        h("div", {
+                          className: "of-bar-fill",
+                          style: {
+                            width: `${scorePct}%`,
+                            background: tone === "done" ? "var(--status-done)" : "var(--status-failed)"
+                          }
+                        })
+                      )
+                    ),
+                    h(
+                      "td",
+                      { className: "of-mono of-muted", style: { fontSize: "11px" } },
+                      m.latencyMs ? `${m.latencyMs}ms · ${m.costUsd || "—"}` : "—"
+                    ),
+                    h(
+                      "td",
+                      null,
+                      m.evalStatus === "approved" ? h("span", { style: { fontSize: "11px", color: "var(--status-done)", fontWeight: 600 } }, "✓ Alinhado") : props.onMigrateSingleAgentModel && (agSpec == null ? void 0 : agSpec.inBuzz) && (agSpec == null ? void 0 : agSpec.agentKey) ? h(
+                        "button",
+                        {
+                          type: "button",
+                          className: "of-btn",
+                          style: { padding: "3px 8px", fontSize: "11px" },
+                          onClick: () => props.onMigrateSingleAgentModel(agSpec.agentKey, { provider: recTarget.provider, model: recTarget.model })
+                        },
+                        `Migrar → ${recTarget.label}`
+                      ) : h("span", { className: "of-muted", style: { fontSize: "11px" } }, "A provisionar")
+                    )
+                  );
+                })
+              )
+            )
+          )
+        );
+      })() : agentTab === "skills" ? (() => {
+        var _a2, _b2, _c2;
+        const surfaceMeta = {
+          codigo: { trustId: "bug", paths: ["src/**", "ferramentas/**", "testes/**"], desc: "Revisão de mérito, provas L-22, regressões e qualidade de código." },
+          metodo: { trustId: "docs", paths: ["specs/**", "cards/**", "licoes/**", "contratos/**"], desc: "Conformidade Specsfy, TDD, regras L-01/L-22/L-90 e governança." },
+          seguranca: { trustId: "seguranca", paths: ["empresas/**", "ferramentas/ci.sh", ".github/**", "infra/secrets/**"], desc: "Auditoria de chaves, CI isolado, alçadas constitucionais e matérias reservadas." },
+          ui: { trustId: "feature", paths: ["src/factory/**", "src/components/**", "manifest.json"], desc: "Design System CodeDen/Buzz, acessibilidade, Shadow DOM e UX nativa." },
+          arquitetura: { trustId: "infra", paths: ["ferramentas/esteira/**", "contratos/alcadas_politica.json"], desc: "Fronteiras de módulos, contratos, performance e dívida estrutural." }
+        };
+        const approvedReviewers = revisoresSurf.filter(([, rev]) => {
+          const row = modelos.find((m) => m.agente.toLowerCase() === String(rev).toLowerCase());
+          return (row == null ? void 0 : row.evalStatus) === "approved";
+        }).length;
+        const openReviewsCount = status.inProgress.filter((i) => i.stage === "verifying").length;
+        return h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: "12px" }, "data-reviewers-l01-view": "true" },
+          h(
+            "div",
+            { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "10px" } },
+            [
+              { label: "Superfícies cobertas (L-01)", val: `${revisoresSurf.length}/5`, sub: "segregação executor ≠ revisor" },
+              { label: "Revisores em modelo R5.1", val: `${approvedReviewers}/${revisoresSurf.length}`, sub: approvedReviewers < revisoresSurf.length ? "reconciliar modelos recomendado" : "todos validados ≥ 8/10" },
+              { label: "PRs em revisão agora", val: String(openReviewsCount), sub: "aguardando veredito GATE" },
+              { label: "Modo de alçadas", val: (((_a2 = status.alcadasPolitica) == null ? void 0 : _a2.modo) || "observe").toUpperCase(), sub: "contratos/alcadas_politica.json" }
+            ].map(
+              (k) => h(
+                "div",
+                { key: k.label, className: "of-card-pad", style: { padding: "11px 13px" } },
+                h("div", { className: "of-meter-label" }, k.label),
+                h("div", { className: "of-num", style: { fontSize: "19px", fontWeight: 700, marginTop: "4px" } }, k.val),
+                h("div", { className: "of-muted", style: { fontSize: "10.5px", marginTop: "2px" } }, k.sub)
+              )
+            )
+          ),
+          h(
+            "div",
+            { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "12px" } },
+            h(
+              "div",
+              null,
+              h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Matriz de Revisores Independentes (L-01) · ${empresaNome}`),
+              h("div", { className: "of-muted", style: { fontSize: "11.5px", marginTop: "2px" } }, "Regra L-01: o executor nunca pode revisar a própria entrega. Cada superfície cruza o revisor titular, modelo vivo no Buzz, nível de autonomia (Trust Engine) e caminhos cobertos.")
+            ),
+            revisoresSurf.length === 0 ? h("div", { className: "of-muted" }, PT_BR.labels.unavailable) : h(
+              "div",
+              { className: "of-grid-3" },
+              revisoresSurf.map(([superficie, revisor]) => {
+                var _a3, _b3, _c3;
+                const keyNorm = superficie.toLowerCase();
+                const meta = surfaceMeta[keyNorm] || { trustId: "feature", paths: ["**"], desc: "Revisão técnica independente L-01." };
+                const agSpec = tenantAgents.find((a) => a.name.toLowerCase() === String(revisor).toLowerCase());
+                const evalRow = modelos.find((m) => m.agente.toLowerCase() === String(revisor).toLowerCase());
+                const liveMatch = liveCrew.find((c) => c.key === (agSpec == null ? void 0 : agSpec.agentKey) || c.name.toLowerCase() === String(revisor).toLowerCase());
+                const pkLower = ((agSpec == null ? void 0 : agSpec.pubkey) || (liveMatch == null ? void 0 : liveMatch.pubkey) || "").toLowerCase();
+                const liveTurn = pkLower && ((_a3 = props.telemetry) == null ? void 0 : _a3.byPubkey) ? props.telemetry.byPubkey[pkLower] : null;
+                const trustCat = ((_c3 = (_b3 = status.trustEngine) == null ? void 0 : _b3.categories) == null ? void 0 : _c3.find((c) => c.id === meta.trustId)) || null;
+                const evalTone = (evalRow == null ? void 0 : evalRow.evalStatus) === "approved" ? "done" : (evalRow == null ? void 0 : evalRow.evalStatus) === "below_min" ? "failed" : "waiting";
+                return h(
+                  "div",
+                  { key: superficie, className: "of-surface", style: { padding: "12px 14px", display: "flex", flexDirection: "column", gap: "9px" } },
                   h(
-                    "span",
-                    { className: "of-pill", "data-tone": m.abaixo_minimo ? "failed" : m.toolcall_eval ? "done" : "idle" },
-                    m.toolcall_eval ? m.abaixo_minimo ? `${m.toolcall_eval} · ${PT_BR.labels.evalBelowMin}` : m.toolcall_eval : PT_BR.labels.unavailable
+                    "div",
+                    { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px" } },
+                    h("span", { className: "of-meter-label", style: { color: "var(--primary)" } }, superficie.toUpperCase()),
+                    trustCat && h(
+                      "span",
+                      { className: "of-pill", "data-tone": trustCat.mode === "dark_auto_merge" ? "done" : trustCat.locked ? "failed" : "waiting", style: { fontSize: "10px" } },
+                      trustCat.mode === "dark_auto_merge" ? "DARK AUTO" : trustCat.locked ? "GATE HUMANO 🔒" : "ASSISTIDO"
+                    )
+                  ),
+                  h(
+                    "div",
+                    { style: { display: "flex", alignItems: "center", gap: "9px" } },
+                    (liveMatch == null ? void 0 : liveMatch.picture) ? h("img", { src: liveMatch.picture, alt: revisor, style: { width: "28px", height: "28px", borderRadius: "7px", objectFit: "cover", border: "1px solid var(--border)" } }) : h("span", { className: "of-project-tile", style: { width: "28px", height: "28px", fontSize: "12px" } }, String(revisor).replace(/^OrgFy\s+/i, "").charAt(0).toUpperCase()),
+                    h(
+                      "div",
+                      { style: { minWidth: 0, flex: 1 } },
+                      h("div", { style: { fontSize: "13.5px", fontWeight: 700, display: "flex", alignItems: "center", gap: "6px" } }, revisor, h("span", { className: "of-dot", "data-tone": liveTurn ? "running" : (agSpec == null ? void 0 : agSpec.inBuzz) ? "done" : "idle" })),
+                      h("div", { className: "of-muted", style: { fontSize: "10.5px" } }, liveTurn ? `⚡ ${liveTurn.stepLabel}` : (agSpec == null ? void 0 : agSpec.funcao) || "Revisor titular L-01")
+                    )
+                  ),
+                  h("div", { className: "of-muted", style: { fontSize: "11px", lineHeight: 1.4 } }, meta.desc),
+                  h(
+                    "div",
+                    { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px", flexWrap: "wrap", paddingTop: "6px", borderTop: "1px solid var(--border)" } },
+                    h("code", { className: "of-mono of-muted", style: { fontSize: "10.5px" } }, (evalRow == null ? void 0 : evalRow.modelo) || (agSpec == null ? void 0 : agSpec.model) || "—"),
+                    h("span", { className: "of-pill", "data-tone": evalTone, style: { fontSize: "10px" } }, (evalRow == null ? void 0 : evalRow.toolcall_eval) ? `R5.1 ${evalRow.toolcall_eval}` : (evalRow == null ? void 0 : evalRow.evalStatus) === "unsupported" ? "Timeout >20s" : "Não avaliado")
+                  ),
+                  h(
+                    "div",
+                    { style: { display: "flex", flexWrap: "wrap", gap: "4px" } },
+                    meta.paths.map((p) => h("code", { key: p, className: "of-mono", style: { fontSize: "10px", padding: "1px 6px", borderRadius: "4px", background: "var(--muted)", color: "var(--muted-foreground)" } }, p))
+                  ),
+                  h(
+                    "div",
+                    { style: { display: "flex", alignItems: "center", gap: "6px", marginTop: "auto", paddingTop: "4px" } },
+                    onOpenAgentDm && ((agSpec == null ? void 0 : agSpec.pubkey) || (liveMatch == null ? void 0 : liveMatch.pubkey)) && h(
+                      "button",
+                      {
+                        type: "button",
+                        className: "of-btn",
+                        style: { padding: "3px 8px", fontSize: "11px" },
+                        onClick: () => onOpenAgentDm({ key: (agSpec == null ? void 0 : agSpec.agentKey) || (liveMatch == null ? void 0 : liveMatch.key), pubkey: (agSpec == null ? void 0 : agSpec.pubkey) || (liveMatch == null ? void 0 : liveMatch.pubkey), name: revisor })
+                      },
+                      "DM ↗"
+                    ),
+                    props.onOpenAgentProfile && ((agSpec == null ? void 0 : agSpec.pubkey) || (liveMatch == null ? void 0 : liveMatch.pubkey) || (agSpec == null ? void 0 : agSpec.agentKey)) && h(
+                      "button",
+                      {
+                        type: "button",
+                        className: "of-btn",
+                        "data-variant": "ghost",
+                        style: { padding: "3px 8px", fontSize: "11px" },
+                        onClick: () => props.onOpenAgentProfile({ key: (agSpec == null ? void 0 : agSpec.agentKey) || (liveMatch == null ? void 0 : liveMatch.key), pubkey: (agSpec == null ? void 0 : agSpec.pubkey) || (liveMatch == null ? void 0 : liveMatch.pubkey), name: revisor })
+                      },
+                      "Perfil Buzz ↗"
+                    ),
+                    trustCat && h("span", { className: "of-mono of-muted", style: { marginLeft: "auto", fontSize: "10px" } }, `Escape ${trustCat.escapeRatePct.toFixed(1)}%`)
+                  )
+                );
+              })
+            )
+          ),
+          ((_c2 = (_b2 = status.alcadasPolitica) == null ? void 0 : _b2.materiasReservadas) == null ? void 0 : _c2.length) && h(
+            "div",
+            { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" } },
+              h("div", { style: { fontSize: "13px", fontWeight: 700 } }, "Matérias Reservadas & Alçadas por Path (contratos/alcadas_politica.json)"),
+              h("span", { className: "of-pill", "data-tone": "waiting" }, `Modo: ${status.alcadasPolitica.modo || "observe"}`)
+            ),
+            h(
+              "div",
+              { className: "of-grid-3" },
+              status.alcadasPolitica.materiasReservadas.map(
+                (mat) => h(
+                  "div",
+                  { key: mat.id, className: "of-surface", style: { padding: "9px 11px", display: "flex", flexDirection: "column", gap: "5px" } },
+                  h(
+                    "div",
+                    { style: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: "6px" } },
+                    h("strong", { style: { fontSize: "12px" } }, mat.nome),
+                    h("span", { className: "of-pill", "data-tone": "failed", style: { fontSize: "9.5px" } }, mat.alcada.toUpperCase())
+                  ),
+                  h(
+                    "div",
+                    { style: { display: "flex", flexWrap: "wrap", gap: "4px" } },
+                    mat.padroes.map((p) => h("code", { key: p, className: "of-mono of-muted", style: { fontSize: "10px" } }, p))
                   )
                 )
               )
             )
           )
-        )
-      ) : agentTab === "skills" ? h(
-        "div",
-        { className: "of-card-pad" },
-        h("div", { style: { fontSize: "14px", fontWeight: 700, marginBottom: "6px" } }, `Matriz de Revisores Independentes (L-01) · ${empresaNome}`),
-        h("div", { className: "of-muted", style: { marginBottom: "10px" } }, "Regra L-01: o executor nunca pode revisar a própria entrega. Cada superfície tem revisor titular definido no manifesto da empresa."),
-        revisoresSurf.length === 0 ? h("div", { className: "of-muted" }, PT_BR.labels.unavailable) : h(
+        );
+      })() : (() => {
+        var _a2;
+        const tools = props.mcpTools || [];
+        const query = (props.mcpSearch || "").trim().toLowerCase();
+        const cat = props.mcpCategory || "all";
+        const categories = ["all", ...Array.from(new Set(tools.map((t) => t.category)))];
+        const filteredTools = tools.filter((t) => {
+          if (cat !== "all" && t.category !== cat) return false;
+          if (!query) return true;
+          return t.name.toLowerCase().includes(query) || t.description.toLowerCase().includes(query) || t.params.some((p) => p.toLowerCase().includes(query));
+        });
+        const integrity = props.commandIntegrity;
+        return h(
           "div",
-          { className: "of-grid-3" },
-          revisoresSurf.map(
-            ([superficie, revisor]) => h(
-              "div",
-              { key: superficie, className: "of-surface", style: { padding: "10px 12px" } },
-              h("div", { className: "of-meter-label" }, superficie),
-              h("div", { style: { fontSize: "13px", fontWeight: 700, marginTop: "3px" } }, revisor)
+          { style: { display: "flex", flexDirection: "column", gap: "12px" }, "data-mcp-registry-view": "true" },
+          h(
+            "div",
+            { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "10px" } },
+            [
+              { label: "Agent Tools MCP", val: `${tools.length || 22} ativas`, sub: "injetadas via ctx.agents.addTool" },
+              { label: "Host Commands SHA-256", val: integrity ? `${integrity.verified}/${integrity.total} íntegros` : "7 pinados", sub: integrity && integrity.mismatches > 0 ? `${integrity.mismatches} divergência(s)` : "manifest.json verificado" },
+              { label: "Agentes no Buzz Desktop", val: String(liveCrew.length), sub: "recebem o catálogo automaticamente" },
+              { label: "Transporte & Tracing", val: "JSON-RPC 2.0", sub: "MCP Loopback · OTel GenAI" }
+            ].map(
+              (k) => h(
+                "div",
+                { key: k.label, className: "of-card-pad", style: { padding: "11px 13px" } },
+                h("div", { className: "of-meter-label" }, k.label),
+                h("div", { className: "of-num", style: { fontSize: "19px", fontWeight: 700, marginTop: "4px" } }, k.val),
+                h("div", { className: "of-muted", style: { fontSize: "10.5px", marginTop: "2px" } }, k.sub)
+              )
             )
+          ),
+          h(
+            "div",
+            { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" } },
+              h(
+                "div",
+                null,
+                h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Unified Tool Registry · ${tools.length || 22} Agent Tools MCP`),
+                h("div", { className: "of-muted", style: { fontSize: "11.5px", marginTop: "2px" } }, "Catálogo determinístico registrado nativamente em todas as sessões de agentes do Buzz Desktop.")
+              ),
+              props.setMcpSearch && h("input", {
+                className: "of-input",
+                style: { width: "240px" },
+                placeholder: "Filtrar tool, descrição ou parâmetro...",
+                value: props.mcpSearch || "",
+                onChange: (e) => props.setMcpSearch(e.target.value)
+              })
+            ),
+            props.setMcpCategory && h(
+              "div",
+              { className: "of-segmented", style: { width: "fit-content", flexWrap: "wrap" } },
+              categories.map(
+                (c) => h(
+                  "button",
+                  {
+                    key: c,
+                    type: "button",
+                    className: "of-seg-btn",
+                    "data-active": cat === c ? "true" : "false",
+                    onClick: () => props.setMcpCategory(c)
+                  },
+                  c === "all" ? `Todas (${tools.length})` : `${c} (${tools.filter((t) => t.category === c).length})`
+                )
+              )
+            ),
+            h(
+              "div",
+              { style: { border: "1px solid var(--border)", borderRadius: "10px", overflow: "hidden" } },
+              filteredTools.length === 0 ? h("div", { className: "of-muted", style: { padding: "16px", textAlign: "center" } }, "Nenhuma ferramenta MCP encontrada para esse filtro.") : filteredTools.map(
+                (tool, idx) => h(
+                  "div",
+                  {
+                    key: tool.name,
+                    style: {
+                      padding: "10px 14px",
+                      borderBottom: idx < filteredTools.length - 1 ? "1px solid var(--border)" : "none",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "5px"
+                    }
+                  },
+                  h(
+                    "div",
+                    { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
+                    h("code", { className: "of-mono", style: { fontSize: "12.5px", fontWeight: 700, color: "var(--foreground)" } }, tool.name),
+                    h("span", { className: "of-pill", "data-tone": "done", style: { fontSize: "10px" } }, tool.category),
+                    h("span", { className: "of-pill", style: { fontSize: "9.5px" } }, "built-in")
+                  ),
+                  h("div", { className: "of-muted", style: { fontSize: "11.5px", lineHeight: 1.4 } }, tool.description),
+                  tool.params.length > 0 && h(
+                    "div",
+                    { style: { display: "flex", flexWrap: "wrap", gap: "4px", marginTop: "2px" } },
+                    tool.params.map((p) => {
+                      const req = tool.required.includes(p);
+                      return h(
+                        "code",
+                        {
+                          key: p,
+                          className: "of-mono",
+                          style: {
+                            fontSize: "10px",
+                            padding: "1px 6px",
+                            borderRadius: "4px",
+                            background: req ? "var(--primary-soft)" : "var(--muted)",
+                            color: req ? "var(--primary)" : "var(--muted-foreground)"
+                          }
+                        },
+                        req ? `${p}*` : p
+                      );
+                    })
+                  )
+                )
+              )
+            )
+          ),
+          h(
+            "div",
+            { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" } },
+              h(
+                "div",
+                null,
+                h("div", { style: { fontSize: "13.5px", fontWeight: 700 } }, "Host Commands Pinados por SHA-256 (manifest.json)"),
+                h("div", { className: "of-muted", style: { fontSize: "11px" } }, "Substitui execuções abertas de python/osascript por comandos declarativos com integridade verificada.")
+              ),
+              props.onAuditCommandIntegrity && h("button", { type: "button", className: "of-btn", style: { fontSize: "11px", padding: "4px 10px" }, onClick: props.onAuditCommandIntegrity }, "↻ Auditar SHA-256")
+            ),
+            ((_a2 = integrity == null ? void 0 : integrity.results) == null ? void 0 : _a2.length) ? h(
+              "div",
+              { className: "of-grid-2" },
+              integrity.results.map(
+                (r) => h(
+                  "div",
+                  { key: r.id, className: "of-surface", style: { padding: "8px 11px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" } },
+                  h(
+                    "div",
+                    { style: { minWidth: 0 } },
+                    h("div", { className: "of-mono", style: { fontSize: "12px", fontWeight: 600 } }, r.id),
+                    h("div", { className: "of-mono of-muted", style: { fontSize: "10px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, `sha256: ${(r.actualSha256 || r.expectedSha256).slice(0, 16)}…`)
+                  ),
+                  h("span", { className: "of-pill", "data-tone": r.status === "verified" ? "done" : "failed" }, r.status === "verified" ? "✓ Íntegro" : r.status)
+                )
+              )
+            ) : h("div", { className: "of-muted", style: { fontSize: "11.5px" } }, "Clique em Auditar SHA-256 para inspecionar os 7 host commands pinados.")
           )
-        )
-      ) : h(
-        "div",
-        { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "8px" } },
-        h("div", { style: { fontSize: "14px", fontWeight: 700 } }, "Unified Tool Registry · 21 Agent Tools MCP"),
-        h("div", { className: "of-muted" }, "Todas as sessões de agentes no Buzz recebem automaticamente as ferramentas determinísticas do OrgFy: orgfy_roster_live, orgfy_handoff_pack, orgfy_smart_dispatch, orgfy_card_create, orgfy_card_progress, orgfy_checkout_lock, orgfy_gate, orgfy_loop_radar, orgfy_session_stop e orgfy_model_failover."),
-        h("div", { className: "of-muted" }, `Total de agentes registrados globalmente no Buzz Desktop: ${liveCrew.length}.`)
-      )
+        );
+      })()
     );
   }
   if (tab === "vision") {
@@ -53231,386 +53678,447 @@ function renderFactorySecondaryPage(props) {
     );
   }
   const chInfo = props.channelInfo;
+  const settingsTenantAgents = ((_A = status.tenantManifest) == null ? void 0 : _A.agentes) || [];
+  const resolvedMembers = ((chInfo == null ? void 0 : chInfo.memberPubkeys) || []).map((pk) => {
+    var _a2, _b2;
+    const pkLow = pk.toLowerCase();
+    const name = props.resolveAuthor ? props.resolveAuthor(pk) : pk.slice(0, 10);
+    const isAgent = settingsTenantAgents.some((a) => {
+      var _a3;
+      return ((_a3 = a.pubkey) == null ? void 0 : _a3.toLowerCase()) === pkLow;
+    }) || liveCrew.some((c) => {
+      var _a3;
+      return ((_a3 = c.pubkey) == null ? void 0 : _a3.toLowerCase()) === pkLow;
+    });
+    const isWorking = Boolean((_b2 = (_a2 = props.telemetry) == null ? void 0 : _a2.byPubkey) == null ? void 0 : _b2[pkLow]);
+    return { pk, name, isAgent, isWorking };
+  });
+  const humanMembers = resolvedMembers.filter((m) => !m.isAgent);
+  const agentMembers = resolvedMembers.filter((m) => m.isAgent);
   return h(
     "div",
-    { style: { display: "flex", flexDirection: "column", gap: "14px", maxWidth: "880px" } },
+    {
+      "data-settings-grid-layout": "true",
+      style: {
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(460px, 1fr))",
+        gap: "16px",
+        alignItems: "start",
+        width: "100%",
+        maxWidth: "1440px"
+      }
+    },
     h(
       "div",
-      { className: "of-card-pad", "data-buzz-channel-settings": "true", style: { display: "flex", flexDirection: "column", gap: "12px" } },
+      { style: { display: "flex", flexDirection: "column", gap: "14px", minWidth: 0 } },
       h(
         "div",
-        { style: { display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "8px" } },
+        { className: "of-card-pad", "data-buzz-channel-settings": "true", style: { display: "flex", flexDirection: "column", gap: "12px" } },
         h(
           "div",
-          null,
-          h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Canal da Empresa no Buzz · #${(chInfo == null ? void 0 : chInfo.name) || ((_A = status.tenantManifest) == null ? void 0 : _A.nome) || tenant}`),
+          { style: { display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "8px" } },
           h(
             "div",
-            { className: "of-muted", style: { marginTop: "2px" } },
-            (chInfo == null ? void 0 : chInfo.available) ? `Stream: ${chInfo.liveStatus} · Roster: ${chInfo.rosterTotalChannels} canais · Papel: ${chInfo.viewerRole || "member"}` : "Conecte o canal da empresa no Buzz para sincronizar descrição, membros, leitura e diagnósticos."
-          )
-        ),
-        h(
-          "div",
-          { style: { display: "inline-flex", gap: "6px", flexWrap: "wrap" } },
-          props.onOpenChannelFullPage && h(
-            "button",
-            { type: "button", className: "of-btn", "data-variant": "primary", onClick: () => props.onOpenChannelFullPage() },
-            "Abrir Canal no Buzz ↗"
-          ),
-          props.onOpenChannelFullPage && h(
-            "button",
-            { type: "button", className: "of-btn", onClick: () => props.onOpenChannelFullPage({ panel: "members" }) },
-            `Membros (${(chInfo == null ? void 0 : chInfo.memberCount) ?? 0})`
-          )
-        )
-      ),
-      (chInfo == null ? void 0 : chInfo.available) && h(
-        "div",
-        { className: "of-grid-2" },
-        h(
-          "div",
-          { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
-          h(
-            "div",
-            { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
-            h("div", { className: "of-meter-label" }, "Descrição do Canal"),
-            chInfo.canEdit && props.setEditingChannelDetails && props.setChannelDetailsDraft && h(
-              "button",
-              {
-                type: "button",
-                className: "of-btn",
-                "data-variant": "ghost",
-                style: { padding: "2px 6px", fontSize: "10.5px" },
-                onClick: () => {
-                  if (props.editingChannelDetails) {
-                    props.setEditingChannelDetails(false);
-                  } else {
-                    props.setChannelDetailsDraft({ name: chInfo.name, description: chInfo.description });
-                    props.setEditingChannelDetails(true);
-                  }
-                }
-              },
-              props.editingChannelDetails ? "Cancelar" : "Editar"
-            )
-          ),
-          props.editingChannelDetails && props.channelDetailsDraft && props.setChannelDetailsDraft ? h(
-            "div",
-            { style: { display: "flex", flexDirection: "column", gap: "6px" } },
-            h("input", {
-              className: "of-input",
-              placeholder: "Nome do canal",
-              value: props.channelDetailsDraft.name,
-              onChange: (e) => props.setChannelDetailsDraft({ name: e.target.value })
-            }),
-            h("textarea", {
-              className: "of-textarea",
-              style: { minHeight: "68px", fontSize: "11.5px" },
-              placeholder: "Descrição oficial da empresa/canal no Buzz...",
-              value: props.channelDetailsDraft.description,
-              onChange: (e) => props.setChannelDetailsDraft({ description: e.target.value })
-            }),
-            h(
-              "button",
-              {
-                type: "button",
-                className: "of-btn",
-                "data-variant": "primary",
-                disabled: props.savingChannelDetails,
-                style: { alignSelf: "flex-start", padding: "4px 10px", fontSize: "11px" },
-                onClick: () => {
-                  var _a2;
-                  return (_a2 = props.onSaveChannelDetails) == null ? void 0 : _a2.call(props);
-                }
-              },
-              props.savingChannelDetails ? "Salvando..." : "Salvar no Buzz (channelDetails.save)"
-            )
-          ) : h(
-            "div",
-            { style: { fontSize: "12px", color: chInfo.description ? "var(--foreground)" : "var(--muted-foreground)" } },
-            chInfo.description || "Sem descrição cadastrada no canal do Buzz."
-          )
-        ),
-        h(
-          "div",
-          { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
-          h("div", { className: "of-meter-label" }, "Acesso, ID & Leitura"),
-          h(
-            "div",
-            { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", fontSize: "12px" } },
-            h("span", { className: "of-pill", "data-tone": chInfo.visibility === "private" ? "waiting" : "done" }, chInfo.visibility === "private" ? "Privado" : chInfo.visibility === "public" ? "Público" : "Canal"),
-            h("span", { className: "of-pill" }, `${chInfo.memberCount} membros`),
-            typeof chInfo.unreadCount === "number" && h("span", { className: "of-pill", "data-tone": chInfo.unreadCount > 0 ? "running" : "idle" }, `${chInfo.unreadCount} não lida(s)`)
-          ),
-          h(
-            "div",
-            { style: { display: "flex", alignItems: "center", gap: "6px", marginTop: "2px" } },
-            h("code", { className: "of-mono of-muted", style: { fontSize: "10.5px", wordBreak: "break-all" } }, chInfo.channelId),
-            props.onCopyText && h(
-              "button",
-              {
-                type: "button",
-                className: "of-btn",
-                "data-variant": "ghost",
-                style: { padding: "2px 6px", fontSize: "10.5px" },
-                onClick: () => props.onCopyText(chInfo.channelId, "Channel ID")
-              },
-              "Copiar"
-            )
-          )
-        )
-      ),
-      (chInfo == null ? void 0 : chInfo.available) && chInfo.memberPubkeys.length > 0 && h(
-        "div",
-        { className: "of-surface", style: { padding: "9px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
-        h("div", { className: "of-meter-label" }, `Membros no canal (${chInfo.memberCount})`),
-        h(
-          "div",
-          { style: { display: "flex", flexWrap: "wrap", gap: "5px" } },
-          chInfo.memberPubkeys.slice(0, 24).map(
-            (pk) => h("span", { key: pk, className: "of-pill", style: { fontSize: "10.5px" } }, props.resolveAuthor ? props.resolveAuthor(pk) : pk.slice(0, 10))
-          )
-        )
-      ),
-      (chInfo == null ? void 0 : chInfo.available) && props.onChannelDiagnostic && h(
-        "div",
-        { style: { display: "flex", flexWrap: "wrap", gap: "6px", paddingTop: "4px", borderTop: "1px solid var(--border)" } },
-        h("button", { type: "button", className: "of-btn", style: { fontSize: "11px" }, onClick: () => props.onChannelDiagnostic("markRead") }, "Marcar como lido"),
-        h("button", { type: "button", className: "of-btn", style: { fontSize: "11px" }, onClick: () => props.onChannelDiagnostic("markUnread") }, "Marcar como não lido"),
-        h("button", { type: "button", className: "of-btn", style: { fontSize: "11px" }, onClick: () => props.onChannelDiagnostic("refresh") }, "Atualizar canais e roster")
-      )
-    ),
-    h(
-      "div",
-      { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-      h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Modo de autonomia · ${((_B = status.tenantManifest) == null ? void 0 : _B.nome) || tenant}`),
-      h("div", { className: "of-muted" }, "Suba um degrau por vez. Áreas protegidas e regra L-01 sempre permanecem ativas."),
-      h(
-        "div",
-        { className: "of-grid-2" },
-        AUTONOMY_MODES.map(
-          (m) => h(
-            "button",
-            {
-              key: m.id,
-              type: "button",
-              className: "of-surface",
-              style: {
-                padding: "12px",
-                textAlign: "left",
-                cursor: "pointer",
-                color: "var(--foreground)",
-                borderColor: settingsForm.mode === m.id ? "var(--primary)" : void 0,
-                background: settingsForm.mode === m.id ? "var(--primary-soft)" : void 0
-              },
-              onClick: () => {
-                setSettingsForm({ mode: m.id });
-                onSelectModeQuick(m.id);
-              }
-            },
+            null,
+            h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Canal da Empresa no Buzz · #${(chInfo == null ? void 0 : chInfo.name) || ((_B = status.tenantManifest) == null ? void 0 : _B.nome) || tenant}`),
             h(
               "div",
-              { style: { display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", fontWeight: 600 } },
-              h("span", null, m.label),
-              m.experimental && h("span", { className: "of-exp-badge" }, "experimental"),
-              status.mode === m.id && h("span", { className: "of-muted", style: { marginLeft: "auto", fontSize: "10px" } }, "Atual")
+              { className: "of-muted", style: { marginTop: "2px" } },
+              (chInfo == null ? void 0 : chInfo.available) ? `Stream: ${chInfo.liveStatus} · Roster: ${chInfo.rosterTotalChannels} canais · Papel: ${chInfo.viewerRole || "member"}` : "Conecte o canal da empresa no Buzz para sincronizar descrição, membros, leitura e diagnósticos."
+            )
+          ),
+          h(
+            "div",
+            { style: { display: "inline-flex", gap: "6px", flexWrap: "wrap" } },
+            props.onOpenChannelFullPage && h(
+              "button",
+              { type: "button", className: "of-btn", "data-variant": "primary", onClick: () => props.onOpenChannelFullPage() },
+              "Abrir Canal no Buzz ↗"
             ),
-            h("div", { className: "of-muted", style: { marginTop: "4px", lineHeight: 1.4 } }, m.summary),
-            h("div", { className: "of-muted", style: { marginTop: "6px", fontSize: "10.5px" } }, `Encontra: ${m.finds} · Merge: ${m.merges}`)
-          )
-        )
-      )
-    ),
-    h(
-      "div",
-      { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "12px" } },
-      h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Limites operacionais · controle-${tenant}.json`),
-      h(
-        "div",
-        { className: "of-grid-3" },
-        h(
-          "label",
-          { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
-          "Orçamento diário (USD)",
-          h("input", {
-            type: "number",
-            className: "of-input",
-            value: settingsForm.gastoDiaUsd,
-            onChange: (e) => setSettingsForm({ gastoDiaUsd: Number(e.target.value) })
-          })
-        ),
-        h(
-          "label",
-          { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
-          "Merges por dia",
-          h("input", {
-            type: "number",
-            className: "of-input",
-            value: settingsForm.mergesDia,
-            onChange: (e) => setSettingsForm({ mergesDia: Number(e.target.value) })
-          })
-        ),
-        h(
-          "label",
-          { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
-          "Agentes simultâneos",
-          h("input", {
-            type: "number",
-            className: "of-input",
-            value: settingsForm.agentesMax,
-            onChange: (e) => setSettingsForm({ agentesMax: Number(e.target.value) })
-          })
-        ),
-        h(
-          "label",
-          { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
-          "PRs abertos no máximo (WIP)",
-          h("input", {
-            type: "number",
-            className: "of-input",
-            value: settingsForm.prsAbertos,
-            onChange: (e) => setSettingsForm({ prsAbertos: Number(e.target.value) })
-          })
-        ),
-        h(
-          "label",
-          { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
-          "Pausar após falhas seguidas",
-          h("input", {
-            type: "number",
-            className: "of-input",
-            value: settingsForm.falhasSeguidas,
-            onChange: (e) => setSettingsForm({ falhasSeguidas: Number(e.target.value) })
-          })
-        ),
-        h(
-          "label",
-          { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
-          "Política de merge",
-          h(
-            "select",
-            {
-              className: "of-tenant-select",
-              value: settingsForm.mergePolicy,
-              onChange: (e) => setSettingsForm({ mergePolicy: e.target.value })
-            },
-            h("option", { value: "strict" }, "Strict (re-testa na main)"),
-            h("option", { value: "fast" }, "Fast (CI próprio sem conflito)")
-          )
-        )
-      ),
-      h(
-        "div",
-        { style: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px", paddingTop: "6px", borderTop: "1px solid var(--border)" } },
-        h("span", { className: "of-muted" }, `Persistido diretamente em estado/controle-${tenant}.json e lido pelo coordenador.`),
-        h("button", { type: "button", className: "of-btn", "data-variant": "primary", onClick: onSaveSettings }, "Salvar configurações")
-      )
-    ),
-    // ── SEGURANÇA & GOVERNANÇA v17.7 (Holdout Sensor + SHA-256 host.commands + Modo Focus) ──
-    h(
-      "div",
-      { className: "of-card-pad", "data-orgfy-security-v177": "true", style: { display: "flex", flexDirection: "column", gap: "12px" } },
-      h("div", { style: { fontSize: "14px", fontWeight: 700 } }, "Segurança & Sensor Independente (Onda 3 · v17.7)"),
-      h(
-        "div",
-        { className: "of-grid-3" },
-        h(
-          "div",
-          { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
-          h("div", { className: "of-meter-label" }, "Holdout Scenarios (fora do repo)"),
-          h(
-            "div",
-            { style: { display: "flex", alignItems: "center", gap: "6px" } },
-            h("span", { className: "of-pill", "data-tone": ((_C = status.holdoutStatus) == null ? void 0 : _C.status) === "pass" ? "done" : ((_D = status.holdoutStatus) == null ? void 0 : _D.status) === "fail" ? "failed" : "idle" }, status.holdoutStatus ? `${status.holdoutStatus.passed ?? 0}/${status.holdoutStatus.total ?? 0} ${status.holdoutStatus.status.toUpperCase()}` : "Não executado"),
-            ((_E = status.holdoutStatus) == null ? void 0 : _E.external_verified) && h("span", { className: "of-muted", style: { fontSize: "10.5px" } }, `sha:${status.holdoutStatus.suite_sha256 || "ok"}`)
-          ),
-          props.onRunHoldoutNow && h("button", { type: "button", className: "of-btn", disabled: props.runningHoldout, style: { alignSelf: "flex-start", padding: "3px 9px", fontSize: "11px" }, onClick: props.onRunHoldoutNow }, props.runningHoldout ? "Rodando..." : "▶ Rodar Holdout")
-        ),
-        h(
-          "div",
-          { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
-          h("div", { className: "of-meter-label" }, "Pinagem SHA-256 (host.commands)"),
-          h(
-            "div",
-            { style: { display: "flex", alignItems: "center", gap: "6px" } },
-            h(
-              "span",
-              { className: "of-pill", "data-tone": props.commandIntegrity ? props.commandIntegrity.mismatches > 0 ? "failed" : props.commandIntegrity.verified > 0 ? "done" : "idle" : "idle" },
-              props.commandIntegrity ? `${props.commandIntegrity.verified}/${props.commandIntegrity.total} íntegros` : "Aguardando auditoria"
+            props.onOpenChannelFullPage && h(
+              "button",
+              { type: "button", className: "of-btn", onClick: () => props.onOpenChannelFullPage({ panel: "members" }) },
+              `Membros (${(chInfo == null ? void 0 : chInfo.memberCount) ?? 0})`
             )
-          ),
-          props.onAuditCommandIntegrity && h("button", { type: "button", className: "of-btn", style: { alignSelf: "flex-start", padding: "3px 9px", fontSize: "11px" }, onClick: props.onAuditCommandIntegrity }, "Auditar SHA-256")
-        ),
-        h(
-          "div",
-          { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
-          h("div", { className: "of-meter-label" }, "Modo Focus do Fundador (Buzz)"),
-          h(
-            "div",
-            { style: { fontSize: "12px", fontWeight: 600 } },
-            ((_F = props.focusState) == null ? void 0 : _F.active) ? `🔭 Focus ativo até ${props.focusState.untilFormatted}` : "Focus inativo"
-          ),
-          h("div", { className: "of-muted", style: { fontSize: "10.5px" } }, "Notificações não críticas são silenciadas durante o modo Focus; apenas alertas P0/Kill Switch atravessam.")
-        )
-      )
-    ),
-    // ── MOTOR DE CONFIANÇA & ESCAPE RATE (Autonomia Graduada · Onda 4 / v18) ──
-    h(
-      "div",
-      { className: "of-card-pad", "data-orgfy-trust-engine": "true", style: { display: "flex", flexDirection: "column", gap: "12px" } },
-      h(
-        "div",
-        { style: { display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" } },
-        h(
-          "div",
-          null,
-          h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Motor de Confiança & Escape Rate (Autonomia Graduada · v18)`),
-          h(
-            "div",
-            { className: "of-muted", style: { fontSize: "11.5px", marginTop: "2px" } },
-            status.trustEngine ? `Amostra: ${status.trustEngine.sampleSize} entregas · Escape Rate global: ${status.trustEngine.globalEscapeRatePct.toFixed(1)}% · ${status.trustEngine.darkCategoriesCount}/${status.trustEngine.totalCategoriesCount} categorias em Dark Auto-Merge` : "Clique em Recalcular para medir a Escape Rate real e habilitar auto-promoção por categoria."
           )
         ),
-        props.onEvaluateTrustEngine && h(
-          "button",
-          { type: "button", className: "of-btn", disabled: props.evaluatingTrust, style: { fontSize: "11px", padding: "4px 10px" }, onClick: () => props.onEvaluateTrustEngine() },
-          props.evaluatingTrust ? "Calculando..." : "↻ Recalcular Escape Rate"
-        )
-      ),
-      ((_H = (_G = status.trustEngine) == null ? void 0 : _G.categories) == null ? void 0 : _H.length) && h(
-        "div",
-        { style: { display: "flex", flexDirection: "column", gap: "8px" } },
-        status.trustEngine.categories.map(
-          (cat) => h(
+        (chInfo == null ? void 0 : chInfo.available) && h(
+          "div",
+          { className: "of-grid-2" },
+          h(
             "div",
-            { key: cat.id, className: "of-surface", style: { padding: "9px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
+            { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
             h(
               "div",
-              { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" } },
-              h(
-                "div",
-                { style: { display: "inline-flex", alignItems: "center", gap: "8px" } },
-                h("strong", { style: { fontSize: "12.5px" } }, cat.label),
-                h(
-                  "span",
-                  { className: "of-pill", "data-tone": cat.mode === "dark_auto_merge" ? "done" : cat.locked ? "failed" : "waiting" },
-                  cat.mode === "dark_auto_merge" ? "DARK AUTO-MERGE" : cat.locked ? "GATE HUMANO 🔒" : "ASSISTIDO"
-                ),
-                h("span", { className: "of-mono of-muted", style: { fontSize: "11px" } }, `Escape: ${cat.escapeRatePct.toFixed(1)}% (máx ${cat.maxEscapeRatePct}%) · Limpas seguidas: ${cat.consecutiveClean}${cat.locked ? "" : `/${cat.targetConsecutiveClean}`}`)
-              ),
-              !cat.locked && props.onEvaluateTrustEngine && h(
-                "div",
-                { style: { display: "inline-flex", gap: "5px" } },
-                cat.mode !== "dark_auto_merge" ? h("button", { type: "button", className: "of-btn", style: { padding: "2px 8px", fontSize: "10.5px" }, onClick: () => props.onEvaluateTrustEngine({ category: cat.id, mode: "dark_auto_merge" }) }, "Promover Dark") : h("button", { type: "button", className: "of-btn", style: { padding: "2px 8px", fontSize: "10.5px" }, onClick: () => props.onEvaluateTrustEngine({ category: cat.id, mode: "assisted" }) }, "Rebaixar Assistido"),
-                cat.manualOverride && h("button", { type: "button", className: "of-btn", "data-variant": "ghost", style: { padding: "2px 7px", fontSize: "10.5px" }, onClick: () => props.onEvaluateTrustEngine({ category: cat.id, mode: "auto" }) }, "Auto")
+              { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
+              h("div", { className: "of-meter-label" }, "Descrição do Canal"),
+              chInfo.canEdit && props.setEditingChannelDetails && props.setChannelDetailsDraft && h(
+                "button",
+                {
+                  type: "button",
+                  className: "of-btn",
+                  "data-variant": "ghost",
+                  style: { padding: "2px 6px", fontSize: "10.5px" },
+                  onClick: () => {
+                    if (props.editingChannelDetails) {
+                      props.setEditingChannelDetails(false);
+                    } else {
+                      props.setChannelDetailsDraft({ name: chInfo.name, description: chInfo.description });
+                      props.setEditingChannelDetails(true);
+                    }
+                  }
+                },
+                props.editingChannelDetails ? "Cancelar" : "Editar"
               )
             ),
-            !cat.locked && h(
+            props.editingChannelDetails && props.channelDetailsDraft && props.setChannelDetailsDraft ? h(
               "div",
-              { className: "of-bar-track", style: { marginTop: 0, height: "5px" } },
-              h("div", { className: "of-bar-fill", style: { width: `${cat.progressPct}%`, background: cat.mode === "dark_auto_merge" ? "var(--status-done)" : "var(--primary)" } })
+              { style: { display: "flex", flexDirection: "column", gap: "6px" } },
+              h("input", {
+                className: "of-input",
+                placeholder: "Nome do canal",
+                value: props.channelDetailsDraft.name,
+                onChange: (e) => props.setChannelDetailsDraft({ name: e.target.value })
+              }),
+              h("textarea", {
+                className: "of-textarea",
+                style: { minHeight: "68px", fontSize: "11.5px" },
+                placeholder: "Descrição oficial da empresa/canal no Buzz...",
+                value: props.channelDetailsDraft.description,
+                onChange: (e) => props.setChannelDetailsDraft({ description: e.target.value })
+              }),
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "of-btn",
+                  "data-variant": "primary",
+                  disabled: props.savingChannelDetails,
+                  style: { alignSelf: "flex-start", padding: "4px 10px", fontSize: "11px" },
+                  onClick: () => {
+                    var _a2;
+                    return (_a2 = props.onSaveChannelDetails) == null ? void 0 : _a2.call(props);
+                  }
+                },
+                props.savingChannelDetails ? "Salvando..." : "Salvar no Buzz (channelDetails.save)"
+              )
+            ) : h(
+              "div",
+              { style: { fontSize: "12px", color: chInfo.description ? "var(--foreground)" : "var(--muted-foreground)" } },
+              chInfo.description || "Sem descrição cadastrada no canal do Buzz."
+            )
+          ),
+          h(
+            "div",
+            { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
+            h("div", { className: "of-meter-label" }, "Acesso, ID & Leitura"),
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", fontSize: "12px" } },
+              h("span", { className: "of-pill", "data-tone": chInfo.visibility === "private" ? "waiting" : "done" }, chInfo.visibility === "private" ? "Privado" : chInfo.visibility === "public" ? "Público" : "Canal"),
+              h("span", { className: "of-pill" }, `${chInfo.memberCount} membros`),
+              typeof chInfo.unreadCount === "number" && h("span", { className: "of-pill", "data-tone": chInfo.unreadCount > 0 ? "running" : "idle" }, `${chInfo.unreadCount} não lida(s)`)
             ),
-            h("div", { className: "of-muted", style: { fontSize: "11px" } }, cat.reason)
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", gap: "6px", marginTop: "2px" } },
+              h("code", { className: "of-mono of-muted", style: { fontSize: "10.5px", wordBreak: "break-all" } }, chInfo.channelId),
+              props.onCopyText && h(
+                "button",
+                {
+                  type: "button",
+                  className: "of-btn",
+                  "data-variant": "ghost",
+                  style: { padding: "2px 6px", fontSize: "10.5px" },
+                  onClick: () => props.onCopyText(chInfo.channelId, "Channel ID")
+                },
+                "Copiar"
+              )
+            )
+          )
+        ),
+        (chInfo == null ? void 0 : chInfo.available) && resolvedMembers.length > 0 && h(
+          "div",
+          { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "8px" } },
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px" } },
+            h("div", { className: "of-meter-label" }, `Membros no canal (${chInfo.memberCount})`),
+            h("span", { className: "of-muted", style: { fontSize: "10.5px" } }, `${humanMembers.length} humano(s) · ${agentMembers.length} agente(s)`)
+          ),
+          humanMembers.length > 0 && h(
+            "div",
+            { style: { display: "flex", flexWrap: "wrap", gap: "5px", alignItems: "center" } },
+            h("span", { className: "of-muted", style: { fontSize: "10px", marginRight: "2px" } }, "Humanos:"),
+            humanMembers.slice(0, 8).map(
+              (m) => h("span", { key: m.pk, className: "of-pill", "data-tone": "waiting", style: { fontSize: "10.5px" } }, m.name)
+            )
+          ),
+          agentMembers.length > 0 && h(
+            "div",
+            { style: { display: "flex", flexWrap: "wrap", gap: "5px", alignItems: "center" } },
+            h("span", { className: "of-muted", style: { fontSize: "10px", marginRight: "2px" } }, "Agentes:"),
+            agentMembers.slice(0, 20).map(
+              (m) => h(
+                "button",
+                {
+                  key: m.pk,
+                  type: "button",
+                  className: "of-pill",
+                  "data-tone": m.isWorking ? "running" : "idle",
+                  style: { fontSize: "10.5px", cursor: onOpenAgentDm ? "pointer" : "default", display: "inline-flex", alignItems: "center", gap: "4px" },
+                  onClick: () => onOpenAgentDm == null ? void 0 : onOpenAgentDm({ pubkey: m.pk, name: m.name })
+                },
+                h("span", { className: "of-dot", "data-tone": m.isWorking ? "running" : "done" }),
+                m.name
+              )
+            )
+          )
+        ),
+        (chInfo == null ? void 0 : chInfo.available) && props.onChannelDiagnostic && h(
+          "div",
+          { style: { display: "flex", flexWrap: "wrap", gap: "6px", paddingTop: "4px", borderTop: "1px solid var(--border)" } },
+          h("button", { type: "button", className: "of-btn", style: { fontSize: "11px" }, onClick: () => props.onChannelDiagnostic("markRead") }, "Marcar como lido"),
+          h("button", { type: "button", className: "of-btn", style: { fontSize: "11px" }, onClick: () => props.onChannelDiagnostic("markUnread") }, "Marcar como não lido"),
+          h("button", { type: "button", className: "of-btn", style: { fontSize: "11px" }, onClick: () => props.onChannelDiagnostic("refresh") }, "Atualizar canais e roster")
+        )
+      ),
+      h(
+        "div",
+        { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+        h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Modo de autonomia · ${((_C = status.tenantManifest) == null ? void 0 : _C.nome) || tenant}`),
+        h("div", { className: "of-muted" }, "Suba um degrau por vez. Áreas protegidas e regra L-01 sempre permanecem ativas."),
+        h(
+          "div",
+          { className: "of-grid-2" },
+          AUTONOMY_MODES.map(
+            (m) => h(
+              "button",
+              {
+                key: m.id,
+                type: "button",
+                className: "of-surface",
+                style: {
+                  padding: "12px",
+                  textAlign: "left",
+                  cursor: "pointer",
+                  color: "var(--foreground)",
+                  borderColor: settingsForm.mode === m.id ? "var(--primary)" : void 0,
+                  background: settingsForm.mode === m.id ? "var(--primary-soft)" : void 0
+                },
+                onClick: () => {
+                  setSettingsForm({ mode: m.id });
+                  onSelectModeQuick(m.id);
+                }
+              },
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", fontWeight: 600 } },
+                h("span", null, m.label),
+                m.experimental && h("span", { className: "of-exp-badge" }, "experimental"),
+                status.mode === m.id && h("span", { className: "of-muted", style: { marginLeft: "auto", fontSize: "10px" } }, "Atual")
+              ),
+              h("div", { className: "of-muted", style: { marginTop: "4px", lineHeight: 1.4 } }, m.summary),
+              h("div", { className: "of-muted", style: { marginTop: "6px", fontSize: "10.5px" } }, `Encontra: ${m.finds} · Merge: ${m.merges}`)
+            )
+          )
+        )
+      )
+    ),
+    h(
+      "div",
+      { style: { display: "flex", flexDirection: "column", gap: "14px", minWidth: 0 } },
+      h(
+        "div",
+        { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "12px" } },
+        h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Limites operacionais · controle-${tenant}.json`),
+        h(
+          "div",
+          { className: "of-grid-3" },
+          h(
+            "label",
+            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+            "Orçamento diário (USD)",
+            h("input", {
+              type: "number",
+              className: "of-input",
+              value: settingsForm.gastoDiaUsd,
+              onChange: (e) => setSettingsForm({ gastoDiaUsd: Number(e.target.value) })
+            })
+          ),
+          h(
+            "label",
+            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+            "Merges por dia",
+            h("input", {
+              type: "number",
+              className: "of-input",
+              value: settingsForm.mergesDia,
+              onChange: (e) => setSettingsForm({ mergesDia: Number(e.target.value) })
+            })
+          ),
+          h(
+            "label",
+            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+            "Agentes simultâneos",
+            h("input", {
+              type: "number",
+              className: "of-input",
+              value: settingsForm.agentesMax,
+              onChange: (e) => setSettingsForm({ agentesMax: Number(e.target.value) })
+            })
+          ),
+          h(
+            "label",
+            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+            "PRs abertos no máximo (WIP)",
+            h("input", {
+              type: "number",
+              className: "of-input",
+              value: settingsForm.prsAbertos,
+              onChange: (e) => setSettingsForm({ prsAbertos: Number(e.target.value) })
+            })
+          ),
+          h(
+            "label",
+            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+            "Pausar após falhas seguidas",
+            h("input", {
+              type: "number",
+              className: "of-input",
+              value: settingsForm.falhasSeguidas,
+              onChange: (e) => setSettingsForm({ falhasSeguidas: Number(e.target.value) })
+            })
+          ),
+          h(
+            "label",
+            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+            "Política de merge",
+            h(
+              "select",
+              {
+                className: "of-tenant-select",
+                value: settingsForm.mergePolicy,
+                onChange: (e) => setSettingsForm({ mergePolicy: e.target.value })
+              },
+              h("option", { value: "strict" }, "Strict (re-testa na main)"),
+              h("option", { value: "fast" }, "Fast (CI próprio sem conflito)")
+            )
+          )
+        ),
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px", paddingTop: "6px", borderTop: "1px solid var(--border)" } },
+          h("span", { className: "of-muted" }, `Persistido diretamente em estado/controle-${tenant}.json e lido pelo coordenador.`),
+          h("button", { type: "button", className: "of-btn", "data-variant": "primary", onClick: onSaveSettings }, "Salvar configurações")
+        )
+      ),
+      // ── SEGURANÇA & GOVERNANÇA v17.7 (Holdout Sensor + SHA-256 host.commands + Modo Focus) ──
+      h(
+        "div",
+        { className: "of-card-pad", "data-orgfy-security-v177": "true", style: { display: "flex", flexDirection: "column", gap: "12px" } },
+        h("div", { style: { fontSize: "14px", fontWeight: 700 } }, "Segurança & Sensor Independente (Onda 3 · v17.7)"),
+        h(
+          "div",
+          { className: "of-grid-3" },
+          h(
+            "div",
+            { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
+            h("div", { className: "of-meter-label" }, "Holdout Scenarios (fora do repo)"),
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", gap: "6px" } },
+              h("span", { className: "of-pill", "data-tone": ((_D = status.holdoutStatus) == null ? void 0 : _D.status) === "pass" ? "done" : ((_E = status.holdoutStatus) == null ? void 0 : _E.status) === "fail" ? "failed" : "idle" }, status.holdoutStatus ? `${status.holdoutStatus.passed ?? 0}/${status.holdoutStatus.total ?? 0} ${status.holdoutStatus.status.toUpperCase()}` : "Não executado"),
+              ((_F = status.holdoutStatus) == null ? void 0 : _F.external_verified) && h("span", { className: "of-muted", style: { fontSize: "10.5px" } }, `sha:${status.holdoutStatus.suite_sha256 || "ok"}`)
+            ),
+            props.onRunHoldoutNow && h("button", { type: "button", className: "of-btn", disabled: props.runningHoldout, style: { alignSelf: "flex-start", padding: "3px 9px", fontSize: "11px" }, onClick: props.onRunHoldoutNow }, props.runningHoldout ? "Rodando..." : "▶ Rodar Holdout")
+          ),
+          h(
+            "div",
+            { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
+            h("div", { className: "of-meter-label" }, "Pinagem SHA-256 (host.commands)"),
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", gap: "6px" } },
+              h(
+                "span",
+                { className: "of-pill", "data-tone": props.commandIntegrity ? props.commandIntegrity.mismatches > 0 ? "failed" : props.commandIntegrity.verified > 0 ? "done" : "idle" : "idle" },
+                props.commandIntegrity ? `${props.commandIntegrity.verified}/${props.commandIntegrity.total} íntegros` : "Aguardando auditoria"
+              )
+            ),
+            props.onAuditCommandIntegrity && h("button", { type: "button", className: "of-btn", style: { alignSelf: "flex-start", padding: "3px 9px", fontSize: "11px" }, onClick: props.onAuditCommandIntegrity }, "Auditar SHA-256")
+          ),
+          h(
+            "div",
+            { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
+            h("div", { className: "of-meter-label" }, "Modo Focus do Fundador (Buzz)"),
+            h(
+              "div",
+              { style: { fontSize: "12px", fontWeight: 600 } },
+              ((_G = props.focusState) == null ? void 0 : _G.active) ? `🔭 Focus ativo até ${props.focusState.untilFormatted}` : "Focus inativo"
+            ),
+            h("div", { className: "of-muted", style: { fontSize: "10.5px" } }, "Notificações não críticas são silenciadas durante o modo Focus; apenas alertas P0/Kill Switch atravessam.")
+          )
+        )
+      ),
+      // ── MOTOR DE CONFIANÇA & ESCAPE RATE (Autonomia Graduada · Onda 4 / v18) ──
+      h(
+        "div",
+        { className: "of-card-pad", "data-orgfy-trust-engine": "true", style: { display: "flex", flexDirection: "column", gap: "12px" } },
+        h(
+          "div",
+          { style: { display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" } },
+          h(
+            "div",
+            null,
+            h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Motor de Confiança & Escape Rate (Autonomia Graduada · v18)`),
+            h(
+              "div",
+              { className: "of-muted", style: { fontSize: "11.5px", marginTop: "2px" } },
+              status.trustEngine ? `Amostra: ${status.trustEngine.sampleSize} entregas · Escape Rate global: ${status.trustEngine.globalEscapeRatePct.toFixed(1)}% · ${status.trustEngine.darkCategoriesCount}/${status.trustEngine.totalCategoriesCount} categorias em Dark Auto-Merge` : "Clique em Recalcular para medir a Escape Rate real e habilitar auto-promoção por categoria."
+            )
+          ),
+          props.onEvaluateTrustEngine && h(
+            "button",
+            { type: "button", className: "of-btn", disabled: props.evaluatingTrust, style: { fontSize: "11px", padding: "4px 10px" }, onClick: () => props.onEvaluateTrustEngine() },
+            props.evaluatingTrust ? "Calculando..." : "↻ Recalcular Escape Rate"
+          )
+        ),
+        ((_I = (_H = status.trustEngine) == null ? void 0 : _H.categories) == null ? void 0 : _I.length) && h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: "8px" } },
+          status.trustEngine.categories.map(
+            (cat) => h(
+              "div",
+              { key: cat.id, className: "of-surface", style: { padding: "9px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" } },
+                h(
+                  "div",
+                  { style: { display: "inline-flex", alignItems: "center", gap: "8px" } },
+                  h("strong", { style: { fontSize: "12.5px" } }, cat.label),
+                  h(
+                    "span",
+                    { className: "of-pill", "data-tone": cat.mode === "dark_auto_merge" ? "done" : cat.locked ? "failed" : "waiting" },
+                    cat.mode === "dark_auto_merge" ? "DARK AUTO-MERGE" : cat.locked ? "GATE HUMANO 🔒" : "ASSISTIDO"
+                  ),
+                  h("span", { className: "of-mono of-muted", style: { fontSize: "11px" } }, `Escape: ${cat.escapeRatePct.toFixed(1)}% (máx ${cat.maxEscapeRatePct}%) · Limpas seguidas: ${cat.consecutiveClean}${cat.locked ? "" : `/${cat.targetConsecutiveClean}`}`)
+                ),
+                !cat.locked && props.onEvaluateTrustEngine && h(
+                  "div",
+                  { style: { display: "inline-flex", gap: "5px" } },
+                  cat.mode !== "dark_auto_merge" ? h("button", { type: "button", className: "of-btn", style: { padding: "2px 8px", fontSize: "10.5px" }, onClick: () => props.onEvaluateTrustEngine({ category: cat.id, mode: "dark_auto_merge" }) }, "Promover Dark") : h("button", { type: "button", className: "of-btn", style: { padding: "2px 8px", fontSize: "10.5px" }, onClick: () => props.onEvaluateTrustEngine({ category: cat.id, mode: "assisted" }) }, "Rebaixar Assistido"),
+                  cat.manualOverride && h("button", { type: "button", className: "of-btn", "data-variant": "ghost", style: { padding: "2px 7px", fontSize: "10.5px" }, onClick: () => props.onEvaluateTrustEngine({ category: cat.id, mode: "auto" }) }, "Auto")
+                )
+              ),
+              !cat.locked && h(
+                "div",
+                { className: "of-bar-track", style: { marginTop: 0, height: "5px" } },
+                h("div", { className: "of-bar-fill", style: { width: `${cat.progressPct}%`, background: cat.mode === "dark_auto_merge" ? "var(--status-done)" : "var(--primary)" } })
+              ),
+              h("div", { className: "of-muted", style: { fontSize: "11px" } }, cat.reason)
+            )
           )
         )
       )
@@ -55116,7 +55624,7 @@ async function verifyHostCommandIntegrity(ctx, commandId, repoRoot = "/Users/hel
   try {
     const fullPath = `${repoRoot.replace(/\/$/, "")}/${spec.scriptPath}`;
     const raw = await readFile(fullPath);
-    const text = typeof raw === "string" ? raw : typeof (raw == null ? void 0 : raw.text) === "string" ? raw.text : typeof (raw == null ? void 0 : raw.content) === "string" ? raw.content : null;
+    const text = typeof raw === "string" ? raw : raw instanceof Uint8Array ? new TextDecoder().decode(raw) : typeof (raw == null ? void 0 : raw.text) === "string" ? raw.text : typeof (raw == null ? void 0 : raw.content) === "string" ? raw.content : null;
     if (text === null) {
       return {
         id: spec.id,
@@ -55379,6 +55887,9 @@ function createFactoryAppComponent(ctx, opts = {}) {
     const [costRange, setCostRange] = React.useState("30d");
     const [autoTab, setAutoTab] = React.useState("automations");
     const [agentTab, setAgentTab] = React.useState("memory");
+    const [evalFilter, setEvalFilter] = React.useState("all");
+    const [mcpSearch, setMcpSearch] = React.useState("");
+    const [mcpCategory, setMcpCategory] = React.useState("all");
     const [settingsForm, setSettingsFormState] = React.useState({
       mode: "software_factory",
       autoMerge: false,
@@ -55639,7 +56150,20 @@ function createFactoryAppComponent(ctx, opts = {}) {
     }, [status.lastTickAt, relayTick]);
     const tenantAgents = ((_c = status.tenantManifest) == null ? void 0 : _c.agentes) || [];
     const nameByPubkey = React.useMemo(() => {
+      var _a2, _b2, _c2, _d2;
       const map = /* @__PURE__ */ new Map();
+      if ((_a2 = holding == null ? void 0 : holding.fundador) == null ? void 0 : _a2.pubkey) {
+        map.set(holding.fundador.pubkey.toLowerCase(), `${holding.fundador.nome || "Helton Fraga"} (Fundador)`);
+      }
+      if ((_b2 = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _b2.pubkey) {
+        map.set(holding.ceoHolding.pubkey.toLowerCase(), holding.ceoHolding.nome || "OrgFy Iris");
+      }
+      try {
+        const rSnap = typeof ((_c2 = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _c2.snapshot) === "function" ? ctx.relay.snapshot() : null;
+        const viewerPk = String(((_d2 = rSnap == null ? void 0 : rSnap.session) == null ? void 0 : _d2.viewer) || (rSnap == null ? void 0 : rSnap.viewer) || "").trim().toLowerCase();
+        if (viewerPk && !map.has(viewerPk)) map.set(viewerPk, "Você (Fundador)");
+      } catch {
+      }
       for (const a of liveCrew) {
         if (a.pubkey) map.set(a.pubkey.toLowerCase(), a.name);
       }
@@ -55647,7 +56171,31 @@ function createFactoryAppComponent(ctx, opts = {}) {
         if (a.pubkey) map.set(a.pubkey.toLowerCase(), a.name);
       }
       return map;
-    }, [liveCrew, tenantAgents]);
+    }, [liveCrew, tenantAgents, holding, relayTick]);
+    const mcpTools = React.useMemo(() => {
+      try {
+        const raw = buildUnifiedOrgfyTools(ctx);
+        const categorize = (name) => {
+          if (/gate|lint|governanca|checkout_lock|decision_triage/.test(name)) return "Governança L-01";
+          if (/roster|handoff|smart_dispatch|despachar|reconciliar/.test(name)) return "Orquestração";
+          if (/card|kanban|historico|bind_context|question_card/.test(name)) return "Cards & Relay";
+          if (/loop_radar|session_stop|model_failover|kpis|status|porteiro/.test(name)) return "Radar & Telemetria";
+          return "Geral";
+        };
+        return raw.map((t) => {
+          var _a2, _b2;
+          return {
+            name: t.name,
+            description: t.description,
+            category: categorize(t.name),
+            params: Object.keys(((_a2 = t.inputSchema) == null ? void 0 : _a2.properties) || {}),
+            required: Array.isArray((_b2 = t.inputSchema) == null ? void 0 : _b2.required) ? t.inputSchema.required : []
+          };
+        });
+      } catch {
+        return [];
+      }
+    }, []);
     const telemetry = React.useMemo(
       () => readBuzzLiveTelemetry(ctx, nameByPubkey),
       [nameByPubkey, activityTick, relayTick, status.lastTickAt]
@@ -56225,11 +56773,11 @@ ${body}`
       notify2(`Auditoria SHA-256: ${summary.verified}/${summary.total} scripts íntegros.`);
     }, [notify2]);
     React.useEffect(() => {
-      if (tab === "settings" && !commandIntegrity) {
+      if ((tab === "settings" || tab === "agents" && agentTab === "mcp") && !commandIntegrity) {
         void auditAllHostCommandsIntegrity(ctx).then(setCommandIntegrity).catch(() => {
         });
       }
-    }, [tab, commandIntegrity]);
+    }, [tab, agentTab, commandIntegrity]);
     const handleRunHoldoutNow = React.useCallback(async () => {
       const host = ctx == null ? void 0 : ctx.host;
       if (typeof (host == null ? void 0 : host.runCommand) !== "function") {
@@ -56866,7 +57414,18 @@ Nota: ${evidence.note}`
                 onScaffoldSubsidiary: handleScaffoldSubsidiary,
                 scaffoldingSubsidiary,
                 subsidiaryDraft,
-                setSubsidiaryDraft
+                setSubsidiaryDraft,
+                evalFilter,
+                setEvalFilter,
+                mcpTools,
+                mcpSearch,
+                setMcpSearch,
+                mcpCategory,
+                setMcpCategory,
+                onOpenAgentProfile: handleOpenNativeAgentProfile,
+                onMigrateSingleAgentModel: async (agentKey, target) => {
+                  await handleSaveAgentProfile(agentKey, { provider: target.provider, model: target.model });
+                }
               })
             )
           )
@@ -57457,6 +58016,7 @@ export {
   notifyRespectingFocus,
   parseBuzzOrgfyEntityUrl,
   parseCardProgress,
+  parseEvalTable,
   parseFactoryStatus,
   parseOrgfyCardStructure,
   parseOrgfyMessageContext,

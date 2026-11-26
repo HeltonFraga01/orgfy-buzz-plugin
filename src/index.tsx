@@ -202,6 +202,7 @@ import { OrgfyCrdtStore, getOrgfyCrdtStore } from "./services/orgfy-crdt-store";
 import { sendBuzzChatMessageOrWake } from "./services/buzz-chat-dispatch";
 import { createQuestionCardsPanel } from "./factory/QuestionCardsPanel";
 import {
+  parseEvalTable,
   parseFactoryStatus,
   buildEmptyFactoryStatus,
   fetchFactoryStatus,
@@ -211,6 +212,7 @@ import { FACTORY_SHADOW_CSS, attachFactoryShadowStyles } from "./factory/shadow-
 import { PT_BR } from "./i18n/pt-BR";
 
 export {
+  parseEvalTable,
   parseFactoryStatus,
   buildEmptyFactoryStatus,
   fetchFactoryStatus,

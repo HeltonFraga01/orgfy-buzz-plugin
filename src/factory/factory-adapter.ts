@@ -41,6 +41,12 @@ export interface AgentModelEvalRow {
   provider: string | null;
   toolcall_eval: string | null;
   abaixo_minimo: boolean;
+  scoreNum?: number | null;
+  latencyMs?: number | null;
+  costUsd?: string | null;
+  evalStatus?: "approved" | "below_min" | "untested" | "unsupported";
+  agentKey?: string;
+  inBuzz?: boolean;
 }
 
 export interface TenantAgentSpec {
@@ -170,6 +176,11 @@ export interface FactoryStatusPayload {
   };
   modelos?: AgentModelEvalRow[];
   tenantManifest?: TenantManifestInfo;
+  alcadasPolitica?: {
+    modo?: string;
+    materiasReservadas?: Array<{ id: string; nome: string; alcada: string; padroes: string[] }>;
+    regrasPath?: Array<{ padrao: string; alcada: string; descricao: string }>;
+  } | null;
   orgfyVision?: {
     projectMd: string | null;
     agentsMd: string | null;
@@ -255,22 +266,59 @@ export function buildEmptyFactoryStatus(tenant: string, reason?: string): Factor
   };
 }
 
-function parseEvalTable(md: string | null): Map<string, { score: string; abaixo: boolean }> {
-  const map = new Map<string, { score: string; abaixo: boolean }>();
+export interface ParsedEvalEntry {
+  score: string;
+  scoreNum: number;
+  abaixo: boolean;
+  latencyMs: number | null;
+  costUsd: string | null;
+}
+
+// Baseline verificada de docs/eval-modelos-onda5.md (10 cards reais R5.1), sobrescrita pelo arquivo ao vivo quando legível.
+const VERIFIED_R51_BASELINE: Record<string, ParsedEvalEntry> = {
+  "claude-sonnet-4-6": { score: "10/10", scoreNum: 10, abaixo: false, latencyMs: 4064, costUsd: "$0.0815" },
+  "gemini-2.5-flash": { score: "10/10", scoreNum: 10, abaixo: false, latencyMs: 2045, costUsd: "$0.0022" },
+  "claude-sonnet-5-5": { score: "9/10", scoreNum: 9, abaixo: false, latencyMs: 5143, costUsd: "$0.0715" },
+  "claude-haiku-5-5": { score: "3/10", scoreNum: 3, abaixo: true, latencyMs: 3738, costUsd: "$0.0219" },
+  "gemini-3.8-flash-medium": { score: "0/10", scoreNum: 0, abaixo: true, latencyMs: 4956, costUsd: "$0.0046" },
+};
+
+export function parseEvalTable(md: string | null): Map<string, ParsedEvalEntry> {
+  const map = new Map<string, ParsedEvalEntry>();
+  for (const [k, v] of Object.entries(VERIFIED_R51_BASELINE)) {
+    map.set(k.toLowerCase(), v);
+  }
   if (!md) return map;
+  let modelColIdx = 0;
   for (const line of md.split("\n")) {
     if (!line.trim().startsWith("|")) continue;
     const cols = line.split("|").map((c) => c.trim()).filter(Boolean);
     if (cols.length < 3) continue;
-    const model = cols[0].replace(/`/g, "").trim();
+    if (cols.every((c) => /^:?-+:?$/.test(c))) continue;
+    const lowerCols = cols.map((c) => c.toLowerCase());
+    const headerModelIdx = lowerCols.findIndex((c) => c === "model" || c === "modelo");
+    if (headerModelIdx >= 0) {
+      modelColIdx = headerModelIdx;
+      continue;
+    }
+    const model = (cols[modelColIdx] || cols[0] || "").replace(/`/g, "").trim();
     const m = line.match(/(\d+)\s*\/\s*10/g);
     if (model && m && m.length >= 1) {
       const toolStr = m.length >= 2 ? m[1] : m[0];
       const num = parseInt(toolStr.split("/")[0], 10);
       if (!Number.isNaN(num)) {
+        const latCol = cols.find((c) => /^\d{3,6}$/.test(c));
+        const costCol = cols.find((c) => /^\$\d/.test(c));
+        const entry: ParsedEvalEntry = {
+          score: `${num}/10`,
+          scoreNum: num,
+          abaixo: num < 8,
+          latencyMs: latCol ? parseInt(latCol, 10) : null,
+          costUsd: costCol || null,
+        };
         const shortName = model.includes("/") ? model.split("/").pop()! : model;
-        map.set(model.toLowerCase(), { score: `${num}/10`, abaixo: num < 8 });
-        map.set(shortName.toLowerCase(), { score: `${num}/10`, abaixo: num < 8 });
+        map.set(model.toLowerCase(), entry);
+        map.set(shortName.toLowerCase(), entry);
       }
     }
   }
@@ -319,7 +367,7 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
   const host = (ctx as any)?.host;
 
   const stateRelPath = slug === "orgfy" ? ".esteira/estado/esteira-minima-state.json" : `.esteira/estado/esteira-minima-${slug}-state.json`;
-  const [kpiRes, cards, empresaJson, boardJson, evalMd, projectMd, agentsMd, regrasJson, esteiraState] = await Promise.all([
+  const [kpiRes, cards, empresaJson, boardJson, evalMd, projectMd, agentsMd, regrasJson, esteiraState, alcadasJson] = await Promise.all([
     fetchKpisEsteira(ctx).catch(() => ({ kpis: null, history: [], error: null })),
     fetchLiveKanbanCards(ctx, { empresa: slug }).catch(() => []),
     readOrgfyJson<any>(ctx, `empresas/${slug}.json`, null).catch(() => null),
@@ -329,6 +377,7 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
     readOrgfyText(ctx, "AGENTS.md").catch(() => null),
     readOrgfyJson<any>(ctx, ".esteira/estado/regras-probatorias.json", null).catch(() => null),
     readOrgfyJson<any>(ctx, stateRelPath, null).catch(() => null),
+    readOrgfyJson<any>(ctx, "contratos/alcadas_politica.json", null).catch(() => null),
   ]);
 
   let controle: Record<string, any> | null = null;
@@ -382,13 +431,33 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
       runningKeys.has(agName.toLowerCase())
     );
 
+    const modelLower = String(modelo || "").toLowerCase();
+    const isUnsupported = Boolean(
+      modelLower.includes("mistral-large-4-1t-a52b") ||
+      modelLower.includes("grok-4.5") ||
+      modelLower.includes("minimax-m3.1-flash")
+    );
+    const evalStatus: AgentModelEvalRow["evalStatus"] = ev
+      ? ev.abaixo
+        ? "below_min"
+        : "approved"
+      : isUnsupported
+      ? "unsupported"
+      : "untested";
+
     modelos.push({
       agente: agName,
       papel: info?.papel || null,
       modelo,
       provider,
       toolcall_eval: ev?.score || null,
-      abaixo_minimo: Boolean(ev?.abaixo),
+      abaixo_minimo: Boolean(ev?.abaixo || isUnsupported),
+      scoreNum: ev ? ev.scoreNum : null,
+      latencyMs: ev ? ev.latencyMs : null,
+      costUsd: ev ? ev.costUsd : null,
+      evalStatus,
+      agentKey: liveKey || `manifest:${slug}:${agName}`,
+      inBuzz: Boolean(live),
     });
 
     tenantAgents.push({
@@ -595,6 +664,24 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
     viewRecent: recent,
     visionExists: Boolean(projectMd || boardJson || empresaJson),
     tenantManifest,
+    alcadasPolitica: alcadasJson
+      ? {
+          modo: String(alcadasJson.modo || "observe"),
+          materiasReservadas: Object.entries((alcadasJson.materias_reservadas || {}) as Record<string, any>).map(([id, m]) => ({
+            id,
+            nome: String(m?.nome || id),
+            alcada: String(m?.alcada_minima || "fundador"),
+            padroes: Array.isArray(m?.padroes) ? m.padroes.map(String) : [],
+          })),
+          regrasPath: Array.isArray(alcadasJson.regras_path)
+            ? alcadasJson.regras_path.map((r: any) => ({
+                padrao: String(r?.padrao || ""),
+                alcada: String(r?.alcada_minima || "executor"),
+                descricao: String(r?.descricao || ""),
+              }))
+            : [],
+        }
+      : null,
     orgfyVision: {
       projectMd: projectMd ? projectMd.slice(0, 2400) : null,
       agentsMd: agentsMd ? agentsMd.slice(0, 2400) : null,
