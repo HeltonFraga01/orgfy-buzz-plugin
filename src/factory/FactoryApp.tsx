@@ -648,19 +648,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                   : w.agentesInfo && h("span", { className: "of-nav-badge" }, w.agentesInfo)
               );
             })
-          ),
-
-          opts.onOpenClassicCockpit &&
-            h(
-              "button",
-              {
-                type: "button",
-                className: "of-btn",
-                style: { marginTop: "auto", justifyContent: "center" },
-                onClick: opts.onOpenClassicCockpit,
-              },
-              "Control Room clássico"
-            )
+          )
         ),
 
         h(
