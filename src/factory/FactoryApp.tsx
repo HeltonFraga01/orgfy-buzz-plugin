@@ -15,6 +15,7 @@ import { attachFactoryShadowStyles, FACTORY_SHADOW_CSS } from "./shadow-shell";
 import { renderFactoryOverviewPanel } from "./FactoryOverviewPanel";
 import { renderFactoryBoardAndFloor, renderItemSheetDrawer, type LiveCrewAgent } from "./FactoryBoardAndFloor";
 import { createFloor3DComponent } from "./codeden-floor/Floor3DCanvas";
+import { createBoardroom3DComponent } from "./Boardroom3DCanvas";
 import { renderFactorySecondaryPage } from "./FactoryPages";
 import {
   interruptLiveTurn,
@@ -56,6 +57,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
   const React = ctx.react;
   const h = React.createElement;
   const Floor3D = createFloor3DComponent(ctx);
+  const Boardroom3D = createBoardroom3DComponent(ctx);
 
   return function OrgFyFactoryApp() {
     const [tenant, setTenant] = React.useState<string>("orgfy");
@@ -379,6 +381,62 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       [notify]
     );
 
+    const handleReconcileAgentsR51 = React.useCallback(async () => {
+      const agentsApi = (ctx as any)?.agents;
+      if (typeof agentsApi?.save !== "function") {
+        notify("API ctx.agents.save indisponível nesta versão do Buzz.");
+        return;
+      }
+      const winners = new Set([
+        "claude-sonnet-5-5",
+        "claude-sonnet-4-6",
+        "gemini-2.5-flash",
+      ]);
+      const targets = tenantAgents.filter(
+        (a) => a.inBuzz && a.agentKey && !winners.has(String(a.model || "").split("/").pop() || "")
+      );
+      if (targets.length === 0) {
+        notify("Todos os agentes provisionados já estão em modelos aprovados no Eval R5.1.");
+        return;
+      }
+      let updated = 0;
+      for (const ag of targets) {
+        const papel = String(ag.papel || "").toLowerCase();
+        const isTier1 = /(ceo|coo|revis|arquit|segur|secur|qa|oraculo|conselho|board)/.test(papel);
+        const provider = isTier1 ? "nexusmind_anthropic" : "nexusmind_antigravity";
+        const model = isTier1 ? "claude-sonnet-5-5" : "gemini-2.5-flash";
+        try {
+          await agentsApi.save(ag.agentKey, { provider, model });
+          updated += 1;
+        } catch {}
+      }
+      notify(
+        updated > 0
+          ? `${updated}/${targets.length} agente(s) reconciliado(s) para os vencedores do Eval R5.1 via ctx.agents.save().`
+          : "Nenhum agente pôde ser atualizado via ctx.agents.save()."
+      );
+      await refresh(tenant);
+    }, [tenantAgents, tenant, notify, refresh]);
+
+    const handleAgentSessionAction = React.useCallback(
+      async (agentKey: string, action: "interrupt" | "compact" | "new") => {
+        const agentsApi = (ctx as any)?.agents;
+        if (typeof agentsApi?.session !== "function") {
+          notify("API ctx.agents.session indisponível nesta versão do Buzz.");
+          return;
+        }
+        const canal = status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === tenant)?.canal || undefined;
+        try {
+          await agentsApi.session(agentKey, canal ? { channelId: canal } : {}, action);
+          const label = action === "interrupt" ? "interrompida" : action === "compact" ? "compactada" : "reiniciada";
+          notify(`Sessão de ${agentKey} ${label} via Buzz API.`);
+        } catch (err: any) {
+          notify(`Falha na ação ${action} para ${agentKey}: ${err?.message || err}`);
+        }
+      },
+      [status.tenantManifest, holding, tenant, notify]
+    );
+
     const dmPool = React.useMemo(() => {
       if (!GLOBAL_TABS.has(tab) && tenantAgents.length > 0) {
         return tenantAgents.map((a) => {
@@ -688,37 +746,19 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                 ),
             h(
               "div",
-              { style: { marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: "6px", flexWrap: "wrap" } },
-              !isGlobalView &&
-                h(
-                  "button",
-                  {
-                    type: "button",
-                    className: "of-btn",
-                    "data-variant": tab === "floor" ? "primary" : "ghost",
-                    onClick: () => setTab(tab === "floor" ? "overview" : "floor"),
-                  },
-                  `Andar 3D (${tenantTotalAgentsCount})`
-                ),
-              !isGlobalView &&
-                h(
-                  "button",
-                  {
-                    type: "button",
-                    className: "of-btn",
-                    "data-variant": "ghost",
-                    onClick: handleOpenChannelInBuzz,
-                  },
-                  "Canal no Buzz ↗"
-                ),
+              { className: "of-apple-chat-bar", "data-apple-header-chat": "true" },
               h(
                 "select",
                 {
-                  className: "of-tenant-select",
-                  "aria-label": "Selecionar agente para chat lateral no Buzz",
+                  className: "of-apple-select",
+                  "aria-label": "Selecionar agente e abrir chat lateral",
                   value: dmAgentKey,
-                  onChange: (e: any) => setDmAgentKey(e.target.value),
-                  style: { width: "auto", maxWidth: "210px", padding: "4px 8px", fontSize: "11.5px" },
+                  onChange: (e: any) => {
+                    const nextKey = e.target.value;
+                    setDmAgentKey(nextKey);
+                    const picked = dmPool.find((a) => a.key === nextKey);
+                    if (picked) handleOpenAgentDmInBuzz(picked);
+                  },
                 },
                 dmPool.length > 0
                   ? dmPool.map((a) => h("option", { key: a.key, value: a.key }, a.label))
@@ -728,12 +768,27 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                 "button",
                 {
                   type: "button",
-                  className: "of-btn",
-                  "data-variant": "primary",
+                  className: "of-apple-icon-btn",
                   disabled: openingDm,
+                  title: selectedDmAgent ? `Abrir chat lateral com ${selectedDmAgent.name}` : "Abrir chat lateral",
+                  "aria-label": "Abrir chat lateral",
                   onClick: () => handleOpenAgentDmInBuzz(selectedDmAgent),
                 },
-                openingDm ? "Abrindo..." : "Chat lateral"
+                h(
+                  "svg",
+                  {
+                    width: 15,
+                    height: 15,
+                    viewBox: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    strokeWidth: 1.8,
+                    strokeLinecap: "round",
+                    strokeLinejoin: "round",
+                    "aria-hidden": "true",
+                  },
+                  h("path", { d: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" })
+                )
               )
             ),
             toast && h("span", { className: "of-pill", "data-tone": "done" }, toast),
@@ -779,6 +834,8 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                     workingNowCount: tenantWorkingNowCount,
                     onOpenTurnInSideChat: handleOpenTurnInSideChat,
                     onInterruptTurn: handleInterruptTurn,
+                    onOpenAgentDm: handleOpenAgentDmInBuzz,
+                    onNavigateTab: (t) => setTab(t),
                     loading,
                     confirmKill,
                     setConfirmKill,
@@ -865,6 +922,9 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                     onSelectModeQuick: (mode) =>
                       handleControlUpdate({ mode }, `Modo alterado para ${PT_BR.modes[mode]}.`),
                     onOpenChannelInBuzz: handleOpenChannelInBuzz,
+                    Boardroom3D,
+                    onReconcileAgents: handleReconcileAgentsR51,
+                    onAgentSessionAction: handleAgentSessionAction,
                   })
             )
           )

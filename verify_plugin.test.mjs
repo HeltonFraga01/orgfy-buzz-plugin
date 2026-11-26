@@ -1559,4 +1559,22 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     assert.ok(bundle.includes("of-sb-tree"), "árvore expansível de empresas estilo CodeDen deve estar no bundle");
     assert.ok(bundle.includes("of-sb-footer"), "footer com status e 4 utilitários deve estar no bundle");
   });
+
+  test("v17.2: Overview modular 1:1 CodeDen + fix de scroll + header minimalista estilo Apple + Boardroom 3D + APIs de agentes", () => {
+    const bundle = fs.readFileSync(path.resolve(__dirname, "plugin.js"), "utf8");
+    const css = orgfyMod.FACTORY_SHADOW_CSS;
+    assert.ok(css.includes("of-overview-stack"), "CSS deve conter wrapper .of-overview-stack");
+    assert.ok(css.includes("overscroll-behavior: contain"), "CSS deve habilitar scroll suave em .of-main");
+    assert.ok(css.includes("of-apple-chat-bar"), "CSS deve conter estilo minimalista .of-apple-chat-bar");
+    assert.ok(bundle.includes("data-overview-modular"), "Overview deve renderizar blocos modulares individuais");
+    assert.ok(bundle.includes("of-now-next"), "Overview deve renderizar bloco AGORA + PRÓXIMOS");
+    assert.ok(bundle.includes("SESSÕES & AGENTES"), "Overview deve renderizar bloco Sessões & Agentes");
+    assert.ok(bundle.includes("AUTOMAÇÕES"), "Overview deve renderizar bloco Automações");
+    assert.ok(bundle.includes("data-apple-header-chat"), "Header superior direito deve usar controle minimalista estilo Apple");
+    const factoryAppSrc = fs.readFileSync(path.resolve(__dirname, "src", "factory", "FactoryApp.tsx"), "utf8");
+    assert.ok(!factoryAppSrc.includes('"Canal no Buzz ↗"'), "botão redundante Canal no Buzz ↗ deve ter sido removido do header");
+    assert.ok(!factoryAppSrc.includes("Andar 3D (${tenantTotalAgentsCount})"), "botão redundante Andar 3D no header deve ter sido removido");
+    assert.ok(bundle.includes("data-boardroom-3d"), "Tema 3D leve boardroom deve estar presente no bundle");
+    assert.ok(bundle.includes("data-reconcile-r51"), "Botão de reconciliação Eval R5.1 via ctx.agents.save deve estar presente");
+  });
 }

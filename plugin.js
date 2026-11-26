@@ -8878,9 +8878,222 @@ const FACTORY_SHADOW_CSS = `
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
-  padding: 16px 20px 28px;
-  gap: 14px;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  padding: 18px 22px 36px;
+  gap: 16px;
   box-sizing: border-box;
+}
+
+.of-overview-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+.of-section-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.of-section-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.of-section-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted-foreground);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.of-now-next {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 310px;
+  gap: 16px;
+  align-items: start;
+  flex-shrink: 0;
+}
+
+@media (max-width: 900px) {
+  .of-now-next {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.of-now-empty {
+  border-radius: 11px;
+  border: 1px dashed var(--border);
+  background: color-mix(in srgb, var(--card) 55%, transparent);
+  padding: 22px 16px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+.of-now-cards {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.of-now-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 248px;
+  max-width: 290px;
+  flex-shrink: 0;
+  border-radius: 11px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  padding: 10px 12px;
+  text-align: left;
+  color: var(--foreground);
+  cursor: pointer;
+  transition: border-color 0.14s ease, background 0.14s ease;
+}
+
+.of-now-card:hover {
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
+  background: var(--surface);
+}
+
+.of-next-list {
+  border-radius: 11px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.of-next-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 9px;
+  border-radius: 7px;
+  border: none;
+  background: transparent;
+  color: var(--foreground);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.of-next-row:hover {
+  background: var(--surface);
+}
+
+.of-list-card {
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.of-list-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--foreground);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.of-list-row:last-child {
+  border-bottom: none;
+}
+
+.of-list-row:hover {
+  background: var(--surface);
+}
+
+.of-spend-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(110px, 160px));
+  gap: 18px;
+  margin-top: 10px;
+}
+
+.of-apple-chat-bar {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.of-apple-select {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 30px;
+  max-width: 210px;
+  padding: 0 26px 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 15 5 5 5-5'/%3E%3Cpath d='m7 9 5-5 5 5'/%3E%3C/svg%3E") no-repeat right 8px center;
+  color: var(--foreground);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+
+.of-apple-select:hover, .of-apple-select:focus {
+  border-color: var(--border-strong);
+  outline: none;
+}
+
+.of-apple-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--foreground);
+  cursor: pointer;
+  transition: border-color 0.12s ease, background-color 0.12s ease, color 0.12s ease;
+}
+
+.of-apple-icon-btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--primary) 50%, var(--border));
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.of-apple-icon-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .of-card {
@@ -8888,6 +9101,7 @@ const FACTORY_SHADOW_CSS = `
   border: 1px solid var(--border);
   border-radius: 12px;
   overflow: hidden;
+  flex-shrink: 0;
   box-sizing: border-box;
 }
 
@@ -8896,6 +9110,7 @@ const FACTORY_SHADOW_CSS = `
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 14px 16px;
+  flex-shrink: 0;
   box-sizing: border-box;
 }
 
@@ -8903,6 +9118,7 @@ const FACTORY_SHADOW_CSS = `
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 9px;
+  flex-shrink: 0;
   box-sizing: border-box;
 }
 
@@ -9937,6 +10153,21 @@ Na fila aguardando agente livre`,
     )
   );
 }
+function fmtTokens$1(n) {
+  if (typeof n !== "number" || !Number.isFinite(n)) return PT_BR.labels.unavailable;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${Math.round(n / 1e3)}k`;
+  return String(n);
+}
+function fmtAge(tsMs) {
+  if (!tsMs || tsMs <= 0) return "—";
+  const diffMin = Math.max(0, Math.floor((Date.now() - tsMs) / 6e4));
+  if (diffMin < 1) return "agora";
+  if (diffMin < 60) return `${diffMin}m`;
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24) return `${diffH}h`;
+  return `${Math.floor(diffH / 24)}d`;
+}
 function Meter(h, props) {
   const pct = props.max > 0 ? Math.min(100, props.value / props.max * 100) : 0;
   const color = !props.warn ? "var(--status-running)" : pct > 85 ? "var(--status-failed)" : pct > 60 ? "var(--status-waiting)" : "var(--primary)";
@@ -9957,11 +10188,12 @@ function Meter(h, props) {
   );
 }
 function renderFactoryOverviewPanel(props) {
-  var _a, _b, _c;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n;
   const {
     h,
     tenant,
     status,
+    telemetry,
     loading,
     confirmKill,
     setConfirmKill,
@@ -9974,6 +10206,10 @@ function renderFactoryOverviewPanel(props) {
     onOpenVision,
     onToggleDrain,
     onToggleKillSwitch,
+    onOpenTurnInSideChat,
+    onInterruptTurn,
+    onOpenAgentDm,
+    onNavigateTab,
     scorecardView,
     setScorecardView,
     scorecardDays,
@@ -9988,6 +10224,38 @@ function renderFactoryOverviewPanel(props) {
   const economia = ((_c = status.kpis) == null ? void 0 : _c.economia) || null;
   const modelos = status.modelos || [];
   const porModelo = Array.isArray(economia == null ? void 0 : economia.por_modelo) ? economia.por_modelo : [];
+  const tenantAgents = ((_d = status.tenantManifest) == null ? void 0 : _d.agentes) || [];
+  const activeTurns = (telemetry == null ? void 0 : telemetry.activeTurns) || [];
+  const openPrs = status.pullRequests || [];
+  const topModelName = ((_e = porModelo[0]) == null ? void 0 : _e.modelo) ? String(porModelo[0].modelo) : ((_f = tenantAgents[0]) == null ? void 0 : _f.model) || PT_BR.labels.unavailable;
+  const nowRunningCount = activeTurns.length + status.inProgress.length;
+  const queuedCount = status.backlog.length;
+  const nextScheduleRows = [
+    {
+      id: "coord-cycle",
+      title: `Coordenador ${status.launchAgent || "esteira-minima"}`,
+      when: status.coordenador === "ativo" ? status.lastTickAt ? `ciclo ${fmtAge(status.lastTickAt)}` : "ativo" : "parado",
+      action: () => onNavigateTab == null ? void 0 : onNavigateTab("automations")
+    },
+    {
+      id: "ceo-routine",
+      title: "Rotina CEO · Workflow Buzz (Kind 30620)",
+      when: "nativo",
+      action: () => onNavigateTab == null ? void 0 : onNavigateTab("automations")
+    },
+    {
+      id: "ci-runner",
+      title: `CI & Probes (${((_g = status.tenantManifest) == null ? void 0 : _g.ciModo) || "local"})`,
+      when: ((_h = status.tenantManifest) == null ? void 0 : _h.probesObrigatorios) ? `${status.tenantManifest.probesCount} probes` : "sob PR",
+      action: () => onNavigateTab == null ? void 0 : onNavigateTab("automations")
+    },
+    ...status.backlog.slice(0, 2).map((b) => ({
+      id: `backlog-${b.id}`,
+      title: b.title,
+      when: "na fila",
+      action: () => onSelectItem(b)
+    }))
+  ];
   const renderColumn = (title, count, body) => h(
     "div",
     { className: "of-surface", style: { minWidth: 0, overflow: "hidden" } },
@@ -9998,7 +10266,7 @@ function renderFactoryOverviewPanel(props) {
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          padding: "7px 12px",
+          padding: "8px 12px",
           borderBottom: "1px solid var(--border)",
           fontSize: "11px",
           fontWeight: 600,
@@ -10015,382 +10283,649 @@ function renderFactoryOverviewPanel(props) {
     )
   );
   return h(
-    "section",
-    { className: "of-card" },
-    // 1. Header da Fábrica (factory-panel.tsx)
+    "div",
+    { className: "of-overview-stack", "data-overview-modular": "true" },
+    // ── BLOCO 1: AGORA (esquerda) + PRÓXIMOS (direita) — 1:1 CodeDen NowNext ──
     h(
-      "div",
-      { className: "of-panel-head" },
-      h("span", { className: "of-brand-icon", style: { width: "32px", height: "32px", fontSize: "14px" } }, "⚙"),
+      "section",
+      { className: "of-now-next", "aria-label": "Agora e próximos" },
+      // Esquerda: AGORA
       h(
         "div",
-        { style: { minWidth: 0 } },
+        { style: { minWidth: 0, display: "flex", flexDirection: "column", gap: "8px" } },
         h(
           "div",
-          { style: { display: "flex", alignItems: "center", gap: "7px", flexWrap: "wrap", fontSize: "14px", fontWeight: 600 } },
-          h("span", null, `${PT_BR.modes[status.mode] || status.mode} · ${tenant}`),
-          status.experimental && h("span", { className: "of-exp-badge" }, "experimental"),
+          { className: "of-section-label" },
+          h("span", null, "AGORA"),
           h(
             "span",
-            { className: "of-pill", "data-tone": status.coordenador === "ativo" ? "done" : "failed" },
-            status.coordenador === "ativo" ? PT_BR.labels.coordinatorActive : PT_BR.labels.coordinatorStopped
+            { className: "of-pill", "data-tone": nowRunningCount > 0 ? "running" : "idle", style: { padding: "1px 7px", fontSize: "10px" } },
+            String(nowRunningCount)
+          ),
+          queuedCount > 0 && h("span", { style: { fontWeight: 500, textTransform: "none", letterSpacing: 0 } }, `· ${queuedCount} na fila`)
+        ),
+        nowRunningCount === 0 ? h("div", { className: "of-now-empty" }, "Nada executando agora.") : h(
+          "div",
+          { className: "of-now-cards" },
+          activeTurns.map(
+            (t) => h(
+              "div",
+              {
+                key: `turn-${t.agentPubkey}-${t.channelId}-${t.messageId || t.startedAt}`,
+                className: "of-now-card",
+                onClick: () => onOpenTurnInSideChat == null ? void 0 : onOpenTurnInSideChat(t)
+              },
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", gap: "7px" } },
+                h("span", { className: "of-dot", "data-tone": t.state === "error" ? "failed" : "running" }),
+                h("strong", { style: { fontSize: "12.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 } }, t.agentName),
+                onInterruptTurn && t.stoppable && h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "of-btn",
+                    "data-variant": "danger",
+                    style: { padding: "1px 6px", fontSize: "10px" },
+                    onClick: (e) => {
+                      e.stopPropagation();
+                      onInterruptTurn(t);
+                    }
+                  },
+                  "Parar"
+                )
+              ),
+              h(
+                "div",
+                { className: "of-muted", style: { fontSize: "11.5px", lineHeight: 1.4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
+                t.stepLabel
+              ),
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "10.5px", color: "var(--muted-foreground)" } },
+                h("span", { className: "of-mono" }, "Buzz ao vivo"),
+                h("span", { className: "of-mono" }, fmtAge(t.startedAt))
+              )
+            )
+          ),
+          status.inProgress.slice(0, 6).map(
+            (item) => h(
+              "button",
+              {
+                key: `wip-${item.id}`,
+                type: "button",
+                className: "of-now-card",
+                onClick: () => onSelectItem(item)
+              },
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", gap: "7px" } },
+                h("span", { className: "of-dot", "data-tone": item.stage === "escalated" ? "waiting" : "running" }),
+                h("strong", { style: { fontSize: "12.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 } }, item.title)
+              ),
+              h("div", { className: "of-muted", style: { fontSize: "11px" } }, `${item.step} · ${item.stage}`),
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "10.5px", color: "var(--muted-foreground)" } },
+                h("span", { className: "of-mono" }, `#${item.id.slice(0, 8)}`),
+                h("span", { className: "of-mono" }, fmtAge(item.updatedAt))
+              )
+            )
+          )
+        )
+      ),
+      // Direita: PRÓXIMOS
+      h(
+        "div",
+        { style: { minWidth: 0, display: "flex", flexDirection: "column", gap: "8px" } },
+        h("div", { className: "of-section-label" }, "PRÓXIMOS"),
+        h(
+          "div",
+          { className: "of-next-list" },
+          nextScheduleRows.slice(0, 5).map(
+            (row) => h(
+              "button",
+              { key: row.id, type: "button", className: "of-next-row", onClick: row.action },
+              h("span", { className: "of-dot", "data-tone": row.when === "parado" ? "failed" : "idle" }),
+              h("span", { style: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, row.title),
+              h("span", { className: "of-mono of-muted", style: { fontSize: "10.5px", flexShrink: 0 } }, row.when)
+            )
+          )
+        )
+      )
+    ),
+    // ── BLOCO 2: FÁBRICA DE SOFTWARE (Card dedicado) ──
+    h(
+      "section",
+      { className: "of-card", "aria-label": "Fábrica de Software" },
+      // Header da Fábrica
+      h(
+        "div",
+        { className: "of-panel-head" },
+        h("span", { className: "of-brand-icon", style: { width: "32px", height: "32px", fontSize: "14px" } }, "⚙"),
+        h(
+          "div",
+          { style: { minWidth: 0 } },
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "center", gap: "7px", flexWrap: "wrap", fontSize: "14px", fontWeight: 600 } },
+            h("span", null, `${PT_BR.modes[status.mode] || status.mode} · ${tenant}`),
+            status.experimental && h("span", { className: "of-exp-badge" }, "experimental"),
+            h(
+              "span",
+              { className: "of-pill", "data-tone": status.coordenador === "ativo" ? "done" : "failed" },
+              status.coordenador === "ativo" ? PT_BR.labels.coordinatorActive : PT_BR.labels.coordinatorStopped
+            )
+          ),
+          h(
+            "div",
+            { className: "of-muted", style: { marginTop: "2px" } },
+            status.mode === "dark_factory" ? "O Oráculo e issues confiáveis alimentam as pipelines; " : "Issues NIP-34 confiáveis alimentam as pipelines; ",
+            status.limits.autoMerge ? "a OrgFy faz merge quando todos os checks passam." : "você e o Revisor L-01 aprovam os PRs."
           )
         ),
         h(
           "div",
-          { className: "of-muted", style: { marginTop: "2px" } },
-          status.mode === "dark_factory" ? "O Oráculo e issues confiáveis alimentam as pipelines; " : "Issues NIP-34 confiáveis alimentam as pipelines; ",
-          status.limits.autoMerge ? "a OrgFy faz merge quando todos os checks passam." : "você e o Revisor L-01 aprovam os PRs."
-        )
-      ),
-      h(
-        "div",
-        { style: { marginLeft: "auto", display: "flex", flexWrap: "wrap", alignItems: "center", gap: "6px" } },
-        h("button", { type: "button", className: "of-btn", onClick: onOpenBoard }, "Abrir Visão da Fábrica"),
-        h(
-          "button",
-          { type: "button", className: "of-btn", onClick: onRefresh, disabled: loading },
-          loading ? "Verificando..." : PT_BR.actions.checkNow
-        ),
-        h(
-          "button",
-          { type: "button", className: "of-btn", "data-variant": "ghost", onClick: onOpenSettings },
-          "Configurações"
-        ),
-        h(
-          "button",
-          { type: "button", className: "of-btn", "data-variant": "ghost", onClick: onOpenVision },
-          "Visão"
-        ),
-        h(
-          "button",
-          { type: "button", className: "of-btn", onClick: onToggleDrain },
-          status.drain ? PT_BR.actions.drainOff : PT_BR.actions.drainOn
-        ),
-        !confirmKill ? h(
-          "button",
-          {
-            type: "button",
-            className: "of-btn",
-            "data-variant": "danger",
-            onClick: () => status.killSwitch ? onToggleKillSwitch(false) : setConfirmKill(true)
-          },
-          status.killSwitch ? PT_BR.actions.killSwitchOff : PT_BR.actions.killSwitchOn
-        ) : h(
-          "div",
-          { style: { display: "inline-flex", gap: "4px" } },
+          { style: { marginLeft: "auto", display: "flex", flexWrap: "wrap", alignItems: "center", gap: "6px" } },
+          h("button", { type: "button", className: "of-btn", onClick: onOpenBoard }, "Visão da Fábrica"),
           h(
+            "button",
+            { type: "button", className: "of-btn", onClick: onRefresh, disabled: loading },
+            loading ? "Verificando..." : PT_BR.actions.checkNow
+          ),
+          h("button", { type: "button", className: "of-btn", "data-variant": "ghost", onClick: onOpenSettings }, "Configurações"),
+          h("button", { type: "button", className: "of-btn", "data-variant": "ghost", onClick: onOpenVision }, "Visão"),
+          h("button", { type: "button", className: "of-btn", onClick: onToggleDrain }, status.drain ? PT_BR.actions.drainOff : PT_BR.actions.drainOn),
+          !confirmKill ? h(
             "button",
             {
               type: "button",
               className: "of-btn",
               "data-variant": "danger",
-              onClick: () => {
-                setConfirmKill(false);
-                onToggleKillSwitch(true);
-              }
+              onClick: () => status.killSwitch ? onToggleKillSwitch(false) : setConfirmKill(true)
             },
-            "Confirmar Kill Switch"
-          ),
-          h("button", { type: "button", className: "of-btn", onClick: () => setConfirmKill(false) }, "Cancelar")
-        )
-      )
-    ),
-    // 2. Corpo do Painel
-    h(
-      "div",
-      { className: "of-panel-body" },
-      // Banner de alerta condicional (apenas bloqueios reais de operação — sem exigir docs/VISION.md do CodeDen)
-      (status.globalKillSwitch || status.pausedReason) && h(
-        "div",
-        { className: "of-alert-banner" },
-        h("span", { style: { color: "var(--status-waiting)", fontWeight: 700 } }, "⚠"),
-        h(
-          "span",
-          { style: { flex: 1 } },
-          status.globalKillSwitch ? "Kill switch global ativado: nenhuma fábrica da Holding está rodando." : `Pausado: ${status.pausedReason}`
-        )
-      ),
-      // Telemetria ao vivo nativa do Buzz (session.agentActivity): turnos em execução agora
-      props.telemetry && props.telemetry.activeTurns.length > 0 && h(
-        "div",
-        { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "8px", borderColor: "rgba(56, 189, 248, 0.35)" } },
-        h(
-          "div",
-          { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" } },
-          h(
-            "span",
-            { style: { display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "11.5px", fontWeight: 700, color: "var(--status-running)" } },
-            h("span", { className: "of-dot", "data-tone": "running" }),
-            `Agora no Buzz · ${props.telemetry.activeTurns.length} agente(s) respondendo`
-          ),
-          h("span", { className: "of-mono of-muted", style: { fontSize: "10px" } }, `agentActivity: ${props.telemetry.activityStatus}`)
-        ),
-        h(
-          "div",
-          { style: { display: "flex", flexDirection: "column", gap: "6px" } },
-          props.telemetry.activeTurns.map(
-            (t) => h(
-              "div",
-              {
-                key: `${t.agentPubkey}-${t.channelId}-${t.messageId || t.startedAt}`,
-                style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", fontSize: "12px", padding: "6px 8px", borderRadius: "7px", background: "var(--card)", border: "1px solid var(--border)" }
-              },
-              h("span", { className: "of-dot", "data-tone": t.state === "error" ? "failed" : "running" }),
-              h("strong", null, t.agentName),
-              h("span", { className: "of-mono of-muted", style: { fontSize: "11px", flex: 1, minWidth: "140px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, t.stepLabel),
-              props.onOpenTurnInSideChat && t.channelId && h(
-                "button",
-                { type: "button", className: "of-btn", "data-variant": "ghost", style: { padding: "2px 7px", fontSize: "11px", color: "var(--primary)" }, onClick: () => props.onOpenTurnInSideChat(t) },
-                "Abrir chat lateral"
-              ),
-              props.onInterruptTurn && t.stoppable && h(
-                "button",
-                { type: "button", className: "of-btn", "data-variant": "danger", style: { padding: "2px 7px", fontSize: "11px" }, onClick: () => props.onInterruptTurn(t) },
-                "Parar"
-              )
-            )
-          )
-        )
-      ),
-      // Seção Pipelines ao vivo
-      h(
-        "div",
-        null,
-        h(
-          "div",
-          { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "6px" } },
-          h("span", { style: { fontSize: "12px", fontWeight: 600, color: "var(--muted-foreground)" } }, PT_BR.pipelines.title),
-          h("span", { className: "of-muted", style: { fontSize: "11px" } }, "Clique em um #id para abrir o detalhe ou sessão"),
-          h(
+            status.killSwitch ? PT_BR.actions.killSwitchOff : PT_BR.actions.killSwitchOn
+          ) : h(
             "div",
-            { style: { marginLeft: "auto", display: "flex", alignItems: "center", gap: "6px" } },
-            status.wip.holding && h(
-              "span",
-              { className: "of-pill", "data-tone": "waiting" },
-              `Finalizando trabalho aberto (${status.wip.openPrs}/${status.wip.limit} PRs)`
-            ),
-            status.drain && !stopped ? h("span", { className: "of-pill", "data-tone": "waiting" }, `Drenando: ${status.drain.inFlight} em andamento`) : h("span", { className: "of-pill", "data-tone": loopTone }, `Loop ${loopLabel.toLowerCase()}`)
-          )
-        ),
-        renderPipelineDiagram({ h, status, activeHelpKey, onToggleHelp, onSelectItem })
-      ),
-      // 5 Meters com barras de progresso (factory-panel.tsx)
-      h(
-        "div",
-        { className: "of-meters-row" },
-        Meter(h, {
-          label: "Gasto hoje",
-          value: status.spendToday.usd,
-          max: budgetUsd,
-          display: `$${status.spendToday.usd.toFixed(2)} / $${budgetUsd.toFixed(0)}`,
-          warn: true
-        }),
-        Meter(h, {
-          label: "Trabalhando agora",
-          value: typeof props.workingNowCount === "number" ? props.workingNowCount : 0,
-          max: status.limits.maxConcurrentSessions,
-          display: `${typeof props.workingNowCount === "number" ? props.workingNowCount : 0} / ${status.limits.maxConcurrentSessions}`,
-          warn: false
-        }),
-        Meter(h, {
-          label: "PRs em andamento",
-          value: status.wip.openPrs,
-          max: status.wip.limit,
-          display: `${status.wip.openPrs} / ${status.wip.limit}`,
-          warn: false
-        }),
-        status.limits.autoMerge ? Meter(h, {
-          label: "Merges hoje (7d: " + status.stats.merged7d + ")",
-          value: status.mergesToday,
-          max: status.limits.maxMergesPerDay,
-          display: `${status.mergesToday} / ${status.limits.maxMergesPerDay}`,
-          warn: false
-        }) : Meter(h, {
-          label: "FPY real (sem hist.: " + (typeof (qualidade == null ? void 0 : qualidade.pct_desconhecido) === "number" ? `${qualidade.pct_desconhecido.toFixed(0)}%` : "n/d") + ")",
-          value: typeof (qualidade == null ? void 0 : qualidade.fpy_real_pct) === "number" ? qualidade.fpy_real_pct : 0,
-          max: 100,
-          display: typeof (qualidade == null ? void 0 : qualidade.fpy_real_pct) === "number" ? `${qualidade.fpy_real_pct.toFixed(1)}%` : `${readyCount} PRs`,
-          warn: false
-        }),
-        Meter(h, {
-          label: "Falhas seguidas",
-          value: status.consecutiveFailures,
-          max: status.limits.pauseAfterConsecutiveFailures,
-          display: `${status.consecutiveFailures} / ${status.limits.pauseAfterConsecutiveFailures}`,
-          warn: true
-        })
-      ),
-      // 3 Colunas (Checks de Merge | Merges & Reversões Recentes | Ignoradas)
-      h(
-        "div",
-        { className: "of-grid-3" },
-        renderColumn(
-          "Checks de merge (CI + L-01 + L-22)",
-          status.mergeChecks.length,
-          status.mergeChecks.slice(0, 6).map(
-            (c, idx) => h(
-              "div",
-              { key: idx, style: { padding: "6px 8px", borderRadius: "6px", background: "var(--card)", fontSize: "11.5px" } },
-              h("span", { className: "of-mono", style: { color: "var(--primary)", marginRight: "6px" } }, `#${c.prNumber || idx}`),
-              h("span", null, c.title || "Check")
-            )
-          )
-        ),
-        renderColumn(
-          "Merges & reversões recentes",
-          status.recent.length,
-          status.recent.slice(0, 8).map(
-            (w) => h(
+            { style: { display: "inline-flex", gap: "4px" } },
+            h(
               "button",
               {
-                key: w.id,
                 type: "button",
-                onClick: () => onSelectItem(w),
-                style: {
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  width: "100%",
-                  textAlign: "left",
-                  padding: "6px 8px",
-                  borderRadius: "6px",
-                  border: "none",
-                  background: "transparent",
-                  color: "var(--foreground)",
-                  cursor: "pointer",
-                  fontSize: "11.5px"
+                className: "of-btn",
+                "data-variant": "danger",
+                onClick: () => {
+                  setConfirmKill(false);
+                  onToggleKillSwitch(true);
                 }
               },
-              h("span", { className: "of-dot", "data-tone": w.stage === "merged" ? "done" : w.stage === "failed" ? "failed" : "waiting" }),
-              h("span", { style: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, w.title),
-              h("span", { className: "of-mono of-muted", style: { fontSize: "10px" } }, w.stage)
-            )
-          )
-        ),
-        renderColumn(
-          "Ignoradas · autores não confiáveis",
-          status.ignored.length,
-          status.ignored.slice(0, 6).map(
-            (w) => h(
-              "div",
-              { key: w.id, style: { display: "flex", alignItems: "center", gap: "6px", padding: "6px 8px", fontSize: "11.5px" } },
-              h("span", { className: "of-mono of-muted" }, `#${w.id.slice(0, 8)}`),
-              h("span", { style: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, w.title)
-            )
+              "Confirmar Kill Switch"
+            ),
+            h("button", { type: "button", className: "of-btn", onClick: () => setConfirmKill(false) }, "Cancelar")
           )
         )
       ),
-      // Scorecard colapsável (scorecard-card.tsx)
+      // Corpo da Fábrica
       h(
-        "details",
-        { className: "of-surface", open: true },
-        h(
-          "summary",
-          {
-            style: {
-              cursor: "pointer",
-              padding: "8px 12px",
-              fontSize: "11.5px",
-              fontWeight: 600,
-              color: "var(--muted-foreground)"
-            }
-          },
-          "Scorecard da Fábrica · FPY real, eval R5.1 de tool call e custo por modelo (kpis-esteira.json)"
+        "div",
+        { className: "of-panel-body" },
+        // Alerta de Kill Switch / Pausa / Esteira Parada
+        (status.globalKillSwitch || status.pausedReason || ((_i = status.wip) == null ? void 0 : _i.holding) && ((_j = status.wip) == null ? void 0 : _j.note)) && h(
+          "div",
+          { className: "of-alert-banner" },
+          h("span", { style: { color: "var(--status-waiting)", fontWeight: 700 } }, "⚠"),
+          h(
+            "span",
+            { style: { flex: 1 } },
+            status.globalKillSwitch ? "Kill switch global ativado: nenhuma fábrica da Holding está rodando." : status.pausedReason ? `Pausado: ${status.pausedReason}` : (_k = status.wip) == null ? void 0 : _k.note
+          )
         ),
+        // Pipelines ao vivo
         h(
           "div",
-          { style: { borderTop: "1px solid var(--border)", padding: "10px 12px", display: "flex", flexDirection: "column", gap: "10px" } },
+          null,
           h(
             "div",
-            { style: { display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center" } },
+            { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "6px" } },
+            h("span", { style: { fontSize: "12px", fontWeight: 600, color: "var(--muted-foreground)" } }, PT_BR.pipelines.title),
+            h("span", { className: "of-muted", style: { fontSize: "11px" } }, "Clique em um #id para abrir o detalhe ou sessão"),
             h(
               "div",
-              { className: "of-segmented" },
-              ["builders", "reviewers", "pairs"].map(
-                (v2) => h(
-                  "button",
-                  {
-                    key: v2,
-                    type: "button",
-                    className: "of-seg-btn",
-                    "data-active": scorecardView === v2 ? "true" : "false",
-                    onClick: () => setScorecardView(v2)
-                  },
-                  v2 === "builders" ? "Construtor" : v2 === "reviewers" ? "Revisor" : "Par"
-                )
-              )
+              { style: { marginLeft: "auto", display: "flex", alignItems: "center", gap: "6px" } },
+              status.drain && !stopped ? h("span", { className: "of-pill", "data-tone": "waiting" }, `Drenando: ${status.drain.inFlight} em andamento`) : h("span", { className: "of-pill", "data-tone": loopTone }, `Loop ${loopLabel.toLowerCase()}`)
+            )
+          ),
+          renderPipelineDiagram({ h, status, activeHelpKey, onToggleHelp, onSelectItem })
+        ),
+        // 5 Meters com barras de progresso
+        h(
+          "div",
+          { className: "of-meters-row" },
+          Meter(h, {
+            label: "Gasto hoje",
+            value: status.spendToday.usd,
+            max: budgetUsd,
+            display: `$${status.spendToday.usd.toFixed(2)} / $${budgetUsd.toFixed(0)}`,
+            warn: true
+          }),
+          Meter(h, {
+            label: "Trabalhando agora",
+            value: typeof props.workingNowCount === "number" ? props.workingNowCount : 0,
+            max: status.limits.maxConcurrentSessions,
+            display: `${typeof props.workingNowCount === "number" ? props.workingNowCount : 0} / ${status.limits.maxConcurrentSessions}`,
+            warn: false
+          }),
+          Meter(h, {
+            label: "PRs em andamento",
+            value: status.wip.openPrs,
+            max: status.wip.limit,
+            display: `${status.wip.openPrs} / ${status.wip.limit}`,
+            warn: false
+          }),
+          status.limits.autoMerge ? Meter(h, {
+            label: "Merges hoje (7d: " + status.stats.merged7d + ")",
+            value: status.mergesToday,
+            max: status.limits.maxMergesPerDay,
+            display: `${status.mergesToday} / ${status.limits.maxMergesPerDay}`,
+            warn: false
+          }) : Meter(h, {
+            label: "FPY real",
+            value: typeof (qualidade == null ? void 0 : qualidade.fpy_real_pct) === "number" ? qualidade.fpy_real_pct : 0,
+            max: 100,
+            display: typeof (qualidade == null ? void 0 : qualidade.fpy_real_pct) === "number" ? `${qualidade.fpy_real_pct.toFixed(1)}%` : `${readyCount} PRs`,
+            warn: false
+          }),
+          Meter(h, {
+            label: "Falhas seguidas",
+            value: status.consecutiveFailures,
+            max: status.limits.pauseAfterConsecutiveFailures,
+            display: `${status.consecutiveFailures} / ${status.limits.pauseAfterConsecutiveFailures}`,
+            warn: true
+          })
+        ),
+        // Caixa dedicada de Pull Requests (1:1 CodeDen)
+        h(
+          "div",
+          { className: "of-surface", style: { overflow: "hidden" } },
+          h(
+            "div",
+            {
+              style: {
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "8px 12px",
+                borderBottom: "1px solid var(--border)",
+                fontSize: "11.5px"
+              }
+            },
+            h(
+              "span",
+              { style: { fontWeight: 600, color: "var(--foreground)" } },
+              "Pull requests",
+              h("span", { className: "of-muted", style: { fontWeight: 400, marginLeft: "6px" } }, openPrs.length === 0 ? "· fila de merge vazia" : `· ${openPrs.length} aberto(s)`)
             ),
-            h(
-              "div",
-              { className: "of-segmented" },
-              [7, 30, 90].map(
-                (d) => h(
-                  "button",
-                  {
-                    key: d,
-                    type: "button",
-                    className: "of-seg-btn",
-                    "data-active": scorecardDays === d ? "true" : "false",
-                    onClick: () => setScorecardDays(d)
-                  },
-                  `${d} dias`
-                )
+            h("span", { className: "of-mono of-num of-muted" }, String(openPrs.length))
+          ),
+          openPrs.length === 0 ? h("div", { className: "of-muted", style: { textAlign: "center", padding: "14px 12px", fontSize: "11.5px" } }, "Nenhum pull request aberto na fábrica.") : h(
+            "div",
+            { style: { display: "flex", flexDirection: "column" } },
+            openPrs.slice(0, 6).map(
+              (pr, idx) => h(
+                "div",
+                {
+                  key: pr.id || idx,
+                  style: {
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    padding: "7px 12px",
+                    borderBottom: idx < Math.min(openPrs.length, 6) - 1 ? "1px solid var(--border)" : "none",
+                    fontSize: "12px"
+                  }
+                },
+                h("span", { className: "of-dot", "data-tone": pr.quarentena ? "failed" : "running" }),
+                h("span", { className: "of-mono", style: { color: "var(--primary)", fontSize: "11px" } }, `#${String(pr.id || idx).slice(0, 8)}`),
+                h("span", { style: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, pr.title || pr.branch || "Pull Request"),
+                pr.quarentena && h("span", { className: "of-pill", "data-tone": "failed" }, "quarentena")
+              )
+            )
+          )
+        ),
+        // 3 Colunas (Checks de Merge | Merges & Reversões Recentes | Ignoradas)
+        h(
+          "div",
+          { className: "of-grid-3" },
+          renderColumn(
+            "Checks de merge (CI + L-01 + L-22)",
+            status.mergeChecks.length,
+            status.mergeChecks.slice(0, 6).map(
+              (c, idx) => h(
+                "div",
+                { key: idx, style: { padding: "6px 8px", borderRadius: "6px", background: "var(--card)", fontSize: "11.5px" } },
+                h("span", { className: "of-mono", style: { color: "var(--primary)", marginRight: "6px" } }, `#${c.prNumber || idx}`),
+                h("span", null, c.title || "Check")
               )
             )
           ),
-          modelos.length === 0 && porModelo.length === 0 ? h("div", { className: "of-muted" }, PT_BR.labels.unavailable) : h(
-            "table",
-            { className: "of-table" },
+          renderColumn(
+            "Merges & reversões recentes",
+            status.recent.length,
+            status.recent.slice(0, 6).map(
+              (w) => h(
+                "button",
+                {
+                  key: w.id,
+                  type: "button",
+                  onClick: () => onSelectItem(w),
+                  style: {
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    width: "100%",
+                    textAlign: "left",
+                    padding: "6px 8px",
+                    borderRadius: "6px",
+                    border: "none",
+                    background: "transparent",
+                    color: "var(--foreground)",
+                    cursor: "pointer",
+                    fontSize: "11.5px"
+                  }
+                },
+                h("span", { className: "of-dot", "data-tone": w.stage === "merged" ? "done" : w.stage === "failed" ? "failed" : "waiting" }),
+                h("span", { style: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, w.title),
+                h("span", { className: "of-mono of-muted", style: { fontSize: "10px" } }, w.stage)
+              )
+            )
+          ),
+          renderColumn(
+            "Ignoradas · autores não confiáveis",
+            status.ignored.length,
+            status.ignored.slice(0, 6).map(
+              (w) => h(
+                "div",
+                { key: w.id, style: { display: "flex", alignItems: "center", gap: "6px", padding: "6px 8px", fontSize: "11.5px" } },
+                h("span", { className: "of-mono of-muted" }, `#${w.id.slice(0, 8)}`),
+                h("span", { style: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, w.title)
+              )
+            )
+          )
+        ),
+        // Acordeão colapsável do Scorecard (fechado por padrão, igual ao CodeDen)
+        h(
+          "details",
+          { className: "of-surface" },
+          h(
+            "summary",
+            {
+              style: {
+                cursor: "pointer",
+                padding: "9px 12px",
+                fontSize: "11.5px",
+                fontWeight: 600,
+                color: "var(--foreground)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between"
+              }
+            },
             h(
-              "thead",
+              "span",
               null,
+              "Scorecard ",
+              h("span", { className: "of-muted", style: { fontWeight: 400 } }, "· FPY real, eval R5.1 de tool call e custo por modelo")
+            ),
+            h("span", { className: "of-mono of-muted", style: { fontSize: "11px" } }, `${modelos.length} agentes`)
+          ),
+          h(
+            "div",
+            { style: { borderTop: "1px solid var(--border)", padding: "10px 12px", display: "flex", flexDirection: "column", gap: "10px" } },
+            h(
+              "div",
+              { style: { display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center" } },
               h(
-                "tr",
-                null,
-                h("th", null, scorecardView === "reviewers" ? "Revisor / Agente" : "Agente / Modelo"),
-                h("th", null, "Papel"),
-                h("th", null, "Modelo"),
-                h("th", null, "Eval R5.1"),
-                h("th", null, "Status")
+                "div",
+                { className: "of-segmented" },
+                ["builders", "reviewers", "pairs"].map(
+                  (v2) => h(
+                    "button",
+                    {
+                      key: v2,
+                      type: "button",
+                      className: "of-seg-btn",
+                      "data-active": scorecardView === v2 ? "true" : "false",
+                      onClick: () => setScorecardView(v2)
+                    },
+                    v2 === "builders" ? "Construtor" : v2 === "reviewers" ? "Revisor" : "Par"
+                  )
+                )
+              ),
+              h(
+                "div",
+                { className: "of-segmented" },
+                [7, 30, 90].map(
+                  (d) => h(
+                    "button",
+                    {
+                      key: d,
+                      type: "button",
+                      className: "of-seg-btn",
+                      "data-active": scorecardDays === d ? "true" : "false",
+                      onClick: () => setScorecardDays(d)
+                    },
+                    `${d} dias`
+                  )
+                )
               )
             ),
-            h(
-              "tbody",
-              null,
-              modelos.slice(0, 10).map(
-                (m) => h(
-                  "tr",
-                  { key: m.agente },
-                  h("td", { style: { fontWeight: 600 } }, m.agente),
-                  h("td", { className: "of-muted" }, m.papel || "—"),
-                  h("td", { className: "of-mono" }, m.modelo || PT_BR.labels.unavailable),
-                  h(
-                    "td",
-                    null,
+            modelos.length === 0 && porModelo.length === 0 ? h("div", { className: "of-muted" }, PT_BR.labels.unavailable) : h(
+              "table",
+              { className: "of-table" },
+              h(
+                "thead",
+                null,
+                h("tr", null, h("th", null, scorecardView === "reviewers" ? "Revisor / Agente" : "Agente"), h("th", null, "Papel"), h("th", null, "Modelo"), h("th", null, "Eval R5.1"), h("th", null, "Status"))
+              ),
+              h(
+                "tbody",
+                null,
+                modelos.slice(0, 10).map(
+                  (m) => h(
+                    "tr",
+                    { key: m.agente },
+                    h("td", { style: { fontWeight: 600 } }, m.agente),
+                    h("td", { className: "of-muted" }, m.papel || "—"),
+                    h("td", { className: "of-mono" }, m.modelo || PT_BR.labels.unavailable),
                     h(
-                      "span",
-                      { className: "of-pill", "data-tone": m.abaixo_minimo ? "failed" : m.toolcall_eval ? "done" : "idle" },
-                      m.toolcall_eval || PT_BR.labels.unavailable
+                      "td",
+                      null,
+                      h("span", { className: "of-pill", "data-tone": m.abaixo_minimo ? "failed" : m.toolcall_eval ? "done" : "idle" }, m.toolcall_eval || PT_BR.labels.unavailable)
+                    ),
+                    h(
+                      "td",
+                      null,
+                      m.abaixo_minimo ? h("span", { style: { color: "var(--status-failed)", fontWeight: 700, fontSize: "11px" } }, PT_BR.labels.evalBelowMin) : h("span", { className: "of-muted" }, "OK")
                     )
-                  ),
-                  h(
-                    "td",
-                    null,
-                    m.abaixo_minimo ? h("span", { style: { color: "var(--status-failed)", fontWeight: 700, fontSize: "11px" } }, PT_BR.labels.evalBelowMin) : h("span", { className: "of-muted" }, "OK")
                   )
                 )
               )
             )
           )
+        ),
+        // Rodapé discreto da fábrica
+        h(
+          "div",
+          { className: "of-muted", style: { fontSize: "10.5px", lineHeight: 1.5 } },
+          `${status.spendToday.tokens.toLocaleString("pt-BR")} tokens hoje · auto-merge ${status.limits.autoMerge ? "ligado" : "desligado"} · política ${status.limits.mergePolicy} · quarentena: ${status.quarentenaCount ?? 0}`,
+          status.indisponivel.length > 0 ? ` · indisponível: ${status.indisponivel.join(", ")}` : ""
         )
-      ),
-      // Rodapé de telemetria honesta (factory-panel.tsx)
+      )
+    ),
+    // ── BLOCO 3: GASTO (Card independente — 1:1 CodeDen ProjectSpendCard) ──
+    h(
+      "section",
+      { className: "of-card-pad", "aria-label": "Gasto da empresa" },
       h(
         "div",
-        { className: "of-muted", style: { fontSize: "10.5px", lineHeight: 1.5 } },
-        `${status.spendToday.tokens.toLocaleString("pt-BR")} tokens hoje · auto-merge ${status.limits.autoMerge ? "ligado" : "desligado"} · política ${status.limits.mergePolicy} · quarentena: ${status.quarentenaCount ?? 0}`,
-        status.indisponivel.length > 0 ? ` · indisponível: ${status.indisponivel.join(", ")}` : ""
+        { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" } },
+        h(
+          "div",
+          { style: { display: "inline-flex", alignItems: "baseline", gap: "8px", flexWrap: "wrap" } },
+          h("strong", { style: { fontSize: "13.5px" } }, "Gasto"),
+          h("span", { className: "of-mono of-muted", style: { fontSize: "11px" } }, `principal: ${topModelName}`)
+        ),
+        onNavigateTab && h(
+          "button",
+          { type: "button", className: "of-btn", "data-variant": "ghost", onClick: () => onNavigateTab("costs") },
+          "Relatório completo →"
+        )
+      ),
+      h(
+        "div",
+        { className: "of-spend-grid" },
+        h(
+          "div",
+          null,
+          h("div", { className: "of-muted", style: { fontSize: "11px" } }, "Hoje"),
+          h("div", { className: "of-num", style: { fontSize: "20px", fontWeight: 700, marginTop: "2px" } }, `$${status.spendToday.usd.toFixed(2)}`)
+        ),
+        h(
+          "div",
+          null,
+          h("div", { className: "of-muted", style: { fontSize: "11px" } }, "Amostra (kpis)"),
+          h(
+            "div",
+            { className: "of-num", style: { fontSize: "20px", fontWeight: 700, marginTop: "2px" } },
+            typeof (economia == null ? void 0 : economia.custo_usd_total_amostra) === "number" ? `$${economia.custo_usd_total_amostra.toFixed(2)}` : "$0.00"
+          )
+        ),
+        h(
+          "div",
+          null,
+          h("div", { className: "of-muted", style: { fontSize: "11px" } }, "Tokens 7d"),
+          h("div", { className: "of-num", style: { fontSize: "20px", fontWeight: 700, marginTop: "2px" } }, fmtTokens$1(economia == null ? void 0 : economia.tokens_7d))
+        )
+      )
+    ),
+    // ── BLOCO 4: SESSÕES & AGENTES (Seção independente — 1:1 CodeDen Sessions) ──
+    h(
+      "section",
+      { className: "of-section-block", "aria-label": "Sessões e agentes" },
+      h(
+        "div",
+        { className: "of-section-head" },
+        h("span", { className: "of-section-label" }, "SESSÕES & AGENTES"),
+        h("span", { className: "of-pill", "data-tone": activeTurns.length > 0 ? "running" : "idle" }, `Ativos · ${activeTurns.length}`),
+        h("span", { className: "of-muted", style: { fontSize: "11px" } }, `Plantel · ${tenantAgents.length}`),
+        onNavigateTab && h(
+          "button",
+          {
+            type: "button",
+            className: "of-btn",
+            "data-variant": "ghost",
+            style: { marginLeft: "auto", fontSize: "11px" },
+            onClick: () => onNavigateTab("agents")
+          },
+          "Ver todos os agentes →"
+        )
+      ),
+      h(
+        "div",
+        { className: "of-list-card" },
+        tenantAgents.length === 0 ? h("div", { className: "of-muted", style: { padding: "18px", textAlign: "center" } }, "Nenhum agente provisionado nesta empresa.") : tenantAgents.slice(0, 7).map((ag) => {
+          const pkLower = (ag.pubkey || "").toLowerCase();
+          const liveTurn = pkLower && (telemetry == null ? void 0 : telemetry.byPubkey) ? telemetry.byPubkey[pkLower] : null;
+          const presence = pkLower && (telemetry == null ? void 0 : telemetry.presenceByPubkey) ? telemetry.presenceByPubkey[pkLower] : void 0;
+          return h(
+            "button",
+            {
+              key: ag.agentKey || ag.name,
+              type: "button",
+              className: "of-list-row",
+              onClick: () => onOpenAgentDm == null ? void 0 : onOpenAgentDm({ key: ag.agentKey, pubkey: ag.pubkey, name: ag.name })
+            },
+            h("span", { className: "of-dot", "data-tone": liveTurn ? liveTurn.state === "error" ? "failed" : "running" : ag.inBuzz ? "done" : "idle" }),
+            h(
+              "div",
+              { style: { flex: 1, minWidth: 0 } },
+              h("div", { style: { fontWeight: 600, fontSize: "12.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, ag.name),
+              h(
+                "div",
+                { className: "of-mono of-muted", style: { fontSize: "10.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
+                liveTurn ? `⚡ ${liveTurn.stepLabel}` : `${ag.papel} · ${ag.model}`
+              )
+            ),
+            h("span", { className: "of-muted", style: { fontSize: "11px", flexShrink: 0 } }, liveTurn ? "Respondendo" : presence === "online" ? "Online" : "Disponível"),
+            h("span", { className: "of-pill", style: { fontSize: "10px" } }, "Chat lateral ↗")
+          );
+        })
+      )
+    ),
+    // ── BLOCO 5: AUTOMAÇÕES (Seção independente — 1:1 CodeDen Automations) ──
+    h(
+      "section",
+      { className: "of-section-block", "aria-label": "Automações" },
+      h(
+        "div",
+        { className: "of-section-head" },
+        h("span", { className: "of-section-label" }, "AUTOMAÇÕES"),
+        onNavigateTab && h(
+          "button",
+          {
+            type: "button",
+            className: "of-btn",
+            "data-variant": "ghost",
+            style: { marginLeft: "auto", fontSize: "11px" },
+            onClick: () => onNavigateTab("automations")
+          },
+          "Gerenciar, execuções e regras →"
+        )
+      ),
+      h(
+        "div",
+        { className: "of-list-card" },
+        [
+          {
+            id: "launch-agent",
+            name: status.launchAgent || "com.orgfy.esteira-minima",
+            desc: "Coordenador da esteira (respeita Kill Switch, Dreno e limites de controle-<tenant>.json)",
+            tone: status.coordenador === "ativo" ? "done" : "failed",
+            badge: status.coordenador === "ativo" ? "Ativo" : "Parado"
+          },
+          {
+            id: "rotina-ceo",
+            name: "Rotina CEO (Workflow Buzz Kind 30620)",
+            desc: ".buzz/workflows/orgfy-rotina-ceo.yaml · revisão de prioridades e escalada executiva",
+            tone: "waiting",
+            badge: "Nativo Buzz"
+          },
+          {
+            id: "ci-probes",
+            name: `CI Runner & Probes (${((_l = status.tenantManifest) == null ? void 0 : _l.ciModo) || "local"})`,
+            desc: ((_m2 = status.tenantManifest) == null ? void 0 : _m2.ciCmd) || "ferramentas/ci.sh com isolamento de segredos e GATE humano",
+            tone: "done",
+            badge: ((_n = status.tenantManifest) == null ? void 0 : _n.probesObrigatorios) ? `${status.tenantManifest.probesCount} probes` : "Habilitado"
+          }
+        ].map(
+          (auto) => h(
+            "button",
+            {
+              key: auto.id,
+              type: "button",
+              className: "of-list-row",
+              onClick: () => onNavigateTab == null ? void 0 : onNavigateTab("automations")
+            },
+            h("span", { className: "of-dot", "data-tone": auto.tone }),
+            h(
+              "div",
+              { style: { flex: 1, minWidth: 0 } },
+              h("div", { style: { fontWeight: 600, fontSize: "12.5px" } }, auto.name),
+              h("div", { className: "of-muted", style: { fontSize: "11px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, auto.desc)
+            ),
+            h("span", { className: "of-pill", "data-tone": auto.tone }, auto.badge)
+          )
+        )
       )
     )
   );
@@ -26557,6 +27092,63 @@ class PerspectiveCamera extends Camera {
     return data;
   }
 }
+class PointLightShadow extends LightShadow {
+  /**
+   * Constructs a new point light shadow.
+   */
+  constructor() {
+    super(new PerspectiveCamera(90, 1, 0.5, 500));
+    this.isPointLightShadow = true;
+  }
+}
+class PointLight extends Light {
+  /**
+   * Constructs a new point light.
+   *
+   * @param {(number|Color|string)} [color=0xffffff] - The light's color.
+   * @param {number} [intensity=1] - The light's strength/intensity measured in candela (cd).
+   * @param {number} [distance=0] - Maximum range of the light. `0` means no limit.
+   * @param {number} [decay=2] - The amount the light dims along the distance of the light.
+   */
+  constructor(color, intensity, distance = 0, decay = 2) {
+    super(color, intensity);
+    this.isPointLight = true;
+    this.type = "PointLight";
+    this.distance = distance;
+    this.decay = decay;
+    this.shadow = new PointLightShadow();
+  }
+  /**
+   * The light's power. Power is the luminous power of the light measured in lumens (lm).
+   * Changing the power will also change the light's intensity.
+   *
+   * @type {number}
+   */
+  get power() {
+    return this.intensity * 4 * Math.PI;
+  }
+  set power(power) {
+    this.intensity = power / (4 * Math.PI);
+  }
+  dispose() {
+    super.dispose();
+    this.shadow.dispose();
+  }
+  copy(source, recursive) {
+    super.copy(source, recursive);
+    this.distance = source.distance;
+    this.decay = source.decay;
+    this.shadow = source.shadow.clone();
+    return this;
+  }
+  toJSON(meta) {
+    const data = super.toJSON(meta);
+    data.object.distance = this.distance;
+    data.object.decay = this.decay;
+    data.object.shadow = this.shadow.toJSON();
+    return data;
+  }
+}
 class OrthographicCamera extends Camera {
   /**
    * Constructs a new orthographic camera.
@@ -26715,6 +27307,19 @@ class DirectionalLight extends Light {
     return data;
   }
 }
+class AmbientLight extends Light {
+  /**
+   * Constructs a new ambient light.
+   *
+   * @param {(number|Color|string)} [color=0xffffff] - The light's color.
+   * @param {number} [intensity=1] - The light's strength/intensity.
+   */
+  constructor(color, intensity) {
+    super(color, intensity);
+    this.isAmbientLight = true;
+    this.type = "AmbientLight";
+  }
+}
 const fov = -90;
 const aspect = 1;
 class CubeCamera extends Object3D {
@@ -26856,6 +27461,69 @@ class ArrayCamera extends PerspectiveCamera {
     this.isMultiViewCamera = false;
     this.cameras = array;
     this.perCameraFrustumCulled = false;
+  }
+}
+class Clock {
+  /**
+   * Constructs a new clock.
+   *
+   * @deprecated since 183.
+   * @param {boolean} [autoStart=true] - Whether to automatically start the clock when
+   * `getDelta()` is called for the first time.
+   */
+  constructor(autoStart = true) {
+    this.autoStart = autoStart;
+    this.startTime = 0;
+    this.oldTime = 0;
+    this.elapsedTime = 0;
+    this.running = false;
+    warn("Clock: This module has been deprecated. Please use THREE.Timer instead.");
+  }
+  /**
+   * Starts the clock. When `autoStart` is set to `true`, the method is automatically
+   * called by the class.
+   */
+  start() {
+    this.startTime = performance.now();
+    this.oldTime = this.startTime;
+    this.elapsedTime = 0;
+    this.running = true;
+  }
+  /**
+   * Stops the clock.
+   */
+  stop() {
+    this.getElapsedTime();
+    this.running = false;
+    this.autoStart = false;
+  }
+  /**
+   * Returns the elapsed time in seconds.
+   *
+   * @return {number} The elapsed time.
+   */
+  getElapsedTime() {
+    this.getDelta();
+    return this.elapsedTime;
+  }
+  /**
+   * Returns the delta time in seconds.
+   *
+   * @return {number} The delta time.
+   */
+  getDelta() {
+    let diff = 0;
+    if (this.autoStart && !this.running) {
+      this.start();
+      return 0;
+    }
+    if (this.running) {
+      const newTime = performance.now();
+      diff = (newTime - this.oldTime) / 1e3;
+      this.oldTime = newTime;
+      this.elapsedTime += diff;
+    }
+    return diff;
   }
 }
 function getByteLength(width, height, format, type) {
@@ -42703,6 +43371,277 @@ function createFloor3DComponent(ctx) {
     );
   };
 }
+function createBoardroom3DComponent(ctx) {
+  const React = ctx.react;
+  const h = React.createElement;
+  return function Boardroom3DCanvas(props) {
+    const mountRef = React.useRef(null);
+    const [fitTick, setFitTick] = React.useState(0);
+    React.useEffect(() => {
+      const container = mountRef.current;
+      if (!container) return;
+      const width = Math.max(320, container.clientWidth || 680);
+      const height = Math.max(220, container.clientHeight || 280);
+      const scene = new Scene();
+      scene.background = new Color(855827);
+      const camera = new PerspectiveCamera(36, width / height, 0.1, 100);
+      let theta = 0.65;
+      let phi = 0.88;
+      let radius = 11.5;
+      const updateCamera = () => {
+        camera.position.set(
+          radius * Math.sin(phi) * Math.sin(theta),
+          radius * Math.cos(phi),
+          radius * Math.sin(phi) * Math.cos(theta)
+        );
+        camera.lookAt(0, 0.65, 0);
+      };
+      updateCamera();
+      let renderer;
+      try {
+        renderer = new WebGLRenderer({ antialias: true, alpha: false, powerPreference: "low-power" });
+      } catch {
+        return;
+      }
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.setSize(width, height);
+      container.innerHTML = "";
+      container.appendChild(renderer.domElement);
+      const ambient = new AmbientLight(14412542, 0.65);
+      scene.add(ambient);
+      const keyLight = new DirectionalLight(16777215, 0.9);
+      keyLight.position.set(5, 9, 6);
+      scene.add(keyLight);
+      const rimLight = new PointLight(4052620, 0.9, 18);
+      rimLight.position.set(-4, 3.2, -3);
+      scene.add(rimLight);
+      const floor = new Mesh(
+        new PlaneGeometry(24, 18),
+        new MeshStandardMaterial({ color: 1119258, roughness: 0.9, metalness: 0.05 })
+      );
+      floor.rotation.x = -Math.PI / 2;
+      scene.add(floor);
+      const rug = new Mesh(
+        new BoxGeometry(8.2, 0.02, 5.2),
+        new MeshStandardMaterial({ color: 1514275, roughness: 0.95 })
+      );
+      rug.position.y = 0.01;
+      scene.add(rug);
+      const tableTop = new Mesh(
+        new BoxGeometry(5.2, 0.14, 2.3),
+        new MeshStandardMaterial({ color: 2238e3, roughness: 0.35, metalness: 0.25 })
+      );
+      tableTop.position.set(0, 0.85, 0);
+      scene.add(tableTop);
+      const inlay = new Mesh(
+        new BoxGeometry(3.6, 0.02, 0.24),
+        new MeshStandardMaterial({ color: 4052620, emissive: 1727548, emissiveIntensity: 0.7 })
+      );
+      inlay.position.set(0, 0.93, 0);
+      scene.add(inlay);
+      for (const xOff of [-1.6, 1.6]) {
+        const leg = new Mesh(
+          new CylinderGeometry(0.14, 0.22, 0.82, 14),
+          new MeshStandardMaterial({ color: 1579810, metalness: 0.5, roughness: 0.4 })
+        );
+        leg.position.set(xOff, 0.41, 0);
+        scene.add(leg);
+      }
+      const wall = new Mesh(
+        new BoxGeometry(10.5, 3.6, 0.16),
+        new MeshStandardMaterial({ color: 1382432, roughness: 0.85 })
+      );
+      wall.position.set(0, 1.8, -3.4);
+      scene.add(wall);
+      const screen = new Mesh(
+        new BoxGeometry(4.4, 1.5, 0.06),
+        new MeshStandardMaterial({ color: 726290, emissive: 1194024, emissiveIntensity: 0.85, roughness: 0.2 })
+      );
+      screen.position.set(0, 2.05, -3.28);
+      scene.add(screen);
+      const seats = props.seats.length > 0 ? props.seats : [
+        { id: "ceo", label: "CEO Holding", role: "Orquestração", status: "active" },
+        { id: "orgfy", label: "OrgFy Core", role: "Operacional", status: "active" },
+        { id: "lumen", label: "Lumen IPTV", role: "Operacional", status: "active" },
+        { id: "saas", label: "SaaS Tributário", role: "Planejado", status: "planned" }
+      ];
+      const seatCoords = [
+        [-3.25, 0, 0],
+        // cabeceira esquerda (CEO Holding)
+        [-1.3, 0, 1.65],
+        [0, 0, 1.65],
+        [1.3, 0, 1.65],
+        [-1.3, 0, -1.65],
+        [0, 0, -1.65],
+        [1.3, 0, -1.65],
+        [3.25, 0, 0]
+      ];
+      const pulseMeshes = [];
+      seats.slice(0, seatCoords.length).forEach((seat, idx) => {
+        const [sx, , sz] = seatCoords[idx];
+        const toneHex = seat.status === "working" ? 6333946 : seat.status === "active" ? 4052620 : 5395035;
+        const chair = new Mesh(
+          new BoxGeometry(0.62, 0.45, 0.62),
+          new MeshStandardMaterial({ color: 2040880, roughness: 0.7 })
+        );
+        chair.position.set(sx, 0.45, sz);
+        scene.add(chair);
+        const body = new Mesh(
+          new CylinderGeometry(0.18, 0.24, 0.42, 16),
+          new MeshStandardMaterial({ color: 2830656, roughness: 0.5 })
+        );
+        body.position.set(sx, 0.9, sz);
+        scene.add(body);
+        const head = new Mesh(
+          new SphereGeometry(0.17, 16, 16),
+          new MeshStandardMaterial({ color: 13949154, roughness: 0.4 })
+        );
+        head.position.set(sx, 1.28, sz);
+        scene.add(head);
+        const ring = new Mesh(
+          new RingGeometry(0.36, 0.44, 24),
+          new MeshBasicMaterial({ color: toneHex, side: DoubleSide })
+        );
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.set(sx, 0.03, sz);
+        scene.add(ring);
+        if (seat.status === "working") pulseMeshes.push(ring);
+      });
+      let dragging = false;
+      let lastX = 0;
+      let lastY = 0;
+      const onDown = (e) => {
+        dragging = true;
+        lastX = e.clientX;
+        lastY = e.clientY;
+      };
+      const onMove = (e) => {
+        if (!dragging) return;
+        theta -= (e.clientX - lastX) * 8e-3;
+        phi = Math.max(0.45, Math.min(1.25, phi - (e.clientY - lastY) * 6e-3));
+        lastX = e.clientX;
+        lastY = e.clientY;
+        updateCamera();
+      };
+      const onUp = () => {
+        dragging = false;
+      };
+      const onWheel = (e) => {
+        e.preventDefault();
+        radius = Math.max(7.5, Math.min(16, radius + e.deltaY * 8e-3));
+        updateCamera();
+      };
+      const dom = renderer.domElement;
+      dom.style.cursor = "grab";
+      dom.addEventListener("mousedown", onDown);
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+      dom.addEventListener("wheel", onWheel, { passive: false });
+      let rafId = 0;
+      const clock = new Clock();
+      const animate = () => {
+        rafId = requestAnimationFrame(animate);
+        const t = clock.getElapsedTime();
+        for (const m of pulseMeshes) {
+          const s = 1 + Math.sin(t * 4) * 0.09;
+          m.scale.set(s, s, 1);
+        }
+        renderer.render(scene, camera);
+      };
+      animate();
+      const onResize = () => {
+        const w = Math.max(320, container.clientWidth || 680);
+        const hh = Math.max(220, container.clientHeight || 280);
+        camera.aspect = w / hh;
+        camera.updateProjectionMatrix();
+        renderer.setSize(w, hh);
+      };
+      window.addEventListener("resize", onResize);
+      return () => {
+        cancelAnimationFrame(rafId);
+        dom.removeEventListener("mousedown", onDown);
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+        dom.removeEventListener("wheel", onWheel);
+        window.removeEventListener("resize", onResize);
+        renderer.dispose();
+      };
+    }, [props.seats.length, fitTick]);
+    return h(
+      "div",
+      {
+        className: "of-card",
+        "data-boardroom-3d": "true",
+        style: { position: "relative", overflow: "hidden" }
+      },
+      h(
+        "div",
+        {
+          style: {
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "9px 14px",
+            borderBottom: "1px solid var(--border)",
+            fontSize: "12px"
+          }
+        },
+        h(
+          "div",
+          { style: { display: "inline-flex", alignItems: "center", gap: "8px" } },
+          h("strong", null, props.title || "Sala de Reunião do Conselho · Tema Boardroom 3D"),
+          h("span", { className: "of-pill", "data-tone": "done" }, `${props.seats.length} assentos`)
+        ),
+        h(
+          "button",
+          {
+            type: "button",
+            className: "of-btn",
+            "data-variant": "ghost",
+            style: { fontSize: "11px", padding: "3px 8px" },
+            onClick: () => setFitTick((n) => n + 1)
+          },
+          "Enquadrar"
+        )
+      ),
+      h("div", {
+        ref: mountRef,
+        style: { width: "100%", height: "270px", background: "#0d0f13" }
+      }),
+      h(
+        "div",
+        {
+          style: {
+            display: "flex",
+            flexWrap: "wrap",
+            gap: "6px",
+            padding: "8px 12px",
+            borderTop: "1px solid var(--border)",
+            background: "var(--panel)"
+          }
+        },
+        props.seats.map(
+          (s) => h(
+            "button",
+            {
+              key: s.id,
+              type: "button",
+              className: "of-chip",
+              onClick: s.onClick,
+              title: `${s.label} — ${s.role}`
+            },
+            h("span", {
+              className: "of-dot",
+              "data-tone": s.status === "working" ? "running" : s.status === "active" ? "done" : "idle"
+            }),
+            h("span", null, s.label),
+            h("span", { className: "of-muted", style: { fontSize: "10px" } }, `· ${s.role}`)
+          )
+        )
+      )
+    );
+  };
+}
 const CHART_COLORS = ["var(--chart-2)", "var(--chart-1)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"];
 const AUTONOMY_MODES = [
   {
@@ -42745,7 +43684,7 @@ function fmtTokens(n) {
   return String(n);
 }
 function renderFactorySecondaryPage(props) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s;
   const {
     h,
     tab,
@@ -42773,6 +43712,25 @@ function renderFactorySecondaryPage(props) {
     const empresas = (holding == null ? void 0 : holding.empresas) || [];
     const boardAreas = (holding == null ? void 0 : holding.conselho) || [];
     const approvals = (holding == null ? void 0 : holding.approvals) || [];
+    const boardroomSeats = [
+      {
+        id: "ceo-holding",
+        label: ((_a = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _a.nome) || "OrgFy Iris",
+        role: "CEO Holding",
+        status: ((_b = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _b.pubkey) && ((_d = (_c = props.telemetry) == null ? void 0 : _c.byPubkey) == null ? void 0 : _d[holding.ceoHolding.pubkey.toLowerCase()]) ? "working" : "active",
+        onClick: () => {
+          var _a2, _b2;
+          return onOpenAgentDm == null ? void 0 : onOpenAgentDm({ name: ((_a2 = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _a2.nome) || "OrgFy Iris", pubkey: ((_b2 = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _b2.pubkey) || "" });
+        }
+      },
+      ...empresas.map((emp) => ({
+        id: emp.slug,
+        label: emp.workspaceBuzz || emp.nome,
+        role: emp.estagio === "operacional" ? `${emp.agentesProntos}/${emp.agentesTotal} agentes` : emp.estagio,
+        status: emp.estagio === "operacional" ? "active" : "planned",
+        onClick: () => onSelectTenant(emp.slug)
+      }))
+    ];
     return h(
       "div",
       { style: { display: "flex", flexDirection: "column", gap: "14px" } },
@@ -42786,7 +43744,7 @@ function renderFactorySecondaryPage(props) {
           h(
             "div",
             { className: "of-muted", style: { marginTop: "3px" } },
-            `Fundador: ${((_a = holding == null ? void 0 : holding.fundador) == null ? void 0 : _a.nome) || "Helton Fraga"} · CEO Holding: ${((_b = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _b.nome) || "OrgFy Iris"} · ${empresas.length} empresas no portfólio · ${approvals.filter((a) => a.status === "pendente").length} aprovação(ões) pendente(s)`
+            `Fundador: ${((_e = holding == null ? void 0 : holding.fundador) == null ? void 0 : _e.nome) || "Helton Fraga"} · CEO Holding: ${((_f = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _f.nome) || "OrgFy Iris"} · ${empresas.length} empresas no portfólio · ${approvals.filter((a) => a.status === "pendente").length} aprovação(ões) pendente(s)`
           )
         ),
         onOpenAgentDm && h(
@@ -42800,9 +43758,10 @@ function renderFactorySecondaryPage(props) {
               return onOpenAgentDm({ name: ((_a2 = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _a2.nome) || "OrgFy Iris", pubkey: ((_b2 = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _b2.pubkey) || "" });
             }
           },
-          `Falar com ${((_c = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _c.nome) || "OrgFy Iris"} ↗`
+          `Falar com ${((_g = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _g.nome) || "OrgFy Iris"} ↗`
         )
       ),
+      props.Boardroom3D && h(props.Boardroom3D, { seats: boardroomSeats, title: "Sala de Reunião do Conselho · Tema Boardroom 3D" }),
       h(
         "div",
         { className: "of-grid-3" },
@@ -42953,8 +43912,8 @@ function renderFactorySecondaryPage(props) {
     );
   }
   if (tab === "costs") {
-    const economia = ((_d = status.kpis) == null ? void 0 : _d.economia) || null;
-    const qualidade = ((_e = status.kpis) == null ? void 0 : _e.qualidade) || null;
+    const economia = ((_h = status.kpis) == null ? void 0 : _h.economia) || null;
+    const qualidade = ((_i = status.kpis) == null ? void 0 : _i.qualidade) || null;
     const porModelo = Array.isArray(economia == null ? void 0 : economia.por_modelo) ? economia.por_modelo : [];
     const totalCost = porModelo.reduce((acc, r) => acc + Number(r.custo_usd || 0), 0);
     const maxCost = Math.max(0.01, ...porModelo.map((r) => Number(r.custo_usd || 0)));
@@ -42985,9 +43944,9 @@ function renderFactorySecondaryPage(props) {
               )
             )
           ),
-          h("span", { className: "of-pill", "data-tone": "done" }, `Empresa em foco: ${((_f = status.tenantManifest) == null ? void 0 : _f.nome) || tenant}`)
+          h("span", { className: "of-pill", "data-tone": "done" }, `Empresa em foco: ${((_j = status.tenantManifest) == null ? void 0 : _j.nome) || tenant}`)
         ),
-        h("span", { className: "of-muted" }, `Fonte real: kpis-esteira.json (${((_g = status.kpis) == null ? void 0 : _g.gerado_em) || PT_BR.labels.unavailable})`)
+        h("span", { className: "of-muted" }, `Fonte real: kpis-esteira.json (${((_k = status.kpis) == null ? void 0 : _k.gerado_em) || PT_BR.labels.unavailable})`)
       ),
       h(
         "div",
@@ -43007,7 +43966,7 @@ function renderFactorySecondaryPage(props) {
           {
             label: "Tokens (7d)",
             val: fmtTokens(economia == null ? void 0 : economia.tokens_7d),
-            sub: `orçamento/dia: ${fmtTokens((_h = status.tenantManifest) == null ? void 0 : _h.budgetTokensDiario)}`
+            sub: `orçamento/dia: ${fmtTokens((_l = status.tenantManifest) == null ? void 0 : _l.budgetTokensDiario)}`
           },
           {
             label: "Cache hit rate",
@@ -43022,7 +43981,7 @@ function renderFactorySecondaryPage(props) {
           {
             label: "FPY real",
             val: typeof (qualidade == null ? void 0 : qualidade.fpy_real_pct) === "number" ? `${qualidade.fpy_real_pct.toFixed(1)}%` : PT_BR.labels.unavailable,
-            sub: `CPI mín: ${((_i = status.tenantManifest) == null ? void 0 : _i.cpiMinimo) ?? 0.85}`
+            sub: `CPI mín: ${((_m2 = status.tenantManifest) == null ? void 0 : _m2.cpiMinimo) ?? 0.85}`
           }
         ].map(
           (k) => h(
@@ -43212,10 +44171,10 @@ function renderFactorySecondaryPage(props) {
     );
   }
   if (tab === "agents") {
-    const tenantAgents = ((_j = status.tenantManifest) == null ? void 0 : _j.agentes) || [];
+    const tenantAgents = ((_n = status.tenantManifest) == null ? void 0 : _n.agentes) || [];
     const modelos = status.modelos || [];
-    const revisoresSurf = Object.entries(((_k = status.tenantManifest) == null ? void 0 : _k.revisoresPorSuperficie) || {});
-    const empresaNome = ((_l = status.tenantManifest) == null ? void 0 : _l.nome) || tenant;
+    const revisoresSurf = Object.entries(((_o = status.tenantManifest) == null ? void 0 : _o.revisoresPorSuperficie) || {});
+    const empresaNome = ((_p = status.tenantManifest) == null ? void 0 : _p.nome) || tenant;
     return h(
       "div",
       { style: { display: "flex", flexDirection: "column", gap: "12px" } },
@@ -43245,23 +44204,38 @@ function renderFactorySecondaryPage(props) {
           )
         ),
         h(
-          "span",
-          { className: "of-muted" },
-          `Fonte: empresas/${tenant}.json × Buzz Desktop (${tenantAgents.filter((a) => a.inBuzz).length}/${tenantAgents.length} provisionados)`
+          "div",
+          { style: { display: "inline-flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
+          h(
+            "span",
+            { className: "of-muted" },
+            `Fonte: empresas/${tenant}.json × Buzz Desktop (${tenantAgents.filter((a) => a.inBuzz).length}/${tenantAgents.length} provisionados)`
+          ),
+          props.onReconcileAgents && h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-variant": "primary",
+              "data-reconcile-r51": "true",
+              onClick: props.onReconcileAgents
+            },
+            "Reconciliar modelos (Eval R5.1)"
+          )
         )
       ),
       agentTab === "memory" ? h(
         "div",
         { className: "of-card-pad" },
         h("div", { style: { fontSize: "14px", fontWeight: 700, marginBottom: "4px" } }, `Agentes de ${empresaNome}`),
-        h("div", { className: "of-muted", style: { marginBottom: "10px" } }, "Cada agente abaixo vem do manifesto oficial desta empresa cruzado com o estado ao vivo no Buzz Desktop. Clique em DM ↗ para conversar na janela nativa do Buzz."),
+        h("div", { className: "of-muted", style: { marginBottom: "10px" } }, "Cada agente abaixo vem do manifesto oficial desta empresa cruzado com o estado ao vivo no Buzz Desktop. Use DM ↗ para conversar na barra lateral ou os controles nativos de sessão (Parar / Compactar / Nova)."),
         tenantAgents.length === 0 ? h("div", { className: "of-muted" }, `Nenhum agente encontrado em empresas/${tenant}.json.`) : h(
           "table",
           { className: "of-table" },
           h(
             "thead",
             null,
-            h("tr", null, h("th", null, "Agente"), h("th", null, "Função & Papel"), h("th", null, "Modelo (Buzz)"), h("th", null, "Status"), h("th", null, "Ação"))
+            h("tr", null, h("th", null, "Agente"), h("th", null, "Função & Papel"), h("th", null, "Modelo (Buzz)"), h("th", null, "Status"), h("th", null, "Ações (Buzz API)"))
           ),
           h(
             "tbody",
@@ -43303,17 +44277,57 @@ function renderFactorySecondaryPage(props) {
                 h(
                   "td",
                   null,
-                  onOpenAgentDm && a.pubkey ? h(
-                    "button",
-                    {
-                      type: "button",
-                      className: "of-btn",
-                      "data-variant": "ghost",
-                      style: { color: "var(--primary)", padding: "3px 8px" },
-                      onClick: () => onOpenAgentDm({ key: a.agentKey, pubkey: a.pubkey, name: a.name })
-                    },
-                    "DM ↗"
-                  ) : h("span", { className: "of-muted" }, "—")
+                  h(
+                    "div",
+                    { style: { display: "inline-flex", alignItems: "center", gap: "4px", flexWrap: "wrap" } },
+                    onOpenAgentDm && a.pubkey && h(
+                      "button",
+                      {
+                        type: "button",
+                        className: "of-btn",
+                        "data-variant": "ghost",
+                        style: { color: "var(--primary)", padding: "3px 7px" },
+                        onClick: () => onOpenAgentDm({ key: a.agentKey, pubkey: a.pubkey, name: a.name })
+                      },
+                      "DM ↗"
+                    ),
+                    props.onAgentSessionAction && a.inBuzz && a.agentKey && h(
+                      "button",
+                      {
+                        type: "button",
+                        className: "of-btn",
+                        "data-variant": "ghost",
+                        style: { padding: "3px 6px", fontSize: "10.5px" },
+                        title: "Compactar contexto da sessão",
+                        onClick: () => props.onAgentSessionAction(a.agentKey, "compact")
+                      },
+                      "Compactar"
+                    ),
+                    props.onAgentSessionAction && a.inBuzz && a.agentKey && h(
+                      "button",
+                      {
+                        type: "button",
+                        className: "of-btn",
+                        "data-variant": "ghost",
+                        style: { padding: "3px 6px", fontSize: "10.5px" },
+                        title: "Iniciar nova sessão limpa",
+                        onClick: () => props.onAgentSessionAction(a.agentKey, "new")
+                      },
+                      "Nova"
+                    ),
+                    props.onAgentSessionAction && liveTurn && a.agentKey && h(
+                      "button",
+                      {
+                        type: "button",
+                        className: "of-btn",
+                        "data-variant": "danger",
+                        style: { padding: "3px 6px", fontSize: "10.5px" },
+                        title: "Interromper turno em andamento",
+                        onClick: () => props.onAgentSessionAction(a.agentKey, "interrupt")
+                      },
+                      "Parar"
+                    )
+                  )
                 )
               );
             })
@@ -43393,7 +44407,7 @@ function renderFactorySecondaryPage(props) {
         h(
           "div",
           null,
-          h("div", { style: { fontSize: "14.5px", fontWeight: 700 } }, `Canvas, Visão & Regras Injetadas · ${((_m2 = status.tenantManifest) == null ? void 0 : _m2.nome) || tenant}`),
+          h("div", { style: { fontSize: "14.5px", fontWeight: 700 } }, `Canvas, Visão & Regras Injetadas · ${((_q = status.tenantManifest) == null ? void 0 : _q.nome) || tenant}`),
           h("div", { className: "of-muted", style: { marginTop: "2px" } }, "Fontes reais do OrgFy: empresas/board.json (Conselho), PROJECT.md + AGENTS.md + Canvas do canal no Buzz (Workspace) e regras-probatorias.json + ctx.agents.addInstructions (Agentes).")
         ),
         props.onOpenChannelInBuzz && h(
@@ -43438,7 +44452,7 @@ function renderFactorySecondaryPage(props) {
         h(
           "section",
           { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-          h("div", { className: "of-meter-label" }, `2. Workspace & Canvas (${((_n = status.tenantManifest) == null ? void 0 : _n.nome) || tenant})`),
+          h("div", { className: "of-meter-label" }, `2. Workspace & Canvas (${((_r = status.tenantManifest) == null ? void 0 : _r.nome) || tenant})`),
           papeis.length > 0 && h(
             "div",
             { style: { display: "flex", flexWrap: "wrap", gap: "6px" } },
@@ -43516,7 +44530,7 @@ function renderFactorySecondaryPage(props) {
     h(
       "div",
       { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-      h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Modo de autonomia · ${((_o = status.tenantManifest) == null ? void 0 : _o.nome) || tenant}`),
+      h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Modo de autonomia · ${((_s = status.tenantManifest) == null ? void 0 : _s.nome) || tenant}`),
       h("div", { className: "of-muted" }, "Suba um degrau por vez. Áreas protegidas e regra L-01 sempre permanecem ativas."),
       h(
         "div",
@@ -44484,6 +45498,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
   const React = ctx.react;
   const h = React.createElement;
   const Floor3D = createFloor3DComponent(ctx);
+  const Boardroom3D = createBoardroom3DComponent(ctx);
   return function OrgFyFactoryApp() {
     var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
     const [tenant, setTenant] = React.useState("orgfy");
@@ -44788,6 +45803,60 @@ function createFactoryAppComponent(ctx, opts = {}) {
       },
       [notify2]
     );
+    const handleReconcileAgentsR51 = React.useCallback(async () => {
+      const agentsApi = ctx == null ? void 0 : ctx.agents;
+      if (typeof (agentsApi == null ? void 0 : agentsApi.save) !== "function") {
+        notify2("API ctx.agents.save indisponível nesta versão do Buzz.");
+        return;
+      }
+      const winners = /* @__PURE__ */ new Set([
+        "claude-sonnet-5-5",
+        "claude-sonnet-4-6",
+        "gemini-2.5-flash"
+      ]);
+      const targets = tenantAgents.filter(
+        (a) => a.inBuzz && a.agentKey && !winners.has(String(a.model || "").split("/").pop() || "")
+      );
+      if (targets.length === 0) {
+        notify2("Todos os agentes provisionados já estão em modelos aprovados no Eval R5.1.");
+        return;
+      }
+      let updated = 0;
+      for (const ag of targets) {
+        const papel = String(ag.papel || "").toLowerCase();
+        const isTier1 = /(ceo|coo|revis|arquit|segur|secur|qa|oraculo|conselho|board)/.test(papel);
+        const provider = isTier1 ? "nexusmind_anthropic" : "nexusmind_antigravity";
+        const model = isTier1 ? "claude-sonnet-5-5" : "gemini-2.5-flash";
+        try {
+          await agentsApi.save(ag.agentKey, { provider, model });
+          updated += 1;
+        } catch {
+        }
+      }
+      notify2(
+        updated > 0 ? `${updated}/${targets.length} agente(s) reconciliado(s) para os vencedores do Eval R5.1 via ctx.agents.save().` : "Nenhum agente pôde ser atualizado via ctx.agents.save()."
+      );
+      await refresh(tenant);
+    }, [tenantAgents, tenant, notify2, refresh]);
+    const handleAgentSessionAction = React.useCallback(
+      async (agentKey, action) => {
+        var _a2, _b2;
+        const agentsApi = ctx == null ? void 0 : ctx.agents;
+        if (typeof (agentsApi == null ? void 0 : agentsApi.session) !== "function") {
+          notify2("API ctx.agents.session indisponível nesta versão do Buzz.");
+          return;
+        }
+        const canal = ((_a2 = status.tenantManifest) == null ? void 0 : _a2.canal) || ((_b2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _b2.canal) || void 0;
+        try {
+          await agentsApi.session(agentKey, canal ? { channelId: canal } : {}, action);
+          const label = action === "interrupt" ? "interrompida" : action === "compact" ? "compactada" : "reiniciada";
+          notify2(`Sessão de ${agentKey} ${label} via Buzz API.`);
+        } catch (err) {
+          notify2(`Falha na ação ${action} para ${agentKey}: ${(err == null ? void 0 : err.message) || err}`);
+        }
+      },
+      [status.tenantManifest, holding, tenant, notify2]
+    );
     const dmPool = React.useMemo(() => {
       if (!GLOBAL_TABS.has(tab) && tenantAgents.length > 0) {
         return tenantAgents.map((a) => {
@@ -45055,35 +46124,19 @@ function createFactoryAppComponent(ctx, opts = {}) {
             ),
             h(
               "div",
-              { style: { marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: "6px", flexWrap: "wrap" } },
-              !isGlobalView && h(
-                "button",
-                {
-                  type: "button",
-                  className: "of-btn",
-                  "data-variant": tab === "floor" ? "primary" : "ghost",
-                  onClick: () => setTab(tab === "floor" ? "overview" : "floor")
-                },
-                `Andar 3D (${tenantTotalAgentsCount})`
-              ),
-              !isGlobalView && h(
-                "button",
-                {
-                  type: "button",
-                  className: "of-btn",
-                  "data-variant": "ghost",
-                  onClick: handleOpenChannelInBuzz
-                },
-                "Canal no Buzz ↗"
-              ),
+              { className: "of-apple-chat-bar", "data-apple-header-chat": "true" },
               h(
                 "select",
                 {
-                  className: "of-tenant-select",
-                  "aria-label": "Selecionar agente para chat lateral no Buzz",
+                  className: "of-apple-select",
+                  "aria-label": "Selecionar agente e abrir chat lateral",
                   value: dmAgentKey,
-                  onChange: (e) => setDmAgentKey(e.target.value),
-                  style: { width: "auto", maxWidth: "210px", padding: "4px 8px", fontSize: "11.5px" }
+                  onChange: (e) => {
+                    const nextKey = e.target.value;
+                    setDmAgentKey(nextKey);
+                    const picked = dmPool.find((a) => a.key === nextKey);
+                    if (picked) handleOpenAgentDmInBuzz(picked);
+                  }
                 },
                 dmPool.length > 0 ? dmPool.map((a) => h("option", { key: a.key, value: a.key }, a.label)) : h("option", { value: "" }, ((_i = status.tenantManifest) == null ? void 0 : _i.coo) || "OrgFy Bento (COO)")
               ),
@@ -45091,12 +46144,27 @@ function createFactoryAppComponent(ctx, opts = {}) {
                 "button",
                 {
                   type: "button",
-                  className: "of-btn",
-                  "data-variant": "primary",
+                  className: "of-apple-icon-btn",
                   disabled: openingDm,
+                  title: selectedDmAgent ? `Abrir chat lateral com ${selectedDmAgent.name}` : "Abrir chat lateral",
+                  "aria-label": "Abrir chat lateral",
                   onClick: () => handleOpenAgentDmInBuzz(selectedDmAgent)
                 },
-                openingDm ? "Abrindo..." : "Chat lateral"
+                h(
+                  "svg",
+                  {
+                    width: 15,
+                    height: 15,
+                    viewBox: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    strokeWidth: 1.8,
+                    strokeLinecap: "round",
+                    strokeLinejoin: "round",
+                    "aria-hidden": "true"
+                  },
+                  h("path", { d: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" })
+                )
               )
             ),
             toast && h("span", { className: "of-pill", "data-tone": "done" }, toast),
@@ -45138,6 +46206,8 @@ function createFactoryAppComponent(ctx, opts = {}) {
                 workingNowCount: tenantWorkingNowCount,
                 onOpenTurnInSideChat: handleOpenTurnInSideChat,
                 onInterruptTurn: handleInterruptTurn,
+                onOpenAgentDm: handleOpenAgentDmInBuzz,
+                onNavigateTab: (t) => setTab(t),
                 loading,
                 confirmKill,
                 setConfirmKill,
@@ -45216,7 +46286,10 @@ function createFactoryAppComponent(ctx, opts = {}) {
                   `Configurações salvas em controle-${tenant}.json.`
                 ),
                 onSelectModeQuick: (mode) => handleControlUpdate({ mode }, `Modo alterado para ${PT_BR.modes[mode]}.`),
-                onOpenChannelInBuzz: handleOpenChannelInBuzz
+                onOpenChannelInBuzz: handleOpenChannelInBuzz,
+                Boardroom3D,
+                onReconcileAgents: handleReconcileAgentsR51,
+                onAgentSessionAction: handleAgentSessionAction
               })
             )
           )

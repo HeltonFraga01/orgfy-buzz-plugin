@@ -715,9 +715,222 @@ export const FACTORY_SHADOW_CSS = `
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
-  padding: 16px 20px 28px;
-  gap: 14px;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  padding: 18px 22px 36px;
+  gap: 16px;
   box-sizing: border-box;
+}
+
+.of-overview-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+.of-section-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.of-section-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.of-section-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted-foreground);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.of-now-next {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 310px;
+  gap: 16px;
+  align-items: start;
+  flex-shrink: 0;
+}
+
+@media (max-width: 900px) {
+  .of-now-next {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.of-now-empty {
+  border-radius: 11px;
+  border: 1px dashed var(--border);
+  background: color-mix(in srgb, var(--card) 55%, transparent);
+  padding: 22px 16px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+.of-now-cards {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.of-now-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 248px;
+  max-width: 290px;
+  flex-shrink: 0;
+  border-radius: 11px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  padding: 10px 12px;
+  text-align: left;
+  color: var(--foreground);
+  cursor: pointer;
+  transition: border-color 0.14s ease, background 0.14s ease;
+}
+
+.of-now-card:hover {
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
+  background: var(--surface);
+}
+
+.of-next-list {
+  border-radius: 11px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.of-next-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 9px;
+  border-radius: 7px;
+  border: none;
+  background: transparent;
+  color: var(--foreground);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.of-next-row:hover {
+  background: var(--surface);
+}
+
+.of-list-card {
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.of-list-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--foreground);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.of-list-row:last-child {
+  border-bottom: none;
+}
+
+.of-list-row:hover {
+  background: var(--surface);
+}
+
+.of-spend-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(110px, 160px));
+  gap: 18px;
+  margin-top: 10px;
+}
+
+.of-apple-chat-bar {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.of-apple-select {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 30px;
+  max-width: 210px;
+  padding: 0 26px 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m7 15 5 5 5-5'/%3E%3Cpath d='m7 9 5-5 5 5'/%3E%3C/svg%3E") no-repeat right 8px center;
+  color: var(--foreground);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+
+.of-apple-select:hover, .of-apple-select:focus {
+  border-color: var(--border-strong);
+  outline: none;
+}
+
+.of-apple-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--foreground);
+  cursor: pointer;
+  transition: border-color 0.12s ease, background-color 0.12s ease, color 0.12s ease;
+}
+
+.of-apple-icon-btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--primary) 50%, var(--border));
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.of-apple-icon-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .of-card {
@@ -725,6 +938,7 @@ export const FACTORY_SHADOW_CSS = `
   border: 1px solid var(--border);
   border-radius: 12px;
   overflow: hidden;
+  flex-shrink: 0;
   box-sizing: border-box;
 }
 
@@ -733,6 +947,7 @@ export const FACTORY_SHADOW_CSS = `
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 14px 16px;
+  flex-shrink: 0;
   box-sizing: border-box;
 }
 
@@ -740,6 +955,7 @@ export const FACTORY_SHADOW_CSS = `
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 9px;
+  flex-shrink: 0;
   box-sizing: border-box;
 }
 
