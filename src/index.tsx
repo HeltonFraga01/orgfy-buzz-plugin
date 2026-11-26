@@ -192,6 +192,11 @@ import { renderKanbanColumn } from "./components/KanbanColumn";
 import { createFactoryAppComponent } from "./factory/FactoryApp";
 import { parseOrgfyCardStructure } from "./components/CodeDenInspectorDrawer";
 import {
+  buildDefaultAutomations,
+  computeNextAutomationRuns,
+  exportAutomationToBuzzWorkflowYaml,
+} from "./factory/AutomationEditor";
+import {
   parseFactoryStatus,
   buildEmptyFactoryStatus,
   fetchFactoryStatus,
@@ -206,6 +211,9 @@ export {
   fetchFactoryStatus,
   writeTenantControl,
   parseOrgfyCardStructure,
+  buildDefaultAutomations,
+  computeNextAutomationRuns,
+  exportAutomationToBuzzWorkflowYaml,
   FACTORY_SHADOW_CSS,
   attachFactoryShadowStyles,
   PT_BR,

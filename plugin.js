@@ -10198,6 +10198,42 @@ const FACTORY_SHADOW_CSS = `
   50% { opacity: 0.45; transform: scale(0.82); }
 }
 
+@keyframes of-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.of-spin {
+  animation: of-spin 0.8s linear infinite;
+}
+
+.of-icon-circle-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 9999px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--muted-foreground);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+
+.of-icon-circle-btn:hover {
+  background: var(--muted);
+  color: var(--foreground);
+  border-color: var(--border-strong);
+}
+
+.of-icon-circle-btn:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
 .of-shell {
   display: grid;
   grid-template-columns: 244px minmax(0, 1fr);
@@ -13170,7 +13206,18 @@ function renderFactoryBoardAndFloor(props) {
             "Andar"
           )
         ),
-        props.onOpenGuide && h("button", { type: "button", className: "of-btn", title: "Como funciona o loop da Fábrica OrgFy", onClick: props.onOpenGuide }, "? Como funciona"),
+        props.onRunScout && h(
+          "button",
+          {
+            type: "button",
+            className: "of-btn",
+            "data-run-scout-now": "true",
+            disabled: props.runningScout,
+            title: "Disparar auditoria imediata do Oráculo (Scout) contra o Canvas/Visão",
+            onClick: props.onRunScout
+          },
+          props.runningScout ? "Oráculo…" : "Oráculo"
+        ),
         props.onToggleKillSwitch && h(
           "button",
           {
@@ -13181,7 +13228,46 @@ function renderFactoryBoardAndFloor(props) {
           },
           status.killSwitch ? "Retomar" : "Kill switch"
         ),
-        h("button", { type: "button", className: "of-btn", onClick: onRefresh, disabled: loading }, loading ? "..." : "Verificar agora")
+        props.onOpenGuide && h(
+          "button",
+          {
+            type: "button",
+            className: "of-icon-circle-btn",
+            "data-factory-guide-trigger": "true",
+            title: "Como funciona o loop da Fábrica OrgFy",
+            "aria-label": "Como funciona o loop da Fábrica OrgFy",
+            onClick: props.onOpenGuide
+          },
+          h("span", { style: { fontSize: "13px", fontWeight: 700, lineHeight: 1 } }, "?")
+        ),
+        h(
+          "button",
+          {
+            type: "button",
+            className: "of-icon-circle-btn",
+            "data-factory-refresh-icon": "true",
+            title: loading ? "Atualizando..." : "Atualizar agora",
+            "aria-label": "Atualizar agora",
+            onClick: onRefresh
+          },
+          h(
+            "svg",
+            {
+              width: 14,
+              height: 14,
+              viewBox: "0 0 24 24",
+              fill: "none",
+              stroke: "currentColor",
+              strokeWidth: 2,
+              strokeLinecap: "round",
+              strokeLinejoin: "round",
+              className: loading ? "of-spin" : void 0,
+              "aria-hidden": "true"
+            },
+            h("path", { d: "M21 12a9 9 0 1 1-2.64-6.36" }),
+            h("path", { d: "M21 3v6h-6" })
+          )
+        )
       )
     ),
     // 2. StatsStrip (exibido no Board; oculto no Andar 3D para o 3D preencher 100% da tela, igual ao CodeDen)
@@ -13305,7 +13391,10 @@ function renderFactoryBoardAndFloor(props) {
           var _a2;
           return (_a2 = props.onOpenAgentDm) == null ? void 0 : _a2.call(props, ag);
         },
-        onOpenAgentProfile: (agentKey) => onSelectAgentKey(agentKey)
+        onOpenAgentProfile: (ag) => {
+          if (props.onOpenAgentProfileNative) props.onOpenAgentProfileNative(ag);
+          else if (ag.key) onSelectAgentKey(ag.key);
+        }
       }) : h(
         "div",
         { className: "of-card-pad" },
@@ -13837,9 +13926,11 @@ function createCodeDenInspectorDrawer(React) {
       onOpenCommitInBuzz,
       onOpenAgentDm,
       onSessionAction,
+      onToggleChecklistStep,
       onClose
     } = props;
     const [activeTab, setActiveTab] = React.useState("pr");
+    const [localChecklistOverrides, setLocalChecklistOverrides] = React.useState({});
     const [showLiveThread, setShowLiveThread] = React.useState(false);
     const [gitSnap, setGitSnap] = React.useState(null);
     const [gitLoading, setGitLoading] = React.useState(false);
@@ -13858,6 +13949,7 @@ function createCodeDenInspectorDrawer(React) {
       setOpenDiffFiles({});
       setSelectedFilePath(null);
       setFileContent(null);
+      setLocalChecklistOverrides({});
     }, [item == null ? void 0 : item.id]);
     React.useEffect(() => {
       if ((repoDetail == null ? void 0 : repoDetail.commit) && !selectedCommit) {
@@ -14671,7 +14763,7 @@ function createCodeDenInspectorDrawer(React) {
                 );
               }
               const resolveCrewByName = (name) => name ? liveCrew.find((a) => a.name.toLowerCase().includes(name.toLowerCase())) || { name } : null;
-              const doneCount = structured.escopo.passos.filter((p) => p.done).length;
+              structured.escopo.passos.filter((p) => p.done).length;
               return h(
                 "section",
                 { "data-buzz-repo-detail": "true", "data-orgfy-structured-card": "true", style: { display: "flex", flexDirection: "column", gap: "10px" } },
@@ -14754,29 +14846,56 @@ function createCodeDenInspectorDrawer(React) {
                     )
                   )
                 ),
-                structured.escopo.passos.length > 0 && h(
-                  "div",
-                  { style: { padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
-                  h(
+                structured.escopo.passos.length > 0 && (() => {
+                  const resolvedPassos = structured.escopo.passos.map((p) => ({
+                    ...p,
+                    done: localChecklistOverrides[p.id] !== void 0 ? localChecklistOverrides[p.id] : p.done
+                  }));
+                  const liveDone = resolvedPassos.filter((p) => p.done).length;
+                  return h(
                     "div",
-                    { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" } },
-                    h("span", { style: { fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted-foreground)" } }, "Checklist do Card"),
-                    h("span", { className: "of-pill", "data-tone": doneCount === structured.escopo.passos.length ? "done" : "waiting" }, `${doneCount}/${structured.escopo.passos.length}`)
-                  ),
-                  h(
-                    "div",
-                    { style: { display: "flex", flexDirection: "column", gap: "5px", fontSize: "12px" } },
-                    structured.escopo.passos.map(
-                      (p) => h(
-                        "div",
-                        { key: `${p.id}-${p.text.slice(0, 12)}`, style: { display: "flex", alignItems: "flex-start", gap: "7px" } },
-                        Icon({ h, name: p.done ? "checkCircle" : "clock", size: 13, color: p.done ? "var(--status-done, #3dd68c)" : "var(--muted-foreground)" }),
-                        h("span", { className: "of-mono", style: { fontSize: "11px", color: "var(--primary)", flexShrink: 0 } }, p.id),
-                        h("span", { style: { color: p.done ? "var(--muted-foreground)" : "var(--foreground)", textDecoration: p.done ? "line-through" : "none" } }, p.text)
+                    { "data-interactive-checklist": "true", style: { padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
+                    h(
+                      "div",
+                      { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" } },
+                      h("span", { style: { fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted-foreground)" } }, "Checklist do Card (clique para marcar)"),
+                      h("span", { className: "of-pill", "data-tone": liveDone === resolvedPassos.length ? "done" : "waiting" }, `${liveDone}/${resolvedPassos.length}`)
+                    ),
+                    h(
+                      "div",
+                      { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "12px" } },
+                      resolvedPassos.map(
+                        (p) => h(
+                          "button",
+                          {
+                            key: `${p.id}-${p.text.slice(0, 12)}`,
+                            type: "button",
+                            onClick: () => {
+                              const nextDone = !p.done;
+                              setLocalChecklistOverrides((prev) => ({ ...prev, [p.id]: nextDone }));
+                              onToggleChecklistStep == null ? void 0 : onToggleChecklistStep(p.id, nextDone, item);
+                            },
+                            style: {
+                              display: "flex",
+                              alignItems: "flex-start",
+                              gap: "7px",
+                              padding: "4px 6px",
+                              borderRadius: "6px",
+                              border: "none",
+                              background: "transparent",
+                              textAlign: "left",
+                              cursor: "pointer",
+                              color: "inherit"
+                            }
+                          },
+                          Icon({ h, name: p.done ? "checkCircle" : "clock", size: 13, color: p.done ? "var(--status-done, #3dd68c)" : "var(--muted-foreground)" }),
+                          h("span", { className: "of-mono", style: { fontSize: "11px", color: "var(--primary)", flexShrink: 0 } }, p.id),
+                          h("span", { style: { color: p.done ? "var(--muted-foreground)" : "var(--foreground)", textDecoration: p.done ? "line-through" : "none" } }, p.text)
+                        )
                       )
                     )
-                  )
-                ),
+                  );
+                })(),
                 (structured.aceite.feitoQuando || structured.aceite.comandoAceite) && h(
                   "div",
                   { style: { padding: "10px 12px", borderRadius: "8px", border: "1px solid rgba(61,214,140,0.3)", background: "rgba(61,214,140,0.06)", display: "flex", flexDirection: "column", gap: "6px" } },
@@ -46766,6 +46885,18 @@ function adaptStatusFor3D(status, liveCrew) {
     pmSessionId
   };
 }
+function formatElapsedStep(tsMs) {
+  if (!tsMs) return "—";
+  const ms = typeof tsMs === "number" ? tsMs : Date.parse(String(tsMs));
+  if (!Number.isFinite(ms)) return "—";
+  const diffSec = Math.max(0, Math.floor((Date.now() - ms) / 1e3));
+  if (diffSec < 60) return diffSec < 10 ? "agora" : `${diffSec}s`;
+  const mins = Math.floor(diffSec / 60);
+  if (mins < 60) return `${mins} min`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ${mins % 60}m`;
+  return `${Math.floor(hours / 24)}d`;
+}
 function createFloor3DComponent(ctx) {
   const React = ctx.react;
   const h = React.createElement;
@@ -46777,6 +46908,7 @@ function createFloor3DComponent(ctx) {
     const layoutRef = React.useRef(null);
     const [webglLost, setWebglLost] = React.useState(false);
     const [rosterOpen, setRosterOpen] = React.useState(true);
+    const [rosterFilter, setRosterFilter] = React.useState("all");
     const [hoveredKey, setHoveredKey] = React.useState(null);
     const [selectedKey, setSelectedKey] = React.useState(null);
     const [isFullscreen, setIsFullscreen] = React.useState(false);
@@ -46877,15 +47009,37 @@ function createFloor3DComponent(ctx) {
         h("div", { className: "of-muted", style: { marginTop: "6px" } }, "O Andar 3D requer WebGL ativo; use a aba Board para acompanhar os cards.")
       );
     }
+    const allWorkItems = [...status.inProgress, ...status.backlog, ...status.recent];
+    const findAssignedWork = (agName) => allWorkItems.find((w) => w.note && w.note.toLowerCase().includes(agName.toLowerCase())) || null;
     const renderCrewRow = (ag) => {
       const liveTurn = turnOf(ag);
+      const liveMatch = liveCrew.find((c) => {
+        var _a2;
+        return c.key === ag.agentKey || ag.pubkey && ((_a2 = c.pubkey) == null ? void 0 : _a2.toLowerCase()) === ag.pubkey.toLowerCase();
+      });
+      const assignedItem = findAssignedWork(ag.name);
+      const isSelected = selectedKey === ag.agentKey;
+      const statusLabel = liveTurn ? liveTurn.state === "error" ? "Erro" : "Respondendo" : ag.running ? "Em execução" : ag.inBuzz ? "Disponível" : "Pendente";
+      const stepLine = (liveTurn == null ? void 0 : liveTurn.stepLabel) || (assignedItem == null ? void 0 : assignedItem.step) || ag.funcao;
       return h(
         "div",
         {
           key: ag.agentKey || ag.name,
-          className: "of-nav-btn",
-          "data-active": selectedKey === ag.agentKey ? "true" : "false",
-          style: { alignItems: "flex-start", padding: "6px 8px" },
+          role: "button",
+          tabIndex: 0,
+          "data-floor3d-roster-row": ag.agentKey || ag.name,
+          style: {
+            display: "flex",
+            flexDirection: "column",
+            gap: "3px",
+            padding: "8px 10px",
+            borderBottom: "1px solid var(--border-subtle, rgba(255,255,255,0.06))",
+            background: isSelected ? "var(--affordance-selected, rgba(255,255,255,0.08))" : "transparent",
+            cursor: "pointer",
+            textAlign: "left"
+          },
+          onMouseEnter: () => setHoveredKey(ag.agentKey),
+          onMouseLeave: () => setHoveredKey((cur) => cur === ag.agentKey ? null : cur),
           onClick: () => {
             var _a2;
             setSelectedKey(ag.agentKey);
@@ -46894,37 +47048,68 @@ function createFloor3DComponent(ctx) {
         },
         h(
           "div",
-          { style: { display: "flex", flexDirection: "column", gap: "2px", minWidth: 0, flex: 1 } },
-          h(
-            "span",
-            { style: { display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "11.5px", fontWeight: 600 } },
-            h("span", {
-              className: "of-dot",
-              "data-tone": liveTurn ? liveTurn.state === "error" ? "failed" : "running" : ag.inBuzz ? "done" : "idle",
-              title: liveTurn ? liveTurn.stepLabel : ag.inBuzz ? "Disponível no Buzz" : "A provisionar"
-            }),
-            h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, ag.name)
-          ),
-          liveTurn ? h("span", { className: "of-mono", style: { fontSize: "9.5px", color: liveTurn.state === "error" ? "var(--status-failed)" : "var(--status-running)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, liveTurn.stepLabel) : h("span", { className: "of-muted", style: { fontSize: "10px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, ag.funcao),
-          h("span", { className: "of-mono of-muted", style: { fontSize: "9.5px" } }, ag.model)
+          { style: { display: "flex", alignItems: "center", gap: "6px", minWidth: 0 } },
+          (liveMatch == null ? void 0 : liveMatch.picture) ? h("img", { src: liveMatch.picture, alt: ag.name, style: { width: "16px", height: "16px", borderRadius: "4px", objectFit: "cover", flexShrink: 0 } }) : h("span", {
+            className: "of-dot",
+            "data-tone": liveTurn ? liveTurn.state === "error" ? "failed" : "running" : ag.inBuzz ? "done" : "idle"
+          }),
+          h("span", { style: { fontSize: "11.5px", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 } }, ag.name),
+          assignedItem && h("span", { className: "of-mono of-muted", style: { fontSize: "9.5px", flexShrink: 0 } }, `#${assignedItem.id.slice(0, 6)}`)
         ),
-        onOpenAgentDm && ag.pubkey && h(
-          "button",
-          {
-            type: "button",
-            className: "of-btn",
-            "data-variant": "ghost",
-            title: `Abrir DM nativa com ${ag.name} no Buzz`,
-            style: { padding: "2px 5px", fontSize: "10px", color: "var(--primary)", flexShrink: 0 },
-            onClick: (e) => {
-              e.stopPropagation();
-              onOpenAgentDm({ key: ag.agentKey, pubkey: ag.pubkey, name: ag.name });
-            }
-          },
-          "DM ↗"
+        assignedItem && h(
+          "div",
+          { style: { fontSize: "11px", color: "var(--foreground)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: assignedItem.title },
+          assignedItem.title
+        ),
+        h(
+          "div",
+          { style: { fontSize: "10px", color: liveTurn ? "var(--status-running)" : "var(--muted-foreground)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: `${stepLine} · ${statusLabel}` },
+          `${stepLine} · ${statusLabel}`
+        ),
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px", marginTop: "1px" } },
+          h("span", { className: "of-mono of-muted", style: { fontSize: "9.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 } }, `${ag.provider || (liveMatch == null ? void 0 : liveMatch.provider) || "buzz"} · ${ag.model}`),
+          h(
+            "div",
+            { style: { display: "inline-flex", alignItems: "center", gap: "4px", flexShrink: 0 } },
+            onOpenAgentProfile && ag.pubkey && h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                "data-variant": "ghost",
+                title: `Abrir perfil nativo de ${ag.name} no Buzz`,
+                style: { padding: "1px 5px", fontSize: "9.5px" },
+                onClick: (e) => {
+                  e.stopPropagation();
+                  onOpenAgentProfile({ key: ag.agentKey, pubkey: ag.pubkey, name: ag.name });
+                }
+              },
+              "Perfil"
+            ),
+            onOpenAgentDm && ag.pubkey && h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                "data-variant": "ghost",
+                title: `Abrir DM nativa com ${ag.name} no Buzz`,
+                style: { padding: "1px 5px", fontSize: "9.5px", color: "var(--primary)" },
+                onClick: (e) => {
+                  e.stopPropagation();
+                  onOpenAgentDm({ key: ag.agentKey, pubkey: ag.pubkey, name: ag.name });
+                }
+              },
+              "DM ↗"
+            )
+          )
         )
       );
     };
+    const filterRows = (list) => rosterFilter === "active" ? list.filter((a) => Boolean(turnOf(a) || a.running)) : list;
+    const workshopRows = filterRows(leadershipAndExec);
+    const lookoutRows = filterRows(reviewAndOps);
     return h(
       "div",
       { style: { display: "flex", flexDirection: "column", gap: "8px", flex: 1, minHeight: "560px" } },
@@ -46943,22 +47128,25 @@ function createFloor3DComponent(ctx) {
           }
         },
         rosterOpen ? h(
-          "aside",
+          "nav",
           {
+            "aria-label": "Roster da equipe",
+            "data-codeden-floor-roster": "true",
             style: {
               position: "absolute",
               top: "10px",
               left: "10px",
               bottom: "10px",
-              width: "238px",
+              width: "256px",
               zIndex: 20,
               borderRadius: "10px",
               border: "1px solid var(--border)",
-              background: "rgba(15, 17, 22, 0.90)",
-              backdropFilter: "blur(8px)",
+              background: "rgba(15, 17, 22, 0.93)",
+              backdropFilter: "blur(10px)",
               display: "flex",
               flexDirection: "column",
-              overflow: "hidden"
+              overflow: "hidden",
+              boxShadow: "0 10px 28px rgba(0,0,0,0.4)"
             }
           },
           h(
@@ -46967,21 +47155,36 @@ function createFloor3DComponent(ctx) {
               style: {
                 display: "flex",
                 alignItems: "center",
-                justifyContent: "space-between",
+                gap: "6px",
                 padding: "8px 10px",
                 borderBottom: "1px solid var(--border)",
                 fontSize: "11.5px",
-                fontWeight: 700
+                fontWeight: 700,
+                flexShrink: 0
               }
             },
-            h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, `Equipe ${empresaNome} · ${tenantAgents.length}`),
+            h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, `Equipe ${empresaNome}`),
+            h("span", { className: "of-pill of-num", style: { fontSize: "10px", padding: "0 5px" } }, String(tenantAgents.length)),
             h(
               "button",
               {
                 type: "button",
                 className: "of-btn",
                 "data-variant": "ghost",
-                style: { padding: "2px 6px" },
+                style: { marginLeft: "auto", padding: "1px 6px", fontSize: "10px" },
+                title: rosterFilter === "active" ? "Mostrar todos" : "Mostrar apenas ativos",
+                onClick: () => setRosterFilter((f) => f === "all" ? "active" : "all")
+              },
+              rosterFilter === "active" ? `Ativos (${workingNowCount})` : "Todos"
+            ),
+            h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                "data-variant": "ghost",
+                style: { padding: "1px 6px" },
+                title: "Recolher roster",
                 onClick: () => setRosterOpen(false)
               },
               "‹"
@@ -46989,11 +47192,56 @@ function createFloor3DComponent(ctx) {
           ),
           h(
             "div",
-            { style: { flex: 1, overflowY: "auto", padding: "8px", display: "flex", flexDirection: "column", gap: "4px" } },
-            h("div", { className: "of-meter-label", style: { padding: "2px 4px" } }, `OFICINA & LIDERANÇA · ${leadershipAndExec.length}`),
-            leadershipAndExec.length === 0 ? h("div", { className: "of-muted", style: { padding: "4px 6px", fontSize: "10.5px" } }, "Sem agentes no manifesto.") : leadershipAndExec.map(renderCrewRow),
-            h("div", { className: "of-meter-label", style: { marginTop: "8px", padding: "2px 4px" } }, `REVISORES L-01 & MIRANTE · ${reviewAndOps.length}`),
-            reviewAndOps.length === 0 ? h("div", { className: "of-muted", style: { padding: "4px 6px", fontSize: "10.5px" } }, "Sem revisores definidos.") : reviewAndOps.map(renderCrewRow)
+            { style: { flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" } },
+            h(
+              "div",
+              {
+                style: {
+                  position: "sticky",
+                  top: 0,
+                  zIndex: 1,
+                  display: "flex",
+                  justifyContent: "space-between",
+                  padding: "5px 10px",
+                  fontSize: "9.5px",
+                  fontWeight: 700,
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  color: "var(--muted-foreground)",
+                  background: "rgba(22, 25, 32, 0.94)",
+                  borderBottom: "1px solid var(--border)",
+                  backdropFilter: "blur(6px)"
+                }
+              },
+              h("span", null, "OFICINA & LIDERANÇA"),
+              h("span", { className: "of-num" }, String(workshopRows.length))
+            ),
+            workshopRows.length === 0 ? h("div", { className: "of-muted", style: { padding: "8px 10px", fontSize: "10.5px" } }, rosterFilter === "active" ? "Nenhum agente ativo na oficina." : "Sem agentes no manifesto.") : workshopRows.map(renderCrewRow),
+            h(
+              "div",
+              {
+                style: {
+                  position: "sticky",
+                  top: 0,
+                  zIndex: 1,
+                  display: "flex",
+                  justifyContent: "space-between",
+                  padding: "5px 10px",
+                  fontSize: "9.5px",
+                  fontWeight: 700,
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  color: "var(--muted-foreground)",
+                  background: "rgba(22, 25, 32, 0.94)",
+                  borderTop: "1px solid var(--border)",
+                  borderBottom: "1px solid var(--border)",
+                  backdropFilter: "blur(6px)"
+                }
+              },
+              h("span", null, "MIRANTE & REVISORES L-01"),
+              h("span", { className: "of-num" }, String(lookoutRows.length))
+            ),
+            lookoutRows.length === 0 ? h("div", { className: "of-muted", style: { padding: "8px 10px", fontSize: "10.5px" } }, rosterFilter === "active" ? "Nenhum revisor ativo no mirante." : "Sem revisores definidos.") : lookoutRows.map(renderCrewRow)
           )
         ) : h(
           "button",
@@ -47072,9 +47320,11 @@ function createFloor3DComponent(ctx) {
             ),
             h(
               "div",
-              { style: { display: "grid", gridTemplateColumns: "58px 1fr", gap: "4px 8px", fontSize: "11px" } },
+              { style: { display: "grid", gridTemplateColumns: "64px 1fr", gap: "4px 8px", fontSize: "11px" } },
               h("span", { className: "of-muted" }, "Etapa"),
               h("span", { style: { fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: stepLabel }, stepLabel),
+              h("span", { className: "of-muted" }, "Na etapa"),
+              h("span", { className: "of-mono of-muted", style: { fontSize: "10.5px" } }, formatElapsedStep((liveTurn == null ? void 0 : liveTurn.startedAt) || (sceneAg == null ? void 0 : sceneAg.since) || status.lastTickAt)),
               h("span", { className: "of-muted" }, "Agente"),
               h("span", { className: "of-mono of-muted", style: { fontSize: "10.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: modelLabel }, modelLabel)
             ),
@@ -47096,15 +47346,19 @@ function createFloor3DComponent(ctx) {
                 },
                 "Abrir chat lateral ↗"
               ),
-              onOpenAgentProfile && ((matchedTenantAg == null ? void 0 : matchedTenantAg.agentKey) || (matchedLive == null ? void 0 : matchedLive.key)) && h(
+              onOpenAgentProfile && (matchedTenantAg || matchedLive) && h(
                 "button",
                 {
                   type: "button",
                   className: "of-btn",
                   style: { fontSize: "11px", padding: "5px 8px" },
-                  onClick: () => onOpenAgentProfile((matchedTenantAg == null ? void 0 : matchedTenantAg.agentKey) || matchedLive.key)
+                  onClick: () => onOpenAgentProfile({
+                    key: (matchedTenantAg == null ? void 0 : matchedTenantAg.agentKey) || (matchedLive == null ? void 0 : matchedLive.key),
+                    pubkey: (matchedTenantAg == null ? void 0 : matchedTenantAg.pubkey) || (matchedLive == null ? void 0 : matchedLive.pubkey),
+                    name: displayTitle
+                  })
                 },
-                "Perfil"
+                "Perfil ↗"
               )
             )
           );
@@ -47899,6 +48153,496 @@ function renderBuzzCanvasViewer(props) {
     )
   );
 }
+const AUTOMATION_PLACEHOLDERS = [
+  "{{project.name}}",
+  "{{date}}",
+  "{{tenant}}",
+  "{{repo}}",
+  "{{channel}}"
+];
+const WEEKDAYS_PT = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
+const WEEKDAYS_SHORT = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+function buildDefaultAutomations(tenant, companyName) {
+  return [
+    {
+      id: `rotina-ceo-${tenant}`,
+      name: "Rotina Executiva CEO",
+      description: `Revisão diária de FPY, gargalos de revisão L-01, orçamento e prioridades de ${companyName}.`,
+      scope: "project",
+      enabled: true,
+      triggerKind: "schedule",
+      frequency: "daily",
+      dayOfWeek: 1,
+      timeHHMM: "08:30",
+      timezone: "America/Sao_Paulo",
+      eventKind: "pr_merged",
+      actionKind: "message_pm",
+      targetAgent: "OrgFy Iris",
+      prompt: `Execute a **Rotina Executiva** de {{project.name}} ({{date}}).
+
+1. Verifique FPY, PRs abertos e itens travados.
+2. Priorize bloqueios críticos e proponha no máximo 3 ações objetivas.`,
+      recentRuns: []
+    },
+    {
+      id: `test-coverage-${tenant}`,
+      name: "Cobertura de testes críticos",
+      description: "Busca semanal por código crítico sem testes; abre PR focado nos maiores riscos e cria issues para o restante.",
+      scope: "project",
+      enabled: true,
+      triggerKind: "schedule",
+      frequency: "weekly",
+      dayOfWeek: 4,
+      timeHHMM: "04:00",
+      timezone: "America/Sao_Paulo",
+      eventKind: "pr_opened",
+      actionKind: "agent_session",
+      targetAgent: "OrgFy Oráculo",
+      prompt: `Você está rodando a revisão agendada de **cobertura de testes** de {{project.name}} ({{date}}).
+Feche os gaps mais valiosos com testes determinísticos (L-22); não persiga porcentagem vazia.`,
+      recentRuns: []
+    },
+    {
+      id: `doc-gardening-${tenant}`,
+      name: "Doc-Gardening & Coleta de Lixo",
+      description: "Detecta drift entre código, Canvas/Visão e AGENTS.md; abre micro-PRs de limpeza automática.",
+      scope: "project",
+      enabled: false,
+      triggerKind: "schedule",
+      frequency: "weekly",
+      dayOfWeek: 0,
+      timeHHMM: "03:00",
+      timezone: "America/Sao_Paulo",
+      eventKind: "pr_merged",
+      actionKind: "agent_session",
+      targetAgent: "OrgFy Lia",
+      prompt: `Rode a coleta de lixo documental de {{project.name}} ({{date}}) no repo {{repo}}.
+Identifique caminhos obsoletos, código morto ou regras em conflito e abra micro-PR limpo.`,
+      recentRuns: []
+    }
+  ];
+}
+function computeNextAutomationRuns(auto, count = 3, now = /* @__PURE__ */ new Date()) {
+  if (auto.triggerKind !== "schedule") return [];
+  const [hhRaw, mmRaw] = String(auto.timeHHMM || "04:00").split(":");
+  const hh = Math.max(0, Math.min(23, Number(hhRaw) || 0));
+  const mm = Math.max(0, Math.min(59, Number(mmRaw) || 0));
+  const out = [];
+  const cursor = new Date(now.getTime());
+  if (auto.frequency === "hourly") {
+    cursor.setMinutes(mm, 0, 0);
+    if (cursor <= now) cursor.setHours(cursor.getHours() + 1);
+    for (let i = 0; i < count; i++) {
+      const d = new Date(cursor.getTime() + i * 36e5);
+      out.push(`${WEEKDAYS_SHORT[d.getDay()]}, ${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`);
+    }
+    return out;
+  }
+  if (auto.frequency === "daily") {
+    cursor.setHours(hh, mm, 0, 0);
+    if (cursor <= now) cursor.setDate(cursor.getDate() + 1);
+    for (let i = 0; i < count; i++) {
+      const d = new Date(cursor.getTime() + i * 864e5);
+      out.push(`${WEEKDAYS_SHORT[d.getDay()]}, ${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")} ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`);
+    }
+    return out;
+  }
+  cursor.setHours(hh, mm, 0, 0);
+  const diffDays = (auto.dayOfWeek - cursor.getDay() + 7) % 7;
+  cursor.setDate(cursor.getDate() + diffDays);
+  if (cursor <= now) cursor.setDate(cursor.getDate() + 7);
+  for (let i = 0; i < count; i++) {
+    const d = new Date(cursor.getTime() + i * 7 * 864e5);
+    out.push(`${WEEKDAYS_SHORT[d.getDay()]}, ${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")} ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`);
+  }
+  return out;
+}
+function exportAutomationToBuzzWorkflowYaml(auto, tenant) {
+  const [hh, mm] = (auto.timeHHMM || "04:00").split(":");
+  const cronExpr = auto.frequency === "hourly" ? `${Number(mm) || 0} * * * *` : auto.frequency === "daily" ? `${Number(mm) || 0} ${Number(hh) || 0} * * *` : `${Number(mm) || 0} ${Number(hh) || 0} * * ${auto.dayOfWeek}`;
+  return [
+    `# Buzz Workflow (Kind 30620) gerado pela OrgFy Factory`,
+    `id: ${auto.id}`,
+    `name: "${auto.name.replace(/"/g, '\\"')}"`,
+    `enabled: ${auto.enabled}`,
+    `tenant: ${tenant}`,
+    `trigger:`,
+    auto.triggerKind === "schedule" ? `  type: schedule
+  cron: "${cronExpr}"
+  timezone: "${auto.timezone || "America/Sao_Paulo"}"` : auto.triggerKind === "event" ? `  type: event
+  event: ${auto.eventKind}` : `  type: manual`,
+    `action:`,
+    `  kind: ${auto.actionKind}`,
+    `  agent: "${auto.targetAgent}"`,
+    `  prompt: |`,
+    ...auto.prompt.split("\n").map((l) => `    ${l}`)
+  ].join("\n");
+}
+function renderAutomationEditor(props) {
+  const {
+    h,
+    tenant,
+    automations,
+    selectedId,
+    onSelectId,
+    onUpdateAutomation,
+    onCreateAutomation,
+    onDeleteAutomation,
+    onSaveAutomations,
+    onRunNow,
+    onExportYaml,
+    runningId,
+    availableAgents
+  } = props;
+  const active = automations.find((a) => a.id === selectedId) || automations[0] || null;
+  const nextRuns = active ? computeNextAutomationRuns(active, 3) : [];
+  return h(
+    "div",
+    {
+      "data-orgfy-automation-editor": "true",
+      style: { display: "grid", gridTemplateColumns: "230px minmax(0, 1fr) 250px", gap: "12px", alignItems: "start" }
+    },
+    // ── COLUNA 1: LISTA DE AUTOMAÇÕES ──
+    h(
+      "div",
+      { className: "of-card-pad", style: { padding: "10px", display: "flex", flexDirection: "column", gap: "6px" } },
+      h(
+        "div",
+        { style: { display: "flex", alignItems: "center", justifyContent: "space-between", paddingBottom: "6px", borderBottom: "1px solid var(--border)" } },
+        h("span", { className: "of-meter-label" }, `Automações (${automations.length})`),
+        h(
+          "button",
+          { type: "button", className: "of-btn", style: { padding: "2px 7px", fontSize: "11px" }, onClick: onCreateAutomation },
+          "+ Nova"
+        )
+      ),
+      automations.map(
+        (a) => h(
+          "button",
+          {
+            key: a.id,
+            type: "button",
+            className: "of-nav-btn",
+            "data-active": (active == null ? void 0 : active.id) === a.id ? "true" : "false",
+            style: { flexDirection: "column", alignItems: "flex-start", gap: "2px", padding: "7px 9px" },
+            onClick: () => onSelectId(a.id)
+          },
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "center", gap: "6px", width: "100%" } },
+            h("span", { className: "of-dot", "data-tone": a.enabled ? "done" : "idle" }),
+            h("span", { style: { fontWeight: 600, fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 } }, a.name)
+          ),
+          h(
+            "span",
+            { className: "of-muted", style: { fontSize: "10px" } },
+            a.triggerKind === "schedule" ? `${a.frequency === "weekly" ? WEEKDAYS_SHORT[a.dayOfWeek] : a.frequency === "daily" ? "Diário" : "Por hora"} · ${a.timeHHMM}` : a.triggerKind === "event" ? `Evento: ${a.eventKind}` : "Manual"
+          )
+        )
+      )
+    ),
+    // ── COLUNA 2: EDITOR PRINCIPAL (Print 5 1:1 CodeDen) ──
+    active ? h(
+      "div",
+      { style: { display: "flex", flexDirection: "column", gap: "12px" } },
+      // Básico
+      h(
+        "section",
+        { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+        h("div", { className: "of-meter-label" }, "Básico"),
+        h(
+          "label",
+          { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+          "Nome",
+          h("input", {
+            className: "of-input",
+            value: active.name,
+            onChange: (e) => onUpdateAutomation(active.id, { name: e.target.value })
+          })
+        ),
+        h(
+          "label",
+          { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+          "Descrição",
+          h("textarea", {
+            className: "of-textarea",
+            style: { minHeight: "54px" },
+            value: active.description,
+            onChange: (e) => onUpdateAutomation(active.id, { description: e.target.value })
+          })
+        ),
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", gap: "8px" } },
+          h("span", { className: "of-muted", style: { fontSize: "11px" } }, "Escopo:"),
+          h(
+            "div",
+            { className: "of-segmented" },
+            h(
+              "button",
+              { type: "button", className: "of-seg-btn", "data-active": active.scope === "project" ? "true" : "false", onClick: () => onUpdateAutomation(active.id, { scope: "project" }) },
+              `Esta empresa (${tenant})`
+            ),
+            h(
+              "button",
+              { type: "button", className: "of-seg-btn", "data-active": active.scope === "all" ? "true" : "false", onClick: () => onUpdateAutomation(active.id, { scope: "all" }) },
+              "Todas as empresas"
+            )
+          )
+        )
+      ),
+      // Quando executa
+      h(
+        "section",
+        { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+        h("div", { className: "of-meter-label" }, "Quando executa"),
+        h(
+          "div",
+          { className: "of-grid-3" },
+          [
+            { id: "schedule", label: "Agendado", sub: "Por hora, diário ou semanal" },
+            { id: "event", label: "Por evento", sub: "PR, issue ou falha de CI" },
+            { id: "manual", label: "Apenas manual", sub: "Executar agora ou via COO" }
+          ].map(
+            (t) => h(
+              "button",
+              {
+                key: t.id,
+                type: "button",
+                className: "of-surface",
+                style: {
+                  padding: "9px 10px",
+                  textAlign: "left",
+                  cursor: "pointer",
+                  color: "var(--foreground)",
+                  borderColor: active.triggerKind === t.id ? "var(--primary)" : void 0,
+                  background: active.triggerKind === t.id ? "var(--primary-soft)" : void 0
+                },
+                onClick: () => onUpdateAutomation(active.id, { triggerKind: t.id })
+              },
+              h("div", { style: { fontSize: "12px", fontWeight: 600 } }, t.label),
+              h("div", { className: "of-muted", style: { fontSize: "10.5px", marginTop: "2px" } }, t.sub)
+            )
+          )
+        ),
+        active.triggerKind === "schedule" && h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: "8px" } },
+          h(
+            "div",
+            { style: { display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center" } },
+            h(
+              "select",
+              {
+                className: "of-tenant-select",
+                value: active.frequency,
+                onChange: (e) => onUpdateAutomation(active.id, { frequency: e.target.value })
+              },
+              h("option", { value: "hourly" }, "A cada hora"),
+              h("option", { value: "daily" }, "Diário"),
+              h("option", { value: "weekly" }, "Semanal")
+            ),
+            active.frequency === "weekly" && h(
+              "select",
+              {
+                className: "of-tenant-select",
+                value: String(active.dayOfWeek),
+                onChange: (e) => onUpdateAutomation(active.id, { dayOfWeek: Number(e.target.value) })
+              },
+              WEEKDAYS_PT.map((d, idx) => h("option", { key: d, value: String(idx) }, d))
+            ),
+            h("input", {
+              type: "time",
+              className: "of-input",
+              style: { width: "110px" },
+              value: active.timeHHMM,
+              onChange: (e) => onUpdateAutomation(active.id, { timeHHMM: e.target.value })
+            }),
+            h("input", {
+              className: "of-input",
+              style: { width: "165px" },
+              placeholder: "America/Sao_Paulo",
+              value: active.timezone,
+              onChange: (e) => onUpdateAutomation(active.id, { timezone: e.target.value })
+            })
+          ),
+          nextRuns.length > 0 && h(
+            "div",
+            { className: "of-surface", style: { padding: "8px 10px", fontSize: "11px" } },
+            h("div", { style: { fontWeight: 600 } }, `Próximas 3 execuções (${active.timezone}):`),
+            h("div", { className: "of-mono of-muted", style: { marginTop: "3px" } }, nextRuns.join("  ·  "))
+          )
+        ),
+        active.triggerKind === "event" && h(
+          "select",
+          {
+            className: "of-tenant-select",
+            value: active.eventKind,
+            onChange: (e) => onUpdateAutomation(active.id, { eventKind: e.target.value })
+          },
+          h("option", { value: "pr_opened" }, "Quando um PR for aberto (NIP-34)"),
+          h("option", { value: "ci_failed" }, "Quando o CI falhar"),
+          h("option", { value: "issue_created" }, "Quando uma nova Issue entrar"),
+          h("option", { value: "pr_merged" }, "Quando um PR for integrado na main")
+        )
+      ),
+      // O que faz + Prompt + Placeholders
+      h(
+        "section",
+        { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+        h("div", { className: "of-meter-label" }, "O que faz"),
+        h(
+          "div",
+          { style: { display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center" } },
+          h(
+            "div",
+            { className: "of-segmented" },
+            [
+              { id: "agent_session", label: "Sessão de agente" },
+              { id: "message_pm", label: "Mensagem para COO/CEO" },
+              { id: "triage_issue", label: "Triar issue" }
+            ].map(
+              (act) => h(
+                "button",
+                {
+                  key: act.id,
+                  type: "button",
+                  className: "of-seg-btn",
+                  "data-active": active.actionKind === act.id ? "true" : "false",
+                  onClick: () => onUpdateAutomation(active.id, { actionKind: act.id })
+                },
+                act.label
+              )
+            )
+          ),
+          h(
+            "select",
+            {
+              className: "of-tenant-select",
+              value: active.targetAgent,
+              onChange: (e) => onUpdateAutomation(active.id, { targetAgent: e.target.value })
+            },
+            (availableAgents.length > 0 ? availableAgents : [active.targetAgent]).map(
+              (name) => h("option", { key: name, value: name }, name)
+            )
+          )
+        ),
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "6px" } },
+          h("span", { style: { fontSize: "11.5px", fontWeight: 600 } }, "Prompt para o agente"),
+          h(
+            "div",
+            { style: { display: "inline-flex", gap: "4px", flexWrap: "wrap" } },
+            AUTOMATION_PLACEHOLDERS.map(
+              (ph) => h(
+                "button",
+                {
+                  key: ph,
+                  type: "button",
+                  className: "of-btn",
+                  "data-variant": "ghost",
+                  style: { padding: "1px 6px", fontSize: "10px", fontFamily: "var(--font-mono)" },
+                  onClick: () => onUpdateAutomation(active.id, { prompt: `${active.prompt}${active.prompt.endsWith(" ") ? "" : " "}${ph}` })
+                },
+                ph
+              )
+            )
+          )
+        ),
+        h("textarea", {
+          className: "of-textarea",
+          style: { minHeight: "120px", fontFamily: "var(--font-mono)", fontSize: "11.5px" },
+          value: active.prompt,
+          onChange: (e) => onUpdateAutomation(active.id, { prompt: e.target.value })
+        })
+      )
+    ) : h("div", { className: "of-card-pad of-muted" }, "Selecione ou crie uma automação."),
+    // ── COLUNA 3: CONTROLE + EXECUÇÕES RECENTES ──
+    active && h(
+      "div",
+      { style: { display: "flex", flexDirection: "column", gap: "12px" } },
+      h(
+        "section",
+        { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
+          h("strong", { style: { fontSize: "12.5px" } }, active.enabled ? "Ativa" : "Pausada"),
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-variant": active.enabled ? "primary" : void 0,
+              style: { padding: "3px 10px", fontSize: "11px" },
+              onClick: () => onUpdateAutomation(active.id, { enabled: !active.enabled })
+            },
+            active.enabled ? "Ligada" : "Desligada"
+          )
+        ),
+        h(
+          "div",
+          { style: { display: "grid", gridTemplateColumns: "82px 1fr", gap: "4px 6px", fontSize: "11px" } },
+          h("span", { className: "of-muted" }, "Próxima"),
+          h("span", { className: "of-mono" }, nextRuns[0] || (active.triggerKind === "event" ? active.eventKind : "Manual")),
+          h("span", { className: "of-muted" }, "Work key"),
+          h("span", { className: "of-mono of-muted", style: { overflow: "hidden", textOverflow: "ellipsis" } }, `auto:${active.id}`)
+        ),
+        h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: "6px" } },
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-variant": "primary",
+              "data-automation-run-now": "true",
+              disabled: runningId === active.id,
+              style: { justifyContent: "center" },
+              onClick: () => onRunNow(active)
+            },
+            runningId === active.id ? "Disparando..." : "▶ Executar agora"
+          ),
+          h(
+            "button",
+            { type: "button", className: "of-btn", style: { justifyContent: "center" }, onClick: onSaveAutomations },
+            "Salvar automações"
+          ),
+          h(
+            "button",
+            { type: "button", className: "of-btn", style: { justifyContent: "center", fontSize: "11px" }, onClick: () => onExportYaml(active) },
+            "Copiar YAML Kind 30620"
+          ),
+          automations.length > 1 && h(
+            "button",
+            { type: "button", className: "of-btn", "data-variant": "danger", style: { justifyContent: "center", fontSize: "11px" }, onClick: () => onDeleteAutomation(active.id) },
+            "Remover"
+          )
+        )
+      ),
+      h(
+        "section",
+        { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "8px" } },
+        h("div", { className: "of-meter-label" }, "Execuções recentes"),
+        active.recentRuns.length === 0 ? h("div", { className: "of-muted", style: { fontSize: "11.5px" } }, "Nenhuma execução registrada ainda. Clique em Executar agora para disparar via Buzz.") : active.recentRuns.slice(0, 6).map(
+          (r) => h(
+            "div",
+            { key: r.id, className: "of-surface", style: { padding: "6px 8px", fontSize: "11px" } },
+            h(
+              "div",
+              { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+              h("span", { className: "of-pill", "data-tone": r.status === "ok" ? "done" : "failed", style: { fontSize: "9.5px", padding: "0 5px" } }, r.status === "ok" ? "OK" : "ERRO"),
+              h("span", { className: "of-mono of-muted", style: { fontSize: "9.5px" } }, r.at)
+            ),
+            h("div", { className: "of-muted", style: { marginTop: "3px" } }, r.detail)
+          )
+        )
+      )
+    )
+  );
+}
 const CHART_COLORS = ["var(--chart-2)", "var(--chart-1)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"];
 const AUTONOMY_MODES = [
   {
@@ -47941,7 +48685,7 @@ function fmtTokens(n) {
   return String(n);
 }
 function renderFactorySecondaryPage(props) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u, _v;
   const {
     h,
     tab,
@@ -48347,9 +49091,9 @@ function renderFactorySecondaryPage(props) {
         "div",
         { className: "of-segmented", style: { width: "fit-content" } },
         [
-          { id: "automations", label: "Processos & Workflows" },
+          { id: "automations", label: "Editor Visual (Workflows)" },
           { id: "runs", label: "CI & Probes da Empresa" },
-          { id: "templates", label: "Governança & Regras" }
+          { id: "templates", label: "LaunchAgents & Regras" }
         ].map(
           (t) => h(
             "button",
@@ -48364,7 +49108,22 @@ function renderFactorySecondaryPage(props) {
           )
         )
       ),
-      autoTab === "runs" ? h(
+      autoTab === "automations" && props.automations && props.onSelectAutomationId && props.onUpdateAutomation && props.onCreateAutomation && props.onDeleteAutomation && props.onSaveAutomations && props.onRunAutomationNow && props.onExportAutomationYaml ? renderAutomationEditor({
+        h,
+        tenant,
+        companyName: (tm == null ? void 0 : tm.nome) || tenant,
+        automations: props.automations,
+        selectedId: props.selectedAutomationId || ((_n = props.automations[0]) == null ? void 0 : _n.id) || "",
+        onSelectId: props.onSelectAutomationId,
+        onUpdateAutomation: props.onUpdateAutomation,
+        onCreateAutomation: props.onCreateAutomation,
+        onDeleteAutomation: props.onDeleteAutomation,
+        onSaveAutomations: props.onSaveAutomations,
+        onRunNow: props.onRunAutomationNow,
+        onExportYaml: props.onExportAutomationYaml,
+        runningId: props.runningAutomationId || null,
+        availableAgents: ((tm == null ? void 0 : tm.agentes) || []).map((a) => a.name)
+      }) : autoTab === "runs" ? h(
         "div",
         { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
         h("div", { style: { fontSize: "13.5px", fontWeight: 700 } }, `CI Runner & Probes Caixa-Preta · ${(tm == null ? void 0 : tm.nome) || tenant}`),
@@ -48428,10 +49187,10 @@ function renderFactorySecondaryPage(props) {
     );
   }
   if (tab === "agents") {
-    const tenantAgents = ((_n = status.tenantManifest) == null ? void 0 : _n.agentes) || [];
+    const tenantAgents = ((_o = status.tenantManifest) == null ? void 0 : _o.agentes) || [];
     const modelos = status.modelos || [];
-    const revisoresSurf = Object.entries(((_o = status.tenantManifest) == null ? void 0 : _o.revisoresPorSuperficie) || {});
-    const empresaNome = ((_p = status.tenantManifest) == null ? void 0 : _p.nome) || tenant;
+    const revisoresSurf = Object.entries(((_p = status.tenantManifest) == null ? void 0 : _p.revisoresPorSuperficie) || {});
+    const empresaNome = ((_q = status.tenantManifest) == null ? void 0 : _q.nome) || tenant;
     return h(
       "div",
       { style: { display: "flex", flexDirection: "column", gap: "12px" } },
@@ -48723,8 +49482,8 @@ function renderFactorySecondaryPage(props) {
       renderBuzzCanvasViewer({
         h,
         tenant,
-        channelName: (ch == null ? void 0 : ch.name) || ((_q = status.tenantManifest) == null ? void 0 : _q.nome) || tenant,
-        channelId: (ch == null ? void 0 : ch.channelId) || ((_r = status.tenantManifest) == null ? void 0 : _r.canal) || null,
+        channelName: (ch == null ? void 0 : ch.name) || ((_r = status.tenantManifest) == null ? void 0 : _r.nome) || tenant,
+        channelId: (ch == null ? void 0 : ch.channelId) || ((_s = status.tenantManifest) == null ? void 0 : _s.canal) || null,
         content: props.channelCanvas ?? null,
         draft: props.canvasDraft ?? props.channelCanvas ?? "",
         onChangeDraft: (v2) => {
@@ -48787,7 +49546,7 @@ function renderFactorySecondaryPage(props) {
         h(
           "section",
           { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-          h("div", { className: "of-meter-label" }, `2. Workspace & Arquivos de Contexto (${((_s = status.tenantManifest) == null ? void 0 : _s.nome) || tenant})`),
+          h("div", { className: "of-meter-label" }, `2. Workspace & Arquivos de Contexto (${((_t = status.tenantManifest) == null ? void 0 : _t.nome) || tenant})`),
           papeis.length > 0 && h(
             "div",
             { style: { display: "flex", flexWrap: "wrap", gap: "6px" } },
@@ -48862,7 +49621,7 @@ function renderFactorySecondaryPage(props) {
         h(
           "div",
           null,
-          h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Canal da Empresa no Buzz · #${(chInfo == null ? void 0 : chInfo.name) || ((_t = status.tenantManifest) == null ? void 0 : _t.nome) || tenant}`),
+          h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Canal da Empresa no Buzz · #${(chInfo == null ? void 0 : chInfo.name) || ((_u = status.tenantManifest) == null ? void 0 : _u.nome) || tenant}`),
           h(
             "div",
             { className: "of-muted", style: { marginTop: "2px" } },
@@ -49002,7 +49761,7 @@ function renderFactorySecondaryPage(props) {
     h(
       "div",
       { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-      h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Modo de autonomia · ${((_u = status.tenantManifest) == null ? void 0 : _u.nome) || tenant}`),
+      h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Modo de autonomia · ${((_v = status.tenantManifest) == null ? void 0 : _v.nome) || tenant}`),
       h("div", { className: "of-muted" }, "Suba um degrau por vez. Áreas protegidas e regra L-01 sempre permanecem ativas."),
       h(
         "div",
@@ -50048,6 +50807,10 @@ function createFactoryAppComponent(ctx, opts = {}) {
     const [paletteQuery, setPaletteQuery] = React.useState("");
     const [guideOpen, setGuideOpen] = React.useState(false);
     const [guideSection, setGuideSection] = React.useState("loop");
+    const [runningScout, setRunningScout] = React.useState(false);
+    const [automations, setAutomations] = React.useState(() => buildDefaultAutomations("orgfy", "OrgFy Core"));
+    const [selectedAutomationId, setSelectedAutomationId] = React.useState("rotina-ceo-orgfy");
+    const [runningAutomationId, setRunningAutomationId] = React.useState(null);
     const [compactDensity, setCompactDensity] = React.useState(false);
     const [expandedProjects, setExpandedProjects] = React.useState({ orgfy: true });
     const [showAllByProject, setShowAllByProject] = React.useState({});
@@ -50203,9 +50966,9 @@ function createFactoryAppComponent(ctx, opts = {}) {
       setTimeout(() => setToast(null), 3500);
     }, []);
     const refresh = React.useCallback(
-      async (targetTenant = tenant, forceSettingsSync = false) => {
+      async (targetTenant = tenant, forceSettingsSync = false, silent = false) => {
         var _a2, _b2;
-        setLoading(true);
+        if (!silent) setLoading(true);
         const [res, holdSnap] = await Promise.all([
           fetchFactoryStatus(ctx, targetTenant),
           fetchHoldingControlPlane(ctx).catch(() => null)
@@ -50225,7 +50988,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
             falhasSeguidas: res.status.limits.pauseAfterConsecutiveFailures ?? 3
           });
         }
-        setLoading(false);
+        if (!silent) setLoading(false);
       },
       [tenant]
     );
@@ -50233,9 +50996,9 @@ function createFactoryAppComponent(ctx, opts = {}) {
       settingsDirtyRef.current = false;
       let disposed = false;
       const run = () => {
-        if (!disposed) refresh(tenant, false);
+        if (!disposed) refresh(tenant, false, true);
       };
-      refresh(tenant, true);
+      refresh(tenant, true, false);
       const timer = setInterval(run, 5e3);
       const unsub = subscribeRelayUpdates(() => run());
       return () => {
@@ -50674,6 +51437,207 @@ function createFactoryAppComponent(ctx, opts = {}) {
       },
       [selectedDmAgent, resolveBuzzScope, notify2]
     );
+    const handleOpenNativeAgentProfile = React.useCallback(
+      async (target) => {
+        var _a2, _b2;
+        const resolved = typeof target === "string" ? liveCrew.find((a) => a.key === target) || tenantAgents.find((a) => a.agentKey === target) : target;
+        const rawPubkey = (resolved && "pubkey" in resolved ? resolved.pubkey : "") || (resolved && "key" in resolved && resolved.key ? ((_a2 = liveCrew.find((a) => a.key === resolved.key)) == null ? void 0 : _a2.pubkey) || "" : "") || "";
+        const pubkey = String(rawPubkey).trim().toLowerCase();
+        const agentName = (resolved && "name" in resolved ? resolved.name : "") || "Agente";
+        const scope = resolveBuzzScope();
+        if (/^[0-9a-f]{64}$/.test(pubkey) && ((_b2 = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _b2.open)) {
+          try {
+            const res = await ctx.navigation.open({
+              version: 1,
+              kind: "page",
+              pluginId: "buzz.agents",
+              pageId: "agents",
+              ...scope ? { scope } : {},
+              route: { version: 1, params: { agent: pubkey } }
+            });
+            if (!res || res.status === "opened") {
+              notify2(`Perfil nativo de ${agentName} aberto no Buzz.`);
+              return;
+            }
+          } catch {
+          }
+        }
+        if (resolved && "key" in resolved && resolved.key) {
+          setSelectedAgentKey(resolved.key);
+        } else {
+          notify2(`Pubkey de ${agentName} indisponível para abrir o perfil nativo.`);
+        }
+      },
+      [liveCrew, tenantAgents, resolveBuzzScope, notify2]
+    );
+    const handleRunScoutNow = React.useCallback(async () => {
+      var _a2, _b2;
+      const agentsApi = ctx == null ? void 0 : ctx.agents;
+      if (typeof (agentsApi == null ? void 0 : agentsApi.wake) !== "function") {
+        notify2("API ctx.agents.wake indisponível nesta versão do Buzz.");
+        return;
+      }
+      const scoutTenant = tenantAgents.find((a) => a.papel === "oraculo" || /or[aá]culo|scout/i.test(a.name));
+      const scoutLive = liveCrew.find((a) => a.key === (scoutTenant == null ? void 0 : scoutTenant.agentKey) || /or[aá]culo|scout/i.test(a.name));
+      const agentKey = (scoutTenant == null ? void 0 : scoutTenant.agentKey) || (scoutLive == null ? void 0 : scoutLive.key);
+      if (!agentKey) {
+        notify2(`Nenhum agente Oráculo/Scout encontrado em ${tenant}.`);
+        return;
+      }
+      const canal = ((_a2 = status.tenantManifest) == null ? void 0 : _a2.canal) || ((_b2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _b2.canal) || void 0;
+      setRunningScout(true);
+      try {
+        await agentsApi.wake(agentKey, {
+          ...canal ? { channelId: canal } : {},
+          text: `[ORGFY SCOUT ONE-SHOT · ${tenant}] Audite o workspace atual contra o Canvas/Visão da empresa, identifique gaps de maior impacto (segurança, testes, UX ou dívida técnica) e proponha os próximos cards canônicos.`
+        });
+        notify2(`${(scoutTenant == null ? void 0 : scoutTenant.name) || (scoutLive == null ? void 0 : scoutLive.name) || "Oráculo"} acionado via ctx.agents.wake.`);
+      } catch (err) {
+        notify2(`Falha ao acionar Oráculo: ${(err == null ? void 0 : err.message) || err}`);
+      } finally {
+        setRunningScout(false);
+      }
+    }, [tenantAgents, liveCrew, tenant, status.tenantManifest, holding, notify2]);
+    React.useEffect(() => {
+      var _a2, _b2;
+      const key = `orgfy_automations_${tenant}`;
+      try {
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setAutomations(parsed);
+            setSelectedAutomationId(parsed[0].id);
+            return;
+          }
+        }
+      } catch {
+      }
+      const defaults = buildDefaultAutomations(tenant, ((_a2 = status.tenantManifest) == null ? void 0 : _a2.nome) || tenant);
+      setAutomations(defaults);
+      setSelectedAutomationId(((_b2 = defaults[0]) == null ? void 0 : _b2.id) || "");
+    }, [tenant]);
+    const persistAutomations = React.useCallback(
+      async (list, showToast = true) => {
+        try {
+          localStorage.setItem(`orgfy_automations_${tenant}`, JSON.stringify(list));
+        } catch {
+        }
+        try {
+          const host = ctx == null ? void 0 : ctx.host;
+          if (typeof (host == null ? void 0 : host.writeFile) === "function") {
+            const targetPath = `/Users/heltonfraga/.buzz/REPOS/orgfy/.esteira/estado/automacoes-${tenant}.json`;
+            await host.writeFile(targetPath, JSON.stringify({ tenant, updatedAt: (/* @__PURE__ */ new Date()).toISOString(), automations: list }, null, 2));
+          }
+        } catch {
+        }
+        if (showToast) notify2(`Automações de ${tenant} salvas.`);
+      },
+      [tenant, notify2]
+    );
+    const handleUpdateAutomation = React.useCallback((id, patch) => {
+      setAutomations((prev) => prev.map((a) => a.id === id ? { ...a, ...patch } : a));
+    }, []);
+    const handleCreateAutomation = React.useCallback(() => {
+      var _a2;
+      const newId = `auto-${Date.now().toString(36)}`;
+      const item = {
+        id: newId,
+        name: "Nova automação",
+        description: "Rotina personalizada da OrgFy Factory.",
+        scope: "project",
+        enabled: true,
+        triggerKind: "schedule",
+        frequency: "daily",
+        dayOfWeek: 1,
+        timeHHMM: "09:00",
+        timezone: "America/Sao_Paulo",
+        eventKind: "pr_opened",
+        actionKind: "agent_session",
+        targetAgent: ((_a2 = tenantAgents[0]) == null ? void 0 : _a2.name) || "OrgFy Bento",
+        prompt: `Execute esta rotina em {{project.name}} ({{date}}).`,
+        recentRuns: []
+      };
+      setAutomations((prev) => [item, ...prev]);
+      setSelectedAutomationId(newId);
+    }, [tenantAgents]);
+    const handleDeleteAutomation = React.useCallback((id) => {
+      setAutomations((prev) => {
+        const next = prev.filter((a) => a.id !== id);
+        if (next.length > 0) setSelectedAutomationId(next[0].id);
+        void persistAutomations(next, false);
+        return next;
+      });
+      notify2("Automação removida.");
+    }, [persistAutomations, notify2]);
+    const handleRunAutomationNow = React.useCallback(
+      async (auto) => {
+        var _a2, _b2, _c2, _d2, _e2;
+        setRunningAutomationId(auto.id);
+        const nowLabel = (/* @__PURE__ */ new Date()).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+        const resolvedPrompt = auto.prompt.replace(/\{\{project\.name\}\}/g, ((_a2 = status.tenantManifest) == null ? void 0 : _a2.nome) || tenant).replace(/\{\{date\}\}/g, (/* @__PURE__ */ new Date()).toISOString().slice(0, 10)).replace(/\{\{tenant\}\}/g, tenant).replace(/\{\{repo\}\}/g, ((_b2 = status.tenantManifest) == null ? void 0 : _b2.repoId) || tenant).replace(/\{\{channel\}\}/g, ((_c2 = status.tenantManifest) == null ? void 0 : _c2.canal) || "");
+        const agentsApi = ctx == null ? void 0 : ctx.agents;
+        const targetAg = tenantAgents.find((a) => a.name.toLowerCase() === auto.targetAgent.toLowerCase()) || liveCrew.find((a) => a.name.toLowerCase() === auto.targetAgent.toLowerCase());
+        const agentKey = (targetAg && "agentKey" in targetAg ? targetAg.agentKey : targetAg == null ? void 0 : targetAg.key) || "";
+        const canal = ((_d2 = status.tenantManifest) == null ? void 0 : _d2.canal) || ((_e2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _e2.canal) || void 0;
+        let statusRun = "ok";
+        let detail = `Disparado para ${auto.targetAgent} via Buzz.`;
+        try {
+          if (typeof (agentsApi == null ? void 0 : agentsApi.wake) === "function" && agentKey) {
+            await agentsApi.wake(agentKey, {
+              ...canal ? { channelId: canal } : {},
+              text: `[ORGFY AUTOMATION · ${auto.name}]
+${resolvedPrompt}`
+            });
+          } else {
+            statusRun = "error";
+            detail = "ctx.agents.wake indisponível ou agente não provisionado.";
+          }
+        } catch (err) {
+          statusRun = "error";
+          detail = (err == null ? void 0 : err.message) || String(err);
+        } finally {
+          setRunningAutomationId(null);
+        }
+        setAutomations((prev) => {
+          const next = prev.map(
+            (a) => a.id === auto.id ? { ...a, recentRuns: [{ id: `run-${Date.now()}`, at: nowLabel, status: statusRun, detail }, ...a.recentRuns].slice(0, 12) } : a
+          );
+          void persistAutomations(next, false);
+          return next;
+        });
+        notify2(statusRun === "ok" ? `Automação "${auto.name}" disparada para ${auto.targetAgent}.` : `Falha ao rodar "${auto.name}": ${detail}`);
+      },
+      [tenant, status.tenantManifest, holding, tenantAgents, liveCrew, persistAutomations, notify2]
+    );
+    const handleExportAutomationYaml = React.useCallback(
+      (auto) => {
+        const yaml = exportAutomationToBuzzWorkflowYaml(auto, tenant);
+        handleCopyText(yaml, `YAML Workflow Kind 30620 (${auto.name})`);
+      },
+      [tenant, handleCopyText]
+    );
+    const handleToggleChecklistStep = React.useCallback(
+      async (stepId, nextDone, item) => {
+        const slug = String(item.workKey || item.title.split(/\s+/)[0] || item.id).replace(/^[^a-zA-Z0-9]+/, "");
+        try {
+          const res = await executeCardProgress(ctx, {
+            slug,
+            step_id: stepId,
+            status: nextDone ? "done" : "todo",
+            agent: "Operador"
+          });
+          if (res.ok) {
+            notify2(`Passo ${stepId} marcado como ${nextDone ? "concluído" : "pendente"} no card.`);
+          } else {
+            notify2(`Passo ${stepId} atualizado localmente (${res.message || "arquivo do card não encontrado"}).`);
+          }
+        } catch {
+          notify2(`Passo ${stepId} marcado localmente.`);
+        }
+      },
+      [notify2]
+    );
     const masterLive = mainAgentPubkey && liveCrew.find((a) => {
       var _a2;
       return ((_a2 = a.pubkey) == null ? void 0 : _a2.toLowerCase()) === mainAgentPubkey;
@@ -50985,12 +51949,15 @@ function createFactoryAppComponent(ctx, opts = {}) {
                 onSelectAgentKey: setSelectedAgentKey,
                 onSelectItem: setSelectedItem,
                 onOpenAgentDm: handleOpenAgentDmInBuzz,
+                onOpenAgentProfileNative: handleOpenNativeAgentProfile,
+                onRunScout: handleRunScoutNow,
+                runningScout,
                 onOpenGuide: () => setGuideOpen(true),
                 onToggleKillSwitch: (next) => handleControlUpdate(
                   { killSwitch: next, pausedReason: next ? "Kill Switch acionado pelo operador" : null },
                   next ? "Kill Switch ativado imediatamente." : "Kill Switch liberado."
                 ),
-                onRefresh: () => refresh(tenant),
+                onRefresh: () => refresh(tenant, false, false),
                 loading,
                 Floor3D
               }) : renderFactorySecondaryPage({
@@ -51040,7 +52007,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
                 Boardroom3D,
                 onReconcileAgents: handleReconcileAgentsR51,
                 onAgentSessionAction: handleAgentSessionAction,
-                onOpenAgentDrawer: (k) => setSelectedAgentKey(k),
+                onOpenAgentDrawer: (k) => void handleOpenNativeAgentProfile(k),
                 onSaveAgentProfile: handleSaveAgentProfile,
                 editingAgentKey,
                 setEditingAgentKey,
@@ -51064,7 +52031,17 @@ function createFactoryAppComponent(ctx, opts = {}) {
                 onSaveChannelDetails: handleSaveChannelDetails,
                 onChannelDiagnostic: handleChannelDiagnostic,
                 onCopyText: handleCopyText,
-                resolveAuthor: (pk) => resolveBuzzIdentityName(ctx, pk, nameByPubkey)
+                resolveAuthor: (pk) => resolveBuzzIdentityName(ctx, pk, nameByPubkey),
+                automations,
+                selectedAutomationId,
+                onSelectAutomationId: setSelectedAutomationId,
+                onUpdateAutomation: handleUpdateAutomation,
+                onCreateAutomation: handleCreateAutomation,
+                onDeleteAutomation: handleDeleteAutomation,
+                onSaveAutomations: () => void persistAutomations(automations, true),
+                onRunAutomationNow: handleRunAutomationNow,
+                onExportAutomationYaml: handleExportAutomationYaml,
+                runningAutomationId
               })
             )
           )
@@ -51094,6 +52071,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
         onOpenCommitInBuzz: handleOpenCommitInBuzz,
         onOpenAgentDm: handleOpenAgentDmInBuzz,
         onSessionAction: handleAgentSessionAction,
+        onToggleChecklistStep: handleToggleChecklistStep,
         onClose: () => setSelectedItem(null)
       }),
       renderAgentProfileDrawer({
@@ -51170,27 +52148,22 @@ function createFactoryAppComponent(ctx, opts = {}) {
         {
           className: "of-sheet-backdrop",
           "data-orgfy-factory-guide": "true",
-          style: { alignItems: "center", justifyContent: "center", padding: "24px" },
+          "data-guide-docked": "right",
           onClick: (e) => {
             if (e.target === e.currentTarget) setGuideOpen(false);
           }
         },
         h(
-          "div",
+          "aside",
           {
-            role: "dialog",
+            className: "of-sheet-panel",
+            role: "complementary",
             "aria-label": "Como funciona o loop da Fábrica OrgFy",
             style: {
-              width: "min(820px, 96vw)",
-              maxHeight: "min(680px, 88vh)",
-              borderRadius: "12px",
-              border: "1px solid var(--border)",
-              background: "var(--card)",
-              color: "var(--foreground)",
-              display: "flex",
-              flexDirection: "column",
-              overflow: "hidden",
-              boxShadow: "0 24px 64px rgba(0,0,0,0.55)"
+              width: "min(640px, 95vw)",
+              padding: 0,
+              gap: 0,
+              overflow: "hidden"
             }
           },
           h(
@@ -51591,6 +52564,7 @@ export {
   attachFactoryShadowStyles,
   buildBuzzAttentionContract,
   buildBuzzEntityUri,
+  buildDefaultAutomations,
   buildEmptyFactoryStatus,
   buildHandoffPack,
   buildLiveAgentRoster,
@@ -51598,10 +52572,12 @@ export {
   checkMentionTargetIdentity,
   checkThreadWakeAntiLoop,
   cleanupAttentionOnStageChange,
+  computeNextAutomationRuns,
   createCanonicalCard,
   createOrgfyPipelineAttentionSource,
   emitOrgfyPipelineEvent,
   executeCardProgress,
+  exportAutomationToBuzzWorkflowYaml,
   fetchFactoryStatus,
   formatOrgfyAttentionText,
   getBuzzNativeState,

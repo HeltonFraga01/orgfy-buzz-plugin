@@ -46,6 +46,7 @@ export interface CodeDenInspectorDrawerProps {
   onOpenCommitInBuzz?: (commit: string) => void;
   onOpenAgentDm?: (agent: { key?: string; pubkey?: string; name?: string }) => void;
   onSessionAction?: (agentKey: string, action: "interrupt" | "compact" | "new") => void;
+  onToggleChecklistStep?: (stepId: string, nextDone: boolean, item: FactoryWorkItem) => void;
   onClose: () => void;
 }
 
@@ -604,10 +605,12 @@ export function createCodeDenInspectorDrawer(React: Context["react"]) {
       onOpenCommitInBuzz,
       onOpenAgentDm,
       onSessionAction,
+      onToggleChecklistStep,
       onClose,
     } = props;
 
     const [activeTab, setActiveTab] = React.useState<InspectorTab>("pr");
+    const [localChecklistOverrides, setLocalChecklistOverrides] = React.useState<Record<string, boolean>>({});
     const [showLiveThread, setShowLiveThread] = React.useState<boolean>(false);
     const [gitSnap, setGitSnap] = React.useState<BuzzGitSnapshot | null>(null);
     const [gitLoading, setGitLoading] = React.useState<boolean>(false);
@@ -628,6 +631,7 @@ export function createCodeDenInspectorDrawer(React: Context["react"]) {
       setOpenDiffFiles({});
       setSelectedFilePath(null);
       setFileContent(null);
+      setLocalChecklistOverrides({});
     }, [item?.id]);
 
     // Sync commit diff when repoDetail hydrates
@@ -1626,29 +1630,56 @@ export function createCodeDenInspectorDrawer(React: Context["react"]) {
                         )
                       ),
                     structured.escopo.passos.length > 0 &&
-                      h(
-                        "div",
-                        { style: { padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
-                        h(
+                      (() => {
+                        const resolvedPassos = structured.escopo.passos.map((p) => ({
+                          ...p,
+                          done: localChecklistOverrides[p.id] !== undefined ? localChecklistOverrides[p.id] : p.done,
+                        }));
+                        const liveDone = resolvedPassos.filter((p) => p.done).length;
+                        return h(
                           "div",
-                          { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" } },
-                          h("span", { style: { fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted-foreground)" } }, "Checklist do Card"),
-                          h("span", { className: "of-pill", "data-tone": doneCount === structured.escopo.passos.length ? "done" : "waiting" }, `${doneCount}/${structured.escopo.passos.length}`)
-                        ),
-                        h(
-                          "div",
-                          { style: { display: "flex", flexDirection: "column", gap: "5px", fontSize: "12px" } },
-                          structured.escopo.passos.map((p) =>
-                            h(
-                              "div",
-                              { key: `${p.id}-${p.text.slice(0, 12)}`, style: { display: "flex", alignItems: "flex-start", gap: "7px" } },
-                              Icon({ h, name: p.done ? "checkCircle" : "clock", size: 13, color: p.done ? "var(--status-done, #3dd68c)" : "var(--muted-foreground)" }),
-                              h("span", { className: "of-mono", style: { fontSize: "11px", color: "var(--primary)", flexShrink: 0 } }, p.id),
-                              h("span", { style: { color: p.done ? "var(--muted-foreground)" : "var(--foreground)", textDecoration: p.done ? "line-through" : "none" } }, p.text)
+                          { "data-interactive-checklist": "true", style: { padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
+                          h(
+                            "div",
+                            { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" } },
+                            h("span", { style: { fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted-foreground)" } }, "Checklist do Card (clique para marcar)"),
+                            h("span", { className: "of-pill", "data-tone": liveDone === resolvedPassos.length ? "done" : "waiting" }, `${liveDone}/${resolvedPassos.length}`)
+                          ),
+                          h(
+                            "div",
+                            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "12px" } },
+                            resolvedPassos.map((p) =>
+                              h(
+                                "button",
+                                {
+                                  key: `${p.id}-${p.text.slice(0, 12)}`,
+                                  type: "button",
+                                  onClick: () => {
+                                    const nextDone = !p.done;
+                                    setLocalChecklistOverrides((prev: Record<string, boolean>) => ({ ...prev, [p.id]: nextDone }));
+                                    onToggleChecklistStep?.(p.id, nextDone, item);
+                                  },
+                                  style: {
+                                    display: "flex",
+                                    alignItems: "flex-start",
+                                    gap: "7px",
+                                    padding: "4px 6px",
+                                    borderRadius: "6px",
+                                    border: "none",
+                                    background: "transparent",
+                                    textAlign: "left",
+                                    cursor: "pointer",
+                                    color: "inherit",
+                                  },
+                                },
+                                Icon({ h, name: p.done ? "checkCircle" : "clock", size: 13, color: p.done ? "var(--status-done, #3dd68c)" : "var(--muted-foreground)" }),
+                                h("span", { className: "of-mono", style: { fontSize: "11px", color: "var(--primary)", flexShrink: 0 } }, p.id),
+                                h("span", { style: { color: p.done ? "var(--muted-foreground)" : "var(--foreground)", textDecoration: p.done ? "line-through" : "none" } }, p.text)
+                              )
                             )
                           )
-                        )
-                      ),
+                        );
+                      })(),
                     (structured.aceite.feitoQuando || structured.aceite.comandoAceite) &&
                       h(
                         "div",

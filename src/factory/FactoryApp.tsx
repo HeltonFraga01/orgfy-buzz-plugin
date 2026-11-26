@@ -50,7 +50,9 @@ import {
 } from "../services/buzz-channel-live";
 import { openIssueInBuzz, openSystemUri } from "../services/orgfy-bridge";
 import { fetchHoldingControlPlane, type HoldingControlPlaneSnapshot } from "../services/holding-service";
+import { executeCardProgress } from "../services/card-progress";
 import { renderCommandPalette, renderFactorySidebar, type FactorySidebarProps } from "./FactorySidebar";
+import { buildDefaultAutomations, exportAutomationToBuzzWorkflowYaml, type OrgfyAutomation } from "./AutomationEditor";
 
 type FactoryTab =
   | "holding"
@@ -128,6 +130,10 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     const [paletteQuery, setPaletteQuery] = React.useState<string>("");
     const [guideOpen, setGuideOpen] = React.useState<boolean>(false);
     const [guideSection, setGuideSection] = React.useState<string>("loop");
+    const [runningScout, setRunningScout] = React.useState<boolean>(false);
+    const [automations, setAutomations] = React.useState<OrgfyAutomation[]>(() => buildDefaultAutomations("orgfy", "OrgFy Core"));
+    const [selectedAutomationId, setSelectedAutomationId] = React.useState<string>("rotina-ceo-orgfy");
+    const [runningAutomationId, setRunningAutomationId] = React.useState<string | null>(null);
     const [compactDensity, setCompactDensity] = React.useState<boolean>(false);
     const [expandedProjects, setExpandedProjects] = React.useState<Record<string, boolean>>({ orgfy: true });
     const [showAllByProject, setShowAllByProject] = React.useState<Record<string, boolean>>({});
@@ -309,8 +315,8 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     }, []);
 
     const refresh = React.useCallback(
-      async (targetTenant = tenant, forceSettingsSync = false) => {
-        setLoading(true);
+      async (targetTenant = tenant, forceSettingsSync = false, silent = false) => {
+        if (!silent) setLoading(true);
         const [res, holdSnap] = await Promise.all([
           fetchFactoryStatus(ctx, targetTenant),
           fetchHoldingControlPlane(ctx).catch(() => null),
@@ -330,7 +336,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
             falhasSeguidas: res.status.limits.pauseAfterConsecutiveFailures ?? 3,
           });
         }
-        setLoading(false);
+        if (!silent) setLoading(false);
       },
       [tenant]
     );
@@ -339,9 +345,9 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       settingsDirtyRef.current = false;
       let disposed = false;
       const run = () => {
-        if (!disposed) refresh(tenant, false);
+        if (!disposed) refresh(tenant, false, true);
       };
-      refresh(tenant, true);
+      refresh(tenant, true, false);
       const timer = setInterval(run, 5000);
       const unsub = subscribeRelayUpdates(() => run());
       return () => {
@@ -794,6 +800,228 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       [selectedDmAgent, resolveBuzzScope, notify]
     );
 
+    // Abre o Perfil NATIVO do agente no Buzz Desktop (Identity | Memory | Activity | Bestie | Attention | OrgFy | Settings)
+    const handleOpenNativeAgentProfile = React.useCallback(
+      async (target?: { key?: string; pubkey?: string; name?: string } | string | null) => {
+        const resolved =
+          typeof target === "string"
+            ? liveCrew.find((a) => a.key === target) ||
+              tenantAgents.find((a) => a.agentKey === target)
+            : target;
+        const rawPubkey =
+          (resolved && "pubkey" in resolved ? resolved.pubkey : "") ||
+          (resolved && "key" in resolved && resolved.key
+            ? liveCrew.find((a) => a.key === resolved.key)?.pubkey || ""
+            : "") ||
+          "";
+        const pubkey = String(rawPubkey).trim().toLowerCase();
+        const agentName = (resolved && "name" in resolved ? resolved.name : "") || "Agente";
+        const scope = resolveBuzzScope();
+        if (/^[0-9a-f]{64}$/.test(pubkey) && (ctx as any)?.navigation?.open) {
+          try {
+            const res = await (ctx as any).navigation.open({
+              version: 1,
+              kind: "page",
+              pluginId: "buzz.agents",
+              pageId: "agents",
+              ...(scope ? { scope } : {}),
+              route: { version: 1, params: { agent: pubkey } },
+            });
+            if (!res || res.status === "opened") {
+              notify(`Perfil nativo de ${agentName} aberto no Buzz.`);
+              return;
+            }
+          } catch {}
+        }
+        if (resolved && "key" in resolved && resolved.key) {
+          setSelectedAgentKey(resolved.key);
+        } else {
+          notify(`Pubkey de ${agentName} indisponível para abrir o perfil nativo.`);
+        }
+      },
+      [liveCrew, tenantAgents, resolveBuzzScope, notify]
+    );
+
+    // Dispara auditoria one-shot do Oráculo (Scout) via ctx.agents.wake
+    const handleRunScoutNow = React.useCallback(async () => {
+      const agentsApi = (ctx as any)?.agents;
+      if (typeof agentsApi?.wake !== "function") {
+        notify("API ctx.agents.wake indisponível nesta versão do Buzz.");
+        return;
+      }
+      const scoutTenant = tenantAgents.find((a) => a.papel === "oraculo" || /or[aá]culo|scout/i.test(a.name));
+      const scoutLive = liveCrew.find((a) => a.key === scoutTenant?.agentKey || /or[aá]culo|scout/i.test(a.name));
+      const agentKey = scoutTenant?.agentKey || scoutLive?.key;
+      if (!agentKey) {
+        notify(`Nenhum agente Oráculo/Scout encontrado em ${tenant}.`);
+        return;
+      }
+      const canal = status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === tenant)?.canal || undefined;
+      setRunningScout(true);
+      try {
+        await agentsApi.wake(agentKey, {
+          ...(canal ? { channelId: canal } : {}),
+          text: `[ORGFY SCOUT ONE-SHOT · ${tenant}] Audite o workspace atual contra o Canvas/Visão da empresa, identifique gaps de maior impacto (segurança, testes, UX ou dívida técnica) e proponha os próximos cards canônicos.`,
+        });
+        notify(`${scoutTenant?.name || scoutLive?.name || "Oráculo"} acionado via ctx.agents.wake.`);
+      } catch (err: any) {
+        notify(`Falha ao acionar Oráculo: ${err?.message || err}`);
+      } finally {
+        setRunningScout(false);
+      }
+    }, [tenantAgents, liveCrew, tenant, status.tenantManifest, holding, notify]);
+
+    // Carrega automacoes persistidas por empresa (localStorage + fallback defaults)
+    React.useEffect(() => {
+      const key = `orgfy_automations_${tenant}`;
+      try {
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setAutomations(parsed);
+            setSelectedAutomationId(parsed[0].id);
+            return;
+          }
+        }
+      } catch {}
+      const defaults = buildDefaultAutomations(tenant, status.tenantManifest?.nome || tenant);
+      setAutomations(defaults);
+      setSelectedAutomationId(defaults[0]?.id || "");
+    }, [tenant]);
+
+    const persistAutomations = React.useCallback(
+      async (list: OrgfyAutomation[], showToast = true) => {
+        try {
+          localStorage.setItem(`orgfy_automations_${tenant}`, JSON.stringify(list));
+        } catch {}
+        try {
+          const host = (ctx as any)?.host;
+          if (typeof host?.writeFile === "function") {
+            const targetPath = `/Users/heltonfraga/.buzz/REPOS/orgfy/.esteira/estado/automacoes-${tenant}.json`;
+            await host.writeFile(targetPath, JSON.stringify({ tenant, updatedAt: new Date().toISOString(), automations: list }, null, 2));
+          }
+        } catch {}
+        if (showToast) notify(`Automações de ${tenant} salvas.`);
+      },
+      [tenant, notify]
+    );
+
+    const handleUpdateAutomation = React.useCallback((id: string, patch: Partial<OrgfyAutomation>) => {
+      setAutomations((prev) => prev.map((a) => (a.id === id ? { ...a, ...patch } : a)));
+    }, []);
+
+    const handleCreateAutomation = React.useCallback(() => {
+      const newId = `auto-${Date.now().toString(36)}`;
+      const item: OrgfyAutomation = {
+        id: newId,
+        name: "Nova automação",
+        description: "Rotina personalizada da OrgFy Factory.",
+        scope: "project",
+        enabled: true,
+        triggerKind: "schedule",
+        frequency: "daily",
+        dayOfWeek: 1,
+        timeHHMM: "09:00",
+        timezone: "America/Sao_Paulo",
+        eventKind: "pr_opened",
+        actionKind: "agent_session",
+        targetAgent: tenantAgents[0]?.name || "OrgFy Bento",
+        prompt: `Execute esta rotina em {{project.name}} ({{date}}).`,
+        recentRuns: [],
+      };
+      setAutomations((prev) => [item, ...prev]);
+      setSelectedAutomationId(newId);
+    }, [tenantAgents]);
+
+    const handleDeleteAutomation = React.useCallback((id: string) => {
+      setAutomations((prev) => {
+        const next = prev.filter((a) => a.id !== id);
+        if (next.length > 0) setSelectedAutomationId(next[0].id);
+        void persistAutomations(next, false);
+        return next;
+      });
+      notify("Automação removida.");
+    }, [persistAutomations, notify]);
+
+    const handleRunAutomationNow = React.useCallback(
+      async (auto: OrgfyAutomation) => {
+        setRunningAutomationId(auto.id);
+        const nowLabel = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+        const resolvedPrompt = auto.prompt
+          .replace(/\{\{project\.name\}\}/g, status.tenantManifest?.nome || tenant)
+          .replace(/\{\{date\}\}/g, new Date().toISOString().slice(0, 10))
+          .replace(/\{\{tenant\}\}/g, tenant)
+          .replace(/\{\{repo\}\}/g, status.tenantManifest?.repoId || tenant)
+          .replace(/\{\{channel\}\}/g, status.tenantManifest?.canal || "");
+        const agentsApi = (ctx as any)?.agents;
+        const targetAg =
+          tenantAgents.find((a) => a.name.toLowerCase() === auto.targetAgent.toLowerCase()) ||
+          liveCrew.find((a) => a.name.toLowerCase() === auto.targetAgent.toLowerCase());
+        const agentKey = (targetAg && "agentKey" in targetAg ? targetAg.agentKey : targetAg?.key) || "";
+        const canal = status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === tenant)?.canal || undefined;
+        let statusRun: "ok" | "error" = "ok";
+        let detail = `Disparado para ${auto.targetAgent} via Buzz.`;
+        try {
+          if (typeof agentsApi?.wake === "function" && agentKey) {
+            await agentsApi.wake(agentKey, {
+              ...(canal ? { channelId: canal } : {}),
+              text: `[ORGFY AUTOMATION · ${auto.name}]\n${resolvedPrompt}`,
+            });
+          } else {
+            statusRun = "error";
+            detail = "ctx.agents.wake indisponível ou agente não provisionado.";
+          }
+        } catch (err: any) {
+          statusRun = "error";
+          detail = err?.message || String(err);
+        } finally {
+          setRunningAutomationId(null);
+        }
+        setAutomations((prev) => {
+          const next = prev.map((a) =>
+            a.id === auto.id
+              ? { ...a, recentRuns: [{ id: `run-${Date.now()}`, at: nowLabel, status: statusRun, detail }, ...a.recentRuns].slice(0, 12) }
+              : a
+          );
+          void persistAutomations(next, false);
+          return next;
+        });
+        notify(statusRun === "ok" ? `Automação "${auto.name}" disparada para ${auto.targetAgent}.` : `Falha ao rodar "${auto.name}": ${detail}`);
+      },
+      [tenant, status.tenantManifest, holding, tenantAgents, liveCrew, persistAutomations, notify]
+    );
+
+    const handleExportAutomationYaml = React.useCallback(
+      (auto: OrgfyAutomation) => {
+        const yaml = exportAutomationToBuzzWorkflowYaml(auto, tenant);
+        handleCopyText(yaml, `YAML Workflow Kind 30620 (${auto.name})`);
+      },
+      [tenant, handleCopyText]
+    );
+
+    const handleToggleChecklistStep = React.useCallback(
+      async (stepId: string, nextDone: boolean, item: FactoryWorkItem) => {
+        const slug = String(item.workKey || item.title.split(/\s+/)[0] || item.id).replace(/^[^a-zA-Z0-9]+/, "");
+        try {
+          const res = await executeCardProgress(ctx, {
+            slug,
+            step_id: stepId,
+            status: nextDone ? "done" : "todo",
+            agent: "Operador",
+          });
+          if (res.ok) {
+            notify(`Passo ${stepId} marcado como ${nextDone ? "concluído" : "pendente"} no card.`);
+          } else {
+            notify(`Passo ${stepId} atualizado localmente (${res.message || "arquivo do card não encontrado"}).`);
+          }
+        } catch {
+          notify(`Passo ${stepId} marcado localmente.`);
+        }
+      },
+      [notify]
+    );
+
     // CEO Master dinâmico: respeita session.mainAgent do Buzz se configurado, senão board.json (OrgFy Iris)
     const masterLive =
       (mainAgentPubkey && liveCrew.find((a) => a.pubkey?.toLowerCase() === mainAgentPubkey)) ||
@@ -1153,13 +1381,16 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                     onSelectAgentKey: setSelectedAgentKey,
                     onSelectItem: setSelectedItem,
                     onOpenAgentDm: handleOpenAgentDmInBuzz,
+                    onOpenAgentProfileNative: handleOpenNativeAgentProfile,
+                    onRunScout: handleRunScoutNow,
+                    runningScout,
                     onOpenGuide: () => setGuideOpen(true),
                     onToggleKillSwitch: (next) =>
                       handleControlUpdate(
                         { killSwitch: next, pausedReason: next ? "Kill Switch acionado pelo operador" : null },
                         next ? "Kill Switch ativado imediatamente." : "Kill Switch liberado."
                       ),
-                    onRefresh: () => refresh(tenant),
+                    onRefresh: () => refresh(tenant, false, false),
                     loading,
                     Floor3D,
                   })
@@ -1212,7 +1443,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                     Boardroom3D,
                     onReconcileAgents: handleReconcileAgentsR51,
                     onAgentSessionAction: handleAgentSessionAction,
-                    onOpenAgentDrawer: (k: string) => setSelectedAgentKey(k),
+                    onOpenAgentDrawer: (k: string) => void handleOpenNativeAgentProfile(k),
                     onSaveAgentProfile: handleSaveAgentProfile,
                     editingAgentKey,
                     setEditingAgentKey,
@@ -1237,6 +1468,16 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                     onChannelDiagnostic: handleChannelDiagnostic,
                     onCopyText: handleCopyText,
                     resolveAuthor: (pk: string) => resolveBuzzIdentityName(ctx, pk, nameByPubkey),
+                    automations,
+                    selectedAutomationId,
+                    onSelectAutomationId: setSelectedAutomationId,
+                    onUpdateAutomation: handleUpdateAutomation,
+                    onCreateAutomation: handleCreateAutomation,
+                    onDeleteAutomation: handleDeleteAutomation,
+                    onSaveAutomations: () => void persistAutomations(automations, true),
+                    onRunAutomationNow: handleRunAutomationNow,
+                    onExportAutomationYaml: handleExportAutomationYaml,
+                    runningAutomationId,
                   })
             )
           )
@@ -1270,6 +1511,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         onOpenCommitInBuzz: handleOpenCommitInBuzz,
         onOpenAgentDm: handleOpenAgentDmInBuzz,
         onSessionAction: handleAgentSessionAction,
+        onToggleChecklistStep: handleToggleChecklistStep,
         onClose: () => setSelectedItem(null),
       }),
       renderAgentProfileDrawer({
@@ -1346,27 +1588,22 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
           {
             className: "of-sheet-backdrop",
             "data-orgfy-factory-guide": "true",
-            style: { alignItems: "center", justifyContent: "center", padding: "24px" },
+            "data-guide-docked": "right",
             onClick: (e: any) => {
               if (e.target === e.currentTarget) setGuideOpen(false);
             },
           },
           h(
-            "div",
+            "aside",
             {
-              role: "dialog",
+              className: "of-sheet-panel",
+              role: "complementary",
               "aria-label": "Como funciona o loop da Fábrica OrgFy",
               style: {
-                width: "min(820px, 96vw)",
-                maxHeight: "min(680px, 88vh)",
-                borderRadius: "12px",
-                border: "1px solid var(--border)",
-                background: "var(--card)",
-                color: "var(--foreground)",
-                display: "flex",
-                flexDirection: "column",
+                width: "min(640px, 95vw)",
+                padding: 0,
+                gap: 0,
                 overflow: "hidden",
-                boxShadow: "0 24px 64px rgba(0,0,0,0.55)",
               },
             },
             h(

@@ -1806,4 +1806,27 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     assert.equal(parsed.escopo.passos[1].done, false);
     assert.equal(parsed.aceite.comandoAceite, "python3 -m pytest -q testes/test_watchdog.py");
   });
+
+  test("v17.5: botão atualizar ícone fixo sem shift, ? minimalista em painel lateral, Perfil nativo do Buzz, Roster 3D CodeDen, Oráculo, checklist interativo e Editor Visual de Automações", () => {
+    const bundle = fs.readFileSync(path.resolve(__dirname, "plugin.js"), "utf8");
+    const css = orgfyMod.FACTORY_SHADOW_CSS;
+    assert.ok(css.includes("@keyframes of-spin"), "CSS deve conter animação @keyframes of-spin");
+    assert.ok(css.includes(".of-icon-circle-btn"), "CSS deve conter botão circular fixo .of-icon-circle-btn");
+    assert.ok(bundle.includes("data-factory-refresh-icon"), "Botão de atualizar ícone fixo deve estar no bundle");
+    assert.ok(bundle.includes("data-factory-guide-trigger"), "Botão ? minimalista deve estar no bundle");
+    assert.ok(bundle.includes("data-guide-docked"), "Guia Como funciona deve abrir acoplado na lateral direita");
+    assert.ok(bundle.includes("buzz.agents"), "Navegação para o Perfil nativo de agente no Buzz (pluginId: buzz.agents) deve estar no bundle");
+    assert.ok(bundle.includes("data-codeden-floor-roster"), "Roster completo 1:1 CodeDen no Andar 3D deve estar no bundle");
+    assert.ok(bundle.includes("data-run-scout-now"), "Botão Executar Oráculo agora deve estar no bundle");
+    assert.ok(bundle.includes("data-interactive-checklist"), "Checklist P1..Pn interativo no Inspector deve estar no bundle");
+    assert.ok(bundle.includes("data-orgfy-automation-editor"), "Editor Visual de Automações deve estar no bundle");
+
+    const defaults = orgfyMod.buildDefaultAutomations("orgfy", "OrgFy Core");
+    assert.ok(defaults.length >= 3, "deve inicializar automações padrão da OrgFy");
+    const nextRuns = orgfyMod.computeNextAutomationRuns(defaults[0], 3, new Date("2026-11-26T10:00:00Z"));
+    assert.equal(nextRuns.length, 3, "deve calcular exatamente as próximas 3 execuções");
+    const yaml = orgfyMod.exportAutomationToBuzzWorkflowYaml(defaults[1], "orgfy");
+    assert.ok(yaml.includes("cron:"), "YAML exportado deve incluir expressão cron");
+    assert.ok(yaml.includes("OrgFy Oráculo"), "YAML exportado deve incluir agente alvo");
+  });
 }
