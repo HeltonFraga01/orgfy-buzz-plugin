@@ -13,17 +13,30 @@ import {
 } from "./factory-adapter";
 import { attachFactoryShadowStyles, FACTORY_SHADOW_CSS } from "./shadow-shell";
 import { renderFactoryOverviewPanel } from "./FactoryOverviewPanel";
-import { renderFactoryBoardAndFloor, renderItemSheetDrawer, type LiveCrewAgent } from "./FactoryBoardAndFloor";
+import { renderAgentProfileDrawer, renderFactoryBoardAndFloor, renderItemSheetDrawer, type LiveCrewAgent } from "./FactoryBoardAndFloor";
 import { createFloor3DComponent } from "./codeden-floor/Floor3DCanvas";
 import { createBoardroom3DComponent } from "./Boardroom3DCanvas";
 import { renderFactorySecondaryPage } from "./FactoryPages";
 import {
   interruptLiveTurn,
-  readBuzzChannelCanvas,
+  readBuzzChannelCanvasDetailed,
+  readBuzzChannelCanvasHistory,
   readBuzzLiveTelemetry,
   readBuzzMainAgentPubkey,
+  saveBuzzChannelCanvas,
+  type BuzzCanvasHistoryEntry,
   type LiveAgentTurn,
 } from "./buzz-live-telemetry";
+import {
+  DEFAULT_ORGFY_REPO_OWNER,
+  loadLiveRepoEntityDetail,
+  loadLiveRepoSnapshot,
+  openBuzzRepoEntity,
+  openRepoTabInBuzz,
+  resolveBuzzIdentityName,
+  type LiveRepoEntityDetail,
+  type LiveRepoSnapshot,
+} from "../services/buzz-repos-live";
 import { subscribeRelayUpdates } from "../services/buzz-native";
 import { openIssueInBuzz, openSystemUri } from "../services/orgfy-bridge";
 import { fetchHoldingControlPlane, type HoldingControlPlaneSnapshot } from "../services/holding-service";
@@ -68,6 +81,19 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     const [activityTick, setActivityTick] = React.useState<number>(0);
     const [mainAgentPubkey, setMainAgentPubkey] = React.useState<string | null>(null);
     const [channelCanvas, setChannelCanvas] = React.useState<string | null>(null);
+    const [canvasDraft, setCanvasDraft] = React.useState<string>("");
+    const [canvasEventId, setCanvasEventId] = React.useState<string | undefined>(undefined);
+    const [canvasWritable, setCanvasWritable] = React.useState<boolean>(false);
+    const [canvasSaving, setCanvasSaving] = React.useState<boolean>(false);
+    const [canvasHistory, setCanvasHistory] = React.useState<BuzzCanvasHistoryEntry[]>([]);
+    const [liveRepo, setLiveRepo] = React.useState<LiveRepoSnapshot | null>(null);
+    const [selectedItemDetail, setSelectedItemDetail] = React.useState<LiveRepoEntityDetail | null>(null);
+    const [selectedItemDetailLoading, setSelectedItemDetailLoading] = React.useState<boolean>(false);
+    const [editingAgentKey, setEditingAgentKey] = React.useState<string | null>(null);
+    const [agentEditDraft, setAgentEditDraftState] = React.useState<{ provider: string; model: string; instructions: string }>({ provider: "", model: "", instructions: "" });
+    const setAgentEditDraft = React.useCallback((patch: Partial<{ provider: string; model: string; instructions: string }>) => {
+      setAgentEditDraftState((prev) => ({ ...prev, ...patch }));
+    }, []);
     const [status, setStatus] = React.useState<FactoryStatusPayload>(() => buildEmptyFactoryStatus("orgfy"));
     const [holding, setHolding] = React.useState<HoldingControlPlaneSnapshot | null>(null);
     const [loading, setLoading] = React.useState<boolean>(true);
@@ -142,19 +168,68 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       };
     }, [relayTick]);
 
-    // Lê Canvas ao vivo do canal da empresa no Buzz (session.canvas.read)
+    // Lê Canvas ao vivo + histórico (session.canvas.read/history) e Buzz Repos NIP-34 (session.repositories)
     React.useEffect(() => {
       let cancelled = false;
       const canal = status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === tenant)?.canal || null;
-      readBuzzChannelCanvas(ctx, canal)
-        .then((txt) => {
-          if (!cancelled) setChannelCanvas(txt);
+      const dtag = status.tenantManifest?.repoId || tenant;
+      readBuzzChannelCanvasDetailed(ctx, canal)
+        .then((st) => {
+          if (!cancelled) {
+            setChannelCanvas(st.content);
+            setCanvasDraft(st.content || "");
+            setCanvasEventId(st.eventId);
+            setCanvasWritable(st.writable);
+          }
+        })
+        .catch(() => {});
+      readBuzzChannelCanvasHistory(ctx, canal)
+        .then((hist) => {
+          if (!cancelled) setCanvasHistory(hist);
+        })
+        .catch(() => {});
+      loadLiveRepoSnapshot(ctx, { channelId: canal, dtag })
+        .then((snap) => {
+          if (!cancelled && snap.available) setLiveRepo(snap);
         })
         .catch(() => {});
       return () => {
         cancelled = true;
       };
-    }, [tenant, status.tenantManifest?.canal, holding, relayTick]);
+    }, [tenant, status.tenantManifest?.canal, status.tenantManifest?.repoId, holding, relayTick]);
+
+    // Ao abrir um card no ItemSheetDrawer, carrega conteúdo NIP-34, comentários e diff Git via Buzz Repos
+    React.useEffect(() => {
+      let cancelled = false;
+      if (!selectedItem || !/^[0-9a-f]{64}$/i.test(selectedItem.id || "")) {
+        setSelectedItemDetail(null);
+        setSelectedItemDetailLoading(false);
+        return;
+      }
+      setSelectedItemDetailLoading(true);
+      const isPr = String(selectedItem.workKey || "").startsWith("pr:");
+      loadLiveRepoEntityDetail(ctx, {
+        type: isPr ? "pr" : "issue",
+        owner: liveRepo?.owner || DEFAULT_ORGFY_REPO_OWNER,
+        dtag: liveRepo?.dtag || status.tenantManifest?.repoId || tenant,
+        id: selectedItem.id,
+      })
+        .then((det) => {
+          if (!cancelled) {
+            setSelectedItemDetail(det);
+            setSelectedItemDetailLoading(false);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setSelectedItemDetail(null);
+            setSelectedItemDetailLoading(false);
+          }
+        });
+      return () => {
+        cancelled = true;
+      };
+    }, [selectedItem?.id, liveRepo?.owner, liveRepo?.dtag, tenant]);
 
     // Estados das páginas
     const [scorecardView, setScorecardView] = React.useState<"builders" | "reviewers" | "pairs">("builders");
@@ -259,14 +334,46 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     const handleOpenInBuzz = React.useCallback(
       async (item: FactoryWorkItem) => {
         if (item.id && /^[0-9a-f]{64}$/i.test(item.id)) {
-          const ok = await openIssueInBuzz(ctx, { id: item.id, dtag: tenant }).catch(() => false);
-          notify(ok ? `Issue #${item.id.slice(0, 8)} aberta no Buzz Repos.` : `Deep link preparado para #${item.id.slice(0, 8)}.`);
+          const isPr = String(item.workKey || "").startsWith("pr:");
+          const owner = liveRepo?.owner || DEFAULT_ORGFY_REPO_OWNER;
+          const dtag = liveRepo?.dtag || status.tenantManifest?.repoId || tenant;
+          const okDirect = await openBuzzRepoEntity(ctx, { type: isPr ? "pr" : "issue", owner, dtag, id: item.id }).catch(() => false);
+          const ok = okDirect || (await openIssueInBuzz(ctx, { id: item.id, owner, dtag }).catch(() => false));
+          notify(ok ? `${isPr ? "PR" : "Issue"} #${item.id.slice(0, 8)} aberto direto no Buzz Repos.` : `Deep link preparado para #${item.id.slice(0, 8)}.`);
         } else {
           notify(`Item local #${item.id.slice(0, 8)} (sem ID Nostr de 64 chars).`);
         }
       },
-      [tenant, notify]
+      [tenant, liveRepo, status.tenantManifest, notify]
     );
+
+    const handleOpenCommitInBuzz = React.useCallback(
+      async (commit: string) => {
+        const ok = await openRepoTabInBuzz(ctx, {
+          owner: liveRepo?.owner || DEFAULT_ORGFY_REPO_OWNER,
+          dtag: liveRepo?.dtag || status.tenantManifest?.repoId || tenant,
+          tab: "commits",
+          commit,
+        }).catch(() => false);
+        notify(ok ? `Commit ${commit.slice(0, 8)} aberto no Buzz Repos.` : `Não foi possível abrir o commit ${commit.slice(0, 8)}.`);
+      },
+      [tenant, liveRepo, status.tenantManifest, notify]
+    );
+
+    const handleSaveCanvas = React.useCallback(async () => {
+      const canal = status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === tenant)?.canal || null;
+      setCanvasSaving(true);
+      const res = await saveBuzzChannelCanvas(ctx, canal, canvasDraft, canvasEventId);
+      setCanvasSaving(false);
+      if (res.ok) {
+        setChannelCanvas(canvasDraft);
+        if (res.eventId) setCanvasEventId(res.eventId);
+        notify("Canvas salvo diretamente no canal do Buzz (session.canvas.save).");
+        readBuzzChannelCanvasHistory(ctx, canal).then(setCanvasHistory).catch(() => {});
+      } else {
+        notify(`Falha ao salvar Canvas: ${res.error || "indisponível"}`);
+      }
+    }, [status.tenantManifest, holding, tenant, canvasDraft, canvasEventId, notify]);
 
     const resolveBuzzScope = React.useCallback((): { viewer: string; communityOrigin: string } | null => {
       try {
@@ -327,8 +434,12 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
           key: String(a?.key || a?.name || ""),
           pubkey: typeof a?.pubkey === "string" ? a.pubkey : "",
           name: String(a?.name || a?.key || "Agente"),
+          picture: typeof a?.picture === "string" && a.picture.trim() ? a.picture : undefined,
           model: a?.config?.model || PT_BR.labels.unavailable,
           provider: a?.config?.provider || "",
+          instructions: typeof a?.config?.instructions === "string" ? a.config.instructions : undefined,
+          config: a?.config && typeof a.config === "object" ? a.config : undefined,
+          configBase: a?.configBase,
           running: runningSet.has(String(a?.key || a?.name)),
         }));
       } catch {
@@ -405,8 +516,12 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         const isTier1 = /(ceo|coo|revis|arquit|segur|secur|qa|oraculo|conselho|board)/.test(papel);
         const provider = isTier1 ? "nexusmind_anthropic" : "nexusmind_antigravity";
         const model = isTier1 ? "claude-sonnet-5-5" : "gemini-2.5-flash";
+        const liveMatch = liveCrew.find((c) => c.key === ag.agentKey);
         try {
-          await agentsApi.save(ag.agentKey, { provider, model });
+          await agentsApi.save(ag.agentKey, {
+            config: { ...(liveMatch?.config || {}), provider, model },
+            ...(liveMatch?.configBase ? { base: liveMatch.configBase } : {}),
+          });
           updated += 1;
         } catch {}
       }
@@ -416,7 +531,35 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
           : "Nenhum agente pôde ser atualizado via ctx.agents.save()."
       );
       await refresh(tenant);
-    }, [tenantAgents, tenant, notify, refresh]);
+    }, [tenantAgents, liveCrew, tenant, notify, refresh]);
+
+    const handleSaveAgentProfile = React.useCallback(
+      async (agentKey: string, patch: { provider: string; model: string; instructions?: string }) => {
+        const agentsApi = (ctx as any)?.agents;
+        if (typeof agentsApi?.save !== "function") {
+          notify("API ctx.agents.save indisponível nesta versão do Buzz.");
+          return;
+        }
+        const liveMatch = liveCrew.find((c) => c.key === agentKey);
+        try {
+          await agentsApi.save(agentKey, {
+            config: {
+              ...(liveMatch?.config || {}),
+              ...(patch.provider ? { provider: patch.provider.trim() } : {}),
+              ...(patch.model ? { model: patch.model.trim() } : {}),
+              ...(patch.instructions !== undefined && patch.instructions.trim() ? { instructions: patch.instructions } : {}),
+            },
+            ...(liveMatch?.configBase ? { base: liveMatch.configBase } : {}),
+          });
+          setEditingAgentKey(null);
+          notify(`Perfil de ${liveMatch?.name || agentKey} salvo via ctx.agents.save().`);
+          await refresh(tenant);
+        } catch (err: any) {
+          notify(`Falha ao salvar perfil: ${err?.message || err}`);
+        }
+      },
+      [liveCrew, tenant, notify, refresh]
+    );
 
     const handleAgentSessionAction = React.useCallback(
       async (agentKey: string, action: "interrupt" | "compact" | "new") => {
@@ -957,6 +1100,19 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                     Boardroom3D,
                     onReconcileAgents: handleReconcileAgentsR51,
                     onAgentSessionAction: handleAgentSessionAction,
+                    onOpenAgentDrawer: (k: string) => setSelectedAgentKey(k),
+                    onSaveAgentProfile: handleSaveAgentProfile,
+                    editingAgentKey,
+                    setEditingAgentKey,
+                    agentEditDraft,
+                    setAgentEditDraft,
+                    canvasDraft,
+                    setCanvasDraft,
+                    canvasWritable,
+                    canvasSaving,
+                    onSaveCanvas: handleSaveCanvas,
+                    canvasHistory,
+                    resolveAuthor: (pk: string) => resolveBuzzIdentityName(ctx, pk, nameByPubkey),
                   })
             )
           )
@@ -966,8 +1122,28 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         h,
         item: selectedItem,
         tenant,
+        repoDetail: selectedItemDetail,
+        repoLoading: selectedItemDetailLoading,
+        resolveAuthor: (pk: string) => resolveBuzzIdentityName(ctx, pk, nameByPubkey),
+        EmbeddedThread: (ctx as any)?.conversation?.ui?.Thread,
+        threadChannelId: status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === tenant)?.canal || null,
+        relaySession: relaySnap?.session,
+        onOpenCommitInBuzz: handleOpenCommitInBuzz,
         onClose: () => setSelectedItem(null),
         onOpenInBuzz: handleOpenInBuzz,
+      }),
+      renderAgentProfileDrawer({
+        h,
+        agent: liveCrew.find((a) => a.key === selectedAgentKey) || null,
+        liveTurn: (() => {
+          const ag = liveCrew.find((a) => a.key === selectedAgentKey);
+          return ag?.pubkey ? telemetry.byPubkey[ag.pubkey.toLowerCase()] || null : null;
+        })(),
+        TranscriptComponent: (ctx as any)?.agents?.ui?.Transcript,
+        channelId: status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === tenant)?.canal || null,
+        onOpenDm: handleOpenAgentDmInBuzz,
+        onSessionAction: handleAgentSessionAction,
+        onClose: () => setSelectedAgentKey(null),
       }),
       renderCommandPalette(
         {

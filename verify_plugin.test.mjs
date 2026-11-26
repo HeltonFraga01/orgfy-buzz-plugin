@@ -1577,4 +1577,15 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     assert.ok(bundle.includes("data-boardroom-3d"), "Tema 3D leve boardroom deve estar presente no bundle");
     assert.ok(bundle.includes("data-reconcile-r51"), "Botão de reconciliação Eval R5.1 via ctx.agents.save deve estar presente");
   });
+
+  test("v17.3: Buzz Repos nativo (session.repositories/projectGit), deep link 1-salto, Canvas editável, Thread e AgentProfileDrawer/Transcript", () => {
+    const bundle = fs.readFileSync(path.resolve(__dirname, "plugin.js"), "utf8");
+    const bridgeSrc = fs.readFileSync(path.resolve(__dirname, "src", "services", "orgfy-bridge.ts"), "utf8");
+    assert.ok(bridgeSrc.includes("ctx?.relay?.snapshot"), "openIssueInBuzz deve resolver scope via ctx.relay.snapshot()");
+    assert.ok(bundle.includes("data-buzz-repo-detail"), "ItemSheetDrawer deve renderizar detalhe NIP-34 do Buzz Repos");
+    assert.ok(bundle.includes("data-embedded-buzz-thread"), "ItemSheetDrawer deve suportar ctx.conversation.ui.Thread");
+    assert.ok(bundle.includes("data-canvas-live-editor"), "Aba Canvas deve suportar edição e salvamento via session.canvas.save");
+    assert.ok(bundle.includes("data-agent-profile-drawer"), "Drawer de Perfil & Transcript do Agente deve estar presente");
+    assert.ok(bundle.includes("data-agent-nip-ap-editor"), "Editor NIP-AP inline via ctx.agents.save deve estar presente");
+  });
 }

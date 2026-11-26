@@ -2,15 +2,20 @@
 // Visão completa da Fábrica: ViewHeader, StatsStrip (6 tiles), Board 6 colunas + Faixa "Precisa de você", Andar 2 pisos (Oficina + Mirante) com Roster lateral e drawer ItemSheet.
 
 import type { FactoryStatusPayload, FactoryWorkItem } from "./factory-adapter";
-import type { BuzzLiveTelemetrySnapshot } from "./buzz-live-telemetry";
+import type { BuzzLiveTelemetrySnapshot, LiveAgentTurn } from "./buzz-live-telemetry";
+import type { LiveRepoEntityDetail } from "../services/buzz-repos-live";
 import { PT_BR } from "../i18n/pt-BR";
 
 export interface LiveCrewAgent {
   key: string;
   pubkey?: string;
   name: string;
+  picture?: string;
   model: string;
   provider: string;
+  instructions?: string;
+  config?: Record<string, any>;
+  configBase?: any;
   running: boolean;
 }
 
@@ -359,7 +364,10 @@ export function renderFactoryBoardAndFloor(props: BoardAndFloorProps) {
             telemetry: props.telemetry,
             focus: storeyFocus,
             onSelectItem,
-            onOpenAgentDm: props.onOpenAgentDm,
+            onOpenAgentDm: (ag: any) => {
+              if (ag?.key) onSelectAgentKey(ag.key);
+              else props.onOpenAgentDm?.(ag);
+            },
           })
         : h(
             "div",
@@ -369,15 +377,22 @@ export function renderFactoryBoardAndFloor(props: BoardAndFloorProps) {
   );
 }
 
-/** Drawer lateral ItemSheet (item-sheet.tsx) com StepTrail, Fatos e Deep Link nativo do Buzz */
+/** Drawer lateral ItemSheet (item-sheet.tsx) com Buzz Repos NIP-34 ao vivo, diff Git, comentários, Thread nativa e Deep Link direto */
 export function renderItemSheetDrawer(props: {
   h: any;
   item: FactoryWorkItem | null;
   tenant: string;
+  repoDetail?: LiveRepoEntityDetail | null;
+  repoLoading?: boolean;
+  resolveAuthor?: (pubkey: string) => string;
+  EmbeddedThread?: any;
+  threadChannelId?: string | null;
+  relaySession?: any;
+  onOpenCommitInBuzz?: (commit: string) => void;
   onClose: () => void;
   onOpenInBuzz?: (item: FactoryWorkItem) => void;
 }) {
-  const { h, item, tenant, onClose, onOpenInBuzz } = props;
+  const { h, item, tenant, repoDetail, repoLoading, resolveAuthor, EmbeddedThread, threadChannelId, relaySession, onOpenCommitInBuzz, onClose, onOpenInBuzz } = props;
   if (!item) return null;
 
   const steps = ["Entrada", "Identificar tipo", "Execução (Worktree)", "Revisão L-01 + CI", "Merge na main"];
@@ -388,13 +403,14 @@ export function renderItemSheetDrawer(props: {
     "div",
     {
       className: "of-sheet-backdrop",
+      "data-item-sheet-drawer": "true",
       onClick: (e: any) => {
         if (e.target === e.currentTarget) onClose();
       },
     },
     h(
       "aside",
-      { className: "of-sheet-panel" },
+      { className: "of-sheet-panel", style: { width: "min(540px, 95vw)" } },
       h(
         "div",
         { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px" } },
@@ -402,14 +418,14 @@ export function renderItemSheetDrawer(props: {
           "div",
           null,
           h("div", { className: "of-mono", style: { fontSize: "11px", color: "var(--primary)" } }, `#${item.id.slice(0, 12)} · ${tenant}`),
-          h("div", { style: { fontSize: "15px", fontWeight: 700, marginTop: "2px" } }, item.title)
+          h("div", { style: { fontSize: "15px", fontWeight: 700, marginTop: "2px" } }, repoDetail?.title || item.title)
         ),
         h("button", { type: "button", className: "of-btn", onClick: onClose }, "Fechar")
       ),
       h(
         "div",
         { style: { display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" } },
-        h("span", { className: "of-pill", "data-tone": cardStateOf(item) === "person" ? "waiting" : cardStateOf(item) }, item.stage),
+        h("span", { className: "of-pill", "data-tone": cardStateOf(item) === "person" ? "waiting" : cardStateOf(item) }, repoDetail?.status || item.stage),
         item.type && h("span", { className: "of-pill" }, item.type),
         item.attempts > 1 && h("span", { className: "of-pill", "data-tone": "waiting" }, `Refazer rodada ${item.attempts}`),
         onOpenInBuzz &&
@@ -422,7 +438,7 @@ export function renderItemSheetDrawer(props: {
               style: { marginLeft: "auto" },
               onClick: () => onOpenInBuzz(item),
             },
-            "Abrir no Buzz ↗"
+            "Abrir direto no Buzz Repos ↗"
           )
       ),
       h(
@@ -455,10 +471,129 @@ export function renderItemSheetDrawer(props: {
         { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px", fontSize: "12px" } },
         h("div", { style: { display: "flex", justifyContent: "space-between" } }, h("span", { className: "of-muted" }, "Work key"), h("span", { className: "of-mono" }, item.workKey || "—")),
         h("div", { style: { display: "flex", justifyContent: "space-between" } }, h("span", { className: "of-muted" }, "Etapa"), h("span", { className: "of-mono" }, item.step || item.stage)),
-        h("div", { style: { display: "flex", justifyContent: "space-between" } }, h("span", { className: "of-muted" }, "Sessão ativa"), h("span", { className: "of-mono" }, item.activeSessionId || "—")),
+        repoDetail?.authorPubkey &&
+          h("div", { style: { display: "flex", justifyContent: "space-between" } }, h("span", { className: "of-muted" }, "Autor (NIP-34)"), h("span", null, resolveAuthor ? resolveAuthor(repoDetail.authorPubkey) : repoDetail.authorPubkey.slice(0, 12))),
+        repoDetail?.commit &&
+          h(
+            "div",
+            { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+            h("span", { className: "of-muted" }, "Commit"),
+            onOpenCommitInBuzz
+              ? h("button", { type: "button", className: "of-btn", "data-variant": "ghost", style: { padding: "1px 6px", fontFamily: "var(--font-mono)", color: "var(--primary)" }, onClick: () => onOpenCommitInBuzz(repoDetail.commit!) }, `${repoDetail.commit.slice(0, 10)} ↗`)
+              : h("span", { className: "of-mono" }, repoDetail.commit.slice(0, 10))
+          ),
         item.reason && h("div", { style: { marginTop: "4px", color: "var(--status-waiting)" } }, `Motivo: ${item.reason}`),
         item.note && h("div", { className: "of-muted" }, `Nota: ${item.note}`)
-      )
+      ),
+      repoLoading && h("div", { className: "of-muted", style: { fontSize: "11.5px" } }, "Carregando conteúdo NIP-34 e diff do Buzz Repos..."),
+      repoDetail?.content &&
+        h(
+          "section",
+          { className: "of-surface", style: { padding: "10px 12px" }, "data-buzz-repo-detail": "true" },
+          h("div", { className: "of-meter-label", style: { marginBottom: "6px" } }, "Descrição (Buzz Repos NIP-34)"),
+          h("pre", { className: "of-muted", style: { margin: 0, whiteSpace: "pre-wrap", fontFamily: "inherit", fontSize: "11.5px", lineHeight: 1.5, maxHeight: "220px", overflowY: "auto" } }, repoDetail.content)
+        ),
+      repoDetail?.commitDiff &&
+        h(
+          "section",
+          { className: "of-surface", style: { padding: "10px 12px" } },
+          h("div", { className: "of-meter-label", style: { marginBottom: "6px" } }, `Diff do Commit (${repoDetail.commit?.slice(0, 8)})`),
+          h("pre", { className: "of-mono", style: { margin: 0, whiteSpace: "pre", fontSize: "10.5px", lineHeight: 1.4, maxHeight: "200px", overflow: "auto" } }, repoDetail.commitDiff)
+        ),
+      repoDetail && repoDetail.comments.length > 0 &&
+        h(
+          "section",
+          { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "8px" } },
+          h("div", { className: "of-meter-label" }, `Discussão NIP-34 (${repoDetail.comments.length})`),
+          repoDetail.comments.slice(-8).map((c) =>
+            h(
+              "div",
+              { key: c.id, style: { padding: "7px 9px", borderRadius: "7px", background: "var(--card)", border: "1px solid var(--border)", fontSize: "11.5px" } },
+              h("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: "4px", fontSize: "10.5px" } },
+                h("strong", null, resolveAuthor ? resolveAuthor(c.authorPubkey) : c.authorPubkey.slice(0, 10)),
+                h("span", { className: "of-muted" }, c.createdAt ? new Date(c.createdAt).toLocaleString("pt-BR") : "")
+              ),
+              h("div", { style: { whiteSpace: "pre-wrap", lineHeight: 1.4 } }, c.content)
+            )
+          )
+        ),
+      EmbeddedThread && threadChannelId && relaySession &&
+        h(
+          "section",
+          { className: "of-surface", style: { padding: "10px 12px", minHeight: "220px" }, "data-embedded-buzz-thread": "true" },
+          h("div", { className: "of-meter-label", style: { marginBottom: "6px" } }, "Thread ao vivo no Buzz"),
+          h(EmbeddedThread, { session: relaySession, channelId: threadChannelId, rootId: item.id })
+        )
+    )
+  );
+}
+
+/** Drawer de Perfil & Transcript ao Vivo do Agente (Andar 3D e aba Agentes) */
+export function renderAgentProfileDrawer(props: {
+  h: any;
+  agent: LiveCrewAgent | null;
+  liveTurn?: LiveAgentTurn | null;
+  TranscriptComponent?: any;
+  channelId?: string | null;
+  onOpenDm?: (agent: { key?: string; pubkey?: string; name?: string }) => void;
+  onSessionAction?: (agentKey: string, action: "interrupt" | "compact" | "new") => void;
+  onClose: () => void;
+}) {
+  const { h, agent, liveTurn, TranscriptComponent, channelId, onOpenDm, onSessionAction, onClose } = props;
+  if (!agent) return null;
+
+  return h(
+    "div",
+    {
+      className: "of-sheet-backdrop",
+      "data-agent-profile-drawer": "true",
+      onClick: (e: any) => {
+        if (e.target === e.currentTarget) onClose();
+      },
+    },
+    h(
+      "aside",
+      { className: "of-sheet-panel", style: { width: "min(520px, 95vw)" } },
+      h(
+        "div",
+        { style: { display: "flex", alignItems: "center", gap: "10px" } },
+        agent.picture
+          ? h("img", { src: agent.picture, alt: agent.name, style: { width: "38px", height: "38px", borderRadius: "10px", objectFit: "cover", border: "1px solid var(--border)" } })
+          : h("span", { className: "of-brand-icon", style: { width: "38px", height: "38px", fontSize: "15px" } }, agent.name.charAt(0).toUpperCase()),
+        h(
+          "div",
+          { style: { flex: 1, minWidth: 0 } },
+          h("div", { style: { fontSize: "15px", fontWeight: 700 } }, agent.name),
+          h("div", { className: "of-mono of-muted", style: { fontSize: "11px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, `${agent.provider || "buzz"} / ${agent.model}`)
+        ),
+        h("button", { type: "button", className: "of-btn", onClick: onClose }, "Fechar")
+      ),
+      h(
+        "div",
+        { style: { display: "flex", flexWrap: "wrap", gap: "6px", alignItems: "center" } },
+        h("span", { className: "of-pill", "data-tone": liveTurn ? (liveTurn.state === "error" ? "failed" : "running") : agent.running ? "done" : "idle" }, liveTurn ? `⚡ ${liveTurn.stepLabel}` : agent.running ? "Ativo" : "Disponível"),
+        onOpenDm &&
+          h("button", { type: "button", className: "of-btn", "data-variant": "primary", onClick: () => onOpenDm({ key: agent.key, pubkey: agent.pubkey, name: agent.name }) }, "DM lateral ↗"),
+        onSessionAction && agent.key &&
+          h("button", { type: "button", className: "of-btn", onClick: () => onSessionAction(agent.key, "compact") }, "Compactar"),
+        onSessionAction && agent.key &&
+          h("button", { type: "button", className: "of-btn", onClick: () => onSessionAction(agent.key, "new") }, "Nova sessão"),
+        onSessionAction && agent.key &&
+          h("button", { type: "button", className: "of-btn", "data-variant": "danger", onClick: () => onSessionAction(agent.key, "interrupt") }, "Parar")
+      ),
+      TranscriptComponent
+        ? h(
+            "section",
+            { className: "of-surface", style: { padding: "10px 12px", flex: 1, minHeight: "260px", overflowY: "auto" }, "data-agent-transcript": "true" },
+            h("div", { className: "of-meter-label", style: { marginBottom: "8px" } }, "Transcript ao vivo (ctx.agents.ui.Transcript)"),
+            h(TranscriptComponent, { agentKey: agent.key, channelId: liveTurn?.channelId || channelId || undefined })
+          )
+        : h(
+            "section",
+            { className: "of-surface", style: { padding: "12px" }, "data-agent-transcript-fallback": "true" },
+            h("div", { className: "of-meter-label", style: { marginBottom: "6px" } }, "Atividade do agente"),
+            h("div", { className: "of-muted", style: { fontSize: "12px" } }, liveTurn ? `Em execução agora: ${liveTurn.stepLabel}` : "Nenhum turno ativo no momento. Clique em DM lateral ↗ para conversar com o agente.")
+          )
     )
   );
 }
