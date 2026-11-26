@@ -16201,6 +16201,10 @@ function renderFactoryBoardAndFloor(props) {
           var _a2;
           return (_a2 = props.onOpenAgentDm) == null ? void 0 : _a2.call(props, ag);
         },
+        onOpenTurnInSideChat: (turn) => {
+          var _a2;
+          return (_a2 = props.onOpenTurnInSideChat) == null ? void 0 : _a2.call(props, turn);
+        },
         onOpenAgentProfile: (ag) => {
           if (props.onOpenAgentProfileNative) props.onOpenAgentProfileNative(ag);
           else if (ag.key) onSelectAgentKey(ag.key);
@@ -47911,7 +47915,7 @@ function toCodeDenStage(item) {
   if (item.stage === "candidate" || item.step === "intake") return "type";
   return "intake";
 }
-function adaptStatusFor3D(status, liveCrew) {
+function adaptStatusFor3D(status, liveCrew, telemetry) {
   var _a;
   const sessions = /* @__PURE__ */ new Map();
   let pmSessionId = null;
@@ -47919,22 +47923,24 @@ function adaptStatusFor3D(status, liveCrew) {
   const tenantAgents = ((_a = status.tenantManifest) == null ? void 0 : _a.agentes) || [];
   const pool = tenantAgents.length > 0 ? tenantAgents.map((a) => ({
     key: a.agentKey,
+    pubkey: a.pubkey || "",
     name: a.name,
     model: a.model,
     provider: a.provider,
     running: a.running,
     papel: a.papel
-  })) : liveCrew.map((a) => ({ ...a, papel: "" }));
+  })) : liveCrew.map((a) => ({ ...a, pubkey: a.pubkey || "", papel: "" }));
   for (const agent of pool) {
     const sid = agent.key;
+    const liveTurn = agent.pubkey && (telemetry == null ? void 0 : telemetry.byPubkey) ? telemetry.byPubkey[agent.pubkey.toLowerCase()] || null : null;
     const isPm = agent.papel === "coo" || agent.papel === "ceo_empresa" || /bento|iris|coo|ceo|pm/i.test(agent.name);
     const isScout = agent.papel === "oraculo" || /oraculo|oráculo|scout/i.test(agent.name);
     if (isPm && !pmSessionId) pmSessionId = sid;
     if (isScout && !scoutSessionId) scoutSessionId = sid;
     sessions.set(sid, {
-      status: agent.running ? "running" : "idle",
-      progress: agent.running ? `Executando (${agent.model})` : "Aguardando",
-      progressAt: (/* @__PURE__ */ new Date()).toISOString(),
+      status: liveTurn ? liveTurn.state === "error" ? "failed" : "running" : agent.running ? "running" : "idle",
+      progress: (liveTurn == null ? void 0 : liveTurn.stepLabel) || (agent.running ? `Executando (${agent.model})` : "Aguardando"),
+      progressAt: new Date((liveTurn == null ? void 0 : liveTurn.startedAt) || Date.now()).toISOString(),
       provider: agent.provider || "claude",
       providerId: agent.provider || "claude",
       model: agent.model || null,
@@ -48044,6 +48050,7 @@ function adaptStatusFor3D(status, liveCrew) {
     pmSessionId
   };
 }
+const COMPLETED_BUBBLE_TTL_MS = 3 * 60 * 1e3;
 function formatElapsedStep(tsMs) {
   if (!tsMs) return "—";
   const ms = typeof tsMs === "number" ? tsMs : Date.parse(String(tsMs));
@@ -48056,24 +48063,38 @@ function formatElapsedStep(tsMs) {
   if (hours < 24) return `${hours}h ${mins % 60}m`;
   return `${Math.floor(hours / 24)}d`;
 }
+function formatBubbleClock(tsMs) {
+  if (!tsMs || !Number.isFinite(tsMs)) return "0s";
+  const diffSec = Math.max(0, Math.floor((Date.now() - tsMs) / 1e3));
+  if (diffSec < 60) return `${diffSec}s`;
+  const mins = Math.floor(diffSec / 60);
+  const rem = diffSec % 60;
+  if (mins < 60) return rem > 0 ? `${mins}m ${rem}s` : `${mins}m`;
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+}
 function createFloor3DComponent(ctx) {
   const React = ctx.react;
   const h = React.createElement;
-  return function CodeDenFloor3D({ tenant, status, liveCrew, telemetry, focus, onSelectItem, onOpenAgentDm, onOpenAgentProfile }) {
+  return function CodeDenFloor3D({ tenant, status, liveCrew, telemetry, focus, onSelectItem, onOpenAgentDm, onOpenAgentProfile, onOpenTurnInSideChat }) {
     var _a, _b;
     const hostRef = React.useRef(null);
     const stageRef = React.useRef(null);
     const seatingRef = React.useRef(NO_SEATING);
     const layoutRef = React.useRef(null);
+    const bubbleNodesRef = React.useRef(/* @__PURE__ */ new Map());
+    const lastFiguresRef = React.useRef([]);
+    const prevActiveByPubkeyRef = React.useRef({});
     const [webglLost, setWebglLost] = React.useState(false);
     const [rosterOpen, setRosterOpen] = React.useState(true);
     const [rosterFilter, setRosterFilter] = React.useState("all");
     const [hoveredKey, setHoveredKey] = React.useState(null);
     const [selectedKey, setSelectedKey] = React.useState(null);
     const [isFullscreen, setIsFullscreen] = React.useState(false);
+    const [completedTurns, setCompletedTurns] = React.useState({});
+    const [, setClockTick] = React.useState(0);
     const tenantAgents = ((_a = status.tenantManifest) == null ? void 0 : _a.agentes) || [];
     const empresaNome = ((_b = status.tenantManifest) == null ? void 0 : _b.nome) || tenant;
-    const adapted = React.useMemo(() => adaptStatusFor3D(status, liveCrew), [status, liveCrew]);
+    const adapted = React.useMemo(() => adaptStatusFor3D(status, liveCrew, telemetry), [status, liveCrew, telemetry]);
     const { scene, layout } = React.useMemo(() => {
       let nextLayout = layoutRef.current;
       const nextScene = sceneOf(
@@ -48095,12 +48116,71 @@ function createFloor3DComponent(ctx) {
       return { scene: nextScene, layout: finalLayout };
     }, [adapted]);
     const lookout = React.useMemo(() => lookoutLayout(layout), [layout]);
+    React.useEffect(() => {
+      const currentMap = (telemetry == null ? void 0 : telemetry.byPubkey) || {};
+      const prevMap = prevActiveByPubkeyRef.current;
+      const now = Date.now();
+      let changed = false;
+      const updates = {};
+      for (const [pk, prevTurn] of Object.entries(prevMap)) {
+        if (!currentMap[pk]) {
+          updates[pk] = { turn: prevTurn, finishedAt: now };
+          changed = true;
+        }
+      }
+      for (const pk of Object.keys(currentMap)) {
+        updates[pk] = null;
+        changed = true;
+      }
+      prevActiveByPubkeyRef.current = { ...currentMap };
+      if (changed) {
+        setCompletedTurns((prev) => {
+          let mutated = false;
+          const copy = { ...prev };
+          for (const [pk, val] of Object.entries(updates)) {
+            if (val === null) {
+              if (copy[pk]) {
+                delete copy[pk];
+                mutated = true;
+              }
+            } else {
+              copy[pk] = val;
+              mutated = true;
+            }
+          }
+          return mutated ? copy : prev;
+        });
+      }
+    }, [telemetry]);
+    const positionBubbles = React.useCallback((figures) => {
+      const host = hostRef.current;
+      if (!host) return;
+      const hostW = host.clientWidth || 1;
+      const hostH = host.clientHeight || 1;
+      const byKey = /* @__PURE__ */ new Map();
+      for (const f of figures) byKey.set(f.key, f);
+      for (const [figKey, node] of bubbleNodesRef.current.entries()) {
+        const fig = byKey.get(figKey);
+        if (!fig || !fig.head.inView) {
+          node.style.opacity = "0";
+          node.style.pointerEvents = "none";
+          continue;
+        }
+        const clampedX = Math.max(124, Math.min(hostW - 124, fig.head.x));
+        const clampedY = Math.max(92, Math.min(hostH - 22, fig.head.y - 16));
+        node.style.transform = `translate3d(${Math.round(clampedX)}px, ${Math.round(clampedY)}px, 0) translate(-50%, -100%)`;
+        node.style.opacity = "1";
+        node.style.pointerEvents = "auto";
+      }
+    }, []);
     const sceneRef = React.useRef(scene);
     const statusRef = React.useRef(status);
     const onSelectItemRef = React.useRef(onSelectItem);
+    const positionBubblesRef = React.useRef(positionBubbles);
     sceneRef.current = scene;
     statusRef.current = status;
     onSelectItemRef.current = onSelectItem;
+    positionBubblesRef.current = positionBubbles;
     React.useEffect(() => {
       const el = hostRef.current;
       if (!el) return;
@@ -48125,7 +48205,9 @@ function createFloor3DComponent(ctx) {
               if (found) onSelectItemRef.current(found);
             }
           },
-          onFrame: () => {
+          onFrame: (figures) => {
+            lastFiguresRef.current = figures;
+            positionBubblesRef.current(figures);
           }
         });
         stageRef.current = st;
@@ -48160,6 +48242,98 @@ function createFloor3DComponent(ctx) {
     const turnOf = (ag) => ag.pubkey && (telemetry == null ? void 0 : telemetry.byPubkey) ? telemetry.byPubkey[ag.pubkey.toLowerCase()] || null : null;
     const workingNowCount = tenantAgents.filter((a) => Boolean(turnOf(a))).length;
     const inBuzzCount = tenantAgents.filter((a) => a.inBuzz).length;
+    const speechBubbles = React.useMemo(() => {
+      var _a2;
+      const now = Date.now();
+      const entries = [];
+      const usedFigures = /* @__PURE__ */ new Set();
+      const areaFigures = scene.agents.filter((a) => a.role === "area").map((a) => a.key);
+      const workerFigures = scene.agents.filter((a) => a.role !== "pm" && a.role !== "scout" && a.role !== "area");
+      let areaCursor = 0;
+      const resolveFigureKey = (ag) => {
+        const isPm = ag.agentKey === adapted.pmSessionId || ag.papel === "coo" || ag.papel === "ceo_empresa" || /bento|iris|coo|ceo|pm/i.test(ag.name);
+        if (isPm && !usedFigures.has("pm") && scene.agents.some((s) => s.key === "pm")) {
+          return "pm";
+        }
+        const isScout = ag.papel === "oraculo" || /oraculo|oráculo|scout/i.test(ag.name);
+        if (isScout && !usedFigures.has("scout") && scene.agents.some((s) => s.key === "scout")) {
+          return "scout";
+        }
+        const directWorker = workerFigures.find(
+          (w) => {
+            var _a3;
+            return !usedFigures.has(w.key) && (w.sessionId === ag.agentKey || Boolean(((_a3 = w.card) == null ? void 0 : _a3.item.note) && w.card.item.note.toLowerCase().includes(ag.name.toLowerCase())));
+          }
+        );
+        if (directWorker) return directWorker.key;
+        while (areaCursor < areaFigures.length) {
+          const candidate = areaFigures[areaCursor++];
+          if (!usedFigures.has(candidate)) return candidate;
+        }
+        if (!usedFigures.has("pm") && scene.agents.some((s) => s.key === "pm")) return "pm";
+        return null;
+      };
+      for (const ag of tenantAgents) {
+        const pk = (ag.pubkey || "").toLowerCase();
+        if (!pk) continue;
+        const liveTurn = ((_a2 = telemetry == null ? void 0 : telemetry.byPubkey) == null ? void 0 : _a2[pk]) || null;
+        const doneRec = completedTurns[pk];
+        const hasFreshDone = Boolean(doneRec && !doneRec.dismissed && now - doneRec.finishedAt < COMPLETED_BUBBLE_TTL_MS);
+        if (!liveTurn && !hasFreshDone) continue;
+        const figureKey = resolveFigureKey(ag);
+        if (!figureKey) continue;
+        usedFigures.add(figureKey);
+        const liveMatch = liveCrew.find((c) => c.key === ag.agentKey || c.pubkey && c.pubkey.toLowerCase() === pk);
+        if (liveTurn) {
+          entries.push({
+            figureKey,
+            agentKey: ag.agentKey,
+            agentPubkey: pk,
+            agentName: ag.name,
+            picture: liveMatch == null ? void 0 : liveMatch.picture,
+            kind: liveTurn.state === "error" ? "error" : "working",
+            turn: liveTurn
+          });
+        } else if (doneRec) {
+          entries.push({
+            figureKey,
+            agentKey: ag.agentKey,
+            agentPubkey: pk,
+            agentName: ag.name,
+            picture: liveMatch == null ? void 0 : liveMatch.picture,
+            kind: "done",
+            turn: doneRec.turn,
+            finishedAt: doneRec.finishedAt
+          });
+        }
+      }
+      return entries;
+    }, [tenantAgents, telemetry, completedTurns, scene.agents, adapted.pmSessionId, liveCrew]);
+    React.useEffect(() => {
+      if (speechBubbles.length === 0) return;
+      const timer = window.setInterval(() => {
+        setClockTick((n) => n + 1);
+        const now = Date.now();
+        setCompletedTurns((prev) => {
+          let expired = false;
+          const next = {};
+          for (const [pk, item] of Object.entries(prev)) {
+            if (!item.dismissed && now - item.finishedAt < COMPLETED_BUBBLE_TTL_MS) {
+              next[pk] = item;
+            } else {
+              expired = true;
+            }
+          }
+          return expired ? next : prev;
+        });
+      }, 1e3);
+      return () => window.clearInterval(timer);
+    }, [speechBubbles.length]);
+    React.useEffect(() => {
+      if (lastFiguresRef.current.length > 0) {
+        positionBubbles(lastFiguresRef.current);
+      }
+    }, [speechBubbles, positionBubbles]);
     if (webglLost) {
       return h(
         "div",
@@ -48286,6 +48460,247 @@ function createFloor3DComponent(ctx) {
             overflow: "hidden"
           }
         },
+        // Camada de balões de chat ao vivo ancorados sobre a cabeça dos bonequinhos 3D
+        h(
+          "div",
+          {
+            "data-floor3d-speech-layer": "true",
+            style: {
+              position: "absolute",
+              inset: 0,
+              zIndex: 18,
+              pointerEvents: "none",
+              overflow: "hidden"
+            }
+          },
+          speechBubbles.map((b) => {
+            const isDone = b.kind === "done";
+            const isErr = b.kind === "error";
+            const borderColor = isDone ? "rgba(16, 185, 129, 0.72)" : isErr ? "rgba(239, 68, 68, 0.72)" : "rgba(59, 130, 246, 0.65)";
+            const accentColor = isDone ? "#34d399" : isErr ? "#f87171" : "#60a5fa";
+            const handleOpenResponse = (e) => {
+              e.stopPropagation();
+              if (isDone) {
+                setCompletedTurns((prev) => {
+                  const cur = prev[b.agentPubkey];
+                  if (!cur) return prev;
+                  return { ...prev, [b.agentPubkey]: { ...cur, dismissed: true } };
+                });
+              }
+              if (b.turn.channelId && onOpenTurnInSideChat) {
+                onOpenTurnInSideChat(b.turn);
+              } else if (onOpenAgentDm) {
+                onOpenAgentDm({ key: b.agentKey, pubkey: b.agentPubkey, name: b.agentName });
+              }
+            };
+            const handleDismiss = (e) => {
+              e.stopPropagation();
+              setCompletedTurns((prev) => {
+                const cur = prev[b.agentPubkey];
+                if (!cur) return prev;
+                return { ...prev, [b.agentPubkey]: { ...cur, dismissed: true } };
+              });
+            };
+            return h(
+              "div",
+              {
+                key: `${b.figureKey}:${b.agentPubkey}`,
+                "data-floor3d-speech-bubble": b.figureKey,
+                "data-bubble-state": b.kind,
+                ref: (el) => {
+                  if (el) bubbleNodesRef.current.set(b.figureKey, el);
+                  else bubbleNodesRef.current.delete(b.figureKey);
+                },
+                style: {
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  opacity: 0,
+                  pointerEvents: "none",
+                  willChange: "transform",
+                  width: "224px",
+                  maxWidth: "240px"
+                },
+                onClick: () => {
+                  var _a2;
+                  setSelectedKey(b.agentKey);
+                  (_a2 = stageRef.current) == null ? void 0 : _a2.select(b.figureKey);
+                }
+              },
+              h(
+                "div",
+                {
+                  style: {
+                    borderRadius: "10px",
+                    border: `1px solid ${borderColor}`,
+                    background: "rgba(15, 18, 24, 0.94)",
+                    backdropFilter: "blur(10px)",
+                    boxShadow: isDone ? "0 10px 26px rgba(0,0,0,0.48), 0 0 18px rgba(16,185,129,0.16)" : "0 10px 26px rgba(0,0,0,0.48), 0 0 18px rgba(59,130,246,0.16)",
+                    padding: "7px 10px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "5px",
+                    cursor: "pointer"
+                  }
+                },
+                h(
+                  "div",
+                  { style: { display: "flex", alignItems: "center", gap: "6px", minWidth: 0 } },
+                  isDone ? h(
+                    "span",
+                    {
+                      style: {
+                        width: "14px",
+                        height: "14px",
+                        borderRadius: "999px",
+                        background: "rgba(16, 185, 129, 0.22)",
+                        color: "#34d399",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: "9.5px",
+                        fontWeight: 700,
+                        flexShrink: 0
+                      }
+                    },
+                    "✓"
+                  ) : h("span", {
+                    style: {
+                      width: "7px",
+                      height: "7px",
+                      borderRadius: "999px",
+                      background: accentColor,
+                      boxShadow: `0 0 8px ${accentColor}`,
+                      animation: "of-pulse 1.5s ease-in-out infinite",
+                      flexShrink: 0
+                    }
+                  }),
+                  h(
+                    "span",
+                    {
+                      style: {
+                        fontSize: "11px",
+                        fontWeight: 700,
+                        color: "var(--foreground)",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        flex: 1
+                      }
+                    },
+                    b.agentName
+                  ),
+                  h(
+                    "span",
+                    {
+                      className: "of-mono",
+                      style: {
+                        fontSize: "9.5px",
+                        color: accentColor,
+                        flexShrink: 0
+                      }
+                    },
+                    isDone ? "Respondeu" : formatBubbleClock(b.turn.startedAt)
+                  ),
+                  isDone && h(
+                    "button",
+                    {
+                      type: "button",
+                      title: "Dispensar balão",
+                      "aria-label": "Dispensar balão",
+                      onClick: handleDismiss,
+                      style: {
+                        border: "none",
+                        background: "transparent",
+                        color: "var(--muted-foreground)",
+                        cursor: "pointer",
+                        padding: "0 2px",
+                        fontSize: "12px",
+                        lineHeight: 1,
+                        flexShrink: 0
+                      }
+                    },
+                    "×"
+                  )
+                ),
+                h(
+                  "div",
+                  {
+                    style: {
+                      fontSize: "11px",
+                      color: isErr ? "#fca5a5" : "rgba(229, 231, 235, 0.88)",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                      lineHeight: 1.35
+                    },
+                    title: b.turn.stepLabel
+                  },
+                  isDone ? "Resposta pronta no chat do Buzz" : b.turn.stepLabel || "Pensando..."
+                ),
+                isDone ? h(
+                  "button",
+                  {
+                    type: "button",
+                    "data-floor3d-open-response": b.agentKey,
+                    className: "of-btn",
+                    "data-variant": "primary",
+                    onClick: handleOpenResponse,
+                    style: {
+                      width: "100%",
+                      justifyContent: "center",
+                      padding: "4px 8px",
+                      fontSize: "10.5px",
+                      fontWeight: 600,
+                      marginTop: "1px"
+                    }
+                  },
+                  "Abrir resposta ↗"
+                ) : h(
+                  "div",
+                  {
+                    style: {
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      fontSize: "9.5px",
+                      color: "var(--muted-foreground)"
+                    }
+                  },
+                  h("span", { className: "of-mono" }, "Buzz ao vivo"),
+                  h(
+                    "button",
+                    {
+                      type: "button",
+                      onClick: handleOpenResponse,
+                      style: {
+                        border: "none",
+                        background: "transparent",
+                        color: accentColor,
+                        cursor: "pointer",
+                        padding: 0,
+                        fontSize: "10px",
+                        fontWeight: 600
+                      }
+                    },
+                    "Ver chat ↗"
+                  )
+                )
+              ),
+              // Pontinha do balão de fala apontando para a cabeça do bonequinho 3D
+              h("div", {
+                style: {
+                  width: 0,
+                  height: 0,
+                  margin: "0 auto",
+                  borderLeft: "7px solid transparent",
+                  borderRight: "7px solid transparent",
+                  borderTop: `7px solid ${borderColor}`
+                }
+              })
+            );
+          })
+        ),
         rosterOpen ? h(
           "nav",
           {
@@ -53561,6 +53976,7 @@ Nota: ${evidence.note}`
                 onSelectItem: setSelectedItem,
                 onOpenAgentDm: handleOpenAgentDmInBuzz,
                 onOpenAgentProfileNative: handleOpenNativeAgentProfile,
+                onOpenTurnInSideChat: handleOpenTurnInSideChat,
                 onRunScout: handleRunScoutNow,
                 runningScout,
                 onOpenGuide: () => setGuideOpen(true),

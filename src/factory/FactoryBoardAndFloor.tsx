@@ -34,6 +34,7 @@ export interface BoardAndFloorProps {
   onSelectItem: (item: FactoryWorkItem) => void;
   onOpenAgentDm?: (agent: { key?: string; pubkey?: string; name?: string }) => void;
   onOpenAgentProfileNative?: (agent: { key?: string; pubkey?: string; name?: string }) => void;
+  onOpenTurnInSideChat?: (turn: LiveAgentTurn) => void;
   onRunScout?: () => void;
   runningScout?: boolean;
   onToggleKillSwitch?: (next: boolean) => void;
@@ -434,6 +435,7 @@ export function renderFactoryBoardAndFloor(props: BoardAndFloorProps) {
             focus: storeyFocus,
             onSelectItem,
             onOpenAgentDm: (ag: any) => props.onOpenAgentDm?.(ag),
+            onOpenTurnInSideChat: (turn: LiveAgentTurn) => props.onOpenTurnInSideChat?.(turn),
             onOpenAgentProfile: (ag: { key?: string; pubkey?: string; name?: string }) => {
               if (props.onOpenAgentProfileNative) props.onOpenAgentProfileNative(ag);
               else if (ag.key) onSelectAgentKey(ag.key);

@@ -1618,6 +1618,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                     onSelectItem: setSelectedItem,
                     onOpenAgentDm: handleOpenAgentDmInBuzz,
                     onOpenAgentProfileNative: handleOpenNativeAgentProfile,
+                    onOpenTurnInSideChat: handleOpenTurnInSideChat,
                     onRunScout: handleRunScoutNow,
                     runningScout,
                     onOpenGuide: () => setGuideOpen(true),
