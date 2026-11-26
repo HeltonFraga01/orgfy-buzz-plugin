@@ -26,6 +26,8 @@ export interface BuzzLiveTelemetrySnapshot {
   activeTurns: LiveAgentTurn[];
   /** Mapa pubkey(lower) -> LiveAgentTurn mais recente */
   byPubkey: Record<string, LiveAgentTurn>;
+  /** Mapa pubkey(lower) -> TODOS os turnos simultâneos daquele agente */
+  turnsByPubkey: Record<string, LiveAgentTurn[]>;
   /** Mapa pubkey(lower) -> status de presença online/away/offline */
   presenceByPubkey: Record<string, "online" | "away" | "offline" | "unknown">;
   /** Contagem de mensagens não lidas por channelId */
@@ -37,6 +39,7 @@ export const EMPTY_TELEMETRY: BuzzLiveTelemetrySnapshot = {
   activityStatus: "unavailable",
   activeTurns: [],
   byPubkey: {},
+  turnsByPubkey: {},
   presenceByPubkey: {},
   unreadByChannel: {},
 };
@@ -53,7 +56,21 @@ export function readBuzzLiveTelemetry(
     const actSnap = session.agentActivity?.snapshot?.();
     const now = Date.now();
     const byPubkey: Record<string, LiveAgentTurn> = {};
+    const turnsByPubkey: Record<string, LiveAgentTurn[]> = {};
+    const seenSessionKey = new Set<string>();
     const turns: LiveAgentTurn[] = [];
+
+    const pushTurn = (item: LiveAgentTurn) => {
+      const sk = `${item.agentPubkey}:${item.channelId}:${item.threadRootId || item.messageId || ""}`;
+      if (seenSessionKey.has(sk)) return;
+      seenSessionKey.add(sk);
+      turns.push(item);
+      if (!turnsByPubkey[item.agentPubkey]) turnsByPubkey[item.agentPubkey] = [];
+      turnsByPubkey[item.agentPubkey].push(item);
+      if (!byPubkey[item.agentPubkey] || item.startedAt >= byPubkey[item.agentPubkey].startedAt) {
+        byPubkey[item.agentPubkey] = item;
+      }
+    };
 
     // 1. LocalWork (mais rico: inclui step.tool, step.target, error e stoppable!)
     const localList: any[] = Array.isArray(actSnap?.local) ? actSnap.local : [];
@@ -72,7 +89,7 @@ export function readBuzzLiveTelemetry(
           : row.state === "waiting"
           ? "Iniciando turno..."
           : "Pensando...";
-      const item: LiveAgentTurn = {
+      pushTurn({
         agentPubkey: pk,
         agentName: nameByPubkey.get(pk) || `Agente #${pk.slice(0, 8)}`,
         channelId: String(row.channelId || ""),
@@ -85,19 +102,17 @@ export function readBuzzLiveTelemetry(
         startedAt: Number(row.startedAt || now),
         error: row.error ? String(row.error) : undefined,
         stoppable: Boolean(row.stoppable),
-      };
-      byPubkey[pk] = item;
-      turns.push(item);
+      });
     }
 
-    // 2. Typing / Working remoto no relay (caso o agente esteja trabalhando sem LocalWork)
+    // 2. Typing / Working remoto no relay (permite múltiplas sessões em canais/threads distintos)
     const typingList: any[] = Array.isArray(actSnap?.typing) ? actSnap.typing : [];
     for (const t of typingList) {
       if (!t || !t.working) continue;
       if (typeof t.expiresAt === "number" && t.expiresAt < now) continue;
       const pk = String(t.agent || "").toLowerCase();
-      if (!pk || byPubkey[pk]) continue;
-      const item: LiveAgentTurn = {
+      if (!pk) continue;
+      pushTurn({
         agentPubkey: pk,
         agentName: nameByPubkey.get(pk) || `Agente #${pk.slice(0, 8)}`,
         channelId: String(t.channelId || ""),
@@ -106,9 +121,7 @@ export function readBuzzLiveTelemetry(
         stepLabel: "Respondendo no Buzz...",
         startedAt: Number(t.startedAt || t.timestamp || now),
         stoppable: false,
-      };
-      byPubkey[pk] = item;
-      turns.push(item);
+      });
     }
 
     // 3. ActivityTurns remotos em estado "working"
@@ -116,9 +129,9 @@ export function readBuzzLiveTelemetry(
     for (const rt of remoteTurns) {
       if (!rt || rt.state !== "working") continue;
       const pk = String(rt.agent || "").toLowerCase();
-      if (!pk || byPubkey[pk]) continue;
+      if (!pk) continue;
       const firstReq = Array.isArray(rt.requests) ? rt.requests[0] : null;
-      const item: LiveAgentTurn = {
+      pushTurn({
         agentPubkey: pk,
         agentName: nameByPubkey.get(pk) || `Agente #${pk.slice(0, 8)}`,
         channelId: String(rt.channelId || ""),
@@ -128,9 +141,7 @@ export function readBuzzLiveTelemetry(
         stepLabel: "Executando turno...",
         startedAt: Number(rt.timestamp || now),
         stoppable: false,
-      };
-      byPubkey[pk] = item;
-      turns.push(item);
+      });
     }
 
     // 4. Presença real (session.presence.status)
@@ -171,6 +182,7 @@ export function readBuzzLiveTelemetry(
       activityStatus: String(actSnap?.status || "unavailable"),
       activeTurns: turns,
       byPubkey,
+      turnsByPubkey,
       presenceByPubkey,
       unreadByChannel,
     };

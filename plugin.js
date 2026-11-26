@@ -6340,6 +6340,7 @@ const EMPTY_TELEMETRY = {
   activityStatus: "unavailable",
   activeTurns: [],
   byPubkey: {},
+  turnsByPubkey: {},
   presenceByPubkey: {},
   unreadByChannel: {}
 };
@@ -6352,7 +6353,20 @@ function readBuzzLiveTelemetry(ctx, nameByPubkey) {
     const actSnap = (_c = (_b = session.agentActivity) == null ? void 0 : _b.snapshot) == null ? void 0 : _c.call(_b);
     const now = Date.now();
     const byPubkey = {};
+    const turnsByPubkey = {};
+    const seenSessionKey = /* @__PURE__ */ new Set();
     const turns = [];
+    const pushTurn = (item) => {
+      const sk = `${item.agentPubkey}:${item.channelId}:${item.threadRootId || item.messageId || ""}`;
+      if (seenSessionKey.has(sk)) return;
+      seenSessionKey.add(sk);
+      turns.push(item);
+      if (!turnsByPubkey[item.agentPubkey]) turnsByPubkey[item.agentPubkey] = [];
+      turnsByPubkey[item.agentPubkey].push(item);
+      if (!byPubkey[item.agentPubkey] || item.startedAt >= byPubkey[item.agentPubkey].startedAt) {
+        byPubkey[item.agentPubkey] = item;
+      }
+    };
     const localList = Array.isArray(actSnap == null ? void 0 : actSnap.local) ? actSnap.local : [];
     for (const row of localList) {
       if (!row || row.dismissed) continue;
@@ -6362,7 +6376,7 @@ function readBuzzLiveTelemetry(ctx, nameByPubkey) {
       const stepTool = ((_d = row.step) == null ? void 0 : _d.tool) ? String(row.step.tool) : void 0;
       const stepTarget = ((_e = row.step) == null ? void 0 : _e.target) ? String(row.step.target) : void 0;
       const stepLabel = row.state === "error" ? `Erro: ${String(row.error || "falha no turno").slice(0, 72)}` : stepTool ? `${stepTool}${stepTarget ? ` · ${stepTarget.slice(0, 40)}` : ""}` : row.state === "waiting" ? "Iniciando turno..." : "Pensando...";
-      const item = {
+      pushTurn({
         agentPubkey: pk,
         agentName: nameByPubkey.get(pk) || `Agente #${pk.slice(0, 8)}`,
         channelId: String(row.channelId || ""),
@@ -6375,17 +6389,15 @@ function readBuzzLiveTelemetry(ctx, nameByPubkey) {
         startedAt: Number(row.startedAt || now),
         error: row.error ? String(row.error) : void 0,
         stoppable: Boolean(row.stoppable)
-      };
-      byPubkey[pk] = item;
-      turns.push(item);
+      });
     }
     const typingList = Array.isArray(actSnap == null ? void 0 : actSnap.typing) ? actSnap.typing : [];
     for (const t of typingList) {
       if (!t || !t.working) continue;
       if (typeof t.expiresAt === "number" && t.expiresAt < now) continue;
       const pk = String(t.agent || "").toLowerCase();
-      if (!pk || byPubkey[pk]) continue;
-      const item = {
+      if (!pk) continue;
+      pushTurn({
         agentPubkey: pk,
         agentName: nameByPubkey.get(pk) || `Agente #${pk.slice(0, 8)}`,
         channelId: String(t.channelId || ""),
@@ -6394,17 +6406,15 @@ function readBuzzLiveTelemetry(ctx, nameByPubkey) {
         stepLabel: "Respondendo no Buzz...",
         startedAt: Number(t.startedAt || t.timestamp || now),
         stoppable: false
-      };
-      byPubkey[pk] = item;
-      turns.push(item);
+      });
     }
     const remoteTurns = Array.isArray(actSnap == null ? void 0 : actSnap.turns) ? actSnap.turns : [];
     for (const rt of remoteTurns) {
       if (!rt || rt.state !== "working") continue;
       const pk = String(rt.agent || "").toLowerCase();
-      if (!pk || byPubkey[pk]) continue;
+      if (!pk) continue;
       const firstReq = Array.isArray(rt.requests) ? rt.requests[0] : null;
-      const item = {
+      pushTurn({
         agentPubkey: pk,
         agentName: nameByPubkey.get(pk) || `Agente #${pk.slice(0, 8)}`,
         channelId: String(rt.channelId || ""),
@@ -6414,9 +6424,7 @@ function readBuzzLiveTelemetry(ctx, nameByPubkey) {
         stepLabel: "Executando turno...",
         startedAt: Number(rt.timestamp || now),
         stoppable: false
-      };
-      byPubkey[pk] = item;
-      turns.push(item);
+      });
     }
     const presenceByPubkey = {};
     if (typeof ((_f = session.presence) == null ? void 0 : _f.status) === "function") {
@@ -6454,6 +6462,7 @@ function readBuzzLiveTelemetry(ctx, nameByPubkey) {
       activityStatus: String((actSnap == null ? void 0 : actSnap.status) || "unavailable"),
       activeTurns: turns,
       byPubkey,
+      turnsByPubkey,
       presenceByPubkey,
       unreadByChannel
     };
@@ -12467,10 +12476,11 @@ function describeOrgfyRole(papelRaw) {
   return map[p] || { funcao: p ? `Agente · ${p}` : "Agente da Esteira", categoria: "execucao" };
 }
 async function hydrateFactoryStatusFromFiles(ctx, slug) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x2, _y2, _z2, _A, _B, _C;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x2, _y2, _z2, _A, _B;
   const base = buildEmptyFactoryStatus(slug);
   const host = ctx == null ? void 0 : ctx.host;
-  const [kpiRes, cards, empresaJson, boardJson, evalMd, projectMd, agentsMd, regrasJson] = await Promise.all([
+  const stateRelPath = slug === "orgfy" ? ".esteira/estado/esteira-minima-state.json" : `.esteira/estado/esteira-minima-${slug}-state.json`;
+  const [kpiRes, cards, empresaJson, boardJson, evalMd, projectMd, agentsMd, regrasJson, esteiraState] = await Promise.all([
     fetchKpisEsteira(ctx).catch(() => ({ kpis: null, history: [], error: null })),
     fetchLiveKanbanCards(ctx, { empresa: slug }).catch(() => []),
     readOrgfyJson(ctx, `empresas/${slug}.json`, null).catch(() => null),
@@ -12478,7 +12488,8 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
     readOrgfyText(ctx, "docs/eval-modelos-onda5.md").catch(() => null),
     readOrgfyText(ctx, "PROJECT.md").catch(() => null),
     readOrgfyText(ctx, "AGENTS.md").catch(() => null),
-    readOrgfyJson(ctx, ".esteira/estado/regras-probatorias.json", null).catch(() => null)
+    readOrgfyJson(ctx, ".esteira/estado/regras-probatorias.json", null).catch(() => null),
+    readOrgfyJson(ctx, stateRelPath, null).catch(() => null)
   ]);
   let controle = null;
   try {
@@ -12579,9 +12590,73 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
     note: c.executor ? `Executor: ${c.executor}${c.revisor ? ` · Revisor: ${c.revisor}` : ""}` : null,
     updatedAt: Date.now()
   });
-  const backlog = cards.filter((c) => c.stage === "triagem").map(toWorkItem);
-  const inProgress = cards.filter((c) => c.stage === "despachado" || c.stage === "execucao" || c.stage === "revisao").map(toWorkItem);
+  const kanbanBacklog = cards.filter((c) => c.stage === "triagem").map(toWorkItem);
+  const kanbanInProgress = cards.filter((c) => c.stage === "despachado" || c.stage === "execucao" || c.stage === "revisao").map(toWorkItem);
   const recent = cards.filter((c) => c.stage === "feito").slice(0, 20).map(toWorkItem);
+  const boardSnap = (esteiraState == null ? void 0 : esteiraState.board_snapshot) && typeof esteiraState.board_snapshot === "object" ? esteiraState.board_snapshot : null;
+  const openPrsRaw = Array.isArray(boardSnap == null ? void 0 : boardSnap.open_prs) ? boardSnap.open_prs : [];
+  const openIssuesRaw = Array.isArray(boardSnap == null ? void 0 : boardSnap.open_issues) ? boardSnap.open_issues : [];
+  const seenIds = new Set([...kanbanBacklog, ...kanbanInProgress].map((w) => w.id));
+  const prWorkItems = openPrsRaw.filter((p) => (p == null ? void 0 : p.id) && !seenIds.has(String(p.id))).map((p) => {
+    const pid = String(p.id);
+    const title = String(p.title || `PR ${pid.slice(0, 8)}`);
+    return {
+      id: pid,
+      title,
+      workKey: `pr:${pid.slice(0, 12)}`,
+      stage: p.quarentena ? "escalated" : "verifying",
+      step: p.quarentena ? "quarantine" : "review",
+      type: /fix|bug|hotfix/i.test(title) ? "bug" : /doc|readme|prd/i.test(title) ? "docs" : "feature",
+      attempts: 1,
+      sessionId: null,
+      activeSessionId: null,
+      reason: p.quarentena ? "PR em quarentena no coordenador" : null,
+      note: p.branch ? `PR aberto · ${p.branch}` : "PR aberto aguardando revisão/GATE",
+      updatedAt: typeof p.created_at === "number" ? p.created_at < 1e12 ? p.created_at * 1e3 : p.created_at : Date.now()
+    };
+  });
+  const issueBacklogItems = openIssuesRaw.filter((i) => (i == null ? void 0 : i.id) && !i.assigned && !seenIds.has(String(i.id))).map((i) => {
+    const iid = String(i.id);
+    const title = String(i.title || `Issue ${iid.slice(0, 8)}`);
+    return {
+      id: iid,
+      title,
+      workKey: `issue:${iid.slice(0, 12)}`,
+      stage: "backlog",
+      step: "intake",
+      type: /fix|bug|hotfix/i.test(title) ? "bug" : /doc|readme|prd/i.test(title) ? "docs" : "feature",
+      attempts: 0,
+      sessionId: null,
+      activeSessionId: null,
+      reason: null,
+      note: null,
+      updatedAt: typeof i.created_at === "number" ? i.created_at < 1e12 ? i.created_at * 1e3 : i.created_at : Date.now()
+    };
+  });
+  const issueActiveItems = openIssuesRaw.filter((i) => (i == null ? void 0 : i.id) && i.assigned && !seenIds.has(String(i.id))).map((i) => {
+    const iid = String(i.id);
+    const title = String(i.title || `Issue ${iid.slice(0, 8)}`);
+    return {
+      id: iid,
+      title,
+      workKey: `issue:${iid.slice(0, 12)}`,
+      stage: "building",
+      step: "implement",
+      type: /fix|bug|hotfix/i.test(title) ? "bug" : /doc|readme|prd/i.test(title) ? "docs" : "feature",
+      attempts: 1,
+      sessionId: null,
+      activeSessionId: null,
+      reason: null,
+      note: "Issue atribuída no coordenador",
+      updatedAt: typeof i.created_at === "number" ? i.created_at < 1e12 ? i.created_at * 1e3 : i.created_at : Date.now()
+    };
+  });
+  const backlog = kanbanBacklog.length > 0 ? kanbanBacklog : issueBacklogItems;
+  const inProgress = [...kanbanInProgress, ...prWorkItems, ...kanbanInProgress.length === 0 ? issueActiveItems.slice(0, 12) : []];
+  const wipLimit = Number(((_q = controle == null ? void 0 : controle.limits) == null ? void 0 : _q.prsAbertos) ?? 6);
+  const realOpenPrs = openPrsRaw.length > 0 ? openPrsRaw.length : inProgress.length;
+  const wipHolding = realOpenPrs >= wipLimit;
+  const wipNote = wipHolding ? `WIP bloqueando novos despachos: ${realOpenPrs} PRs abertos (limite configurado: ${wipLimit})` : null;
   const kpis = kpiRes.kpis;
   const killSwitch = Boolean(controle == null ? void 0 : controle.killSwitch);
   const drainOn = Boolean(controle == null ? void 0 : controle.drain);
@@ -12594,33 +12669,35 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
     loopState: killSwitch ? "stopped" : drainOn ? "draining" : inProgress.length > 0 || runningList.length > 0 ? "building" : "idle",
     pausedReason: (controle == null ? void 0 : controle.pausedReason) || null,
     limits: {
-      maxConcurrentSessions: Number(((_q = controle == null ? void 0 : controle.limits) == null ? void 0 : _q.agentes) ?? 4),
-      maxMergesPerDay: Number(((_r = controle == null ? void 0 : controle.limits) == null ? void 0 : _r.mergesDia) ?? 20),
-      dailyBudget: { usd: Number(((_s = controle == null ? void 0 : controle.limits) == null ? void 0 : _s.gastoDiaUsd) ?? 50) },
-      pauseAfterConsecutiveFailures: Number(((_t = controle == null ? void 0 : controle.limits) == null ? void 0 : _t.falhasSeguidas) ?? 3),
+      maxConcurrentSessions: Number(((_r = controle == null ? void 0 : controle.limits) == null ? void 0 : _r.agentes) ?? 4),
+      maxMergesPerDay: Number(((_s = controle == null ? void 0 : controle.limits) == null ? void 0 : _s.mergesDia) ?? 20),
+      dailyBudget: { usd: Number(((_t = controle == null ? void 0 : controle.limits) == null ? void 0 : _t.gastoDiaUsd) ?? 50) },
+      pauseAfterConsecutiveFailures: Number(((_u = controle == null ? void 0 : controle.limits) == null ? void 0 : _u.falhasSeguidas) ?? 3),
       autoMerge: Boolean((controle == null ? void 0 : controle.autoMerge) ?? false),
       mergePolicy: (controle == null ? void 0 : controle.mergePolicy) === "fast" ? "fast" : "strict"
     },
     spendToday: {
-      tokens: Number(((_u = kpis == null ? void 0 : kpis.economia) == null ? void 0 : _u.tokens_hoje) ?? 0),
-      usd: Number(((_v = kpis == null ? void 0 : kpis.economia) == null ? void 0 : _v.custo_hoje_usd) ?? 0)
+      tokens: Number(((_v = kpis == null ? void 0 : kpis.economia) == null ? void 0 : _v.tokens_hoje) ?? 0),
+      usd: Number(((_w = kpis == null ? void 0 : kpis.economia) == null ? void 0 : _w.custo_hoje_usd) ?? 0)
     },
-    mergesToday: Number(((_w = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _w.vazao_hoje) ?? 0),
+    mergesToday: Number(((_x2 = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _x2.vazao_hoje) ?? 0),
     stats: {
-      mergedToday: Number(((_x2 = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _x2.vazao_hoje) ?? 0),
+      mergedToday: Number(((_y2 = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _y2.vazao_hoje) ?? 0),
       failedToday: 0,
       revertedToday: 0,
       medianMergeMs7d: null,
-      merged7d: Number(((_y2 = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _y2.vazao_7d) ?? recent.length)
+      merged7d: Number(((_z2 = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _z2.vazao_7d) ?? recent.length)
     },
     activeSessions: tenantAgents.filter((a) => a.running).length,
     wip: {
-      openPrs: inProgress.length,
-      limit: Number(((_z2 = controle == null ? void 0 : controle.limits) == null ? void 0 : _z2.prsAbertos) ?? 6),
-      holding: inProgress.length >= Number(((_A = controle == null ? void 0 : controle.limits) == null ? void 0 : _A.prsAbertos) ?? 6),
+      openPrs: realOpenPrs,
+      limit: wipLimit,
+      holding: wipHolding,
       waitingOnProvider: 0,
-      note: null
+      note: wipNote
     },
+    pullRequests: openPrsRaw,
+    quarentenaCount: (esteiraState == null ? void 0 : esteiraState.quarentena) && typeof esteiraState.quarentena === "object" ? Object.keys(esteiraState.quarentena).length : 0,
     backlog,
     inProgress,
     recent,
@@ -12630,8 +12707,8 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
     orgfyVision: {
       projectMd: projectMd ? projectMd.slice(0, 2400) : null,
       agentsMd: agentsMd ? agentsMd.slice(0, 2400) : null,
-      invariantes: Array.isArray((_B = boardJson == null ? void 0 : boardJson.protocolo_governanca) == null ? void 0 : _B.invariantes) ? boardJson.protocolo_governanca.invariantes : [],
-      cadeiaComando: Array.isArray((_C = boardJson == null ? void 0 : boardJson.protocolo_governanca) == null ? void 0 : _C.cadeia_comando) ? boardJson.protocolo_governanca.cadeia_comando : [],
+      invariantes: Array.isArray((_A = boardJson == null ? void 0 : boardJson.protocolo_governanca) == null ? void 0 : _A.invariantes) ? boardJson.protocolo_governanca.invariantes : [],
+      cadeiaComando: Array.isArray((_B = boardJson == null ? void 0 : boardJson.protocolo_governanca) == null ? void 0 : _B.cadeia_comando) ? boardJson.protocolo_governanca.cadeia_comando : [],
       fluxoEscalada: (boardJson == null ? void 0 : boardJson.fluxo_escalada) && typeof boardJson.fluxo_escalada === "object" ? boardJson.fluxo_escalada : {},
       regrasProbatorias: Object.entries((regrasJson == null ? void 0 : regrasJson.regras) || {}).map(([id, r]) => ({
         id,
@@ -14496,10 +14573,11 @@ function bucketStep(item, lane) {
   return "implement";
 }
 function toneOfItem(item) {
-  if (item.stage === "failed" || item.stage === "reverted") return "failed";
-  if (item.stage === "escalated" || item.stage === "verifying") return "waiting";
-  if (item.stage === "building" || item.stage === "watching") return "running";
-  if (item.stage === "merged") return "done";
+  const stageStr = String(item.stage || "");
+  if (stageStr === "failed" || stageStr === "reverted") return "failed";
+  if (stageStr === "escalated" || stageStr === "verifying") return "waiting";
+  if (stageStr === "building" || stageStr === "in_progress" || stageStr === "watching") return "running";
+  if (stageStr === "merged") return "done";
   return "idle";
 }
 function renderPipelineDiagram(props) {
@@ -14510,7 +14588,6 @@ function renderPipelineDiagram(props) {
     ...status.recent.filter((w) => w.stage === "escalated")
   ];
   const mergeItems = live.filter((w) => w.step === "merge" || w.stage === "watching");
-  const recentMerged = status.recent.filter((w) => w.stage === "merged").slice(0, 4);
   const laneBuckets = {
     reproduce: [],
     fix: [],
@@ -14844,12 +14921,12 @@ Na fila aguardando agente livre`,
           badge: status.limits.autoMerge ? "Auto-merge" : "Humano",
           title: PT_BR.pipelines.mergeLabel,
           help: PT_BR.pipelines.mergeHelp,
-          items: mergeItems.length > 0 ? mergeItems : recentMerged,
+          items: mergeItems,
           width: "126px",
           footer: h(
             "span",
             { className: "of-muted", style: { fontSize: "10px" } },
-            status.limits.autoMerge ? "quando checks passam" : "pronto para GATE"
+            mergeItems.length > 0 ? status.limits.autoMerge ? "quando checks passam" : "pronto para GATE" : "fila de merge vazia"
           )
         })
       )
@@ -47908,11 +47985,12 @@ class FloorStage {
   }
 }
 function toCodeDenStage(item) {
-  if (item.stage === "merged") return "merged";
-  if (item.step === "merge" || item.stage === "watching") return "merge";
-  if (item.stage === "verifying" || String(item.step).includes("review")) return "reviewing";
-  if (item.stage === "building") return "building";
-  if (item.stage === "candidate" || item.step === "intake") return "type";
+  const st = String(item.stage || "");
+  if (st === "merged") return "merged";
+  if (item.step === "merge" || st === "watching") return "merge";
+  if (st === "verifying" || String(item.step).includes("review")) return "reviewing";
+  if (st === "building" || st === "in_progress") return "building";
+  if (st === "candidate" || item.step === "intake") return "type";
   return "intake";
 }
 function adaptStatusFor3D(status, liveCrew, telemetry) {
@@ -47964,7 +48042,11 @@ function adaptStatusFor3D(status, liveCrew, telemetry) {
   const backlog = status.backlog.map(mapItem);
   const inProgress = status.inProgress.map(mapItem);
   const recent = status.recent.map(mapItem);
-  const allOrgfy = [...status.backlog, ...status.inProgress, ...status.recent];
+  const allOrgfy = [
+    ...status.backlog.slice(0, 12),
+    ...status.inProgress.slice(0, 16),
+    ...status.recent.slice(0, 8)
+  ];
   const stages = {
     intake: [],
     type: [],
@@ -47977,12 +48059,13 @@ function adaptStatusFor3D(status, liveCrew, telemetry) {
   for (const raw of allOrgfy) {
     const item = mapItem(raw);
     const place = toCodeDenStage(raw);
-    const isFailed = raw.stage === "failed" || raw.stage === "reverted";
-    const isPerson = raw.stage === "escalated";
+    const stageStr = String(raw.stage || "");
+    const isFailed = stageStr === "failed" || stageStr === "reverted";
+    const isPerson = stageStr === "escalated";
     const card = {
       item,
       place: isFailed || isPerson ? "needs_you" : place,
-      state: isFailed ? "failed" : isPerson ? "person" : raw.stage === "building" || raw.stage === "verifying" ? "running" : "idle",
+      state: isFailed ? "failed" : isPerson ? "person" : stageStr === "building" || stageStr === "in_progress" || stageStr === "verifying" ? "running" : "idle",
       need: isFailed ? { kind: "retry", label: "Retry" } : isPerson ? { kind: "merge", label: "Review & merge" } : null,
       activity: raw.note || raw.reason || raw.step || raw.stage,
       since: new Date(raw.updatedAt || Date.now()).toISOString(),
@@ -48159,6 +48242,7 @@ function createFloor3DComponent(ctx) {
       const hostH = host.clientHeight || 1;
       const byKey = /* @__PURE__ */ new Map();
       for (const f of figures) byKey.set(f.key, f);
+      const candidates = [];
       for (const [figKey, node] of bubbleNodesRef.current.entries()) {
         const fig = byKey.get(figKey);
         if (!fig || !fig.head.inView) {
@@ -48166,11 +48250,43 @@ function createFloor3DComponent(ctx) {
           node.style.pointerEvents = "none";
           continue;
         }
-        const clampedX = Math.max(124, Math.min(hostW - 124, fig.head.x));
-        const clampedY = Math.max(92, Math.min(hostH - 22, fig.head.y - 16));
-        node.style.transform = `translate3d(${Math.round(clampedX)}px, ${Math.round(clampedY)}px, 0) translate(-50%, -100%)`;
-        node.style.opacity = "1";
-        node.style.pointerEvents = "auto";
+        const w = node.offsetWidth || 228;
+        const h2 = node.offsetHeight || 88;
+        const halfW = w / 2 + 8;
+        const cx = Math.max(halfW, Math.min(hostW - halfW, fig.head.x));
+        const bottom = Math.max(h2 + 12, Math.min(hostH - 20, fig.head.y - 16));
+        candidates.push({ node, cx, bottom, w, h: h2 });
+      }
+      candidates.sort((a, b) => a.cx - b.cx || b.bottom - a.bottom);
+      const placed2 = [];
+      const PAD = 10;
+      for (const c of candidates) {
+        let cx = c.cx;
+        let bottom = c.bottom;
+        const halfW = c.w / 2;
+        for (let guard = 0; guard < 6; guard++) {
+          const left = cx - halfW;
+          const right = cx + halfW;
+          const top = bottom - c.h;
+          const hit2 = placed2.find(
+            (p) => left < p.right + PAD && right > p.left - PAD && top < p.bottom + PAD && bottom > p.top - PAD
+          );
+          if (!hit2) break;
+          const nextBottom = hit2.top - PAD;
+          if (nextBottom - c.h >= 12) {
+            bottom = nextBottom;
+          } else {
+            const shiftRight = hit2.right + PAD + halfW;
+            const shiftLeft = hit2.left - PAD - halfW;
+            if (shiftRight + halfW <= hostW - 8) cx = shiftRight;
+            else if (shiftLeft - halfW >= 8) cx = shiftLeft;
+            else bottom = Math.max(c.h + 12, nextBottom);
+          }
+        }
+        placed2.push({ left: cx - halfW, right: cx + halfW, top: bottom - c.h, bottom });
+        c.node.style.transform = `translate3d(${Math.round(cx)}px, ${Math.round(bottom)}px, 0) translate(-50%, -100%)`;
+        c.node.style.opacity = "1";
+        c.node.style.pointerEvents = "auto";
       }
     }, []);
     const sceneRef = React.useRef(scene);
@@ -48243,7 +48359,7 @@ function createFloor3DComponent(ctx) {
     const workingNowCount = tenantAgents.filter((a) => Boolean(turnOf(a))).length;
     const inBuzzCount = tenantAgents.filter((a) => a.inBuzz).length;
     const speechBubbles = React.useMemo(() => {
-      var _a2;
+      var _a2, _b2, _c;
       const now = Date.now();
       const entries = [];
       const usedFigures = /* @__PURE__ */ new Set();
@@ -48276,7 +48392,8 @@ function createFloor3DComponent(ctx) {
       for (const ag of tenantAgents) {
         const pk = (ag.pubkey || "").toLowerCase();
         if (!pk) continue;
-        const liveTurn = ((_a2 = telemetry == null ? void 0 : telemetry.byPubkey) == null ? void 0 : _a2[pk]) || null;
+        const liveTurnsList = ((_b2 = (_a2 = telemetry == null ? void 0 : telemetry.turnsByPubkey) == null ? void 0 : _a2[pk]) == null ? void 0 : _b2.length) ? telemetry.turnsByPubkey[pk] : ((_c = telemetry == null ? void 0 : telemetry.byPubkey) == null ? void 0 : _c[pk]) ? [telemetry.byPubkey[pk]] : [];
+        const liveTurn = liveTurnsList[0] || null;
         const doneRec = completedTurns[pk];
         const hasFreshDone = Boolean(doneRec && !doneRec.dismissed && now - doneRec.finishedAt < COMPLETED_BUBBLE_TTL_MS);
         if (!liveTurn && !hasFreshDone) continue;
@@ -48285,14 +48402,16 @@ function createFloor3DComponent(ctx) {
         usedFigures.add(figureKey);
         const liveMatch = liveCrew.find((c) => c.key === ag.agentKey || c.pubkey && c.pubkey.toLowerCase() === pk);
         if (liveTurn) {
+          const hasError = liveTurnsList.some((t) => t.state === "error");
           entries.push({
             figureKey,
             agentKey: ag.agentKey,
             agentPubkey: pk,
             agentName: ag.name,
             picture: liveMatch == null ? void 0 : liveMatch.picture,
-            kind: liveTurn.state === "error" ? "error" : "working",
-            turn: liveTurn
+            kind: hasError ? "error" : "working",
+            turn: liveTurn,
+            turns: liveTurnsList
           });
         } else if (doneRec) {
           entries.push({
@@ -48303,6 +48422,7 @@ function createFloor3DComponent(ctx) {
             picture: liveMatch == null ? void 0 : liveMatch.picture,
             kind: "done",
             turn: doneRec.turn,
+            turns: [doneRec.turn],
             finishedAt: doneRec.finishedAt
           });
         }
@@ -48623,7 +48743,73 @@ function createFloor3DComponent(ctx) {
                     "×"
                   )
                 ),
-                h(
+                !isDone && b.turns.length > 1 ? h(
+                  "div",
+                  {
+                    "data-floor3d-multi-session": String(b.turns.length),
+                    style: { display: "flex", flexDirection: "column", gap: "4px" }
+                  },
+                  h(
+                    "div",
+                    { style: { fontSize: "9.5px", color: accentColor, fontWeight: 600 } },
+                    `${b.turns.length} sessões simultâneas`
+                  ),
+                  ...b.turns.slice(0, 3).map(
+                    (t, idx) => h(
+                      "div",
+                      {
+                        key: `${t.channelId}:${t.threadRootId || t.messageId || idx}`,
+                        style: {
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "5px",
+                          padding: "3px 6px",
+                          borderRadius: "6px",
+                          background: "rgba(255,255,255,0.04)",
+                          fontSize: "10.5px"
+                        }
+                      },
+                      h(
+                        "span",
+                        {
+                          style: {
+                            flex: 1,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                            color: t.state === "error" ? "#fca5a5" : "rgba(229, 231, 235, 0.9)"
+                          },
+                          title: t.stepLabel
+                        },
+                        t.stepLabel || "Pensando..."
+                      ),
+                      h("span", { className: "of-mono of-muted", style: { fontSize: "9px", flexShrink: 0 } }, formatBubbleClock(t.startedAt)),
+                      h(
+                        "button",
+                        {
+                          type: "button",
+                          onClick: (ev) => {
+                            ev.stopPropagation();
+                            if (t.channelId && onOpenTurnInSideChat) onOpenTurnInSideChat(t);
+                            else if (onOpenAgentDm) onOpenAgentDm({ key: b.agentKey, pubkey: b.agentPubkey, name: b.agentName });
+                          },
+                          style: {
+                            border: "none",
+                            background: "transparent",
+                            color: accentColor,
+                            cursor: "pointer",
+                            padding: 0,
+                            fontSize: "9.5px",
+                            fontWeight: 600,
+                            flexShrink: 0
+                          }
+                        },
+                        "Ver ↗"
+                      )
+                    )
+                  ),
+                  b.turns.length > 3 && h("span", { className: "of-muted", style: { fontSize: "9.5px" } }, `+${b.turns.length - 3} sessões ativas`)
+                ) : h(
                   "div",
                   {
                     style: {
@@ -48656,7 +48842,7 @@ function createFloor3DComponent(ctx) {
                     }
                   },
                   "Abrir resposta ↗"
-                ) : h(
+                ) : b.turns.length <= 1 && h(
                   "div",
                   {
                     style: {
@@ -52629,8 +52815,7 @@ async function sendBuzzChatMessageOrWake(ctx, opts) {
         } catch {
         }
       }
-      const isDmOrSolo = (channelMeta == null ? void 0 : channelMeta.channelType) === "dm" || (channelMeta == null ? void 0 : channelMeta.channelType) === "solo";
-      const validRoot = !isDmOrSolo && isHex64(opts.threadRoot) ? opts.threadRoot.trim().toLowerCase() : void 0;
+      const validRoot = isHex64(opts.threadRoot) ? opts.threadRoot.trim().toLowerCase() : void 0;
       let mentions = [];
       if (pkLower) {
         const members = Array.isArray(channelMeta == null ? void 0 : channelMeta.members) ? channelMeta.members.map((m) => String(m).toLowerCase()) : null;

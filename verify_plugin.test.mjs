@@ -2133,5 +2133,43 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     assert.equal(fbRes.mode, "wake_fallback");
     assert.equal(wakes.length, 1);
     assert.equal(wakes[0].payload.channel, dmId);
+
+    // 4. Thread dentro de DM: deve chamar session.messages.reply(dmId, rootId, text, [bentoPubkey]) na MESMA thread
+    const dmThreadRes = await orgfyMod.sendBuzzChatMessageOrWake(chatCtx, {
+      agentKey: "local:orgfy-bento",
+      agentName: "OrgFy Bento",
+      pubkey: bentoPubkey,
+      channelId: dmId,
+      threadRoot: rootId,
+      preferDm: true,
+      postInChat: true,
+      text: "@OrgFy Bento Resposta na mesma thread do DM",
+    });
+    assert.equal(dmThreadRes.ok, true);
+    assert.equal(dmThreadRes.mode, "chat_message");
+    assert.equal(dmThreadRes.threadRoot, rootId, "reply dentro de DM deve preservar threadRoot");
+    assert.equal(replies.length, 2);
+    assert.equal(replies[1].cid, dmId);
+    assert.equal(replies[1].root, rootId);
+  });
+
+  test("v17.10: Múltiplas sessões 3D sem sobreposição, caixas 3D de in_progress/open_prs e Merge sem PRs já mergeados", () => {
+    const bundle = fs.readFileSync(path.resolve(__dirname, "plugin.js"), "utf8");
+    assert.ok(bundle.includes("data-floor3d-multi-session"), "Floor3DCanvas deve agrupar múltiplas sessões num único balão");
+    assert.ok(bundle.includes("sessões simultâneas"), "Balão multi-sessão deve exibir contagem de sessões simultâneas");
+    assert.ok(bundle.includes("fila de merge vazia"), "PipelineDiagram deve exibir fila vazia quando não há PRs pendentes de merge");
+
+    const floorSrc = fs.readFileSync(path.resolve(__dirname, "src", "factory", "codeden-floor", "Floor3DCanvas.tsx"), "utf8");
+    assert.ok(floorSrc.includes('st === "in_progress"'), "toCodeDenStage deve mapear in_progress para building no 3D");
+    assert.ok(floorSrc.includes("const placed: Array<"), "positionBubbles deve resolver colisão entre balões de agentes vizinhos");
+
+    const pdSrc = fs.readFileSync(path.resolve(__dirname, "src", "factory", "PipelineDiagram.tsx"), "utf8");
+    assert.ok(!pdSrc.includes("mergeItems.length > 0 ? mergeItems : recentMerged"), "PipelineDiagram não deve jogar PRs já mergeados no bloco Merge automático");
+
+    const telSrc = fs.readFileSync(path.resolve(__dirname, "src", "factory", "buzz-live-telemetry.ts"), "utf8");
+    assert.ok(telSrc.includes("turnsByPubkey"), "buzz-live-telemetry deve preservar todos os turnos simultâneos em turnsByPubkey");
+
+    const adapterSrc = fs.readFileSync(path.resolve(__dirname, "src", "factory", "factory-adapter.ts"), "utf8");
+    assert.ok(adapterSrc.includes("esteira-minima-state.json"), "factory-adapter deve hidratar open_prs e open_issues reais de esteira-minima-state.json");
   });
 }
