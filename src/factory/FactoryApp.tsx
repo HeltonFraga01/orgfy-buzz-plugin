@@ -1996,6 +1996,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
           height: useNativeSideTabs ? "100%" : "100vh",
           maxHeight: useNativeSideTabs ? "100%" : "100vh",
           overflow: "hidden",
+          display: "flex",
         },
       },
       h("style", { "data-orgfy-factory-inline-fallback": "true" }, FACTORY_SHADOW_CSS),
@@ -2005,6 +2006,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
           className: "of-shell",
           "data-collapsed": sidebarCollapsed ? "true" : "false",
           "data-density": compactDensity ? "compact" : "default",
+          style: { flex: 1, minWidth: 0, height: "100%" },
         },
         renderFactorySidebar(
           {
@@ -2467,129 +2469,130 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                       handleControlUpdate({ killSwitch: false, pausedReason: null }, "Fábrica retomada (Kill Switch liberado)."),
                     onOpenFactoryPanel: () => setTab("overview"),
                   })
-            ),
-            sideProfileTabs.length > 0 && activeSideProfileKey &&
-              (() => {
-                const panelsApi = (ctx as any)?.panels;
-                const PanelWorkspace = panelsApi?.ui?.Workspace;
-                const activeChannel = resolveActiveChannelId(tenant) || "";
-                const workspaceItems = sideProfileTabs
-                  .map((pt) => {
-                    const resolvedPanel = typeof panelsApi?.resolve === "function" ? panelsApi.resolve(pt.target) : null;
-                    if (!resolvedPanel?.component) return null;
-                    return {
-                      id: pt.target,
-                      label: pt.name,
-                      icon: pt.picture
-                        ? h("img", {
-                            src: pt.picture,
-                            alt: pt.name,
-                            style: { width: "16px", height: "16px", borderRadius: "4px", objectFit: "cover", display: "block" },
-                          })
-                        : undefined,
-                      close: () => closeSideProfileTab(pt.target),
-                      content: h(resolvedPanel.component, {
-                        key: pt.target,
-                        target: pt.target,
-                        close: () => closeSideProfileTab(pt.target),
-                        context: {
-                          channelId: activeChannel,
-                          canOpen: (nextTarget: string) => Boolean(typeof panelsApi?.resolve === "function" && panelsApi.resolve(nextTarget)),
-                          open: (nextTarget: string) => openProfileTargetInSideColumn(nextTarget),
-                        },
-                      }),
-                    };
-                  })
-                  .filter(Boolean) as Array<{ id: string; label: string; icon?: any; close: () => void; content: any }>;
-                if (workspaceItems.length === 0) return null;
-                const activeItem = workspaceItems.find((i) => i.id === activeSideProfileKey) || workspaceItems[0];
-                return h(
-                  "aside",
-                  {
-                    "data-agent-side-profile-column": "true",
-                    "aria-label": "Perfil do agente",
-                    style: {
-                      width: "410px",
-                      minWidth: "340px",
-                      maxWidth: "460px",
-                      flexShrink: 0,
-                      borderLeft: "1px solid var(--border)",
-                      background: "var(--card, var(--surface-base))",
-                      display: "flex",
-                      flexDirection: "column",
-                      minHeight: 0,
-                      overflow: "hidden",
-                    },
-                  },
-                  PanelWorkspace
-                    ? h(PanelWorkspace, {
-                        value: activeItem.id,
-                        select: (nextId: string) => setActiveSideProfileKey(nextId),
-                        label: "Perfis de agentes",
-                        focusOnMount: false,
-                        items: workspaceItems,
-                      })
-                    : h(
-                        React.Fragment,
-                        null,
-                        h(
-                          "div",
-                          {
-                            style: {
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "4px",
-                              padding: "6px 8px",
-                              borderBottom: "1px solid var(--border)",
-                              overflowX: "auto",
-                              flexShrink: 0,
-                            },
-                          },
-                          workspaceItems.map((it) =>
-                            h(
-                              "div",
-                              {
-                                key: it.id,
-                                style: {
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  gap: "5px",
-                                  padding: "4px 8px",
-                                  borderRadius: "6px",
-                                  fontSize: "12px",
-                                  fontWeight: it.id === activeItem.id ? 600 : 400,
-                                  background: it.id === activeItem.id ? "var(--muted)" : "transparent",
-                                  color: it.id === activeItem.id ? "var(--foreground)" : "var(--muted-foreground)",
-                                  cursor: "pointer",
-                                  whiteSpace: "nowrap",
-                                },
-                                onClick: () => setActiveSideProfileKey(it.id),
-                              },
-                              it.icon,
-                              h("span", null, it.label),
-                              h(
-                                "button",
-                                {
-                                  type: "button",
-                                  "aria-label": `Fechar ${it.label}`,
-                                  style: { border: "none", background: "transparent", color: "inherit", cursor: "pointer", padding: "0 2px", fontSize: "13px", lineHeight: 1 },
-                                  onClick: (e: any) => {
-                                    e.stopPropagation();
-                                    it.close();
-                                  },
-                                },
-                                "×"
-                              )
-                            )
-                          )
-                        ),
-                        h("div", { style: { flex: 1, minHeight: 0, overflow: "auto" } }, activeItem.content)
-                      )
-                );
-              })()
+            )
           )
         )
       ),
+      sideProfileTabs.length > 0 && activeSideProfileKey &&
+        (() => {
+          const panelsApi = (ctx as any)?.panels;
+          const PanelWorkspace = panelsApi?.ui?.Workspace;
+          const activeChannel = resolveActiveChannelId(tenant) || "";
+          const workspaceItems = sideProfileTabs
+            .map((pt) => {
+              const resolvedPanel = typeof panelsApi?.resolve === "function" ? panelsApi.resolve(pt.target) : null;
+              if (!resolvedPanel?.component) return null;
+              return {
+                id: pt.target,
+                label: pt.name,
+                icon: pt.picture
+                  ? h("img", {
+                      src: pt.picture,
+                      alt: pt.name,
+                      style: { width: "16px", height: "16px", borderRadius: "4px", objectFit: "cover", display: "block" },
+                    })
+                  : undefined,
+                close: () => closeSideProfileTab(pt.target),
+                content: h(resolvedPanel.component, {
+                  key: pt.target,
+                  target: pt.target,
+                  close: () => closeSideProfileTab(pt.target),
+                  context: {
+                    channelId: activeChannel,
+                    canOpen: (nextTarget: string) => Boolean(typeof panelsApi?.resolve === "function" && panelsApi.resolve(nextTarget)),
+                    open: (nextTarget: string) => openProfileTargetInSideColumn(nextTarget),
+                  },
+                }),
+              };
+            })
+            .filter(Boolean) as Array<{ id: string; label: string; icon?: any; close: () => void; content: any }>;
+          if (workspaceItems.length === 0) return null;
+          const activeItem = workspaceItems.find((i) => i.id === activeSideProfileKey) || workspaceItems[0];
+          return h(
+            "aside",
+            {
+              "data-agent-side-profile-column": "true",
+              "aria-label": "Perfil do agente",
+              style: {
+                width: "460px",
+                minWidth: "400px",
+                maxWidth: "520px",
+                height: "100%",
+                flexShrink: 0,
+                borderLeft: "1px solid var(--border)",
+                background: "var(--card, var(--surface-base))",
+                display: "flex",
+                flexDirection: "column",
+                minHeight: 0,
+                overflow: "hidden",
+              },
+            },
+            PanelWorkspace
+              ? h(PanelWorkspace, {
+                  value: activeItem.id,
+                  select: (nextId: string) => setActiveSideProfileKey(nextId),
+                  label: "Perfis de agentes",
+                  focusOnMount: false,
+                  items: workspaceItems,
+                })
+              : h(
+                  React.Fragment,
+                  null,
+                  h(
+                    "div",
+                    {
+                      style: {
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "4px",
+                        padding: "6px 8px",
+                        borderBottom: "1px solid var(--border)",
+                        overflowX: "auto",
+                        flexShrink: 0,
+                      },
+                    },
+                    workspaceItems.map((it) =>
+                      h(
+                        "div",
+                        {
+                          key: it.id,
+                          style: {
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "5px",
+                            padding: "4px 8px",
+                            borderRadius: "6px",
+                            fontSize: "12px",
+                            fontWeight: it.id === activeItem.id ? 600 : 400,
+                            background: it.id === activeItem.id ? "var(--muted)" : "transparent",
+                            color: it.id === activeItem.id ? "var(--foreground)" : "var(--muted-foreground)",
+                            cursor: "pointer",
+                            whiteSpace: "nowrap",
+                          },
+                          onClick: () => setActiveSideProfileKey(it.id),
+                        },
+                        it.icon,
+                        h("span", null, it.label),
+                        h(
+                          "button",
+                          {
+                            type: "button",
+                            "aria-label": `Fechar ${it.label}`,
+                            style: { border: "none", background: "transparent", color: "inherit", cursor: "pointer", padding: "0 2px", fontSize: "13px", lineHeight: 1 },
+                            onClick: (e: any) => {
+                              e.stopPropagation();
+                              it.close();
+                            },
+                          },
+                          "×"
+                        )
+                      )
+                    )
+                  ),
+                  h("div", { style: { flex: 1, minHeight: 0, overflow: "auto" } }, activeItem.content)
+                )
+          );
+        })(),
       h(CodeDenInspectorDrawer, {
         ctx,
         item: selectedItem,
