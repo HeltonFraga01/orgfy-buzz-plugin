@@ -742,7 +742,7 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
 
   orgfyMod.resetTelemetryForTests();
 
-  const nativeEvents = { relay: 0, completions: [], actions: [], sidebars: [], shortcuts: [], attentionSources: [], hooks: [], agentTabs: [] };
+  const nativeEvents = { relay: 0, completions: [], actions: [], tools: [], sidebars: [], shortcuts: [], attentionSources: [], hooks: [], agentTabs: [] };
   const nativeCtx = {
     react: { createElement: () => null },
     relay: {
@@ -752,6 +752,7 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     conversation: {
       registerCompletion: (comp) => { nativeEvents.completions.push(comp); },
       registerMessageAction: (act) => { nativeEvents.actions.push(act); },
+      registerTool: (tool) => { nativeEvents.tools.push(tool); },
     },
     reflect: {
       get: (name) => name === "sidebarSections" ? { register: (sec) => { nativeEvents.sidebars.push(sec); } } : undefined,
@@ -771,7 +772,12 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
   assert.equal(typeof nativeEvents.completions[0].match, "function", "registerCompletion deve usar match()");
   assert.deepEqual(nativeEvents.completions[0].match({ text: "/orgfy-card", end: 11, revision: 1 }, {}), { start: 0, end: 11, query: "orgfy-card" });
   assert.equal(nativeEvents.actions.length, 1);
+  assert.equal(nativeEvents.actions[0].id, "orgfy-message-actions");
   assert.equal(typeof nativeEvents.actions[0].matches, "function", "registerMessageAction deve usar matches()");
+  assert.equal(typeof nativeEvents.actions[0].icon, "function", "registerMessageAction deve expor ícone");
+  assert.equal(nativeState.composerToolRegistered, true, "registerTool do composer deve estar ativo");
+  assert.equal(nativeEvents.tools.length, 1);
+  assert.equal(nativeEvents.tools[0].id, "orgfy-picker");
   assert.equal(nativeState.sidebarRegistered, true);
   assert.equal(nativeEvents.sidebars.length, 1);
   const sidebarSec = nativeEvents.sidebars[0];
@@ -1587,5 +1593,127 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     assert.ok(bundle.includes("data-canvas-live-editor"), "Aba Canvas deve suportar edição e salvamento via session.canvas.save");
     assert.ok(bundle.includes("data-agent-profile-drawer"), "Drawer de Perfil & Transcript do Agente deve estar presente");
     assert.ok(bundle.includes("data-agent-nip-ap-editor"), "Editor NIP-AP inline via ctx.agents.save deve estar presente");
+  });
+
+  test("Onda 3: addAttentionSource real (bus + polling dedup), MessageAction contextual e ComposerTool picker", async () => {
+    const bundle = fs.readFileSync(path.resolve(__dirname, "plugin.js"), "utf8");
+    assert.ok(bundle.includes("data-orgfy-message-action-modal"), "Modal contextual de MessageAction deve estar no bundle");
+    assert.ok(bundle.includes("data-orgfy-composer-picker"), "Picker de composer registerTool deve estar no bundle");
+    assert.ok(bundle.includes("orgfy-picker"), "ID orgfy-picker deve estar registrado no bundle");
+
+    // 1. AttentionSource real: entrega de eventos do barramento + filtro + dedup + polling real + abort limpo
+    const emitted = [];
+    const ac = new AbortController();
+    const fakeRadar = JSON.stringify({
+      ok: true,
+      gerado_em: new Date().toISOString(),
+      resumo: { criticos: 1, criticos_ativos: 1, avisos: 0, duplicadas: 0 },
+      sessoes: [
+        {
+          session_id: "sess-onda3-loop",
+          agente: "OrgFy Otto",
+          severidade: "critical",
+          ativa: true,
+          ultima_atualizacao_min: 1,
+          duracao_min: 19,
+          shells: 24,
+          flags: ["LOOP_SUSPEITO"],
+        },
+      ],
+    });
+    const fakeKpis = JSON.stringify({
+      schema_version: "1.0.0",
+      gerado_em: new Date().toISOString(),
+      janela_dias: 30,
+      fluxo: { vazao_total_feito: 10, fila_revisao_atual: 0 },
+      qualidade: { fpy_real_pct: 96.5 },
+      economia: { status_orcamento: "ALERTA", uso_teto_diario_pct: 84.2 },
+      higiene: { wip_total_ativo: 1, orphan_wip_count: 0, estagnados_nivel_3: 0 },
+      alertas_ativos: [
+        { codigo: "CI_BROKEN", severidade: "critical", mensagem: "CI falhou na etapa pytest", acao_sugerida: "Checar log" },
+      ],
+    });
+    const src = orgfyMod.createOrgfyPipelineAttentionSource({
+      host: {
+        readFile: async (p) => {
+          if (p.endsWith("goose-loop-radar.json")) return new TextEncoder().encode(fakeRadar);
+          if (p.endsWith("kpis-esteira.json")) return new TextEncoder().encode(fakeKpis);
+          throw new Error("ENOENT");
+        },
+      },
+    });
+    const runPromise = src.run({
+      id: "watch-onda3",
+      agent: "local:orgfy-bento",
+      watch: {
+        config: {
+          empresa: "orgfy",
+          events: ["card.ready_for_review", "loop.detected", "ci.failed", "budget.80pct"],
+          pollMs: 60000,
+        },
+      },
+      signal: ac.signal,
+      emit: (txt) => emitted.push(txt),
+    });
+
+    await new Promise((r) => setTimeout(r, 40));
+    orgfyMod.emitOrgfyPipelineEvent({
+      type: "card.ready_for_review",
+      empresa: "orgfy",
+      issueId: "abcd1234",
+      agent: "OrgFy Teo",
+      summary: "PR pronto para Gate",
+    });
+    orgfyMod.emitOrgfyPipelineEvent({
+      type: "card.ready_for_review",
+      empresa: "lumen-iptv",
+      issueId: "ffff9999",
+      summary: "Outro tenant deve ser filtrado",
+    });
+    ac.abort();
+    await runPromise;
+
+    assert.ok(emitted.some((t) => t.includes("card.ready_for_review") && t.includes("abcd1234")), "deve emitir evento do barramento em tempo real");
+    assert.ok(!emitted.some((t) => t.includes("ffff9999")), "deve filtrar eventos de outra empresa");
+    assert.ok(emitted.some((t) => t.includes("loop.detected") && t.includes("OrgFy Otto")), "deve emitir loop.detected do radar");
+    assert.ok(emitted.some((t) => t.includes("budget.80pct") && t.includes("84.2%")), "deve emitir budget.80pct quando >=80%");
+    assert.ok(emitted.some((t) => t.includes("ci.failed") && t.includes("CI_BROKEN")), "deve emitir ci.failed para alertas críticos");
+
+    // 2. MessageAction contextual parser
+    const fakeHex = "a1b2c3d4".repeat(8);
+    const parsedPr = orgfyMod.parseOrgfyMessageContext({
+      id: "msg-1",
+      channelId: "ch-1",
+      authorId: "pub-1",
+      content: `DECIDIDO: revisar SPEC-0040-T002 em buzz://pr?id=${fakeHex}&owner=${fakeHex}&d=lumen-iptv\nGATE pendente`,
+    });
+    assert.equal(parsedPr.citedEntity?.type, "pr");
+    assert.equal(parsedPr.citedEntity?.id, fakeHex);
+    assert.equal(parsedPr.citedEntity?.dtag, "lumen-iptv");
+    assert.equal(parsedPr.citedSlug, "SPEC-0040-T002");
+    assert.equal(parsedPr.hasGateKeyword, true);
+    assert.equal(parsedPr.hasDecidedKeyword, true);
+
+    // 3. ComposerTool picker insertResource + fallback insertText + snippets
+    assert.ok(orgfyMod.ORGFY_GATE_SNIPPETS.length >= 4, "deve oferecer snippets de Gate/Spec/Bloqueado");
+    const uri = orgfyMod.buildBuzzEntityUri("issue", fakeHex, fakeHex, "orgfy");
+    assert.ok(uri.startsWith(`buzz://issue?id=${fakeHex}&owner=${fakeHex}&d=orgfy`));
+    let focused = false;
+    let insertedRes = null;
+    const resOk = orgfyMod.insertOrgfyPickerEntry(
+      { id: "i1", category: "repos", badge: "ISSUE", title: "Card 1", subtitle: "orgfy", resource: { uri, label: "Card 1" }, insertText: `[Card 1](${uri}) ` },
+      { insertResource: (r) => { insertedRes = r; return true; }, focus: () => { focused = true; } }
+    );
+    assert.equal(resOk.ok, true);
+    assert.equal(insertedRes.uri, uri);
+    assert.equal(focused, true);
+
+    let fallbackTxt = "";
+    const resFallback = orgfyMod.insertOrgfyPickerEntry(
+      { id: "i2", category: "repos", badge: "ISSUE", title: "Card 2", subtitle: "orgfy", resource: { uri, label: "Card 2" }, insertText: `[Card 2](${uri}) ` },
+      { insertResource: () => "Link rejeitado", insertText: (t) => { fallbackTxt = t; return true; } }
+    );
+    assert.equal(resFallback.ok, true);
+    assert.ok(fallbackTxt.includes(uri), "fallback deve usar insertText se insertResource recusar");
   });
 }

@@ -36,6 +36,11 @@ export type OrgfyPipelineEventType =
   | "presence.reconciled"
   | "card.auto_dispatched"
   | "card.escalated_coo"
+  | "card.ready_for_review"
+  | "gate.rejected_dsap"
+  | "loop.detected"
+  | "ci.failed"
+  | "budget.80pct"
   | "attention.cleaned_up";
 
 export interface OrgfyPipelineEvent {

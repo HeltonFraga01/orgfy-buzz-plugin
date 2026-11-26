@@ -2092,6 +2092,10 @@ function emitOrgfyPipelineEvent(event) {
 function getOrgfyPipelineEvents(limit = 30) {
   return pipelineEventsBuffer.slice(-Math.max(1, limit)).reverse();
 }
+function subscribeOrgfyPipelineEvents(listener) {
+  pipelineEventListeners.add(listener);
+  return () => pipelineEventListeners.delete(listener);
+}
 function resetPresenceStateForTests() {
   pipelineEventsBuffer.length = 0;
 }
@@ -6801,9 +6805,1217 @@ function createAgentOrgfyTabComponent(ctx) {
     );
   };
 }
+const DEFAULT_ATTENTION_POLL_MS = 3e4;
+const MIN_ATTENTION_POLL_MS = 5e3;
+function formatOrgfyAttentionText(ev) {
+  const parts = [
+    `[ORGFY ATTENTION · ${ev.type}]`,
+    `empresa=${ev.empresa}`,
+    ...ev.issueId ? [`issue=${ev.issueId}`] : [],
+    ...ev.agent ? [`agente=${ev.agent}`] : [],
+    `resumo=${ev.summary}`,
+    `em=${ev.timestamp}`
+  ];
+  return parts.join(" | ");
+}
+function matchesWatchFilter(ev, empresaFilter, allowedEvents) {
+  if (empresaFilter !== "all" && ev.empresa && ev.empresa !== "all") {
+    if (ev.empresa.toLowerCase() !== empresaFilter.toLowerCase()) {
+      return false;
+    }
+  }
+  if (allowedEvents && allowedEvents.size > 0 && !allowedEvents.has(ev.type)) {
+    return false;
+  }
+  return true;
+}
+function createOrgfyPipelineAttentionSource(ctx) {
+  return {
+    id: "orgfy.pipeline",
+    description: "Emite eventos reais e estruturados da esteira OrgFy (PR/card pronto para revisão, loop detectado no Goose, falha de CI/alerta crítico, teto de orçamento >=80%, lock órfão liberado e despacho/escalação) para o Attention nativo do Buzz.",
+    configExample: {
+      empresa: "orgfy",
+      events: [
+        "card.ready_for_review",
+        "loop.detected",
+        "ci.failed",
+        "gate.rejected_dsap",
+        "budget.80pct"
+      ],
+      pollMs: DEFAULT_ATTENTION_POLL_MS
+    },
+    present: (watch, title) => {
+      const cfg = (watch == null ? void 0 : watch.config) || {};
+      const empresa = String(cfg.empresa || "orgfy");
+      const evCount = Array.isArray(cfg.events) && cfg.events.length > 0 ? `${cfg.events.length} sinais` : "todos os sinais";
+      return {
+        type: "OrgFy Esteira",
+        target: empresa,
+        subtitle: title || `Monitoramento ao vivo (${evCount}: revisão, loops, CI e orçamento)`
+      };
+    },
+    run: (input) => new Promise((resolve) => {
+      var _a, _b, _c, _d;
+      if ((_a = input == null ? void 0 : input.signal) == null ? void 0 : _a.aborted) {
+        resolve();
+        return;
+      }
+      const cfg = ((_b = input == null ? void 0 : input.watch) == null ? void 0 : _b.config) || {};
+      const empresaFilter = String(cfg.empresa || "orgfy").trim() || "orgfy";
+      const allowedEvents = Array.isArray(cfg.events) && cfg.events.length > 0 ? new Set(cfg.events.map((e) => String(e).trim()).filter(Boolean)) : null;
+      const rawPoll = typeof cfg.pollMs === "number" ? cfg.pollMs : DEFAULT_ATTENTION_POLL_MS;
+      const pollMs = rawPoll <= 0 ? 0 : Math.max(MIN_ATTENTION_POLL_MS, rawPoll);
+      const seenKeys = /* @__PURE__ */ new Set();
+      let done = false;
+      let pollTimer;
+      let polling = false;
+      const safeEmit = (dedupKey, ev) => {
+        var _a2, _b2;
+        if (done || ((_a2 = input == null ? void 0 : input.signal) == null ? void 0 : _a2.aborted)) return;
+        if (!matchesWatchFilter(ev, empresaFilter, allowedEvents)) return;
+        if (seenKeys.has(dedupKey)) return;
+        seenKeys.add(dedupKey);
+        if (seenKeys.size > 400) {
+          const first = seenKeys.values().next().value;
+          if (first) seenKeys.delete(first);
+        }
+        const text = formatOrgfyAttentionText(ev);
+        try {
+          (_b2 = input == null ? void 0 : input.emit) == null ? void 0 : _b2.call(input, text);
+          recordGenAISpan({
+            operationName: "attention.emit",
+            agentName: String((input == null ? void 0 : input.agent) || "orgfy-attention"),
+            durationMs: 0,
+            status: "ok",
+            attributes: {
+              "orgfy.attention.watch_id": String((input == null ? void 0 : input.id) || ""),
+              "orgfy.event.type": ev.type,
+              "orgfy.empresa": ev.empresa
+            }
+          });
+        } catch (err) {
+          recordGenAISpan({
+            operationName: "attention.emit",
+            agentName: String((input == null ? void 0 : input.agent) || "orgfy-attention"),
+            durationMs: 0,
+            status: "error",
+            finishReason: String((err == null ? void 0 : err.message) || "emit_failed").slice(0, 120),
+            attributes: {
+              "orgfy.attention.watch_id": String((input == null ? void 0 : input.id) || ""),
+              "orgfy.event.type": ev.type
+            }
+          });
+        }
+      };
+      const unsubscribeBus = subscribeOrgfyPipelineEvents((ev) => {
+        safeEmit(`bus:${ev.id}`, ev);
+      });
+      const pollOnce = async () => {
+        var _a2, _b2, _c2, _d2;
+        if (done || ((_a2 = input == null ? void 0 : input.signal) == null ? void 0 : _a2.aborted) || polling) return;
+        if (!((_b2 = ctx == null ? void 0 : ctx.host) == null ? void 0 : _b2.readFile)) return;
+        polling = true;
+        try {
+          const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+          if (!allowedEvents || allowedEvents.has("card.ready_for_review")) {
+            const cards = await fetchLiveKanbanCards(ctx, { empresa: empresaFilter }).catch(() => []);
+            for (const card of cards) {
+              if (card.stage !== "revisao") continue;
+              const issueRef = card.fullIssueId || card.issueId || card.id;
+              safeEmit(`review:${card.empresa}:${issueRef}`, {
+                id: `poll-review-${issueRef}`,
+                type: "card.ready_for_review",
+                timestamp: nowIso,
+                empresa: card.empresa || empresaFilter,
+                issueId: issueRef,
+                agent: card.revisor || card.executor,
+                summary: `PR/Card "${card.title}" pronto para revisão (executor: ${card.executor || "n/d"} -> revisor: ${card.revisor || "n/d"}).`
+              });
+            }
+          }
+          if (!allowedEvents || allowedEvents.has("loop.detected")) {
+            const radar = await fetchGooseLoopRadar(ctx).catch(() => null);
+            if ((radar == null ? void 0 : radar.ok) && Array.isArray(radar.sessoes)) {
+              for (const s of radar.sessoes) {
+                const isActiveCritical = (typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15) && (s.severidade === "critical" || Boolean(s.last_msg_is_provider_error));
+                if (!isActiveCritical) continue;
+                const flags = Array.isArray(s.flags) && s.flags.length > 0 ? s.flags.join(",") : "CRITICO";
+                safeEmit(`loop:${s.session_id}:${flags}`, {
+                  id: `poll-loop-${s.session_id}`,
+                  type: "loop.detected",
+                  timestamp: nowIso,
+                  empresa: empresaFilter,
+                  agent: s.agente,
+                  summary: `Loop/erro crítico detectado em ${s.agente} (sessão ${s.session_id}, ${s.duracao_min}m, ${s.shells} shells, flags: ${flags}).`
+                });
+              }
+            }
+          }
+          if (!allowedEvents || allowedEvents.has("ci.failed") || allowedEvents.has("budget.80pct")) {
+            const kpisRes = await fetchKpisEsteira(ctx).catch(() => null);
+            const kpis = kpisRes == null ? void 0 : kpisRes.kpis;
+            if (kpis) {
+              const pct = Number(((_c2 = kpis == null ? void 0 : kpis.economia) == null ? void 0 : _c2.uso_teto_diario_pct) ?? 0);
+              if (pct >= 80 && (!allowedEvents || allowedEvents.has("budget.80pct"))) {
+                const bucket = Math.floor(pct / 10) * 10;
+                safeEmit(`budget:${empresaFilter}:${bucket}`, {
+                  id: `poll-budget-${bucket}`,
+                  type: "budget.80pct",
+                  timestamp: nowIso,
+                  empresa: empresaFilter,
+                  summary: `Uso do teto diário de orçamento atingiu ${pct.toFixed(1)}% (status: ${((_d2 = kpis.economia) == null ? void 0 : _d2.status_orcamento) || "ALERTA"}).`
+                });
+              }
+              const alertas = Array.isArray(kpis.alertas_ativos) ? kpis.alertas_ativos : [];
+              for (const al of alertas) {
+                const sev = String((al == null ? void 0 : al.severidade) || "").toLowerCase();
+                const cod = String((al == null ? void 0 : al.codigo) || "ALERTA");
+                if (sev !== "critical" && sev !== "error" && !/CI|FAIL|BROKEN/i.test(cod)) continue;
+                safeEmit(`ci:${cod}:${al.mensagem || ""}`, {
+                  id: `poll-ci-${cod}`,
+                  type: "ci.failed",
+                  timestamp: nowIso,
+                  empresa: empresaFilter,
+                  summary: `[${cod}] ${al.mensagem || "Falha crítica detectada na esteira"} (${al.acao_sugerida || "verificar CI"}).`
+                });
+              }
+            }
+          }
+        } finally {
+          polling = false;
+        }
+      };
+      const scheduleNext = () => {
+        var _a2;
+        if (done || ((_a2 = input == null ? void 0 : input.signal) == null ? void 0 : _a2.aborted) || pollMs <= 0) return;
+        pollTimer = setTimeout(async () => {
+          await pollOnce();
+          scheduleNext();
+        }, pollMs);
+      };
+      const finish = () => {
+        var _a2, _b2;
+        if (done) return;
+        done = true;
+        if (pollTimer) clearTimeout(pollTimer);
+        unsubscribeBus();
+        (_b2 = (_a2 = input == null ? void 0 : input.signal) == null ? void 0 : _a2.removeEventListener) == null ? void 0 : _b2.call(_a2, "abort", finish);
+        resolve();
+      };
+      (_d = (_c = input == null ? void 0 : input.signal) == null ? void 0 : _c.addEventListener) == null ? void 0 : _d.call(_c, "abort", finish, { once: true });
+      if (pollMs > 0) {
+        void pollOnce().finally(() => scheduleNext());
+      }
+    })
+  };
+}
+function parseOrgfyMessageContext(message) {
+  const content = String((message == null ? void 0 : message.content) || "").trim();
+  const firstLine = content.split(/\r?\n/).map((l) => l.trim()).find((l) => l.length > 0) || "Nova tarefa via chat";
+  const cleanTitle = firstLine.replace(/^#+\s*/, "").replace(/`+/g, "").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").trim().slice(0, 110);
+  let citedEntity = null;
+  const deepLinkMatch = /buzz:\/\/(issue|pr)\?([^\s)>\]"']+)/i.exec(content);
+  if (deepLinkMatch) {
+    const type = deepLinkMatch[1].toLowerCase();
+    const qs = new URLSearchParams(deepLinkMatch[2]);
+    const id = (qs.get("id") || "").toLowerCase().trim();
+    const owner = (qs.get("owner") || DEFAULT_ORGFY_REPO_OWNER).toLowerCase().trim();
+    const dtag = (qs.get("d") || "orgfy").trim() || "orgfy";
+    if (/^[0-9a-f]{64}$/i.test(id)) {
+      citedEntity = { type, id, owner, dtag };
+    }
+  }
+  if (!citedEntity) {
+    const prHex = /\bPR\b[^0-9a-f]{0,12}([0-9a-f]{64})\b/i.exec(content);
+    const issueHex = /\b(?:issue|card)\b[^0-9a-f]{0,12}([0-9a-f]{64})\b/i.exec(content);
+    const anyHex = /\b([0-9a-f]{64})\b/i.exec(content);
+    if (prHex) {
+      citedEntity = {
+        type: "pr",
+        id: prHex[1].toLowerCase(),
+        owner: DEFAULT_ORGFY_REPO_OWNER,
+        dtag: "orgfy"
+      };
+    } else if (issueHex || anyHex) {
+      citedEntity = {
+        type: "issue",
+        id: (issueHex ? issueHex[1] : anyHex[1]).toLowerCase(),
+        owner: DEFAULT_ORGFY_REPO_OWNER,
+        dtag: "orgfy"
+      };
+    }
+  }
+  const slugMatch = /\b((?:SPEC|ESTEIRA|PMBOK|OPS|SEC)-\d{1,4}(?:[- ]T\d{3})?)\b/i.exec(content);
+  const citedSlug = slugMatch ? slugMatch[1].replace(/\s+/g, "-").toUpperCase() : null;
+  return {
+    messageId: String((message == null ? void 0 : message.id) || ""),
+    channelId: String((message == null ? void 0 : message.channelId) || ""),
+    authorId: String((message == null ? void 0 : message.authorId) || ""),
+    excerpt: content.slice(0, 280),
+    suggestedTitle: cleanTitle || "Card via mensagem do Buzz",
+    citedEntity,
+    citedSlug,
+    hasGateKeyword: /\b(?:GATE|PR|ENTREGUE_PARA_REVISAO|REVISAO|REVISÃO)\b/i.test(content),
+    hasDecidedKeyword: /\bDECIDIDO\b/i.test(content)
+  };
+}
+function createOrgfyMessageActionComponent(ctx) {
+  const React = ctx == null ? void 0 : ctx.react;
+  if (!React) return () => null;
+  const h = React.createElement;
+  return function OrgfyMessageActionModal(props) {
+    const parsed = React.useMemo(() => parseOrgfyMessageContext(props == null ? void 0 : props.message), [props == null ? void 0 : props.message]);
+    const authorName = React.useMemo(
+      () => resolveBuzzIdentityName(ctx, parsed.authorId),
+      [parsed.authorId]
+    );
+    const [mode, setMode] = React.useState("menu");
+    const [cardTitle, setCardTitle] = React.useState(parsed.suggestedTitle);
+    const [cardExecutor, setCardExecutor] = React.useState("OrgFy Otto");
+    const [cardRevisor, setCardRevisor] = React.useState("OrgFy Teo");
+    const [cardPaths, setCardPaths] = React.useState("src/");
+    const [cardAcceptance, setCardAcceptance] = React.useState("npm test");
+    const [gateDecision, setGateDecision] = React.useState("aceito");
+    const [gateReason, setGateReason] = React.useState("");
+    const [busy, setBusy] = React.useState(false);
+    const [feedback, setFeedback] = React.useState(null);
+    React.useEffect(() => {
+      const onKey = (e) => {
+        var _a;
+        if (e.key === "Escape") (_a = props == null ? void 0 : props.close) == null ? void 0 : _a.call(props);
+      };
+      if (typeof window !== "undefined") {
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+      }
+      return void 0;
+    }, [props == null ? void 0 : props.close]);
+    const handleOpenCited = async () => {
+      var _a;
+      if (!parsed.citedEntity) return;
+      setBusy(true);
+      try {
+        const ok2 = await openBuzzRepoEntity(ctx, parsed.citedEntity);
+        if (ok2) {
+          (_a = props == null ? void 0 : props.close) == null ? void 0 : _a.call(props);
+        } else {
+          setFeedback({ ok: false, text: "Não foi possível navegar para a entidade no Buzz Repos." });
+        }
+      } finally {
+        setBusy(false);
+      }
+    };
+    const handleOpenFactory = () => {
+      var _a, _b, _c;
+      try {
+        if ((_a = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a.open) {
+          ctx.navigation.open({
+            version: 1,
+            kind: "page",
+            pluginId: "digital.cortexx.orgfy",
+            pageId: "orgfy"
+          });
+        } else if ((_b = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _b.navigate) {
+          ctx.navigation.navigate("orgfy");
+        }
+      } catch {
+      }
+      (_c = props == null ? void 0 : props.close) == null ? void 0 : _c.call(props);
+    };
+    const handleCreateCard = async () => {
+      var _a, _b;
+      if (!cardTitle.trim()) {
+        setFeedback({ ok: false, text: "Informe um título para o card." });
+        return;
+      }
+      setBusy(true);
+      setFeedback(null);
+      try {
+        const slug = parsed.citedSlug || `CHAT-${(parsed.messageId || String(Date.now())).slice(0, 8).toUpperCase()}`;
+        const paths = cardPaths.split(/[,;]+/).map((s) => s.trim()).filter(Boolean);
+        const res = await createCanonicalCard(ctx, {
+          slug,
+          titulo: cardTitle.trim(),
+          objetivo: parsed.excerpt || cardTitle.trim(),
+          autoridade: `Mensagem Buzz ${parsed.messageId.slice(0, 8)} (${authorName})`,
+          decisao: parsed.hasDecidedKeyword ? `DECIDIDO em mensagem ${parsed.messageId.slice(0, 8)}` : `Solicitado por ${authorName} no canal ${parsed.channelId.slice(0, 8)}`,
+          executor: cardExecutor.trim(),
+          revisor: cardRevisor.trim(),
+          escrita_exclusiva: paths.length > 0 ? paths : ["src/"],
+          feito_quando: `Comando de aceite passa com exit 0 (${cardAcceptance.trim() || "npm test"})`,
+          acceptance_command: cardAcceptance.trim() || "npm test"
+        });
+        if (!res.ok) {
+          setFeedback({ ok: false, text: res.message || res.error || "Falha ao validar card (verifique regra L-01)." });
+        } else {
+          setFeedback({
+            ok: true,
+            text: `Card ${res.slug} gerado (SHA L-22: ${res.acceptanceHashSha256.slice(0, 12)}). Comando de publicação pronto.`
+          });
+          try {
+            (_b = (_a = ctx == null ? void 0 : ctx.notifications) == null ? void 0 : _a.notify) == null ? void 0 : _b.call(_a, {
+              title: "OrgFy · Card gerado",
+              body: `${res.slug} pronto para publicação (${cardExecutor} -> ${cardRevisor}).`
+            });
+          } catch {
+          }
+        }
+      } catch (err) {
+        setFeedback({ ok: false, text: String((err == null ? void 0 : err.message) || err) });
+      } finally {
+        setBusy(false);
+      }
+    };
+    const handleTriggerGate = async () => {
+      if (!parsed.citedEntity) return;
+      if (gateDecision === "recusado" && !gateReason.trim()) {
+        setFeedback({ ok: false, text: "Informe o motivo da recusa do Gate." });
+        return;
+      }
+      setBusy(true);
+      setFeedback(null);
+      try {
+        const res = await executeGate(ctx, {
+          empresa: parsed.citedEntity.dtag || "orgfy",
+          prId: parsed.citedEntity.id,
+          acao: gateDecision,
+          revisor: authorName || "OrgFy Teo",
+          motivo: gateReason.trim() || `Gate ${gateDecision} disparado a partir da mensagem ${parsed.messageId.slice(0, 8)}`
+        });
+        setFeedback({
+          ok: res.code === 0,
+          text: res.code === 0 ? `Gate ${gateDecision.toUpperCase()} registrado para #${parsed.citedEntity.id.slice(0, 8)}.` : `Gate retornou código ${res.code}: ${(res.output || "").slice(0, 140)}`
+        });
+      } catch (err) {
+        setFeedback({ ok: false, text: String((err == null ? void 0 : err.message) || err) });
+      } finally {
+        setBusy(false);
+      }
+    };
+    const fieldStyle = {
+      width: "100%",
+      padding: "7px 10px",
+      borderRadius: "6px",
+      border: "1px solid var(--border-primary, rgba(255,255,255,0.14))",
+      background: "var(--surface-inset, rgba(0,0,0,0.22))",
+      color: "var(--text-primary, #f4f4f5)",
+      fontSize: "12.5px",
+      boxSizing: "border-box",
+      outline: "none"
+    };
+    const actionRowStyle = {
+      width: "100%",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: "10px",
+      padding: "9px 12px",
+      borderRadius: "8px",
+      border: "1px solid var(--border-primary, rgba(255,255,255,0.1))",
+      background: "var(--affordance-subtle, rgba(255,255,255,0.04))",
+      color: "var(--text-primary, #f4f4f5)",
+      fontSize: "12.5px",
+      fontWeight: 500,
+      cursor: "pointer",
+      textAlign: "left"
+    };
+    return h(
+      "div",
+      {
+        "data-orgfy-message-action-modal": "true",
+        role: "dialog",
+        "aria-modal": "true",
+        "aria-label": "Ações OrgFy na mensagem",
+        onClick: (e) => {
+          var _a;
+          if (e.target === e.currentTarget) (_a = props == null ? void 0 : props.close) == null ? void 0 : _a.call(props);
+        },
+        style: {
+          position: "fixed",
+          inset: 0,
+          zIndex: 1e3,
+          background: "rgba(0, 0, 0, 0.48)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "16px"
+        }
+      },
+      h(
+        "div",
+        {
+          style: {
+            width: "min(460px, 100%)",
+            background: "var(--bg-panel, #18181b)",
+            border: "1px solid var(--border-primary, rgba(255,255,255,0.14))",
+            borderRadius: "12px",
+            boxShadow: "0 18px 42px rgba(0,0,0,0.45)",
+            padding: "16px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "12px",
+            color: "var(--text-primary, #f4f4f5)"
+          }
+        },
+        // Header
+        h(
+          "div",
+          {
+            style: {
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "8px"
+            }
+          },
+          h(
+            "div",
+            { style: { display: "flex", flexDirection: "column", gap: "2px" } },
+            h("span", { style: { fontSize: "14px", fontWeight: 600 } }, "Ações OrgFy"),
+            h(
+              "span",
+              { style: { fontSize: "11.5px", color: "var(--text-subtle, #a1a1aa)" } },
+              `Mensagem de ${authorName}${parsed.citedSlug ? ` · ${parsed.citedSlug}` : ""}${parsed.citedEntity ? ` · ${parsed.citedEntity.type.toUpperCase()} #${parsed.citedEntity.id.slice(0, 8)}` : ""}`
+            )
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              onClick: () => {
+                var _a;
+                return (_a = props == null ? void 0 : props.close) == null ? void 0 : _a.call(props);
+              },
+              "aria-label": "Fechar",
+              style: {
+                background: "transparent",
+                border: "none",
+                color: "var(--text-subtle, #a1a1aa)",
+                cursor: "pointer",
+                fontSize: "16px",
+                padding: "4px 6px",
+                lineHeight: 1
+              }
+            },
+            "×"
+          )
+        ),
+        // Context excerpt
+        parsed.excerpt && h(
+          "div",
+          {
+            style: {
+              padding: "8px 10px",
+              borderRadius: "8px",
+              background: "var(--surface-inset, rgba(0,0,0,0.22))",
+              border: "1px solid var(--border-primary, rgba(255,255,255,0.08))",
+              fontSize: "12px",
+              color: "var(--text-subtle, #a1a1aa)",
+              maxHeight: "76px",
+              overflowY: "auto",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word"
+            }
+          },
+          parsed.excerpt
+        ),
+        // Feedback banner
+        feedback && h(
+          "div",
+          {
+            role: "status",
+            style: {
+              padding: "8px 10px",
+              borderRadius: "8px",
+              fontSize: "12px",
+              background: feedback.ok ? "rgba(16, 185, 129, 0.14)" : "rgba(239, 68, 68, 0.14)",
+              border: `1px solid ${feedback.ok ? "rgba(16, 185, 129, 0.35)" : "rgba(239, 68, 68, 0.35)"}`,
+              color: feedback.ok ? "var(--green-11, #34d399)" : "var(--red-11, #f87171)"
+            }
+          },
+          feedback.text
+        ),
+        // Mode: Menu principal
+        mode === "menu" && h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: "8px" } },
+          parsed.citedEntity && h(
+            "button",
+            {
+              type: "button",
+              disabled: busy,
+              onClick: handleOpenCited,
+              style: actionRowStyle
+            },
+            h(
+              "span",
+              null,
+              `Abrir ${parsed.citedEntity.type === "pr" ? "PR" : "Issue"} #${parsed.citedEntity.id.slice(
+                0,
+                8
+              )} no Buzz Repos`
+            ),
+            h("span", { style: { color: "var(--text-subtle, #a1a1aa)", fontSize: "11px" } }, "1 salto ↗")
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              disabled: busy,
+              onClick: () => {
+                setFeedback(null);
+                setMode("card");
+              },
+              style: actionRowStyle
+            },
+            h("span", null, "Criar Card OrgFy a partir desta mensagem"),
+            h("span", { style: { color: "var(--text-subtle, #a1a1aa)", fontSize: "11px" } }, "L-01 / L-22 →")
+          ),
+          parsed.citedEntity && h(
+            "button",
+            {
+              type: "button",
+              disabled: busy,
+              onClick: () => {
+                setFeedback(null);
+                setMode("gate");
+              },
+              style: actionRowStyle
+            },
+            h(
+              "span",
+              null,
+              `Disparar Gate para #${parsed.citedEntity.id.slice(0, 8)}`
+            ),
+            h("span", { style: { color: "var(--text-subtle, #a1a1aa)", fontSize: "11px" } }, "Aceitar / Recusar →")
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              disabled: busy,
+              onClick: handleOpenFactory,
+              style: actionRowStyle
+            },
+            h("span", null, "Abrir OrgFy Factory"),
+            h("span", { style: { color: "var(--text-subtle, #a1a1aa)", fontSize: "11px" } }, "↗")
+          )
+        ),
+        // Mode: Criar Card
+        mode === "card" && h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: "8px" } },
+          h("input", {
+            type: "text",
+            value: cardTitle,
+            onChange: (e) => setCardTitle(e.target.value),
+            placeholder: "Título do card",
+            style: fieldStyle
+          }),
+          h(
+            "div",
+            { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" } },
+            h("input", {
+              type: "text",
+              value: cardExecutor,
+              onChange: (e) => setCardExecutor(e.target.value),
+              placeholder: "Executor (ex: OrgFy Otto)",
+              style: fieldStyle
+            }),
+            h("input", {
+              type: "text",
+              value: cardRevisor,
+              onChange: (e) => setCardRevisor(e.target.value),
+              placeholder: "Revisor L-01 (ex: OrgFy Teo)",
+              style: fieldStyle
+            })
+          ),
+          h("input", {
+            type: "text",
+            value: cardPaths,
+            onChange: (e) => setCardPaths(e.target.value),
+            placeholder: "Escrita exclusiva (separada por vírgula)",
+            style: fieldStyle
+          }),
+          h("input", {
+            type: "text",
+            value: cardAcceptance,
+            onChange: (e) => setCardAcceptance(e.target.value),
+            placeholder: "Comando de aceite L-22 (ex: npm test)",
+            style: fieldStyle
+          }),
+          h(
+            "div",
+            { style: { display: "flex", justifyContent: "space-between", gap: "8px", marginTop: "4px" } },
+            h(
+              "button",
+              {
+                type: "button",
+                onClick: () => setMode("menu"),
+                style: { ...actionRowStyle, width: "auto", padding: "7px 12px" }
+              },
+              "← Voltar"
+            ),
+            h(
+              "button",
+              {
+                type: "button",
+                disabled: busy,
+                onClick: handleCreateCard,
+                style: {
+                  padding: "7px 14px",
+                  borderRadius: "8px",
+                  border: "none",
+                  background: "var(--accent-primary, #10b981)",
+                  color: "#09090b",
+                  fontSize: "12.5px",
+                  fontWeight: 600,
+                  cursor: busy ? "wait" : "pointer"
+                }
+              },
+              busy ? "Gerando..." : "Gerar Card Canônico"
+            )
+          )
+        ),
+        // Mode: Disparar Gate
+        mode === "gate" && parsed.citedEntity && h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: "8px" } },
+          h(
+            "div",
+            { style: { display: "flex", gap: "8px" } },
+            ["aceito", "recusado"].map(
+              (dec) => h(
+                "button",
+                {
+                  key: dec,
+                  type: "button",
+                  onClick: () => setGateDecision(dec),
+                  style: {
+                    flex: 1,
+                    padding: "7px 10px",
+                    borderRadius: "7px",
+                    border: gateDecision === dec ? "1px solid var(--accent-primary, #10b981)" : "1px solid var(--border-primary, rgba(255,255,255,0.12))",
+                    background: gateDecision === dec ? "var(--affordance-selected, rgba(16,185,129,0.16))" : "transparent",
+                    color: "var(--text-primary, #f4f4f5)",
+                    fontSize: "12px",
+                    fontWeight: 600,
+                    cursor: "pointer"
+                  }
+                },
+                dec === "aceito" ? "GATE: Aceito" : "GATE: Recusado"
+              )
+            )
+          ),
+          h("textarea", {
+            rows: 3,
+            value: gateReason,
+            onChange: (e) => setGateReason(e.target.value),
+            placeholder: gateDecision === "aceito" ? "Observação opcional (ex: L-22 validado com exit 0)" : "Motivo obrigatório da recusa",
+            style: { ...fieldStyle, resize: "vertical" }
+          }),
+          h(
+            "div",
+            { style: { display: "flex", justifyContent: "space-between", gap: "8px", marginTop: "4px" } },
+            h(
+              "button",
+              {
+                type: "button",
+                onClick: () => setMode("menu"),
+                style: { ...actionRowStyle, width: "auto", padding: "7px 12px" }
+              },
+              "← Voltar"
+            ),
+            h(
+              "button",
+              {
+                type: "button",
+                disabled: busy,
+                onClick: handleTriggerGate,
+                style: {
+                  padding: "7px 14px",
+                  borderRadius: "8px",
+                  border: "none",
+                  background: "var(--accent-primary, #10b981)",
+                  color: "#09090b",
+                  fontSize: "12.5px",
+                  fontWeight: 600,
+                  cursor: busy ? "wait" : "pointer"
+                }
+              },
+              busy ? "Enviando..." : "Confirmar Gate"
+            )
+          )
+        )
+      )
+    );
+  };
+}
+const ORGFY_GATE_SNIPPETS = [
+  {
+    id: "snippet-gate-aceito",
+    category: "gates",
+    badge: "GATE",
+    title: "GATE: aceito (L-01 / L-22)",
+    subtitle: "Template canônico de aprovação após comando de aceite",
+    insertText: "GATE: aceito — L-22 validado com exit 0, escopo respeitado e sem regressões. "
+  },
+  {
+    id: "snippet-gate-recusado",
+    category: "gates",
+    badge: "GATE",
+    title: "GATE: recusado (devolução ao executor)",
+    subtitle: "Devolve o PR com motivo objetivo e critério de correção",
+    insertText: "GATE: recusado — Motivo: <descrever falha objetiva>. Correção exigida: <ajuste fechado + reexecutar L-22>. "
+  },
+  {
+    id: "snippet-decidido",
+    category: "gates",
+    badge: "SPEC",
+    title: "DECIDIDO (Autoridade / Escopo Fechado)",
+    subtitle: "Deliberação executiva para destravar card Z3/Z4",
+    insertText: "DECIDIDO — Alvo: <1-3 arquivos> | Critério L-22: `<comando>` | Não refazer: <escopo preservado>. "
+  },
+  {
+    id: "snippet-bloqueado",
+    category: "gates",
+    badge: "ALERTA",
+    title: "BLOQUEADO | por | motivo | falta | resolve",
+    subtitle: "Sinalização padronizada de impedimento na esteira",
+    insertText: "BLOQUEADO | por: <agente> | motivo: <causa objetiva> | falta: <insumo> | resolve: <próximo passo>. "
+  }
+];
+function buildBuzzEntityUri(type, id, owner = DEFAULT_ORGFY_REPO_OWNER, dtag = "orgfy") {
+  return `buzz://${type}?id=${id.toLowerCase()}&owner=${owner.toLowerCase()}&d=${encodeURIComponent(
+    dtag || "orgfy"
+  )}`;
+}
+function insertOrgfyPickerEntry(entry, callbacks) {
+  var _a, _b, _c;
+  if (entry.resource && typeof callbacks.insertResource === "function") {
+    const res = callbacks.insertResource(entry.resource);
+    if (res === true) {
+      (_a = callbacks.focus) == null ? void 0 : _a.call(callbacks);
+      return { ok: true };
+    }
+    if (typeof callbacks.insertText === "function" && callbacks.insertText(entry.insertText)) {
+      (_b = callbacks.focus) == null ? void 0 : _b.call(callbacks);
+      return { ok: true };
+    }
+    return { ok: false, reason: typeof res === "string" ? res : "Não foi possível inserir o recurso." };
+  }
+  if (typeof callbacks.insertText === "function") {
+    const ok2 = callbacks.insertText(entry.insertText);
+    if (ok2) (_c = callbacks.focus) == null ? void 0 : _c.call(callbacks);
+    return { ok: ok2, ...ok2 ? {} : { reason: "Composer indisponível para inserção." } };
+  }
+  return { ok: false, reason: "Callbacks de inserção indisponíveis." };
+}
+function createOrgfyComposerPickerComponent(ctx) {
+  const React = ctx == null ? void 0 : ctx.react;
+  if (!React) return () => null;
+  const h = React.createElement;
+  return function OrgfyComposerPicker(props) {
+    const [open, setOpen] = React.useState(false);
+    const [loading, setLoading] = React.useState(false);
+    const [query, setQuery] = React.useState("");
+    const [category, setCategory] = React.useState("all");
+    const [entries, setEntries] = React.useState(() => [...ORGFY_GATE_SNIPPETS]);
+    const [errorMsg, setErrorMsg] = React.useState(null);
+    const containerRef = React.useRef(null);
+    const searchRef = React.useRef(null);
+    React.useEffect(() => {
+      if ((props == null ? void 0 : props.disabled) && open) {
+        setOpen(false);
+      }
+    }, [props == null ? void 0 : props.disabled, open]);
+    React.useEffect(() => {
+      if (!open || typeof document === "undefined") return;
+      const onPointerDown = (ev) => {
+        if (containerRef.current && !containerRef.current.contains(ev.target)) {
+          setOpen(false);
+        }
+      };
+      const onKeyDown = (ev) => {
+        var _a;
+        if (ev.key === "Escape") {
+          setOpen(false);
+          (_a = props == null ? void 0 : props.focus) == null ? void 0 : _a.call(props);
+        }
+      };
+      document.addEventListener("mousedown", onPointerDown);
+      document.addEventListener("keydown", onKeyDown);
+      return () => {
+        document.removeEventListener("mousedown", onPointerDown);
+        document.removeEventListener("keydown", onKeyDown);
+      };
+    }, [open, props == null ? void 0 : props.focus]);
+    React.useEffect(() => {
+      if (!open) return;
+      let cancelled = false;
+      setLoading(true);
+      setErrorMsg(null);
+      setTimeout(() => {
+        var _a, _b;
+        try {
+          (_b = (_a = searchRef.current) == null ? void 0 : _a.focus) == null ? void 0 : _b.call(_a);
+        } catch {
+        }
+      }, 20);
+      Promise.all([
+        loadLiveRepoSnapshot(ctx, { channelId: props == null ? void 0 : props.channelId }).catch(() => null),
+        fetchLiveKanbanCards(ctx, { empresa: "all" }).catch(() => [])
+      ]).then(([repoSnap, cards]) => {
+        if (cancelled) return;
+        const next = [];
+        const seenIds = /* @__PURE__ */ new Set();
+        if (repoSnap == null ? void 0 : repoSnap.available) {
+          for (const pr of repoSnap.prs.slice(0, 20)) {
+            const uri = buildBuzzEntityUri("pr", pr.id, pr.owner, pr.dtag);
+            seenIds.add(pr.id);
+            next.push({
+              id: `pr-${pr.id}`,
+              category: "repos",
+              badge: "PR",
+              title: pr.title,
+              subtitle: `${pr.dtag} · #${pr.id.slice(0, 8)}`,
+              resource: { uri, label: `PR: ${pr.title}` },
+              insertText: `[PR: ${pr.title}](${uri}) `
+            });
+          }
+          for (const issue of repoSnap.issues.slice(0, 25)) {
+            const uri = buildBuzzEntityUri("issue", issue.id, issue.owner, issue.dtag);
+            seenIds.add(issue.id);
+            next.push({
+              id: `issue-${issue.id}`,
+              category: "repos",
+              badge: "ISSUE",
+              title: issue.title,
+              subtitle: `${issue.dtag} · #${issue.id.slice(0, 8)}`,
+              resource: { uri, label: issue.title },
+              insertText: `[${issue.title}](${uri}) `
+            });
+          }
+        }
+        for (const card of (cards || []).slice(0, 30)) {
+          const fullId = card.fullIssueId && /^[0-9a-f]{64}$/i.test(card.fullIssueId) ? card.fullIssueId.toLowerCase() : null;
+          if (fullId && seenIds.has(fullId)) continue;
+          const uri = fullId ? buildBuzzEntityUri("issue", fullId, card.owner || DEFAULT_ORGFY_REPO_OWNER, card.empresa || "orgfy") : void 0;
+          next.push({
+            id: `card-${card.id}`,
+            category: "cards",
+            badge: card.stage.toUpperCase(),
+            title: card.title,
+            subtitle: `${card.empresa || "orgfy"} · #${card.issueId} · ${card.executor || "sem executor"}`,
+            ...uri ? { resource: { uri, label: card.title } } : {},
+            insertText: uri ? `[${card.title}](${uri}) ` : `Card #${card.issueId} — ${card.title} (${card.stage}) `
+          });
+        }
+        next.push(...ORGFY_GATE_SNIPPETS);
+        setEntries(next);
+      }).finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, [open, props == null ? void 0 : props.channelId]);
+    const filtered = React.useMemo(() => {
+      const q = query.trim().toLowerCase();
+      return entries.filter((item) => {
+        if (category !== "all" && item.category !== category) return false;
+        if (!q) return true;
+        return `${item.title} ${item.subtitle} ${item.badge}`.toLowerCase().includes(q);
+      });
+    }, [entries, category, query]);
+    const handleSelect = (item) => {
+      const result = insertOrgfyPickerEntry(item, {
+        insertResource: props == null ? void 0 : props.insertResource,
+        insertText: props == null ? void 0 : props.insertText,
+        focus: props == null ? void 0 : props.focus
+      });
+      if (result.ok) {
+        setErrorMsg(null);
+        setOpen(false);
+      } else {
+        setErrorMsg(result.reason || "Não foi possível inserir o item.");
+      }
+    };
+    const tabs = [
+      { id: "all", label: "Tudo" },
+      { id: "repos", label: "Issues/PRs" },
+      { id: "cards", label: "Cards" },
+      { id: "gates", label: "Specs/Gates" }
+    ];
+    return h(
+      "div",
+      {
+        ref: containerRef,
+        "data-orgfy-composer-picker": "true",
+        style: { position: "relative", display: "inline-flex", alignItems: "center" }
+      },
+      h(
+        "button",
+        {
+          type: "button",
+          disabled: Boolean(props == null ? void 0 : props.disabled),
+          "aria-label": "OrgFy: Inserir Card, Issue, PR, Spec ou Gate",
+          "aria-expanded": open,
+          title: "OrgFy · Cards, Issues, Specs e Gates",
+          onClick: () => setOpen((v2) => !v2),
+          style: {
+            width: "28px",
+            height: "28px",
+            padding: 0,
+            borderRadius: "6px",
+            border: "none",
+            background: open ? "var(--affordance-selected, rgba(255,255,255,0.12))" : "transparent",
+            color: "var(--text-subtle, #a1a1aa)",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: (props == null ? void 0 : props.disabled) ? "not-allowed" : "pointer",
+            opacity: (props == null ? void 0 : props.disabled) ? 0.45 : 1
+          }
+        },
+        h(
+          "svg",
+          {
+            viewBox: "0 0 24 24",
+            width: 17,
+            height: 17,
+            fill: "none",
+            stroke: "currentColor",
+            strokeWidth: 1.85,
+            strokeLinecap: "round",
+            strokeLinejoin: "round",
+            "aria-hidden": "true"
+          },
+          h("polygon", { points: "12 2 20 6.5 20 17.5 12 22 4 17.5 4 6.5 12 2" }),
+          h("polyline", { points: "4 6.5 12 11.5 20 6.5" }),
+          h("line", { x1: 12, y1: 11.5, x2: 12, y2: 22 })
+        )
+      ),
+      open && h(
+        "div",
+        {
+          role: "dialog",
+          "aria-label": "Selecionar recurso OrgFy",
+          style: {
+            position: "absolute",
+            bottom: "calc(100% + 8px)",
+            left: 0,
+            width: "372px",
+            maxWidth: "min(372px, 90vw)",
+            maxHeight: "360px",
+            zIndex: 80,
+            background: "var(--bg-panel, #18181b)",
+            border: "1px solid var(--border-primary, rgba(255,255,255,0.14))",
+            borderRadius: "10px",
+            boxShadow: "0 14px 36px rgba(0,0,0,0.42)",
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+            color: "var(--text-primary, #f4f4f5)"
+          }
+        },
+        // Busca + abas
+        h(
+          "div",
+          {
+            style: {
+              padding: "10px 10px 8px",
+              borderBottom: "1px solid var(--border-primary, rgba(255,255,255,0.1))",
+              display: "flex",
+              flexDirection: "column",
+              gap: "8px"
+            }
+          },
+          h("input", {
+            ref: searchRef,
+            type: "text",
+            value: query,
+            onChange: (e) => setQuery(e.target.value),
+            onKeyDown: (e) => {
+              if (e.key === "Enter" && filtered.length > 0) {
+                e.preventDefault();
+                e.stopPropagation();
+                handleSelect(filtered[0]);
+              }
+            },
+            placeholder: "Buscar card, issue, PR, spec ou gate...",
+            style: {
+              width: "100%",
+              padding: "6px 10px",
+              borderRadius: "999px",
+              border: "1px solid var(--border-primary, rgba(255,255,255,0.14))",
+              background: "var(--surface-inset, rgba(0,0,0,0.22))",
+              color: "var(--text-primary, #f4f4f5)",
+              fontSize: "12px",
+              outline: "none",
+              boxSizing: "border-box"
+            }
+          }),
+          h(
+            "div",
+            { style: { display: "flex", gap: "4px", flexWrap: "wrap" } },
+            tabs.map(
+              (t) => h(
+                "button",
+                {
+                  key: t.id,
+                  type: "button",
+                  onClick: () => setCategory(t.id),
+                  style: {
+                    padding: "3px 8px",
+                    borderRadius: "6px",
+                    border: "none",
+                    background: category === t.id ? "var(--affordance-selected, rgba(255,255,255,0.14))" : "transparent",
+                    color: category === t.id ? "var(--text-primary, #f4f4f5)" : "var(--text-subtle, #a1a1aa)",
+                    fontSize: "11px",
+                    fontWeight: category === t.id ? 600 : 400,
+                    cursor: "pointer"
+                  }
+                },
+                t.label
+              )
+            )
+          )
+        ),
+        errorMsg && h(
+          "div",
+          {
+            role: "alert",
+            style: {
+              padding: "6px 10px",
+              fontSize: "11.5px",
+              color: "var(--red-11, #f87171)",
+              borderBottom: "1px solid var(--border-primary, rgba(255,255,255,0.08))"
+            }
+          },
+          errorMsg
+        ),
+        // Lista de resultados
+        h(
+          "div",
+          {
+            style: {
+              flex: 1,
+              overflowY: "auto",
+              padding: "6px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "2px"
+            }
+          },
+          loading && h(
+            "div",
+            {
+              style: {
+                padding: "10px",
+                fontSize: "11.5px",
+                color: "var(--text-subtle, #a1a1aa)"
+              }
+            },
+            "Carregando issues, PRs e cards..."
+          ),
+          filtered.length === 0 && !loading ? h(
+            "div",
+            {
+              style: {
+                padding: "14px 10px",
+                fontSize: "12px",
+                color: "var(--text-subtle, #a1a1aa)",
+                textAlign: "center"
+              }
+            },
+            "Nenhum item encontrado para esse filtro."
+          ) : filtered.map(
+            (item) => h(
+              "button",
+              {
+                key: item.id,
+                type: "button",
+                onClick: () => handleSelect(item),
+                style: {
+                  width: "100%",
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: "8px",
+                  padding: "7px 8px",
+                  borderRadius: "7px",
+                  border: "none",
+                  background: "transparent",
+                  color: "var(--text-primary, #f4f4f5)",
+                  cursor: "pointer",
+                  textAlign: "left"
+                }
+              },
+              h(
+                "span",
+                {
+                  style: {
+                    flexShrink: 0,
+                    marginTop: "2px",
+                    padding: "1px 5px",
+                    borderRadius: "4px",
+                    fontSize: "9.5px",
+                    fontWeight: 700,
+                    letterSpacing: "0.03em",
+                    background: "var(--affordance-subtle, rgba(255,255,255,0.08))",
+                    color: "var(--text-subtle, #a1a1aa)"
+                  }
+                },
+                item.badge
+              ),
+              h(
+                "span",
+                {
+                  style: {
+                    display: "flex",
+                    flexDirection: "column",
+                    minWidth: 0,
+                    gap: "1px"
+                  }
+                },
+                h(
+                  "span",
+                  {
+                    style: {
+                      fontSize: "12px",
+                      fontWeight: 500,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap"
+                    }
+                  },
+                  item.title
+                ),
+                h(
+                  "span",
+                  {
+                    style: {
+                      fontSize: "11px",
+                      color: "var(--text-subtle, #a1a1aa)",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap"
+                    }
+                  },
+                  item.subtitle
+                )
+              )
+            )
+          )
+        )
+      )
+    );
+  };
+}
 let lastNativeState = {
   relayConnected: false,
   conversationRegistered: false,
+  composerToolRegistered: false,
   sidebarRegistered: false,
   shortcutsRegistered: false,
   attentionSourceRegistered: false,
@@ -6844,6 +8056,7 @@ function registerBuzzNativeIntegrations(ctx) {
   const state = {
     relayConnected: false,
     conversationRegistered: false,
+    composerToolRegistered: false,
     sidebarRegistered: false,
     shortcutsRegistered: false,
     attentionSourceRegistered: false,
@@ -6960,28 +8173,43 @@ function registerBuzzNativeIntegrations(ctx) {
       state.conversationRegistered = true;
     }
     if (conv == null ? void 0 : conv.registerMessageAction) {
-      const OpenControlRoomAction = (props) => {
-        var _a2;
-        (_a2 = React == null ? void 0 : React.useEffect) == null ? void 0 : _a2.call(React, () => {
-          var _a3, _b2, _c2;
-          try {
-            if ((_a3 = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a3.open) {
-              ctx.navigation.open({ version: 1, kind: "page", pluginId: "digital.cortexx.orgfy", pageId: "orgfy" });
-            } else if ((_b2 = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _b2.navigate) {
-              ctx.navigation.navigate("orgfy");
-            }
-          } catch {
-          }
-          (_c2 = props == null ? void 0 : props.close) == null ? void 0 : _c2.call(props);
-        }, []);
-        return null;
-      };
+      const h = React == null ? void 0 : React.createElement;
+      const OrgfyActionIcon = () => h ? h(
+        "svg",
+        {
+          viewBox: "0 0 24 24",
+          width: 16,
+          height: 16,
+          fill: "none",
+          stroke: "currentColor",
+          strokeWidth: 1.85,
+          strokeLinecap: "round",
+          strokeLinejoin: "round",
+          "aria-hidden": "true"
+        },
+        h("polygon", { points: "12 2 20 6.5 20 17.5 12 22 4 17.5 4 6.5 12 2" }),
+        h("polyline", { points: "4 6.5 12 11.5 20 6.5" }),
+        h("line", { x1: 12, y1: 11.5, x2: 12, y2: 22 })
+      ) : null;
+      const OrgfyMessageActionModal = createOrgfyMessageActionComponent(ctx);
       conv.registerMessageAction({
-        id: "orgfy-open-control-room",
-        title: "Abrir no OrgFy Control Room",
-        matches: () => true,
-        component: OpenControlRoomAction
+        id: "orgfy-message-actions",
+        title: "Ações OrgFy",
+        icon: OrgfyActionIcon,
+        matches: (message) => Boolean(message && typeof message.content === "string"),
+        component: OrgfyMessageActionModal
       });
+      state.conversationRegistered = true;
+    }
+    if (conv == null ? void 0 : conv.registerTool) {
+      const OrgfyComposerPicker = createOrgfyComposerPickerComponent(ctx);
+      conv.registerTool({
+        id: "orgfy-picker",
+        title: "OrgFy: Cards, Issues, Specs e Gates",
+        order: 25,
+        component: OrgfyComposerPicker
+      });
+      state.composerToolRegistered = true;
       state.conversationRegistered = true;
     }
   } catch (err) {
@@ -7054,27 +8282,7 @@ function registerBuzzNativeIntegrations(ctx) {
   try {
     const agents = ctx == null ? void 0 : ctx.agents;
     if (agents == null ? void 0 : agents.addAttentionSource) {
-      agents.addAttentionSource({
-        id: "orgfy.pipeline",
-        description: "Emite eventos estruturados da esteira OrgFy (card.ready_for_review, gate.rejected_dsap, loop.detected, budget.80pct) compatíveis com classifier pré-LLM.",
-        configExample: { empresa: "orgfy" },
-        present: (watch, title) => {
-          var _a2;
-          return {
-            type: "OrgFy Esteira",
-            target: String(((_a2 = watch == null ? void 0 : watch.config) == null ? void 0 : _a2.empresa) || "orgfy"),
-            subtitle: title || "Monitoramento determinístico de cards, PRs e loops"
-          };
-        },
-        run: (input) => new Promise((resolve) => {
-          var _a2, _b2, _c2;
-          if ((_a2 = input == null ? void 0 : input.signal) == null ? void 0 : _a2.aborted) {
-            resolve();
-            return;
-          }
-          (_c2 = (_b2 = input == null ? void 0 : input.signal) == null ? void 0 : _b2.addEventListener) == null ? void 0 : _c2.call(_b2, "abort", () => resolve(), { once: true });
-        })
-      });
+      agents.addAttentionSource(createOrgfyPipelineAttentionSource(ctx));
       state.attentionSourceRegistered = true;
     }
   } catch (err) {
@@ -49740,6 +50948,7 @@ export {
   INITIAL_PIPELINE_CARDS,
   INITIAL_REGRAS_PROBATORIAS,
   ORGFY_FAILOVER_REQUEST_EVENT,
+  ORGFY_GATE_SNIPPETS,
   PT_BR,
   SVG,
   TENANTS,
@@ -49749,6 +50958,7 @@ export {
   applyStepUpdateToMarkdown,
   attachFactoryShadowStyles,
   buildBuzzAttentionContract,
+  buildBuzzEntityUri,
   buildEmptyFactoryStatus,
   buildHandoffPack,
   buildLiveAgentRoster,
@@ -49757,16 +50967,21 @@ export {
   checkThreadWakeAntiLoop,
   cleanupAttentionOnStageChange,
   createCanonicalCard,
+  createOrgfyPipelineAttentionSource,
+  emitOrgfyPipelineEvent,
   executeCardProgress,
   fetchFactoryStatus,
+  formatOrgfyAttentionText,
   getBuzzNativeState,
   getOrgfyPipelineEvents,
   getTelemetrySnapshot,
   hydrateIssueDetail,
   inject,
+  insertOrgfyPickerEntry,
   isUnsupportedAgentModel,
   parseCardProgress,
   parseFactoryStatus,
+  parseOrgfyMessageContext,
   reconcileAgentPresenceAndLocks,
   reconcileAgentsViaBuzzApi,
   registerBuzzNativeIntegrations,
