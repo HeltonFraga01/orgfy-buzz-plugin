@@ -144,7 +144,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     const [selectedAutomationId, setSelectedAutomationId] = React.useState<string>("rotina-ceo-orgfy");
     const [automationView, setAutomationView] = React.useState<"list" | "detail">("list");
     const [runningAutomationId, setRunningAutomationId] = React.useState<string | null>(null);
-    const [cooUpdatesExpanded, setCooUpdatesExpanded] = React.useState<boolean>(true);
+    const [cooUpdatesExpanded, setCooUpdatesExpanded] = React.useState<boolean>(false);
     const [sendingCooUpdates, setSendingCooUpdates] = React.useState<boolean>(false);
     const [questionCards, setQuestionCards] = React.useState<OrgfyQuestionCard[]>([]);
     const [compactDensity, setCompactDensity] = React.useState<boolean>(false);
@@ -1581,11 +1581,13 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                     h,
                     tenant,
                     status,
+                    liveCrew,
                     telemetry,
                     workingNowCount: tenantWorkingNowCount,
                     onOpenTurnInSideChat: handleOpenTurnInSideChat,
                     onInterruptTurn: handleInterruptTurn,
                     onOpenAgentDm: handleOpenAgentDmInBuzz,
+                    onOpenAgentProfile: handleOpenNativeAgentProfile,
                     onNavigateTab: (t) => setTab(t),
                     loading,
                     confirmKill,

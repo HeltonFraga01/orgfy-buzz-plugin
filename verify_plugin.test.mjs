@@ -2188,5 +2188,10 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
 
     const appSrc = fs.readFileSync(path.resolve(__dirname, "src", "factory", "FactoryApp.tsx"), "utf8");
     assert.ok(appSrc.includes("waitingItems: [...status.held, ...founderEscalatedItems]"), "Aguardando você deve listar apenas itens do Fundador/Iris");
+    assert.ok(appSrc.includes("useState<boolean>(false);") && appSrc.includes("cooUpdatesExpanded"), "Status para o COO deve iniciar recolhido por padrão");
+
+    assert.ok(bundle.includes("data-overview-pr-row"), "Linhas de Pull Requests na Visão Geral devem ser clicáveis");
+    assert.ok(bundle.includes("data-scorecard-rich"), "Scorecard deve exibir versão rica com avatares, função, uso e ações");
+    assert.ok(bundle.includes("data-now-two-rows"), "Seção AGORA deve usar layout em 2 filas");
   });
 }

@@ -15325,9 +15325,25 @@ function renderFactoryOverviewPanel(props) {
         ),
         nowRunningCount === 0 ? h("div", { className: "of-now-empty" }, "Nada executando agora.") : h(
           "div",
-          { className: "of-now-cards" },
-          activeTurns.map(
-            (t) => h(
+          {
+            className: "of-now-cards",
+            "data-now-two-rows": "true",
+            style: {
+              display: "grid",
+              gridTemplateRows: nowRunningCount > 2 ? "repeat(2, minmax(78px, auto))" : "auto",
+              gridAutoFlow: "column",
+              gridAutoColumns: "minmax(215px, 240px)",
+              gap: "8px",
+              overflowX: "auto",
+              paddingBottom: "4px"
+            }
+          },
+          activeTurns.map((t) => {
+            const turnCrew = (props.liveCrew || []).find((c) => {
+              var _a2;
+              return ((_a2 = c.pubkey) == null ? void 0 : _a2.toLowerCase()) === t.agentPubkey.toLowerCase();
+            });
+            return h(
               "div",
               {
                 key: `turn-${t.agentPubkey}-${t.channelId}-${t.messageId || t.startedAt}`,
@@ -15337,7 +15353,7 @@ function renderFactoryOverviewPanel(props) {
               h(
                 "div",
                 { style: { display: "flex", alignItems: "center", gap: "7px" } },
-                h("span", { className: "of-dot", "data-tone": t.state === "error" ? "failed" : "running" }),
+                (turnCrew == null ? void 0 : turnCrew.picture) ? h("img", { src: turnCrew.picture, alt: t.agentName, style: { width: "18px", height: "18px", borderRadius: "5px", objectFit: "cover", border: "1px solid var(--status-running)", flexShrink: 0 } }) : h("span", { className: "of-dot", "data-tone": t.state === "error" ? "failed" : "running" }),
                 h("strong", { style: { fontSize: "12.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 } }, t.agentName),
                 onInterruptTurn && t.stoppable && h(
                   "button",
@@ -15365,9 +15381,9 @@ function renderFactoryOverviewPanel(props) {
                 h("span", { className: "of-mono" }, "Buzz ao vivo"),
                 h("span", { className: "of-mono" }, fmtAge(t.startedAt))
               )
-            )
-          ),
-          status.inProgress.slice(0, 6).map(
+            );
+          }),
+          status.inProgress.slice(0, 10).map(
             (item) => h(
               "button",
               {
@@ -15600,26 +15616,53 @@ function renderFactoryOverviewPanel(props) {
           openPrs.length === 0 ? h("div", { className: "of-muted", style: { textAlign: "center", padding: "14px 12px", fontSize: "11.5px" } }, "Nenhum pull request aberto na fábrica.") : h(
             "div",
             { style: { display: "flex", flexDirection: "column" } },
-            openPrs.slice(0, 6).map(
-              (pr, idx) => h(
-                "div",
+            openPrs.slice(0, 8).map((pr, idx) => {
+              const pid = String(pr.id || idx);
+              const matchedItem = status.inProgress.find((w) => w.id === pid);
+              const clickableItem = matchedItem || {
+                id: pid,
+                title: String(pr.title || pr.branch || `PR ${pid.slice(0, 8)}`),
+                workKey: `pr:${pid.slice(0, 12)}`,
+                stage: pr.quarentena ? "failed" : "verifying",
+                step: pr.quarentena ? "quarantine" : "review",
+                type: /fix|bug|hotfix/i.test(String(pr.title || "")) ? "bug" : "feature",
+                attempts: 1,
+                sessionId: null,
+                activeSessionId: null,
+                reason: pr.quarentena ? "PR em quarentena no coordenador" : null,
+                note: pr.branch ? `PR aberto · ${pr.branch}` : "PR aberto aguardando revisão/GATE",
+                updatedAt: typeof pr.created_at === "number" ? pr.created_at < 1e12 ? pr.created_at * 1e3 : pr.created_at : Date.now()
+              };
+              return h(
+                "button",
                 {
-                  key: pr.id || idx,
+                  key: pid,
+                  type: "button",
+                  className: "of-list-row",
+                  "data-overview-pr-row": pid.slice(0, 8),
+                  onClick: () => onSelectItem(clickableItem),
                   style: {
+                    width: "100%",
+                    textAlign: "left",
                     display: "flex",
                     alignItems: "center",
                     gap: "8px",
                     padding: "7px 12px",
-                    borderBottom: idx < Math.min(openPrs.length, 6) - 1 ? "1px solid var(--border)" : "none",
+                    border: "none",
+                    borderBottom: idx < Math.min(openPrs.length, 8) - 1 ? "1px solid var(--border)" : "none",
+                    background: "transparent",
+                    color: "var(--foreground)",
+                    cursor: "pointer",
                     fontSize: "12px"
                   }
                 },
                 h("span", { className: "of-dot", "data-tone": pr.quarentena ? "failed" : "running" }),
-                h("span", { className: "of-mono", style: { color: "var(--primary)", fontSize: "11px" } }, `#${String(pr.id || idx).slice(0, 8)}`),
+                h("span", { className: "of-mono", style: { color: "var(--primary)", fontSize: "11px", flexShrink: 0 } }, `#${pid.slice(0, 8)}`),
                 h("span", { style: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, pr.title || pr.branch || "Pull Request"),
-                pr.quarentena && h("span", { className: "of-pill", "data-tone": "failed" }, "quarentena")
-              )
-            )
+                pr.quarentena && h("span", { className: "of-pill", "data-tone": "failed" }, "quarentena"),
+                h("span", { className: "of-muted", style: { fontSize: "11px", flexShrink: 0 } }, "↗")
+              );
+            })
           )
         ),
         // 3 Colunas (Checks de Merge | Merges & Reversões Recentes | Ignoradas)
@@ -15749,38 +15792,148 @@ function renderFactoryOverviewPanel(props) {
                 )
               )
             ),
-            modelos.length === 0 && porModelo.length === 0 ? h("div", { className: "of-muted" }, PT_BR.labels.unavailable) : h(
-              "table",
-              { className: "of-table" },
-              h(
-                "thead",
-                null,
-                h("tr", null, h("th", null, scorecardView === "reviewers" ? "Revisor / Agente" : "Agente"), h("th", null, "Papel"), h("th", null, "Modelo"), h("th", null, "Eval R5.1"), h("th", null, "Status"))
-              ),
-              h(
-                "tbody",
-                null,
-                modelos.slice(0, 10).map(
-                  (m) => h(
+            (() => {
+              const crewList = props.liveCrew || [];
+              const modelEvalByName = new Map(modelos.map((m) => [m.agente.toLowerCase(), m]));
+              const costByModel = /* @__PURE__ */ new Map();
+              for (const row of porModelo) {
+                const mk = String((row == null ? void 0 : row.modelo) || "").toLowerCase();
+                if (!mk) continue;
+                const val = { usd: Number((row == null ? void 0 : row.custo_usd) || 0), calls: Number((row == null ? void 0 : row.requisicoes) ?? (row == null ? void 0 : row.chamadas) ?? 0) };
+                costByModel.set(mk, val);
+                const shortK = mk.includes("/") ? mk.split("/").pop() : mk;
+                if (!costByModel.has(shortK)) costByModel.set(shortK, val);
+              }
+              const filteredAgents = tenantAgents.filter((ag) => {
+                if (scorecardView === "reviewers") return ag.categoria === "revisao";
+                if (scorecardView === "builders") return ag.categoria === "execucao" || ag.categoria === "lideranca";
+                return true;
+              });
+              if (filteredAgents.length === 0) {
+                return h("div", { className: "of-muted", style: { fontSize: "12px" } }, "Nenhum agente nesta categoria.");
+              }
+              return h(
+                "table",
+                { className: "of-table", "data-scorecard-rich": "true" },
+                h(
+                  "thead",
+                  null,
+                  h(
                     "tr",
-                    { key: m.agente },
-                    h("td", { style: { fontWeight: 600 } }, m.agente),
-                    h("td", { className: "of-muted" }, m.papel || "—"),
-                    h("td", { className: "of-mono" }, m.modelo || PT_BR.labels.unavailable),
-                    h(
-                      "td",
-                      null,
-                      h("span", { className: "of-pill", "data-tone": m.abaixo_minimo ? "failed" : m.toolcall_eval ? "done" : "idle" }, m.toolcall_eval || PT_BR.labels.unavailable)
-                    ),
-                    h(
-                      "td",
-                      null,
-                      m.abaixo_minimo ? h("span", { style: { color: "var(--status-failed)", fontWeight: 700, fontSize: "11px" } }, PT_BR.labels.evalBelowMin) : h("span", { className: "of-muted" }, "OK")
-                    )
+                    null,
+                    h("th", null, scorecardView === "reviewers" ? "Revisor L-01" : "Agente"),
+                    h("th", null, "Função & Papel"),
+                    h("th", null, "Modelo & Uso"),
+                    h("th", null, "Ao vivo (Buzz)"),
+                    h("th", null, "Ações")
                   )
+                ),
+                h(
+                  "tbody",
+                  null,
+                  filteredAgents.map((ag) => {
+                    const pkLower = (ag.pubkey || "").toLowerCase();
+                    const liveMatch = crewList.find((c) => {
+                      var _a2;
+                      return c.key === ag.agentKey || pkLower && ((_a2 = c.pubkey) == null ? void 0 : _a2.toLowerCase()) === pkLower;
+                    });
+                    const liveTurn = pkLower && (telemetry == null ? void 0 : telemetry.byPubkey) ? telemetry.byPubkey[pkLower] : null;
+                    const presence = pkLower && (telemetry == null ? void 0 : telemetry.presenceByPubkey) ? telemetry.presenceByPubkey[pkLower] : void 0;
+                    const evRow = modelEvalByName.get(ag.name.toLowerCase());
+                    const modelName = (liveMatch == null ? void 0 : liveMatch.model) || ag.model || PT_BR.labels.unavailable;
+                    const modelShort = modelName.includes("/") ? modelName.split("/").pop().toLowerCase() : modelName.toLowerCase();
+                    const usage = costByModel.get(modelName.toLowerCase()) || costByModel.get(modelShort);
+                    return h(
+                      "tr",
+                      { key: ag.agentKey || ag.name },
+                      h(
+                        "td",
+                        { style: { fontWeight: 600 } },
+                        h(
+                          "span",
+                          { style: { display: "inline-flex", alignItems: "center", gap: "8px" } },
+                          (liveMatch == null ? void 0 : liveMatch.picture) ? h("img", {
+                            src: liveMatch.picture,
+                            alt: ag.name,
+                            style: {
+                              width: "24px",
+                              height: "24px",
+                              borderRadius: "6px",
+                              objectFit: "cover",
+                              border: liveTurn ? "1.5px solid var(--status-running)" : "1px solid var(--border)",
+                              flexShrink: 0
+                            }
+                          }) : h("span", { className: "of-dot", "data-tone": liveTurn ? liveTurn.state === "error" ? "failed" : "running" : ag.inBuzz ? "done" : "idle" }),
+                          h("span", null, ag.name)
+                        )
+                      ),
+                      h(
+                        "td",
+                        null,
+                        h("div", { style: { fontSize: "11.5px" } }, ag.funcao),
+                        h("div", { className: "of-mono of-muted", style: { fontSize: "10px" } }, `${ag.papel} · ${ag.parallelism}x`)
+                      ),
+                      h(
+                        "td",
+                        null,
+                        h("div", { className: "of-mono", style: { fontSize: "11.5px" } }, modelName),
+                        h(
+                          "div",
+                          { style: { display: "flex", alignItems: "center", gap: "5px", marginTop: "2px", flexWrap: "wrap" } },
+                          h("span", { className: "of-mono of-muted", style: { fontSize: "10px" } }, (liveMatch == null ? void 0 : liveMatch.provider) || ag.provider || "buzz"),
+                          (evRow == null ? void 0 : evRow.toolcall_eval) && h("span", { className: "of-pill", "data-tone": evRow.abaixo_minimo ? "failed" : "done", style: { fontSize: "9.5px", padding: "0 5px" } }, `Eval ${evRow.toolcall_eval}`),
+                          usage && h("span", { className: "of-mono of-muted", style: { fontSize: "10px" } }, `· ${usage.calls} calls · $${usage.usd.toFixed(2)}`)
+                        )
+                      ),
+                      h(
+                        "td",
+                        null,
+                        liveTurn ? h(
+                          "div",
+                          { style: { display: "flex", flexDirection: "column", gap: "2px" } },
+                          h("span", { className: "of-pill", "data-tone": liveTurn.state === "error" ? "failed" : "running", style: { width: "fit-content", fontSize: "10px" } }, "⚡ Respondendo"),
+                          h("span", { className: "of-mono of-muted", style: { fontSize: "10px", maxWidth: "170px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: liveTurn.stepLabel }, liveTurn.stepLabel)
+                        ) : h(
+                          "span",
+                          { className: "of-pill", "data-tone": presence === "online" || ag.inBuzz ? "done" : "waiting", style: { fontSize: "10px" } },
+                          presence === "online" ? "Online" : ag.inBuzz ? "Disponível" : "A provisionar"
+                        )
+                      ),
+                      h(
+                        "td",
+                        null,
+                        h(
+                          "div",
+                          { style: { display: "inline-flex", alignItems: "center", gap: "4px" } },
+                          props.onOpenAgentProfile && ag.pubkey && h(
+                            "button",
+                            {
+                              type: "button",
+                              className: "of-btn",
+                              "data-variant": "ghost",
+                              style: { padding: "2px 6px", fontSize: "10.5px" },
+                              onClick: () => props.onOpenAgentProfile({ key: ag.agentKey, pubkey: ag.pubkey, name: ag.name })
+                            },
+                            "Perfil"
+                          ),
+                          onOpenAgentDm && ag.pubkey && h(
+                            "button",
+                            {
+                              type: "button",
+                              className: "of-btn",
+                              "data-variant": "ghost",
+                              style: { padding: "2px 6px", fontSize: "10.5px", color: "var(--primary)" },
+                              onClick: () => onOpenAgentDm({ key: ag.agentKey, pubkey: ag.pubkey, name: ag.name })
+                            },
+                            "DM ↗"
+                          )
+                        )
+                      )
+                    );
+                  })
                 )
-              )
-            )
+              );
+            })()
           )
         ),
         // Rodapé discreto da fábrica
@@ -15865,6 +16018,10 @@ function renderFactoryOverviewPanel(props) {
         { className: "of-list-card" },
         tenantAgents.length === 0 ? h("div", { className: "of-muted", style: { padding: "18px", textAlign: "center" } }, "Nenhum agente provisionado nesta empresa.") : tenantAgents.slice(0, 7).map((ag) => {
           const pkLower = (ag.pubkey || "").toLowerCase();
+          const liveMatch = (props.liveCrew || []).find((c) => {
+            var _a2;
+            return c.key === ag.agentKey || pkLower && ((_a2 = c.pubkey) == null ? void 0 : _a2.toLowerCase()) === pkLower;
+          });
           const liveTurn = pkLower && (telemetry == null ? void 0 : telemetry.byPubkey) ? telemetry.byPubkey[pkLower] : null;
           const presence = pkLower && (telemetry == null ? void 0 : telemetry.presenceByPubkey) ? telemetry.presenceByPubkey[pkLower] : void 0;
           return h(
@@ -15875,7 +16032,7 @@ function renderFactoryOverviewPanel(props) {
               className: "of-list-row",
               onClick: () => onOpenAgentDm == null ? void 0 : onOpenAgentDm({ key: ag.agentKey, pubkey: ag.pubkey, name: ag.name })
             },
-            h("span", { className: "of-dot", "data-tone": liveTurn ? liveTurn.state === "error" ? "failed" : "running" : ag.inBuzz ? "done" : "idle" }),
+            (liveMatch == null ? void 0 : liveMatch.picture) ? h("img", { src: liveMatch.picture, alt: ag.name, style: { width: "22px", height: "22px", borderRadius: "6px", objectFit: "cover", border: liveTurn ? "1.5px solid var(--status-running)" : "1px solid var(--border)", flexShrink: 0 } }) : h("span", { className: "of-dot", "data-tone": liveTurn ? liveTurn.state === "error" ? "failed" : "running" : ag.inBuzz ? "done" : "idle" }),
             h(
               "div",
               { style: { flex: 1, minWidth: 0 } },
@@ -54284,7 +54441,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
     const [selectedAutomationId, setSelectedAutomationId] = React.useState("rotina-ceo-orgfy");
     const [automationView, setAutomationView] = React.useState("list");
     const [runningAutomationId, setRunningAutomationId] = React.useState(null);
-    const [cooUpdatesExpanded, setCooUpdatesExpanded] = React.useState(true);
+    const [cooUpdatesExpanded, setCooUpdatesExpanded] = React.useState(false);
     const [sendingCooUpdates, setSendingCooUpdates] = React.useState(false);
     const [questionCards, setQuestionCards] = React.useState([]);
     const [compactDensity, setCompactDensity] = React.useState(false);
@@ -55597,11 +55754,13 @@ Nota: ${evidence.note}`
                 h,
                 tenant,
                 status,
+                liveCrew,
                 telemetry,
                 workingNowCount: tenantWorkingNowCount,
                 onOpenTurnInSideChat: handleOpenTurnInSideChat,
                 onInterruptTurn: handleInterruptTurn,
                 onOpenAgentDm: handleOpenAgentDmInBuzz,
+                onOpenAgentProfile: handleOpenNativeAgentProfile,
                 onNavigateTab: (t) => setTab(t),
                 loading,
                 confirmKill,
