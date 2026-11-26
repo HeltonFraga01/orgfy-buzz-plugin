@@ -850,6 +850,14 @@ export async function writeTenantControl(
         }
         return { ok: false, path, control: next, error: parsed?.error || "Falha em orgfy-controle-write" };
       }
+      if (!host?.writeFile) {
+        return {
+          ok: false,
+          path,
+          control: next,
+          error: "orgfy-controle-write retornou vazio no Buzz Desktop (reinstale/recarregue o plugin para aplicar o manifest.json).",
+        };
+      }
     } catch (err: any) {
       if (!host?.writeFile) {
         return { ok: false, path, control: next, error: err?.message || String(err) };

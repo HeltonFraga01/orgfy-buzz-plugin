@@ -403,6 +403,11 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         const res = await writeTenantControl(ctx, tenant, patch);
         if (res.ok) {
           settingsDirtyRef.current = false;
+          setStatus((prev) => ({
+            ...prev,
+            ...(res.control?.mode ? { mode: res.control.mode as AutonomyMode } : {}),
+            ...(typeof res.control?.killSwitch === "boolean" ? { killSwitch: res.control.killSwitch } : {}),
+          }));
           notify(message);
           await refresh(tenant, true);
         } else {
