@@ -997,17 +997,19 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       [liveCrew, tenantAgents, resolveBuzzScope, notify]
     );
 
-    // Helper oficial de entrega no Buzz: posta mensagem real Kind 9 via session.messages.send/reply
-    // (visível no chat/DM/thread e acorda o agente como menção do dono), com fallback para ctx.agents.wake.
+    // Helper oficial de entrega no Buzz: posta mensagem real Kind 9 com NIP-27 (nostr:npub1... + tag p)
+    // e garantia de disparo via ctx.agents.wake quando ensureWake=true ou quando o agente não é membro ainda.
     const wakeAgentInBuzz = React.useCallback(
       async (opts: {
         agentKey: string;
         agentName?: string;
         pubkey?: string;
+        extraMentions?: Array<{ agentKey?: string; agentName?: string; pubkey: string }>;
         channelId?: string | null;
         threadRoot?: string | null;
         preferDm?: boolean;
         postInChat?: boolean;
+        ensureWake?: boolean;
         text: string;
       }): Promise<BuzzDispatchResult> => {
         const fallbackCanal = resolveActiveChannelId(tenant);
@@ -1020,7 +1022,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     );
 
     // Dispara auditoria one-shot do Oráculo (Scout) diretamente no CANAL da empresa ou do Conselho
-    // (nunca em DM), instruindo-o a responder no canal e marcar (@) os conselheiros / responsáveis para continuidade da reunião.
+    // com menção NIP-27 real (`nostr:npub1...` + tag `p`) e `ensureWake: true` (zero risco de não disparar).
     const handleRunScoutNow = React.useCallback(async () => {
       const scoutTenant = tenantAgents.find((a) => a.papel === "oraculo" || /or[aá]culo|scout/i.test(a.name));
       const scoutLive = liveCrew.find((a) => a.key === scoutTenant?.agentKey || /or[aá]culo|scout/i.test(a.name));
@@ -1032,15 +1034,17 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       }
       const targetChannelId = resolveActiveChannelId(tenant);
       const isBoard = tenant === "board";
-      const councilHandles = (holding?.conselho || [])
-        .map((c) => c.responsavel)
-        .filter((n) => n && n.toLowerCase() !== scoutName.toLowerCase())
-        .map((n) => `@${n}`);
-      const uniqueCouncilHandles = Array.from(new Set(councilHandles));
+      const councilNames = Array.from(
+        new Set(
+          (holding?.conselho || [])
+            .map((c) => c.responsavel)
+            .filter((n) => n && n.toLowerCase() !== scoutName.toLowerCase())
+        )
+      );
       const cooName = status.tenantManifest?.coo || "OrgFy Bento";
       const promptText = isBoard
-        ? `@${scoutName} [ORGFY SCOUT ONE-SHOT · board]\nAudite o portfólio e o workspace atual contra o Canvas/Visão da Holding, identifique os gaps de maior impacto (segurança, testes, UX, dívida técnica ou governança) e proponha os próximos cards/pautas canônicos.\n\n**Regra de Reunião:** responda obrigatoriamente **aqui neste canal do Conselho** (não em DM) e marque (\`@\`) os conselheiros competentes (${uniqueCouncilHandles.join(", ") || "@OrgFy Bento, @OrgFy Bento Arquiteto, @OrgFy Vera, @OrgFy Val, @OrgFy Iris"}) para deliberarem e darem continuidade à reunião.`
-        : `@${scoutName} [ORGFY SCOUT ONE-SHOT · ${tenant}]\nAudite o workspace atual contra o Canvas/Visão de ${status.tenantManifest?.nome || tenant}, identifique os gaps de maior impacto (segurança, testes, UX ou dívida técnica) e proponha os próximos cards canônicos.\n\n**Regra de Canal:** responda obrigatoriamente **aqui neste canal da empresa** (não em DM) e marque \`@${cooName}\` (COO) e os especialistas responsáveis para triagem e continuidade imediata.`;
+        ? `@${scoutName} [ORGFY SCOUT ONE-SHOT · board]\nAudite o portfólio e o workspace atual contra o Canvas/Visão da Holding, identifique os gaps de maior impacto (segurança, testes, UX, dívida técnica ou governança) e proponha os próximos cards/pautas canônicos.\n\n**Regra de Reunião (Menção Garantida):** responda **aqui neste canal do Conselho** (não em DM) e, para acionar os conselheiros competentes (${councilNames.join(", ") || "OrgFy Iris, OrgFy Bento Arquiteto, OrgFy Vera, OrgFy Bento, OrgFy Val"}), chame obrigatoriamente a tool \`orgfy_mention_wake\` passando \`agents\` + \`message\` — nunca escreva apenas \`@Nome\` em texto puro.`
+        : `@${scoutName} [ORGFY SCOUT ONE-SHOT · ${tenant}]\nAudite o workspace atual contra o Canvas/Visão de ${status.tenantManifest?.nome || tenant}, identifique os gaps de maior impacto (segurança, testes, UX ou dívida técnica) e proponha os próximos cards canônicos.\n\n**Regra de Canal (Menção Garantida):** responda **aqui neste canal da empresa** (não em DM) e chame a tool \`orgfy_mention_wake\` com \`agents: ["${cooName}", ...]\` para acionar o COO e os especialistas sem risco de menção fantasma.`;
 
       setRunningScout(true);
       try {
@@ -1051,6 +1055,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
           channelId: targetChannelId,
           preferDm: false,
           postInChat: true,
+          ensureWake: true,
           text: promptText,
         });
         if (res.ok && res.channel && openSideTabRef.current) {
@@ -1058,9 +1063,13 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
             openSideTabRef.current({ channelId: res.channel }, { keep: true });
           } catch {}
         }
+        const missingWarn =
+          res.missingMembers && res.missingMembers.length > 0
+            ? ` (acordado via wake — adicione ${res.missingMembers.join(", ")} em Membros do canal)`
+            : "";
         notify(
           res.ok
-            ? `${scoutName} acionado no canal de ${isBoard ? "Conselho" : tenant} ✓`
+            ? `${scoutName} acionado no canal de ${isBoard ? "Conselho" : tenant} ✓${missingWarn}`
             : `Falha ao acionar Oráculo: ${res.error}`
         );
       } finally {

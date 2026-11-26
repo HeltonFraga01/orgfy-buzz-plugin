@@ -47,6 +47,7 @@ import {
   emitOrgfyPipelineEvent,
 } from "../services/presence-dispatcher";
 import { getOrgfyCrdtStore } from "../services/orgfy-crdt-store";
+import { sendBuzzChatMessageOrWake } from "../services/buzz-chat-dispatch";
 import { sendDesktopNotification } from "../services/mcp-server";
 import { recordGenAISpan } from "../services/telemetry-otel";
 
@@ -885,6 +886,99 @@ export function buildUnifiedOrgfyTools(ctx: Context | any): UnifiedOrgfyTool[] {
             null,
             2
           ),
+        };
+      },
+    },
+    {
+      name: "orgfy_mention_wake",
+      description:
+        "Envia mensagem no canal/thread mencionando 1 ou mais agentes com NIP-27 real (nostr:npub1... + tag p) e garante disparo via ctx.agents.wake (elimina risco de menção fantasma em texto puro).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          agents: {
+            type: "array",
+            items: { type: "string" },
+            description: "Nomes dos agentes a mencionar e acordar (ex.: ['OrgFy Bento', 'OrgFy Vera'])",
+          },
+          message: { type: "string", description: "Conteúdo da mensagem/pauta para o canal" },
+          channel_id: { type: "string", description: "UUID do canal (usa context.channel automaticamente se omitido)" },
+          thread_root: { type: "string", description: "ID da thread opcional (usa context.root se omitido)" },
+        },
+        required: ["agents", "message"],
+      },
+      execute: async (args: any, meta?: { client?: any; context?: any }) => {
+        const requestedNames: string[] = Array.isArray(args?.agents)
+          ? args.agents.map((s: any) => String(s || "").replace(/^@/, "").trim()).filter(Boolean)
+          : [];
+        const message = String(args?.message || "").trim();
+        if (requestedNames.length === 0 || !message) {
+          return {
+            text: JSON.stringify({ ok: false, error: "agents (array não vazio) e message são obrigatórios." }),
+            isError: true,
+          };
+        }
+        const snapAgents: any[] = (() => {
+          try {
+            return (ctx as any)?.agents?.snapshot?.()?.agents || [];
+          } catch {
+            return [];
+          }
+        })();
+        const targets: Array<{ agentKey?: string; agentName: string; pubkey: string }> = [];
+        const notFound: string[] = [];
+        for (const reqName of requestedNames) {
+          const lower = reqName.toLowerCase();
+          const found =
+            snapAgents.find((a: any) => String(a?.name || "").toLowerCase() === lower) ||
+            snapAgents.find((a: any) => String(a?.name || "").toLowerCase().includes(lower));
+          if (found?.pubkey) {
+            targets.push({
+              agentKey: found.key ? String(found.key) : undefined,
+              agentName: String(found.name || reqName),
+              pubkey: String(found.pubkey).toLowerCase(),
+            });
+          } else {
+            notFound.push(reqName);
+          }
+        }
+        if (targets.length === 0) {
+          return {
+            text: JSON.stringify({ ok: false, error: "Nenhum agente encontrado no Buzz", notFound }),
+            isError: true,
+          };
+        }
+        const isUuidLike = (v: unknown) =>
+          typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v.trim());
+        const isHex64 = (v: unknown) => typeof v === "string" && /^[0-9a-f]{64}$/i.test(v.trim());
+        const ctxChan = meta?.context?.channel;
+        const ctxRoot = meta?.context?.root;
+        const resolvedChannel = isUuidLike(args?.channel_id)
+          ? String(args.channel_id).trim()
+          : isUuidLike(ctxChan)
+            ? String(ctxChan).trim()
+            : null;
+        const resolvedRoot = isHex64(args?.thread_root)
+          ? String(args.thread_root).trim().toLowerCase()
+          : isHex64(ctxRoot)
+            ? String(ctxRoot).trim().toLowerCase()
+            : null;
+        const [primary, ...rest] = targets;
+        const res = await sendBuzzChatMessageOrWake(ctx, {
+          agentKey: primary.agentKey,
+          agentName: primary.agentName,
+          pubkey: primary.pubkey,
+          extraMentions: rest,
+          channelId: resolvedChannel,
+          threadRoot: resolvedRoot,
+          preferDm: false,
+          postInChat: true,
+          ensureWake: true,
+          text: message,
+        });
+        return {
+          text: JSON.stringify({ ...res, notFound }, null, 2),
+          isError: !res.ok,
         };
       },
     },

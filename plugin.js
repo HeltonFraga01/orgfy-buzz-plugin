@@ -5248,6 +5248,274 @@ function getOrgfyCrdtStore(ctx) {
   if (!fallbackSingleton) fallbackSingleton = new OrgfyCrdtStore(null);
   return fallbackSingleton;
 }
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const HEX64_RE = /^[0-9a-f]{64}$/i;
+const BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+const isUuid = (v2) => typeof v2 === "string" && UUID_RE.test(v2.trim());
+const isHex64 = (v2) => typeof v2 === "string" && HEX64_RE.test(v2.trim());
+function bech32Polymod(values) {
+  const gen = [996825010, 642813549, 513874426, 1027748829, 705979059];
+  let chk = 1;
+  for (const v2 of values) {
+    const top = chk >> 25;
+    chk = (chk & 33554431) << 5 ^ v2;
+    for (let i = 0; i < 5; i++) {
+      if (top >> i & 1) chk ^= gen[i];
+    }
+  }
+  return chk;
+}
+function bech32HrpExpand(hrp) {
+  const ret = [];
+  for (let i = 0; i < hrp.length; i++) ret.push(hrp.charCodeAt(i) >> 5);
+  ret.push(0);
+  for (let i = 0; i < hrp.length; i++) ret.push(hrp.charCodeAt(i) & 31);
+  return ret;
+}
+function convertBits(data, fromBits, toBits, pad) {
+  let acc = 0;
+  let bits = 0;
+  const ret = [];
+  const maxv = (1 << toBits) - 1;
+  for (const value of data) {
+    acc = acc << fromBits | value;
+    bits += fromBits;
+    while (bits >= toBits) {
+      bits -= toBits;
+      ret.push(acc >> bits & maxv);
+    }
+  }
+  if (bits > 0) {
+    ret.push(acc << toBits - bits & maxv);
+  }
+  return ret;
+}
+function hexToNpub(hexPubkey) {
+  const clean = String(hexPubkey || "").trim().toLowerCase();
+  if (!HEX64_RE.test(clean)) return null;
+  const bytes = [];
+  for (let i = 0; i < 64; i += 2) {
+    bytes.push(parseInt(clean.slice(i, i + 2), 16));
+  }
+  const words = convertBits(bytes, 8, 5);
+  const hrp = "npub";
+  const polymod = bech32Polymod([...bech32HrpExpand(hrp), ...words, 0, 0, 0, 0, 0, 0]) ^ 1;
+  const checksum = [];
+  for (let i = 0; i < 6; i++) checksum.push(polymod >> 5 * (5 - i) & 31);
+  return `${hrp}1${[...words, ...checksum].map((d) => BECH32_CHARSET[d]).join("")}`;
+}
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function formatTextWithNostrMentions(rawText, targets, prependPrimaryIfMissing = false) {
+  let out = rawText;
+  for (const t of targets) {
+    const npub = hexToNpub(t.pubkey);
+    if (!npub) continue;
+    const token2 = `nostr:${npub}`;
+    if (t.agentName && t.agentName.trim()) {
+      const rx = new RegExp(`@${escapeRegex(t.agentName.trim())}(?=$|[\\s,.;:!?()\\[\\]])`, "gi");
+      if (rx.test(out)) {
+        out = out.replace(rx, token2);
+        continue;
+      }
+    }
+    if (prependPrimaryIfMissing && t === targets[0] && !out.includes(token2)) {
+      out = `${token2} ${out}`;
+    }
+  }
+  return out;
+}
+async function sendBuzzChatMessageOrWake(ctx, opts) {
+  var _a, _b, _c, _d;
+  const rawText = String(opts.text || "").trim();
+  if (!rawText) return { ok: false, error: "Mensagem vazia" };
+  const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+  const channelsList = (() => {
+    var _a2, _b2, _c2;
+    try {
+      return ((_c2 = (_b2 = (_a2 = session == null ? void 0 : session.channels) == null ? void 0 : _a2.list) == null ? void 0 : _b2.call(_a2)) == null ? void 0 : _c2.channels) || [];
+    } catch {
+      return [];
+    }
+  })();
+  const pkLower = isHex64(opts.pubkey) ? opts.pubkey.trim().toLowerCase() : "";
+  const nameLower = (opts.agentName || "").trim().toLowerCase();
+  const allTargets = [];
+  const seenPk = /* @__PURE__ */ new Set();
+  const pushTarget = (t) => {
+    const pk = isHex64(t.pubkey) ? t.pubkey.trim().toLowerCase() : "";
+    if (!pk || seenPk.has(pk)) return;
+    seenPk.add(pk);
+    allTargets.push({ ...t, pubkey: pk });
+  };
+  if (pkLower) {
+    pushTarget({ agentKey: opts.agentKey, agentName: opts.agentName, pubkey: pkLower });
+  }
+  if (Array.isArray(opts.extraMentions)) {
+    for (const m of opts.extraMentions) pushTarget(m);
+  }
+  const findDmChannelId = async () => {
+    var _a2;
+    const existing = channelsList.find((ch) => {
+      if ((ch == null ? void 0 : ch.channelType) !== "dm" && (ch == null ? void 0 : ch.channelType) !== "solo") return false;
+      if (pkLower) {
+        const members = [...ch.participants || [], ...ch.members || []];
+        if (members.some((m) => String(m).toLowerCase() === pkLower)) return true;
+      }
+      return Boolean(nameLower && typeof (ch == null ? void 0 : ch.name) === "string" && ch.name.toLowerCase().includes(nameLower));
+    });
+    if (existing == null ? void 0 : existing.id) return String(existing.id);
+    if (pkLower && ((_a2 = session == null ? void 0 : session.directMessages) == null ? void 0 : _a2.available) && typeof session.directMessages.open === "function") {
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), 6e3);
+      try {
+        const opened = await session.directMessages.open([pkLower], ac.signal);
+        if (opened) return String(opened);
+      } catch {
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    return null;
+  };
+  let resolvedChannel = isUuid(opts.channelId) ? opts.channelId.trim() : null;
+  if (!resolvedChannel && opts.preferDm) {
+    resolvedChannel = await findDmChannelId();
+  }
+  if (!resolvedChannel && isUuid(opts.fallbackChannelId)) {
+    resolvedChannel = opts.fallbackChannelId.trim();
+  }
+  if (!resolvedChannel) {
+    resolvedChannel = await findDmChannelId();
+  }
+  if (!resolvedChannel) {
+    return { ok: false, error: "Nenhum canal/DM válido encontrado no Buzz para enviar a mensagem" };
+  }
+  let channelMeta = channelsList.find((ch) => String((ch == null ? void 0 : ch.id) || "") === resolvedChannel) || null;
+  let chatError;
+  const formattedText = formatTextWithNostrMentions(rawText, allTargets, !opts.preferDm && allTargets.length > 0);
+  const agentsApi = ctx == null ? void 0 : ctx.agents;
+  const snapAgents = (() => {
+    var _a2, _b2;
+    try {
+      return ((_b2 = (_a2 = agentsApi == null ? void 0 : agentsApi.snapshot) == null ? void 0 : _a2.call(agentsApi)) == null ? void 0 : _b2.agents) || [];
+    } catch {
+      return [];
+    }
+  })();
+  const resolveAgentKey = (t) => {
+    if (t.agentKey) return t.agentKey;
+    const found = snapAgents.find(
+      (a) => (a == null ? void 0 : a.pubkey) && String(a.pubkey).toLowerCase() === t.pubkey || t.agentName && String((a == null ? void 0 : a.name) || "").toLowerCase() === t.agentName.toLowerCase()
+    );
+    return (found == null ? void 0 : found.key) ? String(found.key) : null;
+  };
+  if (opts.postInChat !== false && (session == null ? void 0 : session.messages)) {
+    try {
+      if (typeof ((_d = session.channelWrites) == null ? void 0 : _d.refreshMembership) === "function") {
+        try {
+          const fresh = await session.channelWrites.refreshMembership(resolvedChannel);
+          if (fresh) channelMeta = fresh;
+        } catch {
+        }
+      }
+      const validRoot = isHex64(opts.threadRoot) ? opts.threadRoot.trim().toLowerCase() : void 0;
+      const isDm = (channelMeta == null ? void 0 : channelMeta.channelType) === "dm" || (channelMeta == null ? void 0 : channelMeta.channelType) === "solo";
+      const members = Array.isArray(channelMeta == null ? void 0 : channelMeta.members) ? channelMeta.members.map((m) => String(m).toLowerCase()) : null;
+      const mentions = [];
+      const missingTargets = [];
+      for (const t of allTargets) {
+        if (isDm || !members || members.includes(t.pubkey)) {
+          mentions.push(t.pubkey);
+        } else {
+          missingTargets.push(t);
+        }
+      }
+      let eventId;
+      if (validRoot && typeof session.messages.reply === "function") {
+        const res = session.messages.reply(resolvedChannel, validRoot, formattedText, mentions);
+        if (typeof res === "string") eventId = res;
+      } else if (typeof session.messages.send === "function") {
+        const res = session.messages.send(resolvedChannel, formattedText, mentions);
+        if (typeof res === "string") eventId = res;
+      }
+      if (eventId !== void 0 || typeof session.messages.send === "function") {
+        const targetsToWake = opts.ensureWake ? allTargets : missingTargets;
+        const wokenAgents = [];
+        if (typeof (agentsApi == null ? void 0 : agentsApi.wake) === "function" && targetsToWake.length > 0) {
+          const wakeRoot = !isDm && isHex64(validRoot || eventId) ? validRoot || eventId : void 0;
+          for (const t of targetsToWake) {
+            const key = resolveAgentKey(t);
+            if (!key) continue;
+            try {
+              await agentsApi.wake(key, {
+                channel: resolvedChannel,
+                text: formattedText,
+                ...wakeRoot ? { root: wakeRoot } : isDm ? {} : { topLevel: true }
+              });
+              wokenAgents.push(t.agentName || key);
+            } catch {
+            }
+          }
+        }
+        return {
+          ok: true,
+          mode: wokenAgents.length > 0 ? "chat_message_and_wake" : "chat_message",
+          channel: resolvedChannel,
+          threadRoot: validRoot,
+          eventId,
+          mentionedPubkeys: mentions,
+          wokenAgents,
+          missingMembers: missingTargets.map((t) => t.agentName || t.pubkey.slice(0, 8))
+        };
+      }
+    } catch (err) {
+      chatError = (err == null ? void 0 : err.message) || String(err);
+    }
+  }
+  if (typeof (agentsApi == null ? void 0 : agentsApi.wake) === "function") {
+    const isDmOrSolo = (channelMeta == null ? void 0 : channelMeta.channelType) === "dm" || (channelMeta == null ? void 0 : channelMeta.channelType) === "solo";
+    const validRoot = !isDmOrSolo && isHex64(opts.threadRoot) ? opts.threadRoot.trim().toLowerCase() : void 0;
+    const keysToWake = allTargets.length > 0 ? allTargets.map((t) => ({ key: resolveAgentKey(t), name: t.agentName || t.pubkey.slice(0, 8) })).filter((x) => x.key) : opts.agentKey ? [{ key: opts.agentKey, name: opts.agentName || opts.agentKey }] : [];
+    const wokenAgents = [];
+    let lastWakeErr = "";
+    for (const target of keysToWake) {
+      const payload = {
+        channel: resolvedChannel,
+        text: formattedText,
+        ...validRoot ? { root: validRoot } : isDmOrSolo ? {} : { topLevel: true }
+      };
+      try {
+        await agentsApi.wake(target.key, payload);
+        wokenAgents.push(target.name);
+      } catch (err) {
+        lastWakeErr = (err == null ? void 0 : err.message) || String(err);
+      }
+    }
+    if (wokenAgents.length > 0) {
+      return {
+        ok: true,
+        mode: opts.postInChat === false ? "wake" : "wake_fallback",
+        channel: resolvedChannel,
+        threadRoot: validRoot,
+        wokenAgents,
+        ...chatError ? { chatError } : {}
+      };
+    }
+    return {
+      ok: false,
+      channel: resolvedChannel,
+      chatError,
+      error: lastWakeErr || chatError || "Nenhum agente pôde ser acordado via ctx.agents.wake"
+    };
+  }
+  return {
+    ok: false,
+    channel: resolvedChannel,
+    error: chatError || "session.messages.send e ctx.agents.wake indisponíveis"
+  };
+}
 function buildUnifiedOrgfyTools(ctx) {
   const rawTools = [
     {
@@ -6038,6 +6306,87 @@ function buildUnifiedOrgfyTools(ctx) {
             null,
             2
           )
+        };
+      }
+    },
+    {
+      name: "orgfy_mention_wake",
+      description: "Envia mensagem no canal/thread mencionando 1 ou mais agentes com NIP-27 real (nostr:npub1... + tag p) e garante disparo via ctx.agents.wake (elimina risco de menção fantasma em texto puro).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          agents: {
+            type: "array",
+            items: { type: "string" },
+            description: "Nomes dos agentes a mencionar e acordar (ex.: ['OrgFy Bento', 'OrgFy Vera'])"
+          },
+          message: { type: "string", description: "Conteúdo da mensagem/pauta para o canal" },
+          channel_id: { type: "string", description: "UUID do canal (usa context.channel automaticamente se omitido)" },
+          thread_root: { type: "string", description: "ID da thread opcional (usa context.root se omitido)" }
+        },
+        required: ["agents", "message"]
+      },
+      execute: async (args, meta) => {
+        var _a, _b;
+        const requestedNames = Array.isArray(args == null ? void 0 : args.agents) ? args.agents.map((s) => String(s || "").replace(/^@/, "").trim()).filter(Boolean) : [];
+        const message = String((args == null ? void 0 : args.message) || "").trim();
+        if (requestedNames.length === 0 || !message) {
+          return {
+            text: JSON.stringify({ ok: false, error: "agents (array não vazio) e message são obrigatórios." }),
+            isError: true
+          };
+        }
+        const snapAgents = (() => {
+          var _a2, _b2, _c;
+          try {
+            return ((_c = (_b2 = (_a2 = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _a2.snapshot) == null ? void 0 : _b2.call(_a2)) == null ? void 0 : _c.agents) || [];
+          } catch {
+            return [];
+          }
+        })();
+        const targets = [];
+        const notFound = [];
+        for (const reqName of requestedNames) {
+          const lower = reqName.toLowerCase();
+          const found = snapAgents.find((a) => String((a == null ? void 0 : a.name) || "").toLowerCase() === lower) || snapAgents.find((a) => String((a == null ? void 0 : a.name) || "").toLowerCase().includes(lower));
+          if (found == null ? void 0 : found.pubkey) {
+            targets.push({
+              agentKey: found.key ? String(found.key) : void 0,
+              agentName: String(found.name || reqName),
+              pubkey: String(found.pubkey).toLowerCase()
+            });
+          } else {
+            notFound.push(reqName);
+          }
+        }
+        if (targets.length === 0) {
+          return {
+            text: JSON.stringify({ ok: false, error: "Nenhum agente encontrado no Buzz", notFound }),
+            isError: true
+          };
+        }
+        const isUuidLike = (v2) => typeof v2 === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v2.trim());
+        const isHex642 = (v2) => typeof v2 === "string" && /^[0-9a-f]{64}$/i.test(v2.trim());
+        const ctxChan = (_a = meta == null ? void 0 : meta.context) == null ? void 0 : _a.channel;
+        const ctxRoot = (_b = meta == null ? void 0 : meta.context) == null ? void 0 : _b.root;
+        const resolvedChannel = isUuidLike(args == null ? void 0 : args.channel_id) ? String(args.channel_id).trim() : isUuidLike(ctxChan) ? String(ctxChan).trim() : null;
+        const resolvedRoot = isHex642(args == null ? void 0 : args.thread_root) ? String(args.thread_root).trim().toLowerCase() : isHex642(ctxRoot) ? String(ctxRoot).trim().toLowerCase() : null;
+        const [primary, ...rest] = targets;
+        const res = await sendBuzzChatMessageOrWake(ctx, {
+          agentKey: primary.agentKey,
+          agentName: primary.agentName,
+          pubkey: primary.pubkey,
+          extraMentions: rest,
+          channelId: resolvedChannel,
+          threadRoot: resolvedRoot,
+          preferDm: false,
+          postInChat: true,
+          ensureWake: true,
+          text: message
+        });
+        return {
+          text: JSON.stringify({ ...res, notFound }, null, 2),
+          isError: !res.ok
         };
       }
     }
@@ -59346,139 +59695,6 @@ function createQuestionCardsPanel(React) {
     );
   };
 }
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const HEX64_RE = /^[0-9a-f]{64}$/i;
-const isUuid = (v2) => typeof v2 === "string" && UUID_RE.test(v2.trim());
-const isHex64 = (v2) => typeof v2 === "string" && HEX64_RE.test(v2.trim());
-async function sendBuzzChatMessageOrWake(ctx, opts) {
-  var _a, _b, _c, _d;
-  const text = String(opts.text || "").trim();
-  if (!text) return { ok: false, error: "Mensagem vazia" };
-  const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
-  const channelsList = (() => {
-    var _a2, _b2, _c2;
-    try {
-      return ((_c2 = (_b2 = (_a2 = session == null ? void 0 : session.channels) == null ? void 0 : _a2.list) == null ? void 0 : _b2.call(_a2)) == null ? void 0 : _c2.channels) || [];
-    } catch {
-      return [];
-    }
-  })();
-  const pkLower = isHex64(opts.pubkey) ? opts.pubkey.trim().toLowerCase() : "";
-  const nameLower = (opts.agentName || "").trim().toLowerCase();
-  const findDmChannelId = async () => {
-    var _a2;
-    const existing = channelsList.find((ch) => {
-      if ((ch == null ? void 0 : ch.channelType) !== "dm" && (ch == null ? void 0 : ch.channelType) !== "solo") return false;
-      if (pkLower) {
-        const members = [...ch.participants || [], ...ch.members || []];
-        if (members.some((m) => String(m).toLowerCase() === pkLower)) return true;
-      }
-      return Boolean(nameLower && typeof (ch == null ? void 0 : ch.name) === "string" && ch.name.toLowerCase().includes(nameLower));
-    });
-    if (existing == null ? void 0 : existing.id) return String(existing.id);
-    if (pkLower && ((_a2 = session == null ? void 0 : session.directMessages) == null ? void 0 : _a2.available) && typeof session.directMessages.open === "function") {
-      const ac = new AbortController();
-      const timer = setTimeout(() => ac.abort(), 6e3);
-      try {
-        const opened = await session.directMessages.open([pkLower], ac.signal);
-        if (opened) return String(opened);
-      } catch {
-      } finally {
-        clearTimeout(timer);
-      }
-    }
-    return null;
-  };
-  let resolvedChannel = isUuid(opts.channelId) ? opts.channelId.trim() : null;
-  if (!resolvedChannel && opts.preferDm) {
-    resolvedChannel = await findDmChannelId();
-  }
-  if (!resolvedChannel && isUuid(opts.fallbackChannelId)) {
-    resolvedChannel = opts.fallbackChannelId.trim();
-  }
-  if (!resolvedChannel) {
-    resolvedChannel = await findDmChannelId();
-  }
-  if (!resolvedChannel) {
-    return { ok: false, error: "Nenhum canal/DM válido encontrado no Buzz para enviar a mensagem" };
-  }
-  let channelMeta = channelsList.find((ch) => String((ch == null ? void 0 : ch.id) || "") === resolvedChannel) || null;
-  let chatError;
-  if (opts.postInChat !== false && (session == null ? void 0 : session.messages)) {
-    try {
-      if (typeof ((_d = session.channelWrites) == null ? void 0 : _d.refreshMembership) === "function") {
-        try {
-          const fresh = await session.channelWrites.refreshMembership(resolvedChannel);
-          if (fresh) channelMeta = fresh;
-        } catch {
-        }
-      }
-      const validRoot = isHex64(opts.threadRoot) ? opts.threadRoot.trim().toLowerCase() : void 0;
-      let mentions = [];
-      if (pkLower) {
-        const members = Array.isArray(channelMeta == null ? void 0 : channelMeta.members) ? channelMeta.members.map((m) => String(m).toLowerCase()) : null;
-        if (!members || members.includes(pkLower)) {
-          mentions = [pkLower];
-        } else if ((channelMeta == null ? void 0 : channelMeta.channelType) !== "dm") {
-          mentions = [];
-        }
-      }
-      if (validRoot && typeof session.messages.reply === "function") {
-        const eventId = session.messages.reply(resolvedChannel, validRoot, text, mentions);
-        return {
-          ok: true,
-          mode: "chat_message",
-          channel: resolvedChannel,
-          threadRoot: validRoot,
-          eventId: typeof eventId === "string" ? eventId : void 0
-        };
-      }
-      if (typeof session.messages.send === "function") {
-        const eventId = session.messages.send(resolvedChannel, text, mentions);
-        return {
-          ok: true,
-          mode: "chat_message",
-          channel: resolvedChannel,
-          eventId: typeof eventId === "string" ? eventId : void 0
-        };
-      }
-    } catch (err) {
-      chatError = (err == null ? void 0 : err.message) || String(err);
-    }
-  }
-  const agentsApi = ctx == null ? void 0 : ctx.agents;
-  if (typeof (agentsApi == null ? void 0 : agentsApi.wake) === "function" && opts.agentKey) {
-    const isDmOrSolo = (channelMeta == null ? void 0 : channelMeta.channelType) === "dm" || (channelMeta == null ? void 0 : channelMeta.channelType) === "solo";
-    const validRoot = !isDmOrSolo && isHex64(opts.threadRoot) ? opts.threadRoot.trim().toLowerCase() : void 0;
-    const payload = {
-      channel: resolvedChannel,
-      text,
-      ...validRoot ? { root: validRoot } : isDmOrSolo ? {} : { topLevel: true }
-    };
-    try {
-      await agentsApi.wake(opts.agentKey, payload);
-      return {
-        ok: true,
-        mode: opts.postInChat === false ? "wake" : "wake_fallback",
-        channel: resolvedChannel,
-        threadRoot: validRoot,
-        ...chatError ? { chatError } : {}
-      };
-    } catch (err) {
-      return {
-        ok: false,
-        channel: resolvedChannel,
-        chatError,
-        error: (err == null ? void 0 : err.message) || String(err)
-      };
-    }
-  }
-  return {
-    ok: false,
-    channel: resolvedChannel,
-    error: chatError || "session.messages.send e ctx.agents.wake indisponíveis"
-  };
-}
 function observationTokens(obs) {
   var _a, _b, _c, _d;
   const input = Number((obs == null ? void 0 : obs.input) ?? (obs == null ? void 0 : obs.inputTokens) ?? ((_a = obs == null ? void 0 : obs.tokens) == null ? void 0 : _a.input) ?? 0) || 0;
@@ -60674,16 +60890,19 @@ function createFactoryAppComponent(ctx, opts = {}) {
       }
       const targetChannelId = resolveActiveChannelId(tenant);
       const isBoard = tenant === "board";
-      const councilHandles = ((holding == null ? void 0 : holding.conselho) || []).map((c) => c.responsavel).filter((n) => n && n.toLowerCase() !== scoutName.toLowerCase()).map((n) => `@${n}`);
-      const uniqueCouncilHandles = Array.from(new Set(councilHandles));
+      const councilNames = Array.from(
+        new Set(
+          ((holding == null ? void 0 : holding.conselho) || []).map((c) => c.responsavel).filter((n) => n && n.toLowerCase() !== scoutName.toLowerCase())
+        )
+      );
       const cooName = ((_a2 = status.tenantManifest) == null ? void 0 : _a2.coo) || "OrgFy Bento";
       const promptText = isBoard ? `@${scoutName} [ORGFY SCOUT ONE-SHOT · board]
 Audite o portfólio e o workspace atual contra o Canvas/Visão da Holding, identifique os gaps de maior impacto (segurança, testes, UX, dívida técnica ou governança) e proponha os próximos cards/pautas canônicos.
 
-**Regra de Reunião:** responda obrigatoriamente **aqui neste canal do Conselho** (não em DM) e marque (\`@\`) os conselheiros competentes (${uniqueCouncilHandles.join(", ") || "@OrgFy Bento, @OrgFy Bento Arquiteto, @OrgFy Vera, @OrgFy Val, @OrgFy Iris"}) para deliberarem e darem continuidade à reunião.` : `@${scoutName} [ORGFY SCOUT ONE-SHOT · ${tenant}]
+**Regra de Reunião (Menção Garantida):** responda **aqui neste canal do Conselho** (não em DM) e, para acionar os conselheiros competentes (${councilNames.join(", ") || "OrgFy Iris, OrgFy Bento Arquiteto, OrgFy Vera, OrgFy Bento, OrgFy Val"}), chame obrigatoriamente a tool \`orgfy_mention_wake\` passando \`agents\` + \`message\` — nunca escreva apenas \`@Nome\` em texto puro.` : `@${scoutName} [ORGFY SCOUT ONE-SHOT · ${tenant}]
 Audite o workspace atual contra o Canvas/Visão de ${((_b2 = status.tenantManifest) == null ? void 0 : _b2.nome) || tenant}, identifique os gaps de maior impacto (segurança, testes, UX ou dívida técnica) e proponha os próximos cards canônicos.
 
-**Regra de Canal:** responda obrigatoriamente **aqui neste canal da empresa** (não em DM) e marque \`@${cooName}\` (COO) e os especialistas responsáveis para triagem e continuidade imediata.`;
+**Regra de Canal (Menção Garantida):** responda **aqui neste canal da empresa** (não em DM) e chame a tool \`orgfy_mention_wake\` com \`agents: ["${cooName}", ...]\` para acionar o COO e os especialistas sem risco de menção fantasma.`;
       setRunningScout(true);
       try {
         const res = await wakeAgentInBuzz({
@@ -60693,6 +60912,7 @@ Audite o workspace atual contra o Canvas/Visão de ${((_b2 = status.tenantManife
           channelId: targetChannelId,
           preferDm: false,
           postInChat: true,
+          ensureWake: true,
           text: promptText
         });
         if (res.ok && res.channel && openSideTabRef.current) {
@@ -60701,8 +60921,9 @@ Audite o workspace atual contra o Canvas/Visão de ${((_b2 = status.tenantManife
           } catch {
           }
         }
+        const missingWarn = res.missingMembers && res.missingMembers.length > 0 ? ` (acordado via wake — adicione ${res.missingMembers.join(", ")} em Membros do canal)` : "";
         notify2(
-          res.ok ? `${scoutName} acionado no canal de ${isBoard ? "Conselho" : tenant} ✓` : `Falha ao acionar Oráculo: ${res.error}`
+          res.ok ? `${scoutName} acionado no canal de ${isBoard ? "Conselho" : tenant} ✓${missingWarn}` : `Falha ao acionar Oráculo: ${res.error}`
         );
       } finally {
         setRunningScout(false);
@@ -62216,7 +62437,8 @@ INVARIANTS UNIVERSAIS (TODOS OS PAPÉIS):
 - L-01 / L-22 / L-90: Executor != Revisor; aceite L-22 imutável (SHA-256); nunca afrouxe testes ou gates.
 - Specsfy + TDD (FAIL-CLOSED): nunca use 'buzz issues create' direto nem '--gate gate:qa'. Effort 1-2 (Z2): TDD RED->GREEN; Effort 3-6 (Z3): exige spec.md com Definition/Plan Gate Passed; Effort 7-10 (Z4): + DECIDIDO. Crie via 'orgfy_card_create', valide com './ferramentas/card-lint.sh' e publique via './ferramentas/buzz-issue-guard.sh'.
 - Guarda de Identidade & Freio Anti-Loop: menção para '@OutroPerfil' ou thread aguardando GATE de outro -> responda apenas '[SILENT]'. Máx 12 shells sem commit / 2 falhas consecutivas -> pare e publique 'BLOQUEADO | por | motivo | falta | resolve'. Nunca faça 'git checkout' na raiz do repo (use worktree isolado).
-- Ferramentas-chave de 1 chamada: 'orgfy_roster_live' (quem está livre de verdade + limpa locks zumbis), 'orgfy_handoff_pack' (retomada/revisão P1..Pn + git), 'orgfy_smart_dispatch' (delegação one-shot L-01 + WRITE_SET_CONFLICT), 'orgfy_card_progress', 'orgfy_checkout_lock' (sempre passe exclusive_paths), 'orgfy_loop_radar', 'orgfy_session_stop', 'orgfy_model_failover', 'orgfy_gate'.
+- Menção Garantida entre Agentes (ZERO menção fantasma): escrever '@Nome' em texto puro NÃO acorda outro agente no canal. Para acionar conselheiros, COO ou especialistas e continuar a reunião no canal, use SEMPRE a tool 'orgfy_mention_wake(agents=[...], message=...)' — ela publica 'nostr:npub1...' + tag 'p' e garante wake real.
+- Ferramentas-chave de 1 chamada: 'orgfy_mention_wake' (menção real + wake garantido no canal), 'orgfy_roster_live' (quem está livre de verdade + limpa locks zumbis), 'orgfy_handoff_pack' (retomada/revisão P1..Pn + git), 'orgfy_smart_dispatch' (delegação one-shot L-01 + WRITE_SET_CONFLICT), 'orgfy_card_progress', 'orgfy_checkout_lock' (sempre passe exclusive_paths), 'orgfy_loop_radar', 'orgfy_session_stop', 'orgfy_model_failover', 'orgfy_gate'.
 
 REGRAS POR PAPEL (APLIQUE APENAS O SEU):
 - [Executor]: use 'orgfy_handoff_pack' ao retomar; mantenha 'orgfy_card_progress' atualizado; edite apenas Escrita exclusiva; se 'git push relay' der exit 128, pegue o header via 'buzz__repo' com GIT_CONFIG_COUNT=1.
@@ -62307,11 +62529,13 @@ export {
   exportAutomationToBuzzWorkflowYaml,
   fetchFactoryStatus,
   formatOrgfyAttentionText,
+  formatTextWithNostrMentions,
   getBuzzNativeState,
   getDeferredFocusNotices,
   getOrgfyCrdtStore,
   getOrgfyPipelineEvents,
   getTelemetrySnapshot,
+  hexToNpub,
   hydrateIssueDetail,
   inject,
   insertOrgfyPickerEntry,

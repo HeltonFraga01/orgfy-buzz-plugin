@@ -199,7 +199,7 @@ import {
 import { parseBuzzOrgfyEntityUrl } from "./components/OrgfyLiveChatRenderers";
 import { buildCooUpdatesFeed } from "./factory/FactoryCooUpdatesFeed";
 import { OrgfyCrdtStore, getOrgfyCrdtStore } from "./services/orgfy-crdt-store";
-import { sendBuzzChatMessageOrWake } from "./services/buzz-chat-dispatch";
+import { sendBuzzChatMessageOrWake, hexToNpub, formatTextWithNostrMentions } from "./services/buzz-chat-dispatch";
 import { createQuestionCardsPanel } from "./factory/QuestionCardsPanel";
 import {
   parseEvalTable,
@@ -226,6 +226,8 @@ export {
   OrgfyCrdtStore,
   getOrgfyCrdtStore,
   sendBuzzChatMessageOrWake,
+  hexToNpub,
+  formatTextWithNostrMentions,
   createQuestionCardsPanel,
   FACTORY_SHADOW_CSS,
   attachFactoryShadowStyles,
@@ -2270,7 +2272,8 @@ INVARIANTS UNIVERSAIS (TODOS OS PAPÉIS):
 - L-01 / L-22 / L-90: Executor != Revisor; aceite L-22 imutável (SHA-256); nunca afrouxe testes ou gates.
 - Specsfy + TDD (FAIL-CLOSED): nunca use 'buzz issues create' direto nem '--gate gate:qa'. Effort 1-2 (Z2): TDD RED->GREEN; Effort 3-6 (Z3): exige spec.md com Definition/Plan Gate Passed; Effort 7-10 (Z4): + DECIDIDO. Crie via 'orgfy_card_create', valide com './ferramentas/card-lint.sh' e publique via './ferramentas/buzz-issue-guard.sh'.
 - Guarda de Identidade & Freio Anti-Loop: menção para '@OutroPerfil' ou thread aguardando GATE de outro -> responda apenas '[SILENT]'. Máx 12 shells sem commit / 2 falhas consecutivas -> pare e publique 'BLOQUEADO | por | motivo | falta | resolve'. Nunca faça 'git checkout' na raiz do repo (use worktree isolado).
-- Ferramentas-chave de 1 chamada: 'orgfy_roster_live' (quem está livre de verdade + limpa locks zumbis), 'orgfy_handoff_pack' (retomada/revisão P1..Pn + git), 'orgfy_smart_dispatch' (delegação one-shot L-01 + WRITE_SET_CONFLICT), 'orgfy_card_progress', 'orgfy_checkout_lock' (sempre passe exclusive_paths), 'orgfy_loop_radar', 'orgfy_session_stop', 'orgfy_model_failover', 'orgfy_gate'.
+- Menção Garantida entre Agentes (ZERO menção fantasma): escrever '@Nome' em texto puro NÃO acorda outro agente no canal. Para acionar conselheiros, COO ou especialistas e continuar a reunião no canal, use SEMPRE a tool 'orgfy_mention_wake(agents=[...], message=...)' — ela publica 'nostr:npub1...' + tag 'p' e garante wake real.
+- Ferramentas-chave de 1 chamada: 'orgfy_mention_wake' (menção real + wake garantido no canal), 'orgfy_roster_live' (quem está livre de verdade + limpa locks zumbis), 'orgfy_handoff_pack' (retomada/revisão P1..Pn + git), 'orgfy_smart_dispatch' (delegação one-shot L-01 + WRITE_SET_CONFLICT), 'orgfy_card_progress', 'orgfy_checkout_lock' (sempre passe exclusive_paths), 'orgfy_loop_radar', 'orgfy_session_stop', 'orgfy_model_failover', 'orgfy_gate'.
 
 REGRAS POR PAPEL (APLIQUE APENAS O SEU):
 - [Executor]: use 'orgfy_handoff_pack' ao retomar; mantenha 'orgfy_card_progress' atualizado; edite apenas Escrita exclusiva; se 'git push relay' der exit 128, pegue o header via 'buzz__repo' com GIT_CONFIG_COUNT=1.
