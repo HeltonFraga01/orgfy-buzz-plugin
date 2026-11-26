@@ -1304,15 +1304,27 @@ export async function openIssueInBuzz(
 
   const uri = `buzz://issue?id=${rawId}&owner=${owner}&d=${dtag}`;
 
-  // 1. Tenta navegação interna nativa SOMENTE quando há scope de comunidade ativo no snapshot
-  //    (sem scope, buzz.repos abre no Personal space e cai em "This page isn't available").
+  // 1. Navegação interna nativa direta em 1 salto (resolve scope de navigation.snapshot OU relay.snapshot)
   if (ctx?.navigation?.open) {
     try {
       const snap = typeof ctx.navigation.snapshot === "function" ? ctx.navigation.snapshot() : null;
-      const currentTarget = snap?.entry?.target as any;
-      const activeScope = currentTarget?.scope && typeof currentTarget.scope === "object"
-        ? currentTarget.scope
-        : undefined;
+      const navScope = snap?.entry?.target?.scope;
+      let activeScope =
+        navScope && typeof navScope === "object" && navScope.viewer && navScope.communityOrigin
+          ? { viewer: String(navScope.viewer), communityOrigin: String(navScope.communityOrigin) }
+          : undefined;
+
+      if (!activeScope && typeof ctx?.relay?.snapshot === "function") {
+        const rSnap = ctx.relay.snapshot();
+        const viewer = rSnap?.viewer ? String(rSnap.viewer) : "";
+        let communityOrigin = rSnap?.origin ? String(rSnap.origin) : "";
+        if (!communityOrigin && viewer && typeof rSnap?.scope === "string" && rSnap.scope.endsWith(`:${viewer}`)) {
+          communityOrigin = rSnap.scope.slice(0, -(viewer.length + 1));
+        }
+        if (viewer && communityOrigin) {
+          activeScope = { viewer, communityOrigin };
+        }
+      }
 
       if (activeScope) {
         const res = await ctx.navigation.open({

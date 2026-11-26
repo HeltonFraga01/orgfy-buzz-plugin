@@ -201,16 +201,90 @@ export async function readBuzzMainAgentPubkey(ctx: Context): Promise<string | nu
   return null;
 }
 
+export interface BuzzCanvasState {
+  content: string | null;
+  eventId?: string;
+  writable: boolean;
+}
+
+export interface BuzzCanvasHistoryEntry {
+  id: string;
+  createdAt: number;
+  authorPubkey: string;
+  preview: string;
+}
+
 export async function readBuzzChannelCanvas(ctx: Context, channelId: string | null | undefined): Promise<string | null> {
-  if (!channelId) return null;
+  const detailed = await readBuzzChannelCanvasDetailed(ctx, channelId);
+  return detailed.content;
+}
+
+export async function readBuzzChannelCanvasDetailed(
+  ctx: Context,
+  channelId: string | null | undefined
+): Promise<BuzzCanvasState> {
+  if (!channelId) return { content: null, writable: false };
   try {
     const session = (ctx as any)?.relay?.snapshot?.()?.session;
+    const writable = Boolean(session?.canvas?.available && typeof session.canvas.save === "function");
     if (session?.canvas?.available && typeof session.canvas.read === "function") {
       const ev = await session.canvas.read(channelId);
-      if (ev && typeof ev.content === "string" && ev.content.trim()) {
-        return ev.content.trim();
+      if (ev && typeof ev.content === "string") {
+        return {
+          content: ev.content.trim() ? ev.content : null,
+          eventId: typeof ev.id === "string" ? ev.id : undefined,
+          writable,
+        };
       }
     }
-  } catch {}
-  return null;
+    return { content: null, writable };
+  } catch {
+    return { content: null, writable: false };
+  }
+}
+
+export async function saveBuzzChannelCanvas(
+  ctx: Context,
+  channelId: string | null | undefined,
+  content: string,
+  expectedEventId?: string
+): Promise<{ ok: boolean; eventId?: string; error?: string }> {
+  if (!channelId) return { ok: false, error: "Canal da empresa não configurado." };
+  try {
+    const session = (ctx as any)?.relay?.snapshot?.()?.session;
+    if (!session?.canvas?.available || typeof session.canvas.save !== "function") {
+      return { ok: false, error: "API session.canvas.save indisponível no Buzz." };
+    }
+    const saved = await session.canvas.save(channelId, content, expectedEventId);
+    return { ok: true, eventId: typeof saved?.id === "string" ? saved.id : undefined };
+  } catch (err: any) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+}
+
+export async function readBuzzChannelCanvasHistory(
+  ctx: Context,
+  channelId: string | null | undefined
+): Promise<BuzzCanvasHistoryEntry[]> {
+  if (!channelId) return [];
+  try {
+    const session = (ctx as any)?.relay?.snapshot?.()?.session;
+    if (!session?.canvas?.available || typeof session.canvas.history !== "function") return [];
+    const page = await session.canvas.history(channelId);
+    const entries: any[] = Array.isArray(page?.entries)
+      ? page.entries
+      : Array.isArray(page?.events)
+      ? page.events
+      : Array.isArray(page)
+      ? page
+      : [];
+    return entries.slice(0, 8).map((ev: any) => ({
+      id: String(ev?.id || ev?.event?.id || ""),
+      createdAt: Number(ev?.created_at || ev?.event?.created_at || 0) * 1000,
+      authorPubkey: String(ev?.pubkey || ev?.event?.pubkey || "").toLowerCase(),
+      preview: String(ev?.content || ev?.event?.content || "").replace(/\s+/g, " ").slice(0, 100),
+    }));
+  } catch {
+    return [];
+  }
 }

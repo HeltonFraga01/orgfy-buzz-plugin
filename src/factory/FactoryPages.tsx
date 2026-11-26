@@ -44,6 +44,19 @@ export interface FactorySecondaryPagesProps {
   Boardroom3D?: any;
   onReconcileAgents?: () => void;
   onAgentSessionAction?: (agentKey: string, action: "interrupt" | "compact" | "new") => void;
+  onOpenAgentDrawer?: (agentKey: string) => void;
+  onSaveAgentProfile?: (agentKey: string, patch: { provider: string; model: string; instructions?: string }) => Promise<void> | void;
+  editingAgentKey?: string | null;
+  setEditingAgentKey?: (k: string | null) => void;
+  agentEditDraft?: { provider: string; model: string; instructions: string };
+  setAgentEditDraft?: (patch: Partial<{ provider: string; model: string; instructions: string }>) => void;
+  canvasDraft?: string;
+  setCanvasDraft?: (v: string) => void;
+  canvasWritable?: boolean;
+  canvasSaving?: boolean;
+  onSaveCanvas?: () => void;
+  canvasHistory?: Array<{ id: string; createdAt: number; authorPubkey: string; preview: string }>;
+  resolveAuthor?: (pubkey: string) => string;
 }
 
 const CHART_COLORS = ["var(--chart-2)", "var(--chart-1)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"];
@@ -691,6 +704,8 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                       const pkLower = (a.pubkey || "").toLowerCase();
                       const liveTurn = pkLower && props.telemetry?.byPubkey ? props.telemetry.byPubkey[pkLower] : null;
                       const presence = pkLower && props.telemetry?.presenceByPubkey ? props.telemetry.presenceByPubkey[pkLower] : undefined;
+                      const liveMatch = liveCrew.find((c) => c.key === a.agentKey || (pkLower && c.pubkey?.toLowerCase() === pkLower));
+                      const isEditing = Boolean(props.editingAgentKey && props.editingAgentKey === a.agentKey);
                       return h(
                         "tr",
                         { key: a.name },
@@ -699,8 +714,10 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                           { style: { fontWeight: 600 } },
                           h(
                             "span",
-                            { style: { display: "inline-flex", alignItems: "center", gap: "6px" } },
-                            h("span", { className: "of-dot", "data-tone": liveTurn ? (liveTurn.state === "error" ? "failed" : "running") : a.inBuzz ? "done" : "idle" }),
+                            { style: { display: "inline-flex", alignItems: "center", gap: "7px" } },
+                            liveMatch?.picture
+                              ? h("img", { src: liveMatch.picture, alt: a.name, style: { width: "22px", height: "22px", borderRadius: "6px", objectFit: "cover", border: liveTurn ? "1.5px solid var(--status-running)" : "1px solid var(--border)", flexShrink: 0 } })
+                              : h("span", { className: "of-dot", "data-tone": liveTurn ? (liveTurn.state === "error" ? "failed" : "running") : a.inBuzz ? "done" : "idle" }),
                             a.name
                           )
                         ),
@@ -710,7 +727,21 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                           h("div", { style: { fontSize: "12px" } }, a.funcao),
                           liveTurn
                             ? h("div", { className: "of-mono", style: { fontSize: "10px", color: liveTurn.state === "error" ? "var(--status-failed)" : "var(--status-running)" } }, `⚡ ${liveTurn.stepLabel}`)
-                            : h("div", { className: "of-mono of-muted", style: { fontSize: "10px" } }, `papel: ${a.papel} · paralelismo: ${a.parallelism}x`)
+                            : h("div", { className: "of-mono of-muted", style: { fontSize: "10px" } }, `papel: ${a.papel} · paralelismo: ${a.parallelism}x`),
+                          isEditing && props.agentEditDraft && props.setAgentEditDraft &&
+                            h(
+                              "div",
+                              { className: "of-surface", style: { marginTop: "8px", padding: "8px", display: "flex", flexDirection: "column", gap: "6px" }, "data-agent-nip-ap-editor": "true" },
+                              h("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" } },
+                                h("input", { className: "of-input", placeholder: "Provider (ex: nexusmind_anthropic)", value: props.agentEditDraft.provider, onChange: (e: any) => props.setAgentEditDraft!({ provider: e.target.value }) }),
+                                h("input", { className: "of-input", placeholder: "Model (ex: claude-sonnet-5-5)", value: props.agentEditDraft.model, onChange: (e: any) => props.setAgentEditDraft!({ model: e.target.value }) })
+                              ),
+                              h("textarea", { className: "of-textarea", placeholder: "Instructions NIP-AP (opcional)", value: props.agentEditDraft.instructions, onChange: (e: any) => props.setAgentEditDraft!({ instructions: e.target.value }) }),
+                              h("div", { style: { display: "flex", gap: "6px" } },
+                                h("button", { type: "button", className: "of-btn", "data-variant": "primary", onClick: () => props.onSaveAgentProfile?.(a.agentKey, props.agentEditDraft!) }, "Salvar no Buzz (ctx.agents.save)"),
+                                h("button", { type: "button", className: "of-btn", onClick: () => props.setEditingAgentKey?.(null) }, "Cancelar")
+                              )
+                            )
                         ),
                         h("td", { className: "of-mono" }, a.model),
                         h(
@@ -739,6 +770,41 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                                   onClick: () => onOpenAgentDm({ key: a.agentKey, pubkey: a.pubkey, name: a.name }),
                                 },
                                 "DM ↗"
+                              ),
+                            props.onOpenAgentDrawer && a.inBuzz && a.agentKey &&
+                              h(
+                                "button",
+                                {
+                                  type: "button",
+                                  className: "of-btn",
+                                  "data-variant": "ghost",
+                                  style: { padding: "3px 6px", fontSize: "10.5px" },
+                                  onClick: () => props.onOpenAgentDrawer!(a.agentKey),
+                                },
+                                "Transcript"
+                              ),
+                            props.setEditingAgentKey && props.setAgentEditDraft && a.inBuzz && a.agentKey &&
+                              h(
+                                "button",
+                                {
+                                  type: "button",
+                                  className: "of-btn",
+                                  "data-variant": "ghost",
+                                  style: { padding: "3px 6px", fontSize: "10.5px" },
+                                  onClick: () => {
+                                    if (isEditing) {
+                                      props.setEditingAgentKey!(null);
+                                    } else {
+                                      props.setEditingAgentKey!(a.agentKey);
+                                      props.setAgentEditDraft!({
+                                        provider: liveMatch?.provider || "",
+                                        model: liveMatch?.model || a.model || "",
+                                        instructions: liveMatch?.instructions || "",
+                                      });
+                                    }
+                                  },
+                                },
+                                isEditing ? "Fechar" : "Editar"
                               ),
                             props.onAgentSessionAction && a.inBuzz && a.agentKey &&
                               h(
@@ -927,17 +993,52 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
               { style: { display: "flex", flexWrap: "wrap", gap: "6px" } },
               papeis.map(([papel, agente]) => h("span", { key: papel, className: "of-pill" }, `${papel}: ${agente}`))
             ),
-          props.channelCanvas &&
+          h(
+            "div",
+            { className: "of-surface", style: { padding: "10px 12px", borderColor: "var(--primary)", display: "flex", flexDirection: "column", gap: "8px" }, "data-canvas-live-editor": "true" },
             h(
               "div",
-              { className: "of-surface", style: { padding: "10px 12px", borderColor: "var(--primary)" } },
-              h("div", { className: "of-mono", style: { fontSize: "10.5px", color: "var(--primary)", marginBottom: "6px" } }, `Canvas ao vivo do canal no Buzz (session.canvas.read · ${tenant})`),
-              h(
-                "pre",
-                { className: "of-muted", style: { margin: 0, whiteSpace: "pre-wrap", fontSize: "11px", maxHeight: "180px", overflowY: "auto", fontFamily: "inherit", lineHeight: 1.45 } },
-                props.channelCanvas
-              )
+              { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" } },
+              h("div", { className: "of-mono", style: { fontSize: "10.5px", color: "var(--primary)" } }, `Canvas ao vivo do canal no Buzz (session.canvas · ${tenant})`),
+              props.canvasWritable && props.onSaveCanvas &&
+                h(
+                  "button",
+                  { type: "button", className: "of-btn", "data-variant": "primary", disabled: props.canvasSaving, style: { padding: "3px 9px", fontSize: "11px" }, onClick: props.onSaveCanvas },
+                  props.canvasSaving ? "Salvando..." : "Salvar Canvas no Buzz"
+                )
             ),
+            props.setCanvasDraft
+              ? h("textarea", {
+                  className: "of-textarea",
+                  style: { minHeight: "150px", fontSize: "11.5px", lineHeight: 1.45 },
+                  placeholder: "Conteúdo do Canvas do canal no Buzz...",
+                  value: props.canvasDraft ?? props.channelCanvas ?? "",
+                  onChange: (e: any) => props.setCanvasDraft!(e.target.value),
+                })
+              : h(
+                  "pre",
+                  { className: "of-muted", style: { margin: 0, whiteSpace: "pre-wrap", fontSize: "11px", maxHeight: "180px", overflowY: "auto", fontFamily: "inherit", lineHeight: 1.45 } },
+                  props.channelCanvas || "Canvas vazio neste canal."
+                ),
+            props.canvasHistory && props.canvasHistory.length > 0 &&
+              h(
+                "details",
+                null,
+                h("summary", { className: "of-muted", style: { cursor: "pointer", fontSize: "11px" } }, `Histórico de revisões (${props.canvasHistory.length})`),
+                h(
+                  "div",
+                  { style: { marginTop: "6px", display: "flex", flexDirection: "column", gap: "4px" } },
+                  props.canvasHistory.map((rev) =>
+                    h(
+                      "div",
+                      { key: rev.id, style: { fontSize: "10.5px", padding: "4px 6px", borderRadius: "5px", background: "var(--card)" } },
+                      h("strong", null, props.resolveAuthor ? props.resolveAuthor(rev.authorPubkey) : rev.authorPubkey.slice(0, 10)),
+                      h("span", { className: "of-muted" }, ` · ${rev.createdAt ? new Date(rev.createdAt).toLocaleString("pt-BR") : ""} — ${rev.preview}`)
+                    )
+                  )
+                )
+              )
+          ),
           h(
             "div",
             { className: "of-surface", style: { padding: "10px 12px" } },

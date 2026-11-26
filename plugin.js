@@ -908,7 +908,7 @@ async function openSystemUri(ctx, uri) {
   return opened;
 }
 async function openIssueInBuzz(ctx, issue) {
-  var _a, _b;
+  var _a, _b, _c, _d;
   const DEFAULT_OWNER = "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20";
   let owner = (issue.owner || DEFAULT_OWNER).toLowerCase().trim();
   if (!/^[0-9a-f]{64}$/i.test(owner)) {
@@ -927,8 +927,19 @@ async function openIssueInBuzz(ctx, issue) {
   if ((_a = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a.open) {
     try {
       const snap = typeof ctx.navigation.snapshot === "function" ? ctx.navigation.snapshot() : null;
-      const currentTarget = (_b = snap == null ? void 0 : snap.entry) == null ? void 0 : _b.target;
-      const activeScope = (currentTarget == null ? void 0 : currentTarget.scope) && typeof currentTarget.scope === "object" ? currentTarget.scope : void 0;
+      const navScope = (_c = (_b = snap == null ? void 0 : snap.entry) == null ? void 0 : _b.target) == null ? void 0 : _c.scope;
+      let activeScope = navScope && typeof navScope === "object" && navScope.viewer && navScope.communityOrigin ? { viewer: String(navScope.viewer), communityOrigin: String(navScope.communityOrigin) } : void 0;
+      if (!activeScope && typeof ((_d = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _d.snapshot) === "function") {
+        const rSnap = ctx.relay.snapshot();
+        const viewer = (rSnap == null ? void 0 : rSnap.viewer) ? String(rSnap.viewer) : "";
+        let communityOrigin = (rSnap == null ? void 0 : rSnap.origin) ? String(rSnap.origin) : "";
+        if (!communityOrigin && viewer && typeof (rSnap == null ? void 0 : rSnap.scope) === "string" && rSnap.scope.endsWith(`:${viewer}`)) {
+          communityOrigin = rSnap.scope.slice(0, -(viewer.length + 1));
+        }
+        if (viewer && communityOrigin) {
+          activeScope = { viewer, communityOrigin };
+        }
+      }
       if (activeScope) {
         const res = await ctx.navigation.open({
           version: 1,
@@ -11278,7 +11289,11 @@ function renderFactoryBoardAndFloor(props) {
         telemetry: props.telemetry,
         focus: storeyFocus,
         onSelectItem,
-        onOpenAgentDm: props.onOpenAgentDm
+        onOpenAgentDm: (ag) => {
+          var _a2;
+          if (ag == null ? void 0 : ag.key) onSelectAgentKey(ag.key);
+          else (_a2 = props.onOpenAgentDm) == null ? void 0 : _a2.call(props, ag);
+        }
       }) : h(
         "div",
         { className: "of-card-pad" },
@@ -11288,7 +11303,8 @@ function renderFactoryBoardAndFloor(props) {
   );
 }
 function renderItemSheetDrawer(props) {
-  const { h, item, tenant, onClose, onOpenInBuzz } = props;
+  var _a;
+  const { h, item, tenant, repoDetail, repoLoading, resolveAuthor, EmbeddedThread, threadChannelId, relaySession, onOpenCommitInBuzz, onClose, onOpenInBuzz } = props;
   if (!item) return null;
   const steps = ["Entrada", "Identificar tipo", "Execução (Worktree)", "Revisão L-01 + CI", "Merge na main"];
   const activeIdx = item.stage === "merged" ? 4 : item.stage === "verifying" || item.stage === "watching" ? 3 : item.stage === "building" ? 2 : item.stage === "candidate" ? 1 : 0;
@@ -11296,13 +11312,14 @@ function renderItemSheetDrawer(props) {
     "div",
     {
       className: "of-sheet-backdrop",
+      "data-item-sheet-drawer": "true",
       onClick: (e) => {
         if (e.target === e.currentTarget) onClose();
       }
     },
     h(
       "aside",
-      { className: "of-sheet-panel" },
+      { className: "of-sheet-panel", style: { width: "min(540px, 95vw)" } },
       h(
         "div",
         { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px" } },
@@ -11310,14 +11327,14 @@ function renderItemSheetDrawer(props) {
           "div",
           null,
           h("div", { className: "of-mono", style: { fontSize: "11px", color: "var(--primary)" } }, `#${item.id.slice(0, 12)} · ${tenant}`),
-          h("div", { style: { fontSize: "15px", fontWeight: 700, marginTop: "2px" } }, item.title)
+          h("div", { style: { fontSize: "15px", fontWeight: 700, marginTop: "2px" } }, (repoDetail == null ? void 0 : repoDetail.title) || item.title)
         ),
         h("button", { type: "button", className: "of-btn", onClick: onClose }, "Fechar")
       ),
       h(
         "div",
         { style: { display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" } },
-        h("span", { className: "of-pill", "data-tone": cardStateOf(item) === "person" ? "waiting" : cardStateOf(item) }, item.stage),
+        h("span", { className: "of-pill", "data-tone": cardStateOf(item) === "person" ? "waiting" : cardStateOf(item) }, (repoDetail == null ? void 0 : repoDetail.status) || item.stage),
         item.type && h("span", { className: "of-pill" }, item.type),
         item.attempts > 1 && h("span", { className: "of-pill", "data-tone": "waiting" }, `Refazer rodada ${item.attempts}`),
         onOpenInBuzz && h(
@@ -11329,7 +11346,7 @@ function renderItemSheetDrawer(props) {
             style: { marginLeft: "auto" },
             onClick: () => onOpenInBuzz(item)
           },
-          "Abrir no Buzz ↗"
+          "Abrir direto no Buzz Repos ↗"
         )
       ),
       h(
@@ -11362,9 +11379,102 @@ function renderItemSheetDrawer(props) {
         { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px", fontSize: "12px" } },
         h("div", { style: { display: "flex", justifyContent: "space-between" } }, h("span", { className: "of-muted" }, "Work key"), h("span", { className: "of-mono" }, item.workKey || "—")),
         h("div", { style: { display: "flex", justifyContent: "space-between" } }, h("span", { className: "of-muted" }, "Etapa"), h("span", { className: "of-mono" }, item.step || item.stage)),
-        h("div", { style: { display: "flex", justifyContent: "space-between" } }, h("span", { className: "of-muted" }, "Sessão ativa"), h("span", { className: "of-mono" }, item.activeSessionId || "—")),
+        (repoDetail == null ? void 0 : repoDetail.authorPubkey) && h("div", { style: { display: "flex", justifyContent: "space-between" } }, h("span", { className: "of-muted" }, "Autor (NIP-34)"), h("span", null, resolveAuthor ? resolveAuthor(repoDetail.authorPubkey) : repoDetail.authorPubkey.slice(0, 12))),
+        (repoDetail == null ? void 0 : repoDetail.commit) && h(
+          "div",
+          { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+          h("span", { className: "of-muted" }, "Commit"),
+          onOpenCommitInBuzz ? h("button", { type: "button", className: "of-btn", "data-variant": "ghost", style: { padding: "1px 6px", fontFamily: "var(--font-mono)", color: "var(--primary)" }, onClick: () => onOpenCommitInBuzz(repoDetail.commit) }, `${repoDetail.commit.slice(0, 10)} ↗`) : h("span", { className: "of-mono" }, repoDetail.commit.slice(0, 10))
+        ),
         item.reason && h("div", { style: { marginTop: "4px", color: "var(--status-waiting)" } }, `Motivo: ${item.reason}`),
         item.note && h("div", { className: "of-muted" }, `Nota: ${item.note}`)
+      ),
+      repoLoading && h("div", { className: "of-muted", style: { fontSize: "11.5px" } }, "Carregando conteúdo NIP-34 e diff do Buzz Repos..."),
+      (repoDetail == null ? void 0 : repoDetail.content) && h(
+        "section",
+        { className: "of-surface", style: { padding: "10px 12px" }, "data-buzz-repo-detail": "true" },
+        h("div", { className: "of-meter-label", style: { marginBottom: "6px" } }, "Descrição (Buzz Repos NIP-34)"),
+        h("pre", { className: "of-muted", style: { margin: 0, whiteSpace: "pre-wrap", fontFamily: "inherit", fontSize: "11.5px", lineHeight: 1.5, maxHeight: "220px", overflowY: "auto" } }, repoDetail.content)
+      ),
+      (repoDetail == null ? void 0 : repoDetail.commitDiff) && h(
+        "section",
+        { className: "of-surface", style: { padding: "10px 12px" } },
+        h("div", { className: "of-meter-label", style: { marginBottom: "6px" } }, `Diff do Commit (${(_a = repoDetail.commit) == null ? void 0 : _a.slice(0, 8)})`),
+        h("pre", { className: "of-mono", style: { margin: 0, whiteSpace: "pre", fontSize: "10.5px", lineHeight: 1.4, maxHeight: "200px", overflow: "auto" } }, repoDetail.commitDiff)
+      ),
+      repoDetail && repoDetail.comments.length > 0 && h(
+        "section",
+        { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "8px" } },
+        h("div", { className: "of-meter-label" }, `Discussão NIP-34 (${repoDetail.comments.length})`),
+        repoDetail.comments.slice(-8).map(
+          (c) => h(
+            "div",
+            { key: c.id, style: { padding: "7px 9px", borderRadius: "7px", background: "var(--card)", border: "1px solid var(--border)", fontSize: "11.5px" } },
+            h(
+              "div",
+              { style: { display: "flex", justifyContent: "space-between", marginBottom: "4px", fontSize: "10.5px" } },
+              h("strong", null, resolveAuthor ? resolveAuthor(c.authorPubkey) : c.authorPubkey.slice(0, 10)),
+              h("span", { className: "of-muted" }, c.createdAt ? new Date(c.createdAt).toLocaleString("pt-BR") : "")
+            ),
+            h("div", { style: { whiteSpace: "pre-wrap", lineHeight: 1.4 } }, c.content)
+          )
+        )
+      ),
+      EmbeddedThread && threadChannelId && relaySession && h(
+        "section",
+        { className: "of-surface", style: { padding: "10px 12px", minHeight: "220px" }, "data-embedded-buzz-thread": "true" },
+        h("div", { className: "of-meter-label", style: { marginBottom: "6px" } }, "Thread ao vivo no Buzz"),
+        h(EmbeddedThread, { session: relaySession, channelId: threadChannelId, rootId: item.id })
+      )
+    )
+  );
+}
+function renderAgentProfileDrawer(props) {
+  const { h, agent, liveTurn, TranscriptComponent, channelId, onOpenDm, onSessionAction, onClose } = props;
+  if (!agent) return null;
+  return h(
+    "div",
+    {
+      className: "of-sheet-backdrop",
+      "data-agent-profile-drawer": "true",
+      onClick: (e) => {
+        if (e.target === e.currentTarget) onClose();
+      }
+    },
+    h(
+      "aside",
+      { className: "of-sheet-panel", style: { width: "min(520px, 95vw)" } },
+      h(
+        "div",
+        { style: { display: "flex", alignItems: "center", gap: "10px" } },
+        agent.picture ? h("img", { src: agent.picture, alt: agent.name, style: { width: "38px", height: "38px", borderRadius: "10px", objectFit: "cover", border: "1px solid var(--border)" } }) : h("span", { className: "of-brand-icon", style: { width: "38px", height: "38px", fontSize: "15px" } }, agent.name.charAt(0).toUpperCase()),
+        h(
+          "div",
+          { style: { flex: 1, minWidth: 0 } },
+          h("div", { style: { fontSize: "15px", fontWeight: 700 } }, agent.name),
+          h("div", { className: "of-mono of-muted", style: { fontSize: "11px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, `${agent.provider || "buzz"} / ${agent.model}`)
+        ),
+        h("button", { type: "button", className: "of-btn", onClick: onClose }, "Fechar")
+      ),
+      h(
+        "div",
+        { style: { display: "flex", flexWrap: "wrap", gap: "6px", alignItems: "center" } },
+        h("span", { className: "of-pill", "data-tone": liveTurn ? liveTurn.state === "error" ? "failed" : "running" : agent.running ? "done" : "idle" }, liveTurn ? `⚡ ${liveTurn.stepLabel}` : agent.running ? "Ativo" : "Disponível"),
+        onOpenDm && h("button", { type: "button", className: "of-btn", "data-variant": "primary", onClick: () => onOpenDm({ key: agent.key, pubkey: agent.pubkey, name: agent.name }) }, "DM lateral ↗"),
+        onSessionAction && agent.key && h("button", { type: "button", className: "of-btn", onClick: () => onSessionAction(agent.key, "compact") }, "Compactar"),
+        onSessionAction && agent.key && h("button", { type: "button", className: "of-btn", onClick: () => onSessionAction(agent.key, "new") }, "Nova sessão"),
+        onSessionAction && agent.key && h("button", { type: "button", className: "of-btn", "data-variant": "danger", onClick: () => onSessionAction(agent.key, "interrupt") }, "Parar")
+      ),
+      TranscriptComponent ? h(
+        "section",
+        { className: "of-surface", style: { padding: "10px 12px", flex: 1, minHeight: "260px", overflowY: "auto" }, "data-agent-transcript": "true" },
+        h("div", { className: "of-meter-label", style: { marginBottom: "8px" } }, "Transcript ao vivo (ctx.agents.ui.Transcript)"),
+        h(TranscriptComponent, { agentKey: agent.key, channelId: (liveTurn == null ? void 0 : liveTurn.channelId) || channelId || void 0 })
+      ) : h(
+        "section",
+        { className: "of-surface", style: { padding: "12px" }, "data-agent-transcript-fallback": "true" },
+        h("div", { className: "of-meter-label", style: { marginBottom: "6px" } }, "Atividade do agente"),
+        h("div", { className: "of-muted", style: { fontSize: "12px" } }, liveTurn ? `Em execução agora: ${liveTurn.stepLabel}` : "Nenhum turno ativo no momento. Clique em DM lateral ↗ para conversar com o agente.")
       )
     )
   );
@@ -44296,6 +44406,11 @@ function renderFactorySecondaryPage(props) {
               const pkLower = (a.pubkey || "").toLowerCase();
               const liveTurn = pkLower && ((_a2 = props.telemetry) == null ? void 0 : _a2.byPubkey) ? props.telemetry.byPubkey[pkLower] : null;
               const presence = pkLower && ((_b2 = props.telemetry) == null ? void 0 : _b2.presenceByPubkey) ? props.telemetry.presenceByPubkey[pkLower] : void 0;
+              const liveMatch = liveCrew.find((c) => {
+                var _a3;
+                return c.key === a.agentKey || pkLower && ((_a3 = c.pubkey) == null ? void 0 : _a3.toLowerCase()) === pkLower;
+              });
+              const isEditing = Boolean(props.editingAgentKey && props.editingAgentKey === a.agentKey);
               return h(
                 "tr",
                 { key: a.name },
@@ -44304,8 +44419,8 @@ function renderFactorySecondaryPage(props) {
                   { style: { fontWeight: 600 } },
                   h(
                     "span",
-                    { style: { display: "inline-flex", alignItems: "center", gap: "6px" } },
-                    h("span", { className: "of-dot", "data-tone": liveTurn ? liveTurn.state === "error" ? "failed" : "running" : a.inBuzz ? "done" : "idle" }),
+                    { style: { display: "inline-flex", alignItems: "center", gap: "7px" } },
+                    (liveMatch == null ? void 0 : liveMatch.picture) ? h("img", { src: liveMatch.picture, alt: a.name, style: { width: "22px", height: "22px", borderRadius: "6px", objectFit: "cover", border: liveTurn ? "1.5px solid var(--status-running)" : "1px solid var(--border)", flexShrink: 0 } }) : h("span", { className: "of-dot", "data-tone": liveTurn ? liveTurn.state === "error" ? "failed" : "running" : a.inBuzz ? "done" : "idle" }),
                     a.name
                   )
                 ),
@@ -44313,7 +44428,30 @@ function renderFactorySecondaryPage(props) {
                   "td",
                   null,
                   h("div", { style: { fontSize: "12px" } }, a.funcao),
-                  liveTurn ? h("div", { className: "of-mono", style: { fontSize: "10px", color: liveTurn.state === "error" ? "var(--status-failed)" : "var(--status-running)" } }, `⚡ ${liveTurn.stepLabel}`) : h("div", { className: "of-mono of-muted", style: { fontSize: "10px" } }, `papel: ${a.papel} · paralelismo: ${a.parallelism}x`)
+                  liveTurn ? h("div", { className: "of-mono", style: { fontSize: "10px", color: liveTurn.state === "error" ? "var(--status-failed)" : "var(--status-running)" } }, `⚡ ${liveTurn.stepLabel}`) : h("div", { className: "of-mono of-muted", style: { fontSize: "10px" } }, `papel: ${a.papel} · paralelismo: ${a.parallelism}x`),
+                  isEditing && props.agentEditDraft && props.setAgentEditDraft && h(
+                    "div",
+                    { className: "of-surface", style: { marginTop: "8px", padding: "8px", display: "flex", flexDirection: "column", gap: "6px" }, "data-agent-nip-ap-editor": "true" },
+                    h(
+                      "div",
+                      { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" } },
+                      h("input", { className: "of-input", placeholder: "Provider (ex: nexusmind_anthropic)", value: props.agentEditDraft.provider, onChange: (e) => props.setAgentEditDraft({ provider: e.target.value }) }),
+                      h("input", { className: "of-input", placeholder: "Model (ex: claude-sonnet-5-5)", value: props.agentEditDraft.model, onChange: (e) => props.setAgentEditDraft({ model: e.target.value }) })
+                    ),
+                    h("textarea", { className: "of-textarea", placeholder: "Instructions NIP-AP (opcional)", value: props.agentEditDraft.instructions, onChange: (e) => props.setAgentEditDraft({ instructions: e.target.value }) }),
+                    h(
+                      "div",
+                      { style: { display: "flex", gap: "6px" } },
+                      h("button", { type: "button", className: "of-btn", "data-variant": "primary", onClick: () => {
+                        var _a3;
+                        return (_a3 = props.onSaveAgentProfile) == null ? void 0 : _a3.call(props, a.agentKey, props.agentEditDraft);
+                      } }, "Salvar no Buzz (ctx.agents.save)"),
+                      h("button", { type: "button", className: "of-btn", onClick: () => {
+                        var _a3;
+                        return (_a3 = props.setEditingAgentKey) == null ? void 0 : _a3.call(props, null);
+                      } }, "Cancelar")
+                    )
+                  )
                 ),
                 h("td", { className: "of-mono" }, a.model),
                 h(
@@ -44341,6 +44479,39 @@ function renderFactorySecondaryPage(props) {
                         onClick: () => onOpenAgentDm({ key: a.agentKey, pubkey: a.pubkey, name: a.name })
                       },
                       "DM ↗"
+                    ),
+                    props.onOpenAgentDrawer && a.inBuzz && a.agentKey && h(
+                      "button",
+                      {
+                        type: "button",
+                        className: "of-btn",
+                        "data-variant": "ghost",
+                        style: { padding: "3px 6px", fontSize: "10.5px" },
+                        onClick: () => props.onOpenAgentDrawer(a.agentKey)
+                      },
+                      "Transcript"
+                    ),
+                    props.setEditingAgentKey && props.setAgentEditDraft && a.inBuzz && a.agentKey && h(
+                      "button",
+                      {
+                        type: "button",
+                        className: "of-btn",
+                        "data-variant": "ghost",
+                        style: { padding: "3px 6px", fontSize: "10.5px" },
+                        onClick: () => {
+                          if (isEditing) {
+                            props.setEditingAgentKey(null);
+                          } else {
+                            props.setEditingAgentKey(a.agentKey);
+                            props.setAgentEditDraft({
+                              provider: (liveMatch == null ? void 0 : liveMatch.provider) || "",
+                              model: (liveMatch == null ? void 0 : liveMatch.model) || a.model || "",
+                              instructions: (liveMatch == null ? void 0 : liveMatch.instructions) || ""
+                            });
+                          }
+                        }
+                      },
+                      isEditing ? "Fechar" : "Editar"
                     ),
                     props.onAgentSessionAction && a.inBuzz && a.agentKey && h(
                       "button",
@@ -44509,14 +44680,46 @@ function renderFactorySecondaryPage(props) {
             { style: { display: "flex", flexWrap: "wrap", gap: "6px" } },
             papeis.map(([papel, agente]) => h("span", { key: papel, className: "of-pill" }, `${papel}: ${agente}`))
           ),
-          props.channelCanvas && h(
+          h(
             "div",
-            { className: "of-surface", style: { padding: "10px 12px", borderColor: "var(--primary)" } },
-            h("div", { className: "of-mono", style: { fontSize: "10.5px", color: "var(--primary)", marginBottom: "6px" } }, `Canvas ao vivo do canal no Buzz (session.canvas.read · ${tenant})`),
+            { className: "of-surface", style: { padding: "10px 12px", borderColor: "var(--primary)", display: "flex", flexDirection: "column", gap: "8px" }, "data-canvas-live-editor": "true" },
             h(
+              "div",
+              { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" } },
+              h("div", { className: "of-mono", style: { fontSize: "10.5px", color: "var(--primary)" } }, `Canvas ao vivo do canal no Buzz (session.canvas · ${tenant})`),
+              props.canvasWritable && props.onSaveCanvas && h(
+                "button",
+                { type: "button", className: "of-btn", "data-variant": "primary", disabled: props.canvasSaving, style: { padding: "3px 9px", fontSize: "11px" }, onClick: props.onSaveCanvas },
+                props.canvasSaving ? "Salvando..." : "Salvar Canvas no Buzz"
+              )
+            ),
+            props.setCanvasDraft ? h("textarea", {
+              className: "of-textarea",
+              style: { minHeight: "150px", fontSize: "11.5px", lineHeight: 1.45 },
+              placeholder: "Conteúdo do Canvas do canal no Buzz...",
+              value: props.canvasDraft ?? props.channelCanvas ?? "",
+              onChange: (e) => props.setCanvasDraft(e.target.value)
+            }) : h(
               "pre",
               { className: "of-muted", style: { margin: 0, whiteSpace: "pre-wrap", fontSize: "11px", maxHeight: "180px", overflowY: "auto", fontFamily: "inherit", lineHeight: 1.45 } },
-              props.channelCanvas
+              props.channelCanvas || "Canvas vazio neste canal."
+            ),
+            props.canvasHistory && props.canvasHistory.length > 0 && h(
+              "details",
+              null,
+              h("summary", { className: "of-muted", style: { cursor: "pointer", fontSize: "11px" } }, `Histórico de revisões (${props.canvasHistory.length})`),
+              h(
+                "div",
+                { style: { marginTop: "6px", display: "flex", flexDirection: "column", gap: "4px" } },
+                props.canvasHistory.map(
+                  (rev) => h(
+                    "div",
+                    { key: rev.id, style: { fontSize: "10.5px", padding: "4px 6px", borderRadius: "5px", background: "var(--card)" } },
+                    h("strong", null, props.resolveAuthor ? props.resolveAuthor(rev.authorPubkey) : rev.authorPubkey.slice(0, 10)),
+                    h("span", { className: "of-muted" }, ` · ${rev.createdAt ? new Date(rev.createdAt).toLocaleString("pt-BR") : ""} — ${rev.preview}`)
+                  )
+                )
+              )
             )
           ),
           h(
@@ -44856,20 +45059,275 @@ async function readBuzzMainAgentPubkey(ctx) {
   }
   return null;
 }
-async function readBuzzChannelCanvas(ctx, channelId) {
-  var _a, _b, _c, _d;
-  if (!channelId) return null;
+async function readBuzzChannelCanvasDetailed(ctx, channelId) {
+  var _a, _b, _c, _d, _e;
+  if (!channelId) return { content: null, writable: false };
   try {
     const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
-    if (((_d = session == null ? void 0 : session.canvas) == null ? void 0 : _d.available) && typeof session.canvas.read === "function") {
+    const writable = Boolean(((_d = session == null ? void 0 : session.canvas) == null ? void 0 : _d.available) && typeof session.canvas.save === "function");
+    if (((_e = session == null ? void 0 : session.canvas) == null ? void 0 : _e.available) && typeof session.canvas.read === "function") {
       const ev = await session.canvas.read(channelId);
-      if (ev && typeof ev.content === "string" && ev.content.trim()) {
-        return ev.content.trim();
+      if (ev && typeof ev.content === "string") {
+        return {
+          content: ev.content.trim() ? ev.content : null,
+          eventId: typeof ev.id === "string" ? ev.id : void 0,
+          writable
+        };
       }
+    }
+    return { content: null, writable };
+  } catch {
+    return { content: null, writable: false };
+  }
+}
+async function saveBuzzChannelCanvas(ctx, channelId, content, expectedEventId) {
+  var _a, _b, _c, _d;
+  if (!channelId) return { ok: false, error: "Canal da empresa não configurado." };
+  try {
+    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+    if (!((_d = session == null ? void 0 : session.canvas) == null ? void 0 : _d.available) || typeof session.canvas.save !== "function") {
+      return { ok: false, error: "API session.canvas.save indisponível no Buzz." };
+    }
+    const saved = await session.canvas.save(channelId, content, expectedEventId);
+    return { ok: true, eventId: typeof (saved == null ? void 0 : saved.id) === "string" ? saved.id : void 0 };
+  } catch (err) {
+    return { ok: false, error: (err == null ? void 0 : err.message) || String(err) };
+  }
+}
+async function readBuzzChannelCanvasHistory(ctx, channelId) {
+  var _a, _b, _c, _d;
+  if (!channelId) return [];
+  try {
+    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+    if (!((_d = session == null ? void 0 : session.canvas) == null ? void 0 : _d.available) || typeof session.canvas.history !== "function") return [];
+    const page = await session.canvas.history(channelId);
+    const entries = Array.isArray(page == null ? void 0 : page.entries) ? page.entries : Array.isArray(page == null ? void 0 : page.events) ? page.events : Array.isArray(page) ? page : [];
+    return entries.slice(0, 8).map((ev) => {
+      var _a2, _b2, _c2, _d2;
+      return {
+        id: String((ev == null ? void 0 : ev.id) || ((_a2 = ev == null ? void 0 : ev.event) == null ? void 0 : _a2.id) || ""),
+        createdAt: Number((ev == null ? void 0 : ev.created_at) || ((_b2 = ev == null ? void 0 : ev.event) == null ? void 0 : _b2.created_at) || 0) * 1e3,
+        authorPubkey: String((ev == null ? void 0 : ev.pubkey) || ((_c2 = ev == null ? void 0 : ev.event) == null ? void 0 : _c2.pubkey) || "").toLowerCase(),
+        preview: String((ev == null ? void 0 : ev.content) || ((_d2 = ev == null ? void 0 : ev.event) == null ? void 0 : _d2.content) || "").replace(/\s+/g, " ").slice(0, 100)
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+const DEFAULT_ORGFY_REPO_OWNER = "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20";
+function resolveBuzzNavigationScope(ctx) {
+  var _a, _b, _c, _d;
+  try {
+    const navSnap = typeof ((_a = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a.snapshot) === "function" ? ctx.navigation.snapshot() : null;
+    const navScope = (_c = (_b = navSnap == null ? void 0 : navSnap.entry) == null ? void 0 : _b.target) == null ? void 0 : _c.scope;
+    if ((navScope == null ? void 0 : navScope.viewer) && (navScope == null ? void 0 : navScope.communityOrigin)) {
+      return {
+        viewer: String(navScope.viewer),
+        communityOrigin: String(navScope.communityOrigin)
+      };
+    }
+  } catch {
+  }
+  try {
+    const relaySnap = typeof ((_d = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _d.snapshot) === "function" ? ctx.relay.snapshot() : null;
+    const viewer = (relaySnap == null ? void 0 : relaySnap.viewer) ? String(relaySnap.viewer) : "";
+    let communityOrigin = (relaySnap == null ? void 0 : relaySnap.origin) ? String(relaySnap.origin) : "";
+    if (!communityOrigin && viewer && typeof (relaySnap == null ? void 0 : relaySnap.scope) === "string" && relaySnap.scope.endsWith(`:${viewer}`)) {
+      communityOrigin = relaySnap.scope.slice(0, -(viewer.length + 1));
+    }
+    if (viewer && communityOrigin) {
+      return { viewer, communityOrigin };
     }
   } catch {
   }
   return null;
+}
+async function openBuzzRepoEntity(ctx, route) {
+  var _a;
+  const scope = resolveBuzzNavigationScope(ctx);
+  if (!scope || typeof ((_a = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a.open) !== "function") {
+    return false;
+  }
+  const normalizedRoute = "id" in route ? {
+    type: route.type,
+    owner: route.owner.toLowerCase().trim(),
+    dtag: route.dtag.trim(),
+    id: route.id.toLowerCase().replace(/^#/, "").trim()
+  } : {
+    type: "repo",
+    owner: route.owner.toLowerCase().trim(),
+    dtag: route.dtag.trim(),
+    ...route.tab ? { tab: route.tab } : {},
+    ...route.commit ? { commit: route.commit.toLowerCase().trim() } : {}
+  };
+  try {
+    const res = await ctx.navigation.open({
+      version: 1,
+      kind: "page",
+      pluginId: "buzz.repos",
+      pageId: "repos",
+      scope,
+      route: {
+        version: 1,
+        params: normalizedRoute
+      }
+    });
+    return !res || res.status === "opened";
+  } catch (err) {
+    console.warn("[OrgFy BuzzRepos] ctx.navigation.open falhou:", err);
+    return false;
+  }
+}
+async function openRepoTabInBuzz(ctx, opts) {
+  const owner = /^[0-9a-f]{64}$/i.test(String(opts.owner)) ? String(opts.owner).toLowerCase() : DEFAULT_ORGFY_REPO_OWNER;
+  const dtag = String(opts.dtag || "orgfy").trim() || "orgfy";
+  return openBuzzRepoEntity(ctx, {
+    type: "repo",
+    owner,
+    dtag,
+    ...opts.tab ? { tab: opts.tab } : {},
+    ...opts.commit ? { tab: "commits", commit: opts.commit } : {}
+  });
+}
+function tagValue(event, name) {
+  const tags = Array.isArray(event == null ? void 0 : event.tags) ? event.tags : [];
+  const found = tags.find((t) => Array.isArray(t) && t[0] === name && typeof t[1] === "string");
+  return found ? String(found[1]) : void 0;
+}
+async function loadLiveRepoSnapshot(ctx, opts) {
+  var _a, _b, _c, _d;
+  const fallbackOwner = /^[0-9a-f]{64}$/i.test(String(opts.owner || "")) ? String(opts.owner).toLowerCase() : DEFAULT_ORGFY_REPO_OWNER;
+  const fallbackDtag = String(opts.dtag || "orgfy").trim() || "orgfy";
+  const session = typeof ((_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) === "function" ? (_b = ctx.relay.snapshot()) == null ? void 0 : _b.session : null;
+  if (!(session == null ? void 0 : session.repositories) || typeof session.repositories.load !== "function") {
+    return { available: false, owner: fallbackOwner, dtag: fallbackDtag, issues: [], prs: [] };
+  }
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 8e3);
+  try {
+    let owner = fallbackOwner;
+    let dtag = fallbackDtag;
+    let name;
+    if (opts.channelId && typeof session.repositories.home === "function") {
+      try {
+        const home = await session.repositories.home(opts.channelId, ac.signal);
+        if ((home == null ? void 0 : home.status) === "home" && Array.isArray(home.repositories) && home.repositories.length > 0) {
+          const picked = home.repositories.find((r) => String(r.dtag || "").toLowerCase() === fallbackDtag.toLowerCase()) || home.repositories[0];
+          if ((picked == null ? void 0 : picked.owner) && (picked == null ? void 0 : picked.dtag)) {
+            owner = String(picked.owner).toLowerCase();
+            dtag = String(picked.dtag);
+            name = typeof picked.name === "string" ? picked.name : dtag;
+          }
+        }
+      } catch {
+      }
+    }
+    const [issuesDetail, prsDetail] = await Promise.all([
+      session.repositories.load({ type: "repo", owner, dtag, tab: "issues" }, ac.signal).catch(() => null),
+      session.repositories.load({ type: "repo", owner, dtag, tab: "prs" }, ac.signal).catch(() => null)
+    ]);
+    const mapItems = (detail, kind) => {
+      const items = Array.isArray(detail == null ? void 0 : detail.items) ? detail.items : [];
+      return items.map((ev) => {
+        var _a2;
+        const content = String((ev == null ? void 0 : ev.content) || "");
+        const title = tagValue(ev, "subject") || ((_a2 = content.split("\n").find((l) => l.trim())) == null ? void 0 : _a2.replace(/^#+\s*/, "").slice(0, 120)) || `${kind.toUpperCase()} #${String((ev == null ? void 0 : ev.id) || "").slice(0, 8)}`;
+        return {
+          id: String((ev == null ? void 0 : ev.id) || ""),
+          kind,
+          owner,
+          dtag,
+          title,
+          authorPubkey: String((ev == null ? void 0 : ev.pubkey) || "").toLowerCase(),
+          createdAt: Number((ev == null ? void 0 : ev.created_at) || 0) * 1e3,
+          content
+        };
+      });
+    };
+    return {
+      available: Boolean(issuesDetail || prsDetail),
+      owner,
+      dtag,
+      name: name || ((_c = issuesDetail == null ? void 0 : issuesDetail.entity) == null ? void 0 : _c.name) || ((_d = prsDetail == null ? void 0 : prsDetail.entity) == null ? void 0 : _d.name) || dtag,
+      issues: mapItems(issuesDetail, "issue"),
+      prs: mapItems(prsDetail, "pr")
+    };
+  } catch {
+    return { available: false, owner: fallbackOwner, dtag: fallbackDtag, issues: [], prs: [] };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+async function loadLiveRepoEntityDetail(ctx, route) {
+  var _a, _b, _c;
+  const id = String(route.id || "").toLowerCase().replace(/^#/, "").trim();
+  if (!/^[0-9a-f]{64}$/i.test(id)) return null;
+  const session = typeof ((_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) === "function" ? (_b = ctx.relay.snapshot()) == null ? void 0 : _b.session : null;
+  if (!(session == null ? void 0 : session.repositories) || typeof session.repositories.load !== "function") return null;
+  const owner = /^[0-9a-f]{64}$/i.test(String(route.owner)) ? String(route.owner).toLowerCase() : DEFAULT_ORGFY_REPO_OWNER;
+  const dtag = String(route.dtag || "orgfy").trim() || "orgfy";
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 8e3);
+  try {
+    const fullRoute = { type: route.type, owner, dtag, id };
+    const detail = await session.repositories.load(fullRoute, ac.signal);
+    if (!(detail == null ? void 0 : detail.item)) return null;
+    let commitDiff = null;
+    if (detail.commit && session.projectGit && typeof session.projectGit.read === "function") {
+      try {
+        const git = await session.projectGit.read({ owner, dtag, commit: detail.commit }, ac.signal);
+        if (git && typeof git.diff === "string") {
+          commitDiff = git.diff.slice(0, 12e3);
+        }
+      } catch {
+      }
+    }
+    const content = String(detail.item.content || "");
+    const title = tagValue(detail.item, "subject") || ((_c = content.split("\n").find((l) => l.trim())) == null ? void 0 : _c.replace(/^#+\s*/, "").slice(0, 140)) || `#${id.slice(0, 8)}`;
+    const activity = Array.isArray(detail.activity) ? detail.activity : [];
+    return {
+      route: fullRoute,
+      title,
+      content,
+      status: String(detail.status || "Open"),
+      authorPubkey: String(detail.item.pubkey || "").toLowerCase(),
+      createdAt: Number(detail.item.created_at || 0) * 1e3,
+      commit: detail.commit ? String(detail.commit) : void 0,
+      commitDiff,
+      channels: Array.isArray(detail.channels) ? detail.channels.map(String) : [],
+      comments: activity.map((ev) => ({
+        id: String((ev == null ? void 0 : ev.id) || ""),
+        authorPubkey: String((ev == null ? void 0 : ev.pubkey) || "").toLowerCase(),
+        createdAt: Number((ev == null ? void 0 : ev.created_at) || 0) * 1e3,
+        content: String((ev == null ? void 0 : ev.content) || "")
+      }))
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+function resolveBuzzIdentityName(ctx, pubkey, fallbackMap) {
+  var _a, _b;
+  const pk = String(pubkey || "").trim().toLowerCase();
+  if (!pk) return "Desconhecido";
+  try {
+    const session = typeof ((_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) === "function" ? (_b = ctx.relay.snapshot()) == null ? void 0 : _b.session : null;
+    const idView = (session == null ? void 0 : session.identityNames) || (ctx == null ? void 0 : ctx.identityNames);
+    if (typeof (idView == null ? void 0 : idView.resolve) === "function") {
+      const resolved = idView.resolve(pk);
+      if (resolved && typeof resolved === "string" && resolved.trim()) return resolved.trim();
+    }
+    if (typeof (idView == null ? void 0 : idView.lookup) === "function") {
+      const looked = idView.lookup(pk);
+      if (looked == null ? void 0 : looked.name) return String(looked.name);
+    }
+  } catch {
+  }
+  if (fallbackMap == null ? void 0 : fallbackMap.has(pk)) return fallbackMap.get(pk);
+  return /^[0-9a-f]{64}$/i.test(pk) ? `#${pk.slice(0, 8)}` : pk;
 }
 const SESSION_LIMIT = 5;
 function projectHue(slug) {
@@ -45551,7 +46009,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
   const Floor3D = createFloor3DComponent(ctx);
   const Boardroom3D = createBoardroom3DComponent(ctx);
   return function OrgFyFactoryApp() {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s;
     const [tenant, setTenant] = React.useState("orgfy");
     const [tab, setTab] = React.useState("overview");
     const [dmAgentKey, setDmAgentKey] = React.useState("");
@@ -45560,6 +46018,19 @@ function createFactoryAppComponent(ctx, opts = {}) {
     const [activityTick, setActivityTick] = React.useState(0);
     const [mainAgentPubkey, setMainAgentPubkey] = React.useState(null);
     const [channelCanvas, setChannelCanvas] = React.useState(null);
+    const [canvasDraft, setCanvasDraft] = React.useState("");
+    const [canvasEventId, setCanvasEventId] = React.useState(void 0);
+    const [canvasWritable, setCanvasWritable] = React.useState(false);
+    const [canvasSaving, setCanvasSaving] = React.useState(false);
+    const [canvasHistory, setCanvasHistory] = React.useState([]);
+    const [liveRepo, setLiveRepo] = React.useState(null);
+    const [selectedItemDetail, setSelectedItemDetail] = React.useState(null);
+    const [selectedItemDetailLoading, setSelectedItemDetailLoading] = React.useState(false);
+    const [editingAgentKey, setEditingAgentKey] = React.useState(null);
+    const [agentEditDraft, setAgentEditDraftState] = React.useState({ provider: "", model: "", instructions: "" });
+    const setAgentEditDraft = React.useCallback((patch) => {
+      setAgentEditDraftState((prev) => ({ ...prev, ...patch }));
+    }, []);
     const [status, setStatus] = React.useState(() => buildEmptyFactoryStatus("orgfy"));
     const [holding, setHolding] = React.useState(null);
     const [loading, setLoading] = React.useState(true);
@@ -45638,17 +46109,61 @@ function createFactoryAppComponent(ctx, opts = {}) {
       };
     }, [relayTick]);
     React.useEffect(() => {
-      var _a2, _b2;
+      var _a2, _b2, _c2;
       let cancelled = false;
       const canal = ((_a2 = status.tenantManifest) == null ? void 0 : _a2.canal) || ((_b2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _b2.canal) || null;
-      readBuzzChannelCanvas(ctx, canal).then((txt) => {
-        if (!cancelled) setChannelCanvas(txt);
+      const dtag = ((_c2 = status.tenantManifest) == null ? void 0 : _c2.repoId) || tenant;
+      readBuzzChannelCanvasDetailed(ctx, canal).then((st) => {
+        if (!cancelled) {
+          setChannelCanvas(st.content);
+          setCanvasDraft(st.content || "");
+          setCanvasEventId(st.eventId);
+          setCanvasWritable(st.writable);
+        }
+      }).catch(() => {
+      });
+      readBuzzChannelCanvasHistory(ctx, canal).then((hist) => {
+        if (!cancelled) setCanvasHistory(hist);
+      }).catch(() => {
+      });
+      loadLiveRepoSnapshot(ctx, { channelId: canal, dtag }).then((snap) => {
+        if (!cancelled && snap.available) setLiveRepo(snap);
       }).catch(() => {
       });
       return () => {
         cancelled = true;
       };
-    }, [tenant, (_a = status.tenantManifest) == null ? void 0 : _a.canal, holding, relayTick]);
+    }, [tenant, (_a = status.tenantManifest) == null ? void 0 : _a.canal, (_b = status.tenantManifest) == null ? void 0 : _b.repoId, holding, relayTick]);
+    React.useEffect(() => {
+      var _a2;
+      let cancelled = false;
+      if (!selectedItem || !/^[0-9a-f]{64}$/i.test(selectedItem.id || "")) {
+        setSelectedItemDetail(null);
+        setSelectedItemDetailLoading(false);
+        return;
+      }
+      setSelectedItemDetailLoading(true);
+      const isPr = String(selectedItem.workKey || "").startsWith("pr:");
+      loadLiveRepoEntityDetail(ctx, {
+        type: isPr ? "pr" : "issue",
+        owner: (liveRepo == null ? void 0 : liveRepo.owner) || DEFAULT_ORGFY_REPO_OWNER,
+        dtag: (liveRepo == null ? void 0 : liveRepo.dtag) || ((_a2 = status.tenantManifest) == null ? void 0 : _a2.repoId) || tenant,
+        id: selectedItem.id
+      }).then((det) => {
+        if (!cancelled) {
+          setSelectedItemDetail(det);
+          setSelectedItemDetailLoading(false);
+        }
+      }).catch(() => {
+        if (!cancelled) {
+          setSelectedItemDetail(null);
+          setSelectedItemDetailLoading(false);
+        }
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, [selectedItem == null ? void 0 : selectedItem.id, liveRepo == null ? void 0 : liveRepo.owner, liveRepo == null ? void 0 : liveRepo.dtag, tenant]);
     const [scorecardView, setScorecardView] = React.useState("builders");
     const [scorecardDays, setScorecardDays] = React.useState(30);
     const [storeyFocus, setStoreyFocus] = React.useState("both");
@@ -45733,15 +46248,49 @@ function createFactoryAppComponent(ctx, opts = {}) {
     );
     const handleOpenInBuzz = React.useCallback(
       async (item) => {
+        var _a2;
         if (item.id && /^[0-9a-f]{64}$/i.test(item.id)) {
-          const ok2 = await openIssueInBuzz(ctx, { id: item.id, dtag: tenant }).catch(() => false);
-          notify2(ok2 ? `Issue #${item.id.slice(0, 8)} aberta no Buzz Repos.` : `Deep link preparado para #${item.id.slice(0, 8)}.`);
+          const isPr = String(item.workKey || "").startsWith("pr:");
+          const owner = (liveRepo == null ? void 0 : liveRepo.owner) || DEFAULT_ORGFY_REPO_OWNER;
+          const dtag = (liveRepo == null ? void 0 : liveRepo.dtag) || ((_a2 = status.tenantManifest) == null ? void 0 : _a2.repoId) || tenant;
+          const okDirect = await openBuzzRepoEntity(ctx, { type: isPr ? "pr" : "issue", owner, dtag, id: item.id }).catch(() => false);
+          const ok2 = okDirect || await openIssueInBuzz(ctx, { id: item.id, owner, dtag }).catch(() => false);
+          notify2(ok2 ? `${isPr ? "PR" : "Issue"} #${item.id.slice(0, 8)} aberto direto no Buzz Repos.` : `Deep link preparado para #${item.id.slice(0, 8)}.`);
         } else {
           notify2(`Item local #${item.id.slice(0, 8)} (sem ID Nostr de 64 chars).`);
         }
       },
-      [tenant, notify2]
+      [tenant, liveRepo, status.tenantManifest, notify2]
     );
+    const handleOpenCommitInBuzz = React.useCallback(
+      async (commit) => {
+        var _a2;
+        const ok2 = await openRepoTabInBuzz(ctx, {
+          owner: (liveRepo == null ? void 0 : liveRepo.owner) || DEFAULT_ORGFY_REPO_OWNER,
+          dtag: (liveRepo == null ? void 0 : liveRepo.dtag) || ((_a2 = status.tenantManifest) == null ? void 0 : _a2.repoId) || tenant,
+          tab: "commits",
+          commit
+        }).catch(() => false);
+        notify2(ok2 ? `Commit ${commit.slice(0, 8)} aberto no Buzz Repos.` : `Não foi possível abrir o commit ${commit.slice(0, 8)}.`);
+      },
+      [tenant, liveRepo, status.tenantManifest, notify2]
+    );
+    const handleSaveCanvas = React.useCallback(async () => {
+      var _a2, _b2;
+      const canal = ((_a2 = status.tenantManifest) == null ? void 0 : _a2.canal) || ((_b2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _b2.canal) || null;
+      setCanvasSaving(true);
+      const res = await saveBuzzChannelCanvas(ctx, canal, canvasDraft, canvasEventId);
+      setCanvasSaving(false);
+      if (res.ok) {
+        setChannelCanvas(canvasDraft);
+        if (res.eventId) setCanvasEventId(res.eventId);
+        notify2("Canvas salvo diretamente no canal do Buzz (session.canvas.save).");
+        readBuzzChannelCanvasHistory(ctx, canal).then(setCanvasHistory).catch(() => {
+        });
+      } else {
+        notify2(`Falha ao salvar Canvas: ${res.error || "indisponível"}`);
+      }
+    }, [status.tenantManifest, holding, tenant, canvasDraft, canvasEventId, notify2]);
     const resolveBuzzScope = React.useCallback(() => {
       var _a2, _b2, _c2, _d2;
       try {
@@ -45802,13 +46351,17 @@ function createFactoryAppComponent(ctx, opts = {}) {
         const snap = ((_b2 = (_a2 = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _a2.snapshot) == null ? void 0 : _b2.call(_a2)) || {};
         const runningSet = new Set((snap.running || []).map((a) => String((a == null ? void 0 : a.key) || (a == null ? void 0 : a.name))));
         return (snap.agents || []).map((a) => {
-          var _a3, _b3;
+          var _a3, _b3, _c2;
           return {
             key: String((a == null ? void 0 : a.key) || (a == null ? void 0 : a.name) || ""),
             pubkey: typeof (a == null ? void 0 : a.pubkey) === "string" ? a.pubkey : "",
             name: String((a == null ? void 0 : a.name) || (a == null ? void 0 : a.key) || "Agente"),
+            picture: typeof (a == null ? void 0 : a.picture) === "string" && a.picture.trim() ? a.picture : void 0,
             model: ((_a3 = a == null ? void 0 : a.config) == null ? void 0 : _a3.model) || PT_BR.labels.unavailable,
             provider: ((_b3 = a == null ? void 0 : a.config) == null ? void 0 : _b3.provider) || "",
+            instructions: typeof ((_c2 = a == null ? void 0 : a.config) == null ? void 0 : _c2.instructions) === "string" ? a.config.instructions : void 0,
+            config: (a == null ? void 0 : a.config) && typeof a.config === "object" ? a.config : void 0,
+            configBase: a == null ? void 0 : a.configBase,
             running: runningSet.has(String((a == null ? void 0 : a.key) || (a == null ? void 0 : a.name)))
           };
         });
@@ -45816,7 +46369,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
         return [];
       }
     }, [status.lastTickAt, relayTick]);
-    const tenantAgents = ((_b = status.tenantManifest) == null ? void 0 : _b.agentes) || [];
+    const tenantAgents = ((_c = status.tenantManifest) == null ? void 0 : _c.agentes) || [];
     const nameByPubkey = React.useMemo(() => {
       const map = /* @__PURE__ */ new Map();
       for (const a of liveCrew) {
@@ -45878,8 +46431,12 @@ function createFactoryAppComponent(ctx, opts = {}) {
         const isTier1 = /(ceo|coo|revis|arquit|segur|secur|qa|oraculo|conselho|board)/.test(papel);
         const provider = isTier1 ? "nexusmind_anthropic" : "nexusmind_antigravity";
         const model = isTier1 ? "claude-sonnet-5-5" : "gemini-2.5-flash";
+        const liveMatch = liveCrew.find((c) => c.key === ag.agentKey);
         try {
-          await agentsApi.save(ag.agentKey, { provider, model });
+          await agentsApi.save(ag.agentKey, {
+            config: { ...(liveMatch == null ? void 0 : liveMatch.config) || {}, provider, model },
+            ...(liveMatch == null ? void 0 : liveMatch.configBase) ? { base: liveMatch.configBase } : {}
+          });
           updated += 1;
         } catch {
         }
@@ -45888,7 +46445,34 @@ function createFactoryAppComponent(ctx, opts = {}) {
         updated > 0 ? `${updated}/${targets.length} agente(s) reconciliado(s) para os vencedores do Eval R5.1 via ctx.agents.save().` : "Nenhum agente pôde ser atualizado via ctx.agents.save()."
       );
       await refresh(tenant);
-    }, [tenantAgents, tenant, notify2, refresh]);
+    }, [tenantAgents, liveCrew, tenant, notify2, refresh]);
+    const handleSaveAgentProfile = React.useCallback(
+      async (agentKey, patch) => {
+        const agentsApi = ctx == null ? void 0 : ctx.agents;
+        if (typeof (agentsApi == null ? void 0 : agentsApi.save) !== "function") {
+          notify2("API ctx.agents.save indisponível nesta versão do Buzz.");
+          return;
+        }
+        const liveMatch = liveCrew.find((c) => c.key === agentKey);
+        try {
+          await agentsApi.save(agentKey, {
+            config: {
+              ...(liveMatch == null ? void 0 : liveMatch.config) || {},
+              ...patch.provider ? { provider: patch.provider.trim() } : {},
+              ...patch.model ? { model: patch.model.trim() } : {},
+              ...patch.instructions !== void 0 && patch.instructions.trim() ? { instructions: patch.instructions } : {}
+            },
+            ...(liveMatch == null ? void 0 : liveMatch.configBase) ? { base: liveMatch.configBase } : {}
+          });
+          setEditingAgentKey(null);
+          notify2(`Perfil de ${(liveMatch == null ? void 0 : liveMatch.name) || agentKey} salvo via ctx.agents.save().`);
+          await refresh(tenant);
+        } catch (err) {
+          notify2(`Falha ao salvar perfil: ${(err == null ? void 0 : err.message) || err}`);
+        }
+      },
+      [liveCrew, tenant, notify2, refresh]
+    );
     const handleAgentSessionAction = React.useCallback(
       async (agentKey, action) => {
         var _a2, _b2;
@@ -46022,7 +46606,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
       var _a2;
       return ((_a2 = a.pubkey) == null ? void 0 : _a2.toLowerCase()) === mainAgentPubkey;
     }) || liveCrew.find((a) => a.name.toLowerCase().includes("iris")) || liveCrew[0] || null;
-    const masterAgentName = (masterLive == null ? void 0 : masterLive.name) || ((_c = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _c.nome) || "OrgFy Iris";
+    const masterAgentName = (masterLive == null ? void 0 : masterLive.name) || ((_d = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _d.nome) || "OrgFy Iris";
     const masterTurn = (masterLive == null ? void 0 : masterLive.pubkey) ? telemetry.byPubkey[masterLive.pubkey.toLowerCase()] || null : null;
     const workspaces = (holding == null ? void 0 : holding.empresas) && holding.empresas.length > 0 ? holding.empresas.map((e) => ({
       slug: e.slug,
@@ -46032,8 +46616,8 @@ function createFactoryAppComponent(ctx, opts = {}) {
       agentesInfo: `${e.agentesProntos}/${e.agentesTotal}`
     })) : DEFAULT_WORKSPACES.map((w) => ({ ...w, agentesInfo: "" }));
     const activeWorkspace = workspaces.find((w) => w.slug === tenant) || workspaces[0];
-    const empresaNome = ((_d = status.tenantManifest) == null ? void 0 : _d.nome) || (activeWorkspace == null ? void 0 : activeWorkspace.nome) || tenant;
-    const empresaRepo = ((_e = status.tenantManifest) == null ? void 0 : _e.repoId) || tenant;
+    const empresaNome = ((_e = status.tenantManifest) == null ? void 0 : _e.nome) || (activeWorkspace == null ? void 0 : activeWorkspace.nome) || tenant;
+    const empresaRepo = ((_f = status.tenantManifest) == null ? void 0 : _f.repoId) || tenant;
     const isGlobalView = GLOBAL_TABS.has(tab);
     const pendingApprovals = ((holding == null ? void 0 : holding.approvals) || []).filter((a) => a.status === "pendente").length;
     const abaixoMinimoCount = (status.modelos || []).filter((m) => m.abaixo_minimo).length;
@@ -46054,7 +46638,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
       { id: "vision", label: "Canvas / Visão" },
       { id: "settings", label: PT_BR.nav.settings }
     ];
-    const NativeTabs = (_g = (_f = ctx == null ? void 0 : ctx.conversation) == null ? void 0 : _f.ui) == null ? void 0 : _g.Tabs;
+    const NativeTabs = (_h = (_g = ctx == null ? void 0 : ctx.conversation) == null ? void 0 : _g.ui) == null ? void 0 : _h.Tabs;
     const relaySnap = React.useMemo(() => {
       var _a2;
       try {
@@ -46108,7 +46692,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
             status,
             telemetry,
             masterAgentName,
-            masterAgentPubkey: (masterLive == null ? void 0 : masterLive.pubkey) || ((_h = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _h.pubkey) || "",
+            masterAgentPubkey: (masterLive == null ? void 0 : masterLive.pubkey) || ((_i = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _i.pubkey) || "",
             masterTurn,
             pendingApprovals,
             inboxCount,
@@ -46266,7 +46850,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
                     if (picked) handleOpenAgentDmInBuzz(picked);
                   }
                 },
-                dmPool.length > 0 ? dmPool.map((a) => h("option", { key: a.key, value: a.key }, a.label)) : h("option", { value: "" }, ((_i = status.tenantManifest) == null ? void 0 : _i.coo) || "OrgFy Bento (COO)")
+                dmPool.length > 0 ? dmPool.map((a) => h("option", { key: a.key, value: a.key }, a.label)) : h("option", { value: "" }, ((_j = status.tenantManifest) == null ? void 0 : _j.coo) || "OrgFy Bento (COO)")
               )
             ),
             toast && h("span", { className: "of-pill", "data-tone": "done" }, toast),
@@ -46372,7 +46956,20 @@ function createFactoryAppComponent(ctx, opts = {}) {
                 onOpenChannelInBuzz: handleOpenChannelInBuzz,
                 Boardroom3D,
                 onReconcileAgents: handleReconcileAgentsR51,
-                onAgentSessionAction: handleAgentSessionAction
+                onAgentSessionAction: handleAgentSessionAction,
+                onOpenAgentDrawer: (k) => setSelectedAgentKey(k),
+                onSaveAgentProfile: handleSaveAgentProfile,
+                editingAgentKey,
+                setEditingAgentKey,
+                agentEditDraft,
+                setAgentEditDraft,
+                canvasDraft,
+                setCanvasDraft,
+                canvasWritable,
+                canvasSaving,
+                onSaveCanvas: handleSaveCanvas,
+                canvasHistory,
+                resolveAuthor: (pk) => resolveBuzzIdentityName(ctx, pk, nameByPubkey)
               })
             )
           )
@@ -46382,8 +46979,28 @@ function createFactoryAppComponent(ctx, opts = {}) {
         h,
         item: selectedItem,
         tenant,
+        repoDetail: selectedItemDetail,
+        repoLoading: selectedItemDetailLoading,
+        resolveAuthor: (pk) => resolveBuzzIdentityName(ctx, pk, nameByPubkey),
+        EmbeddedThread: (_l = (_k = ctx == null ? void 0 : ctx.conversation) == null ? void 0 : _k.ui) == null ? void 0 : _l.Thread,
+        threadChannelId: ((_m2 = status.tenantManifest) == null ? void 0 : _m2.canal) || ((_n = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _n.canal) || null,
+        relaySession: relaySnap == null ? void 0 : relaySnap.session,
+        onOpenCommitInBuzz: handleOpenCommitInBuzz,
         onClose: () => setSelectedItem(null),
         onOpenInBuzz: handleOpenInBuzz
+      }),
+      renderAgentProfileDrawer({
+        h,
+        agent: liveCrew.find((a) => a.key === selectedAgentKey) || null,
+        liveTurn: (() => {
+          const ag = liveCrew.find((a) => a.key === selectedAgentKey);
+          return (ag == null ? void 0 : ag.pubkey) ? telemetry.byPubkey[ag.pubkey.toLowerCase()] || null : null;
+        })(),
+        TranscriptComponent: (_p = (_o = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _o.ui) == null ? void 0 : _p.Transcript,
+        channelId: ((_q = status.tenantManifest) == null ? void 0 : _q.canal) || ((_r = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _r.canal) || null,
+        onOpenDm: handleOpenAgentDmInBuzz,
+        onSessionAction: handleAgentSessionAction,
+        onClose: () => setSelectedAgentKey(null)
       }),
       renderCommandPalette(
         {
@@ -46409,7 +47026,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
           status,
           telemetry,
           masterAgentName,
-          masterAgentPubkey: (masterLive == null ? void 0 : masterLive.pubkey) || ((_j = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _j.pubkey) || "",
+          masterAgentPubkey: (masterLive == null ? void 0 : masterLive.pubkey) || ((_s = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _s.pubkey) || "",
           masterTurn,
           pendingApprovals,
           inboxCount,
