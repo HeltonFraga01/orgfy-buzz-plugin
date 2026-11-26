@@ -33,6 +33,9 @@ export interface BoardAndFloorProps {
   onSelectAgentKey: (k: string | null) => void;
   onSelectItem: (item: FactoryWorkItem) => void;
   onOpenAgentDm?: (agent: { key?: string; pubkey?: string; name?: string }) => void;
+  onOpenAgentProfileNative?: (agent: { key?: string; pubkey?: string; name?: string }) => void;
+  onRunScout?: () => void;
+  runningScout?: boolean;
   onToggleKillSwitch?: (next: boolean) => void;
   onOpenGuide?: () => void;
   onRefresh: () => void;
@@ -236,8 +239,19 @@ export function renderFactoryBoardAndFloor(props: BoardAndFloorProps) {
             "Andar"
           )
         ),
-        props.onOpenGuide &&
-          h("button", { type: "button", className: "of-btn", title: "Como funciona o loop da Fábrica OrgFy", onClick: props.onOpenGuide }, "? Como funciona"),
+        props.onRunScout &&
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-run-scout-now": "true",
+              disabled: props.runningScout,
+              title: "Disparar auditoria imediata do Oráculo (Scout) contra o Canvas/Visão",
+              onClick: props.onRunScout,
+            },
+            props.runningScout ? "Oráculo…" : "Oráculo"
+          ),
         props.onToggleKillSwitch &&
           h(
             "button",
@@ -249,7 +263,47 @@ export function renderFactoryBoardAndFloor(props: BoardAndFloorProps) {
             },
             status.killSwitch ? "Retomar" : "Kill switch"
           ),
-        h("button", { type: "button", className: "of-btn", onClick: onRefresh, disabled: loading }, loading ? "..." : "Verificar agora")
+        props.onOpenGuide &&
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-icon-circle-btn",
+              "data-factory-guide-trigger": "true",
+              title: "Como funciona o loop da Fábrica OrgFy",
+              "aria-label": "Como funciona o loop da Fábrica OrgFy",
+              onClick: props.onOpenGuide,
+            },
+            h("span", { style: { fontSize: "13px", fontWeight: 700, lineHeight: 1 } }, "?")
+          ),
+        h(
+          "button",
+          {
+            type: "button",
+            className: "of-icon-circle-btn",
+            "data-factory-refresh-icon": "true",
+            title: loading ? "Atualizando..." : "Atualizar agora",
+            "aria-label": "Atualizar agora",
+            onClick: onRefresh,
+          },
+          h(
+            "svg",
+            {
+              width: 14,
+              height: 14,
+              viewBox: "0 0 24 24",
+              fill: "none",
+              stroke: "currentColor",
+              strokeWidth: 2,
+              strokeLinecap: "round",
+              strokeLinejoin: "round",
+              className: loading ? "of-spin" : undefined,
+              "aria-hidden": "true",
+            },
+            h("path", { d: "M21 12a9 9 0 1 1-2.64-6.36" }),
+            h("path", { d: "M21 3v6h-6" })
+          )
+        )
       )
     ),
 
@@ -380,7 +434,10 @@ export function renderFactoryBoardAndFloor(props: BoardAndFloorProps) {
             focus: storeyFocus,
             onSelectItem,
             onOpenAgentDm: (ag: any) => props.onOpenAgentDm?.(ag),
-            onOpenAgentProfile: (agentKey: string) => onSelectAgentKey(agentKey),
+            onOpenAgentProfile: (ag: { key?: string; pubkey?: string; name?: string }) => {
+              if (props.onOpenAgentProfileNative) props.onOpenAgentProfileNative(ag);
+              else if (ag.key) onSelectAgentKey(ag.key);
+            },
           })
         : h(
             "div",

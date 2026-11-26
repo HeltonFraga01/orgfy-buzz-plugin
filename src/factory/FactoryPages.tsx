@@ -7,6 +7,7 @@ import type { LiveCrewAgent } from "./FactoryBoardAndFloor";
 import type { HoldingControlPlaneSnapshot } from "../services/holding-service";
 import type { BuzzChannelLiveInfo } from "../services/buzz-channel-live";
 import { renderBuzzCanvasViewer } from "../components/BuzzCanvasViewer";
+import { renderAutomationEditor, type OrgfyAutomation } from "./AutomationEditor";
 import { PT_BR } from "../i18n/pt-BR";
 
 export interface FactorySecondaryPagesProps {
@@ -73,6 +74,16 @@ export interface FactorySecondaryPagesProps {
   onChannelDiagnostic?: (action: "markRead" | "markUnread" | "refresh") => void;
   onCopyText?: (text: string, label: string) => void;
   resolveAuthor?: (pubkey: string) => string;
+  automations?: OrgfyAutomation[];
+  selectedAutomationId?: string;
+  onSelectAutomationId?: (id: string) => void;
+  onUpdateAutomation?: (id: string, patch: Partial<OrgfyAutomation>) => void;
+  onCreateAutomation?: () => void;
+  onDeleteAutomation?: (id: string) => void;
+  onSaveAutomations?: () => void;
+  onRunAutomationNow?: (auto: OrgfyAutomation) => void;
+  onExportAutomationYaml?: (auto: OrgfyAutomation) => void;
+  runningAutomationId?: string | null;
 }
 
 const CHART_COLORS = ["var(--chart-2)", "var(--chart-1)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"];
@@ -557,9 +568,9 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
         "div",
         { className: "of-segmented", style: { width: "fit-content" } },
         ([
-          { id: "automations", label: "Processos & Workflows" },
+          { id: "automations", label: "Editor Visual (Workflows)" },
           { id: "runs", label: "CI & Probes da Empresa" },
-          { id: "templates", label: "Governança & Regras" },
+          { id: "templates", label: "LaunchAgents & Regras" },
         ] as const).map((t) =>
           h(
             "button",
@@ -574,7 +585,24 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
           )
         )
       ),
-      autoTab === "runs"
+      autoTab === "automations" && props.automations && props.onSelectAutomationId && props.onUpdateAutomation && props.onCreateAutomation && props.onDeleteAutomation && props.onSaveAutomations && props.onRunAutomationNow && props.onExportAutomationYaml
+        ? renderAutomationEditor({
+            h,
+            tenant,
+            companyName: tm?.nome || tenant,
+            automations: props.automations,
+            selectedId: props.selectedAutomationId || props.automations[0]?.id || "",
+            onSelectId: props.onSelectAutomationId,
+            onUpdateAutomation: props.onUpdateAutomation,
+            onCreateAutomation: props.onCreateAutomation,
+            onDeleteAutomation: props.onDeleteAutomation,
+            onSaveAutomations: props.onSaveAutomations,
+            onRunNow: props.onRunAutomationNow,
+            onExportYaml: props.onExportAutomationYaml,
+            runningId: props.runningAutomationId || null,
+            availableAgents: (tm?.agentes || []).map((a) => a.name),
+          })
+        : autoTab === "runs"
         ? h(
             "div",
             { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },

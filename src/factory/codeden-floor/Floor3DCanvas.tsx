@@ -197,7 +197,20 @@ export interface Floor3DProps {
   focus: StoreyFocus;
   onSelectItem: (item: OrgfyWorkItem) => void;
   onOpenAgentDm?: (agent: { key?: string; pubkey?: string; name?: string }) => void;
-  onOpenAgentProfile?: (agentKey: string) => void;
+  onOpenAgentProfile?: (agent: { key?: string; pubkey?: string; name?: string }) => void;
+}
+
+function formatElapsedStep(tsMs?: number | string | null): string {
+  if (!tsMs) return "—";
+  const ms = typeof tsMs === "number" ? tsMs : Date.parse(String(tsMs));
+  if (!Number.isFinite(ms)) return "—";
+  const diffSec = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  if (diffSec < 60) return diffSec < 10 ? "agora" : `${diffSec}s`;
+  const mins = Math.floor(diffSec / 60);
+  if (mins < 60) return `${mins} min`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ${mins % 60}m`;
+  return `${Math.floor(hours / 24)}d`;
 }
 
 export function createFloor3DComponent(ctx: Context) {
@@ -211,6 +224,7 @@ export function createFloor3DComponent(ctx: Context) {
     const layoutRef = React.useRef<WorkshopLayout | null>(null);
     const [webglLost, setWebglLost] = React.useState<boolean>(false);
     const [rosterOpen, setRosterOpen] = React.useState<boolean>(true);
+    const [rosterFilter, setRosterFilter] = React.useState<"all" | "active">("all");
     const [hoveredKey, setHoveredKey] = React.useState<string | null>(null);
     const [selectedKey, setSelectedKey] = React.useState<string | null>(null);
     const [isFullscreen, setIsFullscreen] = React.useState<boolean>(false);
@@ -315,15 +329,45 @@ export function createFloor3DComponent(ctx: Context) {
       );
     }
 
+    const allWorkItems = [...status.inProgress, ...status.backlog, ...status.recent];
+    const findAssignedWork = (agName: string) =>
+      allWorkItems.find((w) => w.note && w.note.toLowerCase().includes(agName.toLowerCase())) || null;
+
     const renderCrewRow = (ag: (typeof tenantAgents)[number]) => {
       const liveTurn = turnOf(ag);
+      const liveMatch = liveCrew.find((c) => c.key === ag.agentKey || (ag.pubkey && c.pubkey?.toLowerCase() === ag.pubkey.toLowerCase()));
+      const assignedItem = findAssignedWork(ag.name);
+      const isSelected = selectedKey === ag.agentKey;
+      const statusLabel = liveTurn
+        ? liveTurn.state === "error"
+          ? "Erro"
+          : "Respondendo"
+        : ag.running
+        ? "Em execução"
+        : ag.inBuzz
+        ? "Disponível"
+        : "Pendente";
+      const stepLine = liveTurn?.stepLabel || assignedItem?.step || ag.funcao;
+
       return h(
         "div",
         {
           key: ag.agentKey || ag.name,
-          className: "of-nav-btn",
-          "data-active": selectedKey === ag.agentKey ? "true" : "false",
-          style: { alignItems: "flex-start", padding: "6px 8px" },
+          role: "button",
+          tabIndex: 0,
+          "data-floor3d-roster-row": ag.agentKey || ag.name,
+          style: {
+            display: "flex",
+            flexDirection: "column",
+            gap: "3px",
+            padding: "8px 10px",
+            borderBottom: "1px solid var(--border-subtle, rgba(255,255,255,0.06))",
+            background: isSelected ? "var(--affordance-selected, rgba(255,255,255,0.08))" : "transparent",
+            cursor: "pointer",
+            textAlign: "left",
+          },
+          onMouseEnter: () => setHoveredKey(ag.agentKey),
+          onMouseLeave: () => setHoveredKey((cur) => (cur === ag.agentKey ? null : cur)),
           onClick: () => {
             setSelectedKey(ag.agentKey);
             stageRef.current?.select(ag.agentKey);
@@ -331,41 +375,78 @@ export function createFloor3DComponent(ctx: Context) {
         },
         h(
           "div",
-          { style: { display: "flex", flexDirection: "column", gap: "2px", minWidth: 0, flex: 1 } },
-          h(
-            "span",
-            { style: { display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "11.5px", fontWeight: 600 } },
-            h("span", {
-              className: "of-dot",
-              "data-tone": liveTurn ? (liveTurn.state === "error" ? "failed" : "running") : ag.inBuzz ? "done" : "idle",
-              title: liveTurn ? liveTurn.stepLabel : ag.inBuzz ? "Disponível no Buzz" : "A provisionar",
-            }),
-            h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, ag.name)
-          ),
-          liveTurn
-            ? h("span", { className: "of-mono", style: { fontSize: "9.5px", color: liveTurn.state === "error" ? "var(--status-failed)" : "var(--status-running)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, liveTurn.stepLabel)
-            : h("span", { className: "of-muted", style: { fontSize: "10px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, ag.funcao),
-          h("span", { className: "of-mono of-muted", style: { fontSize: "9.5px" } }, ag.model)
+          { style: { display: "flex", alignItems: "center", gap: "6px", minWidth: 0 } },
+          liveMatch?.picture
+            ? h("img", { src: liveMatch.picture, alt: ag.name, style: { width: "16px", height: "16px", borderRadius: "4px", objectFit: "cover", flexShrink: 0 } })
+            : h("span", {
+                className: "of-dot",
+                "data-tone": liveTurn ? (liveTurn.state === "error" ? "failed" : "running") : ag.inBuzz ? "done" : "idle",
+              }),
+          h("span", { style: { fontSize: "11.5px", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 } }, ag.name),
+          assignedItem &&
+            h("span", { className: "of-mono of-muted", style: { fontSize: "9.5px", flexShrink: 0 } }, `#${assignedItem.id.slice(0, 6)}`)
         ),
-        onOpenAgentDm &&
-          ag.pubkey &&
+        assignedItem &&
           h(
-            "button",
-            {
-              type: "button",
-              className: "of-btn",
-              "data-variant": "ghost",
-              title: `Abrir DM nativa com ${ag.name} no Buzz`,
-              style: { padding: "2px 5px", fontSize: "10px", color: "var(--primary)", flexShrink: 0 },
-              onClick: (e: any) => {
-                e.stopPropagation();
-                onOpenAgentDm({ key: ag.agentKey, pubkey: ag.pubkey, name: ag.name });
-              },
-            },
-            "DM ↗"
+            "div",
+            { style: { fontSize: "11px", color: "var(--foreground)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: assignedItem.title },
+            assignedItem.title
+          ),
+        h(
+          "div",
+          { style: { fontSize: "10px", color: liveTurn ? "var(--status-running)" : "var(--muted-foreground)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: `${stepLine} · ${statusLabel}` },
+          `${stepLine} · ${statusLabel}`
+        ),
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px", marginTop: "1px" } },
+          h("span", { className: "of-mono of-muted", style: { fontSize: "9.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 } }, `${ag.provider || liveMatch?.provider || "buzz"} · ${ag.model}`),
+          h(
+            "div",
+            { style: { display: "inline-flex", alignItems: "center", gap: "4px", flexShrink: 0 } },
+            onOpenAgentProfile &&
+              ag.pubkey &&
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "of-btn",
+                  "data-variant": "ghost",
+                  title: `Abrir perfil nativo de ${ag.name} no Buzz`,
+                  style: { padding: "1px 5px", fontSize: "9.5px" },
+                  onClick: (e: any) => {
+                    e.stopPropagation();
+                    onOpenAgentProfile({ key: ag.agentKey, pubkey: ag.pubkey, name: ag.name });
+                  },
+                },
+                "Perfil"
+              ),
+            onOpenAgentDm &&
+              ag.pubkey &&
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "of-btn",
+                  "data-variant": "ghost",
+                  title: `Abrir DM nativa com ${ag.name} no Buzz`,
+                  style: { padding: "1px 5px", fontSize: "9.5px", color: "var(--primary)" },
+                  onClick: (e: any) => {
+                    e.stopPropagation();
+                    onOpenAgentDm({ key: ag.agentKey, pubkey: ag.pubkey, name: ag.name });
+                  },
+                },
+                "DM ↗"
+              )
           )
+        )
       );
     };
+
+    const filterRows = (list: typeof tenantAgents) =>
+      rosterFilter === "active" ? list.filter((a) => Boolean(turnOf(a) || a.running)) : list;
+    const workshopRows = filterRows(leadershipAndExec);
+    const lookoutRows = filterRows(reviewAndOps);
 
     return h(
       "div",
@@ -386,22 +467,25 @@ export function createFloor3DComponent(ctx: Context) {
         },
         rosterOpen
           ? h(
-              "aside",
+              "nav",
               {
+                "aria-label": "Roster da equipe",
+                "data-codeden-floor-roster": "true",
                 style: {
                   position: "absolute",
                   top: "10px",
                   left: "10px",
                   bottom: "10px",
-                  width: "238px",
+                  width: "256px",
                   zIndex: 20,
                   borderRadius: "10px",
                   border: "1px solid var(--border)",
-                  background: "rgba(15, 17, 22, 0.90)",
-                  backdropFilter: "blur(8px)",
+                  background: "rgba(15, 17, 22, 0.93)",
+                  backdropFilter: "blur(10px)",
                   display: "flex",
                   flexDirection: "column",
                   overflow: "hidden",
+                  boxShadow: "0 10px 28px rgba(0,0,0,0.4)",
                 },
               },
               h(
@@ -410,21 +494,36 @@ export function createFloor3DComponent(ctx: Context) {
                   style: {
                     display: "flex",
                     alignItems: "center",
-                    justifyContent: "space-between",
+                    gap: "6px",
                     padding: "8px 10px",
                     borderBottom: "1px solid var(--border)",
                     fontSize: "11.5px",
                     fontWeight: 700,
+                    flexShrink: 0,
                   },
                 },
-                h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, `Equipe ${empresaNome} · ${tenantAgents.length}`),
+                h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, `Equipe ${empresaNome}`),
+                h("span", { className: "of-pill of-num", style: { fontSize: "10px", padding: "0 5px" } }, String(tenantAgents.length)),
                 h(
                   "button",
                   {
                     type: "button",
                     className: "of-btn",
                     "data-variant": "ghost",
-                    style: { padding: "2px 6px" },
+                    style: { marginLeft: "auto", padding: "1px 6px", fontSize: "10px" },
+                    title: rosterFilter === "active" ? "Mostrar todos" : "Mostrar apenas ativos",
+                    onClick: () => setRosterFilter((f) => (f === "all" ? "active" : "all")),
+                  },
+                  rosterFilter === "active" ? `Ativos (${workingNowCount})` : "Todos"
+                ),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "of-btn",
+                    "data-variant": "ghost",
+                    style: { padding: "1px 6px" },
+                    title: "Recolher roster",
                     onClick: () => setRosterOpen(false),
                   },
                   "‹"
@@ -432,15 +531,60 @@ export function createFloor3DComponent(ctx: Context) {
               ),
               h(
                 "div",
-                { style: { flex: 1, overflowY: "auto", padding: "8px", display: "flex", flexDirection: "column", gap: "4px" } },
-                h("div", { className: "of-meter-label", style: { padding: "2px 4px" } }, `OFICINA & LIDERANÇA · ${leadershipAndExec.length}`),
-                leadershipAndExec.length === 0
-                  ? h("div", { className: "of-muted", style: { padding: "4px 6px", fontSize: "10.5px" } }, "Sem agentes no manifesto.")
-                  : leadershipAndExec.map(renderCrewRow),
-                h("div", { className: "of-meter-label", style: { marginTop: "8px", padding: "2px 4px" } }, `REVISORES L-01 & MIRANTE · ${reviewAndOps.length}`),
-                reviewAndOps.length === 0
-                  ? h("div", { className: "of-muted", style: { padding: "4px 6px", fontSize: "10.5px" } }, "Sem revisores definidos.")
-                  : reviewAndOps.map(renderCrewRow)
+                { style: { flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" } },
+                h(
+                  "div",
+                  {
+                    style: {
+                      position: "sticky",
+                      top: 0,
+                      zIndex: 1,
+                      display: "flex",
+                      justifyContent: "space-between",
+                      padding: "5px 10px",
+                      fontSize: "9.5px",
+                      fontWeight: 700,
+                      letterSpacing: "0.06em",
+                      textTransform: "uppercase",
+                      color: "var(--muted-foreground)",
+                      background: "rgba(22, 25, 32, 0.94)",
+                      borderBottom: "1px solid var(--border)",
+                      backdropFilter: "blur(6px)",
+                    },
+                  },
+                  h("span", null, "OFICINA & LIDERANÇA"),
+                  h("span", { className: "of-num" }, String(workshopRows.length))
+                ),
+                workshopRows.length === 0
+                  ? h("div", { className: "of-muted", style: { padding: "8px 10px", fontSize: "10.5px" } }, rosterFilter === "active" ? "Nenhum agente ativo na oficina." : "Sem agentes no manifesto.")
+                  : workshopRows.map(renderCrewRow),
+                h(
+                  "div",
+                  {
+                    style: {
+                      position: "sticky",
+                      top: 0,
+                      zIndex: 1,
+                      display: "flex",
+                      justifyContent: "space-between",
+                      padding: "5px 10px",
+                      fontSize: "9.5px",
+                      fontWeight: 700,
+                      letterSpacing: "0.06em",
+                      textTransform: "uppercase",
+                      color: "var(--muted-foreground)",
+                      background: "rgba(22, 25, 32, 0.94)",
+                      borderTop: "1px solid var(--border)",
+                      borderBottom: "1px solid var(--border)",
+                      backdropFilter: "blur(6px)",
+                    },
+                  },
+                  h("span", null, "MIRANTE & REVISORES L-01"),
+                  h("span", { className: "of-num" }, String(lookoutRows.length))
+                ),
+                lookoutRows.length === 0
+                  ? h("div", { className: "of-muted", style: { padding: "8px 10px", fontSize: "10.5px" } }, rosterFilter === "active" ? "Nenhum revisor ativo no mirante." : "Sem revisores definidos.")
+                  : lookoutRows.map(renderCrewRow)
               )
             )
           : h(
@@ -551,9 +695,11 @@ export function createFloor3DComponent(ctx: Context) {
             ),
             h(
               "div",
-              { style: { display: "grid", gridTemplateColumns: "58px 1fr", gap: "4px 8px", fontSize: "11px" } },
+              { style: { display: "grid", gridTemplateColumns: "64px 1fr", gap: "4px 8px", fontSize: "11px" } },
               h("span", { className: "of-muted" }, "Etapa"),
               h("span", { style: { fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: stepLabel }, stepLabel),
+              h("span", { className: "of-muted" }, "Na etapa"),
+              h("span", { className: "of-mono of-muted", style: { fontSize: "10.5px" } }, formatElapsedStep((liveTurn as any)?.startedAt || sceneAg?.since || status.lastTickAt)),
               h("span", { className: "of-muted" }, "Agente"),
               h("span", { className: "of-mono of-muted", style: { fontSize: "10.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: modelLabel }, modelLabel)
             ),
@@ -577,16 +723,21 @@ export function createFloor3DComponent(ctx: Context) {
                   },
                   "Abrir chat lateral ↗"
                 ),
-              onOpenAgentProfile && (matchedTenantAg?.agentKey || matchedLive?.key) &&
+              onOpenAgentProfile && (matchedTenantAg || matchedLive) &&
                 h(
                   "button",
                   {
                     type: "button",
                     className: "of-btn",
                     style: { fontSize: "11px", padding: "5px 8px" },
-                    onClick: () => onOpenAgentProfile(matchedTenantAg?.agentKey || matchedLive!.key),
+                    onClick: () =>
+                      onOpenAgentProfile({
+                        key: matchedTenantAg?.agentKey || matchedLive?.key,
+                        pubkey: matchedTenantAg?.pubkey || matchedLive?.pubkey,
+                        name: displayTitle,
+                      }),
                   },
-                  "Perfil"
+                  "Perfil ↗"
                 )
             )
           );

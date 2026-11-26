@@ -55,6 +55,42 @@ export const FACTORY_SHADOW_CSS = `
   50% { opacity: 0.45; transform: scale(0.82); }
 }
 
+@keyframes of-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.of-spin {
+  animation: of-spin 0.8s linear infinite;
+}
+
+.of-icon-circle-btn {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 9999px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--muted-foreground);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+
+.of-icon-circle-btn:hover {
+  background: var(--muted);
+  color: var(--foreground);
+  border-color: var(--border-strong);
+}
+
+.of-icon-circle-btn:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
 .of-shell {
   display: grid;
   grid-template-columns: 244px minmax(0, 1fr);
