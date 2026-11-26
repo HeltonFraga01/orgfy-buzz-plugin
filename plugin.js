@@ -644,11 +644,24 @@ async function fetchLiveKanbanCards(ctx, filter) {
   return snapshot.cards;
 }
 async function buildOrgfyStatus(ctx, empresa) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2;
   const slug = empresa || "orgfy";
-  const [live, kanban] = await Promise.all([
+  const readKpisEsteira = async () => {
+    var _a2;
+    if ((_a2 = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a2.readFile) {
+      try {
+        const raw = await ctx.host.readFile(`${SCRATCH_ROOT}/kpis-esteira.json`);
+        const txt = typeof raw === "string" ? raw : new TextDecoder().decode(raw);
+        return JSON.parse(txt);
+      } catch {
+      }
+    }
+    return readOrgfyJson(ctx, ".scratch/kpis-esteira.json", null);
+  };
+  const [live, kanban, kpisSnap] = await Promise.all([
     fetchLiveEsteiraState(ctx, slug),
-    fetchLiveKanbanSnapshot(ctx, { empresa: slug })
+    fetchLiveKanbanSnapshot(ctx, { empresa: slug }),
+    readKpisEsteira()
   ]);
   const cardsPorRaia = {
     triagem: 0,
@@ -678,16 +691,23 @@ async function buildOrgfyStatus(ctx, empresa) {
   const regrasAtivas = regrasObj && typeof regrasObj === "object" ? Object.keys(regrasObj).length : null;
   const totalAceitesBlindados = countEntries((_d = live.esteiraState) == null ? void 0 : _d.aceite_cache) ?? countEntries((_e = live.esteiraState) == null ? void 0 : _e.aceites);
   const totalMergedGate = countEntries((_f = live.esteiraState) == null ? void 0 : _f.merged);
-  const cpiTokens = typeof ((_h = (_g = live.metricasTurnos) == null ? void 0 : _g.governanca_orcamento) == null ? void 0 : _h.cpi_tokens) === "number" ? live.metricasTurnos.governanca_orcamento.cpi_tokens : null;
-  const cpiMinimo = typeof ((_j = (_i = live.metricasTurnos) == null ? void 0 : _i.governanca_orcamento) == null ? void 0 : _j.cpi_minimo) === "number" ? live.metricasTurnos.governanca_orcamento.cpi_minimo : null;
-  const fpyPercent = typeof ((_k = live.placarState) == null ? void 0 : _k.pct_aceito_primeira_revisao) === "number" ? live.placarState.pct_aceito_primeira_revisao : null;
+  const kpiCpiReal = typeof ((_g = kpisSnap == null ? void 0 : kpisSnap.economia) == null ? void 0 : _g.cpi_real) === "number" ? kpisSnap.economia.cpi_real : null;
+  const fallbackCpiTokens = typeof ((_i = (_h = live.metricasTurnos) == null ? void 0 : _h.governanca_orcamento) == null ? void 0 : _i.cpi_tokens) === "number" ? live.metricasTurnos.governanca_orcamento.cpi_tokens : null;
+  const cpiTokens = kpiCpiReal ?? fallbackCpiTokens;
+  const cpiMinimo = typeof ((_k = (_j = live.metricasTurnos) == null ? void 0 : _j.governanca_orcamento) == null ? void 0 : _k.cpi_minimo) === "number" ? live.metricasTurnos.governanca_orcamento.cpi_minimo : null;
+  const kpiFpyReal = typeof ((_l = kpisSnap == null ? void 0 : kpisSnap.qualidade) == null ? void 0 : _l.fpy_real_pct) === "number" ? kpisSnap.qualidade.fpy_real_pct : null;
+  const fallbackFpyPercent = typeof ((_m2 = live.placarState) == null ? void 0 : _m2.pct_aceito_primeira_revisao) === "number" ? live.placarState.pct_aceito_primeira_revisao : null;
+  const fpyPercent = kpiFpyReal ?? fallbackFpyPercent;
   return {
     empresa: slug,
     measured_at: (/* @__PURE__ */ new Date()).toISOString(),
     porteiro_online: porteiroOnline,
     fpy_percent: fpyPercent,
+    fpy_fonte: kpiFpyReal !== null ? "kpis-esteira.json" : fallbackFpyPercent !== null ? "placar" : null,
     cpi_tokens: cpiTokens,
+    cpi_fonte: kpiCpiReal !== null ? "kpis-esteira.json" : fallbackCpiTokens !== null ? "metricas_turnos" : null,
     cpi_minimo: cpiMinimo,
+    kpis_gerado_em: typeof (kpisSnap == null ? void 0 : kpisSnap.gerado_em) === "string" ? kpisSnap.gerado_em : null,
     circuit_breaker_loop: maxReentregas !== null ? `${maxReentregas}/3` : null,
     circuit_breaker_loop_ativo: maxReentregas !== null ? maxReentregas >= 3 : null,
     total_cards_kanban: kanban.cards.length,
@@ -714,6 +734,7 @@ async function buildOrgfyStatus(ctx, empresa) {
     fontes_lidas: {
       canvas_atual: kanban.sources.canvas_atual,
       esteira_minima_state: live.esteiraState !== null,
+      kpis_esteira: kpisSnap !== null,
       placar_20h: live.placarState !== null,
       porteiro_state: live.porteiroState !== null,
       metricas_turnos: live.metricasTurnos !== null,

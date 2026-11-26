@@ -854,9 +854,24 @@ export async function fetchLiveKanbanCards(
  */
 export async function buildOrgfyStatus(ctx: any, empresa?: string) {
   const slug = empresa || "orgfy";
-  const [live, kanban] = await Promise.all([
+
+  const readKpisEsteira = async (): Promise<any | null> => {
+    if (ctx?.host?.readFile) {
+      try {
+        const raw = await ctx.host.readFile(`${SCRATCH_ROOT}/kpis-esteira.json`);
+        const txt = typeof raw === "string" ? raw : new TextDecoder().decode(raw);
+        return JSON.parse(txt);
+      } catch {
+        // fallback para readOrgfyJson
+      }
+    }
+    return readOrgfyJson<any>(ctx, ".scratch/kpis-esteira.json", null);
+  };
+
+  const [live, kanban, kpisSnap] = await Promise.all([
     fetchLiveEsteiraState(ctx, slug),
     fetchLiveKanbanSnapshot(ctx, { empresa: slug }),
+    readKpisEsteira(),
   ]);
 
   // Contagem das 5 raias derivada 100% da mesma fonte do orgfy_kanban_read
@@ -900,26 +915,42 @@ export async function buildOrgfyStatus(ctx: any, empresa?: string) {
     countEntries(live.esteiraState?.aceite_cache) ?? countEntries(live.esteiraState?.aceites);
 
   const totalMergedGate = countEntries(live.esteiraState?.merged);
-  const cpiTokens =
+
+  // Fonte única determinística: prioriza kpis-esteira.json (mesma fonte do orgfy_kpis)
+  // para eliminar contradição entre orgfy_status e orgfy_kpis.
+  const kpiCpiReal =
+    typeof kpisSnap?.economia?.cpi_real === "number" ? kpisSnap.economia.cpi_real : null;
+  const fallbackCpiTokens =
     typeof live.metricasTurnos?.governanca_orcamento?.cpi_tokens === "number"
       ? live.metricasTurnos.governanca_orcamento.cpi_tokens
       : null;
+  const cpiTokens = kpiCpiReal ?? fallbackCpiTokens;
+
   const cpiMinimo =
     typeof live.metricasTurnos?.governanca_orcamento?.cpi_minimo === "number"
       ? live.metricasTurnos.governanca_orcamento.cpi_minimo
       : null;
-  const fpyPercent =
+
+  const kpiFpyReal =
+    typeof kpisSnap?.qualidade?.fpy_real_pct === "number"
+      ? kpisSnap.qualidade.fpy_real_pct
+      : null;
+  const fallbackFpyPercent =
     typeof live.placarState?.pct_aceito_primeira_revisao === "number"
       ? live.placarState.pct_aceito_primeira_revisao
       : null;
+  const fpyPercent = kpiFpyReal ?? fallbackFpyPercent;
 
   return {
     empresa: slug,
     measured_at: new Date().toISOString(),
     porteiro_online: porteiroOnline,
     fpy_percent: fpyPercent,
+    fpy_fonte: kpiFpyReal !== null ? "kpis-esteira.json" : fallbackFpyPercent !== null ? "placar" : null,
     cpi_tokens: cpiTokens,
+    cpi_fonte: kpiCpiReal !== null ? "kpis-esteira.json" : fallbackCpiTokens !== null ? "metricas_turnos" : null,
     cpi_minimo: cpiMinimo,
+    kpis_gerado_em: typeof kpisSnap?.gerado_em === "string" ? kpisSnap.gerado_em : null,
     circuit_breaker_loop: maxReentregas !== null ? `${maxReentregas}/3` : null,
     circuit_breaker_loop_ativo: maxReentregas !== null ? maxReentregas >= 3 : null,
     total_cards_kanban: kanban.cards.length,
@@ -950,6 +981,7 @@ export async function buildOrgfyStatus(ctx: any, empresa?: string) {
     fontes_lidas: {
       canvas_atual: kanban.sources.canvas_atual,
       esteira_minima_state: live.esteiraState !== null,
+      kpis_esteira: kpisSnap !== null,
       placar_20h: live.placarState !== null,
       porteiro_state: live.porteiroState !== null,
       metricas_turnos: live.metricasTurnos !== null,
