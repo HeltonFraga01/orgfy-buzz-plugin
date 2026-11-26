@@ -8012,10 +8012,2014 @@ function createOrgfyComposerPickerComponent(ctx) {
     );
   };
 }
+function Icon({ h, name, size = 14, color }) {
+  const base = {
+    viewBox: "0 0 24 24",
+    width: size,
+    height: size,
+    fill: "none",
+    stroke: color || "currentColor",
+    strokeWidth: 1.8,
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    style: { flexShrink: 0 },
+    "aria-hidden": "true"
+  };
+  switch (name) {
+    case "diff":
+      return h("svg", base, h("path", { d: "M12 3v14" }), h("path", { d: "M5 10h14" }), h("path", { d: "M5 21h14" }));
+    case "files":
+      return h("svg", base, h("path", { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }), h("path", { d: "M14 2v4a2 2 0 0 0 2 2h4" }));
+    case "pr":
+      return h("svg", base, h("circle", { cx: 18, cy: 18, r: 3 }), h("circle", { cx: 6, cy: 6, r: 3 }), h("path", { d: "M13 6h3a2 2 0 0 1 2 2v7" }), h("line", { x1: 6, y1: 9, x2: 6, y2: 21 }));
+    case "info":
+      return h("svg", base, h("circle", { cx: 12, cy: 12, r: 10 }), h("path", { d: "M12 16v-4" }), h("path", { d: "M12 8h.01" }));
+    case "close":
+      return h("svg", base, h("path", { d: "M18 6 6 18" }), h("path", { d: "m6 6 12 12" }));
+    case "chevron":
+      return h("svg", base, h("path", { d: "m9 18 6-6-6-6" }));
+    case "folder":
+      return h("svg", base, h("path", { d: "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" }));
+    case "fileCode":
+      return h("svg", base, h("path", { d: "M10 12.5 8 15l2 2.5" }), h("path", { d: "m14 12.5 2 2.5-2 2.5" }), h("path", { d: "M14 2v4a2 2 0 0 0 2 2h4" }), h("path", { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z" }));
+    case "checkCircle":
+      return h("svg", base, h("circle", { cx: 12, cy: 12, r: 10 }), h("path", { d: "m9 12 2 2 4-4" }));
+    case "clock":
+      return h("svg", base, h("circle", { cx: 12, cy: 12, r: 10 }), h("polyline", { points: "12 6 12 12 16 14" }));
+    case "xCircle":
+      return h("svg", base, h("circle", { cx: 12, cy: 12, r: 10 }), h("path", { d: "m15 9-6 6" }), h("path", { d: "m9 9 6 6" }));
+    case "external":
+      return h("svg", base, h("path", { d: "M15 3h6v6" }), h("path", { d: "M10 14 21 3" }), h("path", { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" }));
+    case "message":
+      return h("svg", base, h("path", { d: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" }));
+    case "refresh":
+      return h("svg", base, h("path", { d: "M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" }), h("path", { d: "M21 3v5h-5" }));
+    case "compact":
+      return h("svg", base, h("path", { d: "M12 22v-6" }), h("path", { d: "M12 8V2" }), h("path", { d: "M4 12H2" }), h("path", { d: "M10 12H8" }), h("path", { d: "M16 12h-2" }), h("path", { d: "M22 12h-2" }), h("path", { d: "m15 19-3-3-3 3" }), h("path", { d: "m15 5-3 3-3-3" }));
+    case "plug":
+      return h("svg", base, h("path", { d: "M12 22v-5" }), h("path", { d: "M9 8V2" }), h("path", { d: "M15 8V2" }), h("path", { d: "M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z" }));
+    case "sparkles":
+      return h("svg", base, h("path", { d: "m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z" }));
+    case "bot":
+      return h("svg", base, h("path", { d: "M12 8V4H8" }), h("rect", { width: 16, height: 12, x: 4, y: 8, rx: 2 }), h("path", { d: "M2 14h2" }), h("path", { d: "M20 14h2" }), h("path", { d: "M15 13v2" }), h("path", { d: "M9 13v2" }));
+    default:
+      return null;
+  }
+}
+function buildFileTree(files) {
+  const root = [];
+  const dirMap = /* @__PURE__ */ new Map();
+  const getOrCreateDir = (parts) => {
+    if (parts.length === 0) return root;
+    const key = parts.join("/");
+    const existing = dirMap.get(key);
+    if (existing) return existing.children;
+    const parentList = getOrCreateDir(parts.slice(0, -1));
+    const node = {
+      name: parts[parts.length - 1],
+      path: key,
+      kind: "dir",
+      children: []
+    };
+    parentList.push(node);
+    dirMap.set(key, node);
+    return node.children;
+  };
+  for (const f of files) {
+    const parts = f.path.split("/").filter(Boolean);
+    if (parts.length === 0) continue;
+    const parentList = getOrCreateDir(parts.slice(0, -1));
+    parentList.push({
+      name: parts[parts.length - 1],
+      path: f.path,
+      kind: "file",
+      size: f.size
+    });
+  }
+  const sortNodes = (list) => {
+    list.sort((a, b) => {
+      if (a.kind !== b.kind) return a.kind === "dir" ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+    for (const n of list) {
+      if (n.children) sortNodes(n.children);
+    }
+  };
+  sortNodes(root);
+  return root;
+}
+function cleanCardMarkdown(raw) {
+  return raw.replace(/<!--[\s\S]*?-->/g, "").replace(/^\s*\n+/, "").trim();
+}
+function parseOrgfyCardStructure(raw) {
+  const cleaned = cleanCardMarkdown(raw || "");
+  if (!cleaned) return null;
+  const pickField = (labelPattern) => {
+    const rx = new RegExp(`(?:^|\\n)\\s*(?:[-*•]\\s*)?(?:\\*\\*)?(?:${labelPattern})(?:\\*\\*)?\\s*:\\s*(?:\\*\\*)?\\s*(.+)`, "i");
+    const m = rx.exec(cleaned);
+    if (!m) return void 0;
+    return m[1].replace(/\*\*/g, "").replace(/^`|`$/g, "").trim() || void 0;
+  };
+  const lines = cleaned.replace(/\r\n/g, "\n").split("\n");
+  let currentSection = "intro";
+  const introLines = [];
+  const objetivoLines = [];
+  const leitura = [];
+  const escritaExclusiva = [];
+  const passos = [];
+  let subListMode = "none";
+  let comandoAceite;
+  let feitoQuando;
+  let inCodeBlock = false;
+  const codeBlockLines = [];
+  for (const rawLine of lines) {
+    const trimmed = rawLine.trim();
+    if (trimmed.startsWith("```")) {
+      if (inCodeBlock) {
+        if (currentSection === "aceite" && !comandoAceite && codeBlockLines.length > 0) {
+          comandoAceite = codeBlockLines.join("\n").trim();
+        }
+        codeBlockLines.length = 0;
+        inCodeBlock = false;
+      } else {
+        inCodeBlock = true;
+      }
+      continue;
+    }
+    if (inCodeBlock) {
+      codeBlockLines.push(rawLine);
+      continue;
+    }
+    const secMatch = /^#{1,4}\s+(.+)$/.exec(trimmed) || /^\*\*([^*]{2,40})\*\*$/.exec(trimmed);
+    if (secMatch) {
+      const heading = secMatch[1].toLowerCase();
+      subListMode = "none";
+      if (/objetivo/.test(heading)) currentSection = "objetivo";
+      else if (/estado/.test(heading)) currentSection = "estado";
+      else if (/pap[eé]is|ambiente/.test(heading)) currentSection = "papeis";
+      else if (/escopo|plano|checklist|passos/.test(heading)) currentSection = "escopo";
+      else if (/aceite|crit[eé]rio|l-22/.test(heading)) currentSection = "aceite";
+      else currentSection = "other";
+      continue;
+    }
+    const checkMatch = /^[-*•]\s*\[([ xX])\]\s*(?:(P\d+)\s*[:\-–]?\s*)?(.+)$/.exec(trimmed);
+    if (checkMatch) {
+      passos.push({
+        id: checkMatch[2] || `P${passos.length + 1}`,
+        done: checkMatch[1].toLowerCase() === "x",
+        text: checkMatch[3].trim()
+      });
+      continue;
+    }
+    if (/^(?:[-*•]\s*)?(?:\*\*)?escrita\s+exclusiva(?:\*\*)?\s*:/i.test(trimmed)) {
+      subListMode = "escrita";
+      const inlineVal = trimmed.replace(/^(?:[-*•]\s*)?(?:\*\*)?escrita\s+exclusiva(?:\*\*)?\s*:\s*(?:\*\*)?\s*/i, "").trim();
+      if (inlineVal) {
+        for (const p of inlineVal.split(/[,;]/)) {
+          const cleanP = p.replace(/`/g, "").replace(/^\*\*\s*|\s*\*\*$/g, "").trim();
+          if (cleanP) escritaExclusiva.push(cleanP);
+        }
+      }
+      continue;
+    }
+    if (/^(?:[-*•]\s*)?(?:\*\*)?(?:leitura|arquivos\s+de\s+refer[eê]ncia)(?:\*\*)?\s*:/i.test(trimmed)) {
+      subListMode = "leitura";
+      const inlineVal = trimmed.replace(/^(?:[-*•]\s*)?(?:\*\*)?(?:leitura|arquivos\s+de\s+refer[eê]ncia)(?:\*\*)?\s*:\s*(?:\*\*)?\s*/i, "").trim();
+      if (inlineVal) {
+        for (const p of inlineVal.split(/[,;]/)) {
+          const cleanP = p.replace(/`/g, "").replace(/^\*\*\s*|\s*\*\*$/g, "").trim();
+          if (cleanP) leitura.push(cleanP);
+        }
+      }
+      continue;
+    }
+    if (subListMode !== "none" && /^[-*•]\s+/.test(trimmed)) {
+      const itemVal = trimmed.replace(/^[-*•]\s+/, "").replace(/`/g, "").trim();
+      if (itemVal) {
+        if (subListMode === "escrita") escritaExclusiva.push(itemVal);
+        else leitura.push(itemVal);
+      }
+      continue;
+    }
+    if (currentSection === "objetivo" && trimmed) {
+      objetivoLines.push(trimmed);
+    } else if (currentSection === "intro" && trimmed && !/^\*\*[^*]+\*\*:/.test(trimmed)) {
+      introLines.push(trimmed);
+    }
+  }
+  feitoQuando = pickField("feito\\s+quando|crit[eé]rio\\s+de\\s+aceite");
+  if (!comandoAceite) {
+    comandoAceite = pickField("comando\\s+de\\s+aceite|comando\\s+l-22|aceite\\s+l-22|aceite");
+  }
+  const result = {
+    objetivo: (objetivoLines.length > 0 ? objetivoLines : introLines).join(" ").trim(),
+    estado: {
+      contexto: pickField("contexto"),
+      autoridade: pickField("autoridade"),
+      decisao: pickField("decis[aã]o")
+    },
+    papeis: {
+      tipo: pickField("tipo"),
+      executor: pickField("executor"),
+      revisor: pickField("revisor"),
+      decisor: pickField("decisor"),
+      workspace: pickField("workspace"),
+      effort: pickField("effort|esfor[cç]o"),
+      spec: pickField("spec")
+    },
+    escopo: {
+      leitura,
+      escritaExclusiva,
+      passos
+    },
+    aceite: {
+      feitoQuando,
+      comandoAceite
+    }
+  };
+  const hasStructuredSignal = Boolean(
+    result.estado.contexto || result.estado.autoridade || result.estado.decisao || result.papeis.executor || result.papeis.revisor || result.papeis.tipo || result.escopo.escritaExclusiva.length > 0 || result.escopo.passos.length > 0 || result.aceite.comandoAceite
+  );
+  return hasStructuredSignal ? result : null;
+}
+function renderSimpleMarkdown(h, raw) {
+  const cleaned = cleanCardMarkdown(raw);
+  if (!cleaned) return null;
+  const lines = cleaned.replace(/\r\n/g, "\n").split("\n");
+  const blocks = [];
+  let i = 0;
+  let k = 0;
+  const renderInline = (text) => {
+    const out = [];
+    const rx = /(`[^`]+`|\*\*[^*]+\*\*)/g;
+    let last = 0;
+    let m;
+    let ik = 0;
+    while ((m = rx.exec(text)) !== null) {
+      if (m.index > last) out.push(text.slice(last, m.index));
+      const tok = m[0];
+      if (tok.startsWith("`")) {
+        out.push(
+          h(
+            "code",
+            {
+              key: `c${ik++}`,
+              className: "of-mono",
+              style: {
+                fontSize: "11px",
+                padding: "1px 4px",
+                borderRadius: "4px",
+                background: "var(--muted)",
+                border: "1px solid var(--border)"
+              }
+            },
+            tok.slice(1, -1)
+          )
+        );
+      } else {
+        out.push(h("strong", { key: `b${ik++}`, style: { color: "var(--foreground)", fontWeight: 600 } }, tok.slice(2, -2)));
+      }
+      last = rx.lastIndex;
+    }
+    if (last < text.length) out.push(text.slice(last));
+    return out;
+  };
+  while (i < lines.length) {
+    const trimmed = lines[i].trim();
+    if (!trimmed) {
+      i++;
+      continue;
+    }
+    const hm = /^(#{1,4})\s+(.+)$/.exec(trimmed);
+    if (hm) {
+      const lvl = hm[1].length;
+      blocks.push(
+        h(
+          `h${Math.min(4, lvl + 1)}`,
+          {
+            key: `h${k++}`,
+            style: {
+              margin: lvl === 1 ? "2px 0 6px" : "10px 0 4px",
+              fontSize: lvl === 1 ? "13.5px" : "12px",
+              fontWeight: 600,
+              color: "var(--foreground)"
+            }
+          },
+          ...renderInline(hm[2])
+        )
+      );
+      i++;
+      continue;
+    }
+    if (/^[-*•]\s+/.test(trimmed)) {
+      const items = [];
+      while (i < lines.length && /^[-*•]\s+/.test(lines[i].trim())) {
+        items.push(lines[i].trim().replace(/^[-*•]\s+/, ""));
+        i++;
+      }
+      blocks.push(
+        h(
+          "ul",
+          {
+            key: `ul${k++}`,
+            style: { margin: "4px 0", paddingLeft: "18px", display: "flex", flexDirection: "column", gap: "3px", fontSize: "12px", lineHeight: 1.45, color: "var(--muted-foreground)" }
+          },
+          items.map((it, idx) => h("li", { key: idx }, ...renderInline(it)))
+        )
+      );
+      continue;
+    }
+    const para = [];
+    while (i < lines.length && lines[i].trim() && !/^(#{1,4}\s|[-*•]\s)/.test(lines[i].trim())) {
+      para.push(lines[i].trim());
+      i++;
+    }
+    blocks.push(
+      h(
+        "p",
+        { key: `p${k++}`, style: { margin: "4px 0", fontSize: "12px", lineHeight: 1.5, color: "var(--muted-foreground)" } },
+        ...renderInline(para.join(" "))
+      )
+    );
+  }
+  return blocks;
+}
+function renderUnifiedFileDiff(h, file, isOpen, onToggle, anchorOpts) {
+  const displayName = file.previousPath ? `${file.previousPath} → ${file.path}` : file.path;
+  const statusColor = file.status === "added" ? "var(--status-done, #3dd68c)" : file.status === "deleted" ? "var(--status-failed, #ff9592)" : "var(--status-waiting, #ffca16)";
+  return h(
+    "div",
+    {
+      key: file.path,
+      style: {
+        borderRadius: "8px",
+        border: "1px solid var(--border)",
+        overflow: "hidden",
+        background: "var(--card)"
+      }
+    },
+    h(
+      "button",
+      {
+        type: "button",
+        "aria-expanded": isOpen,
+        onClick: onToggle,
+        style: {
+          width: "100%",
+          display: "flex",
+          alignItems: "center",
+          gap: "7px",
+          padding: "7px 10px",
+          background: "var(--surface-inset, rgba(255,255,255,0.02))",
+          border: "none",
+          borderRadius: 0,
+          color: "var(--foreground)",
+          cursor: "pointer",
+          textAlign: "left",
+          fontSize: "12px"
+        }
+      },
+      h(
+        "span",
+        {
+          style: {
+            display: "inline-flex",
+            transform: isOpen ? "rotate(90deg)" : "rotate(0deg)",
+            transition: "transform 0.12s ease",
+            color: "var(--muted-foreground)"
+          }
+        },
+        Icon({ h, name: "chevron", size: 13 })
+      ),
+      Icon({ h, name: "fileCode", size: 13, color: statusColor }),
+      h(
+        "span",
+        {
+          className: "of-mono",
+          title: displayName,
+          style: { flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "11.5px" }
+        },
+        displayName
+      ),
+      h("span", { style: { fontSize: "10px", color: "var(--muted-foreground)", textTransform: "uppercase" } }, file.status[0]),
+      file.additions > 0 && h("span", { className: "of-mono", style: { fontSize: "11px", color: "var(--status-done, #3dd68c)" } }, `+${file.additions}`),
+      file.deletions > 0 && h("span", { className: "of-mono", style: { fontSize: "11px", color: "var(--status-failed, #ff9592)" } }, `−${file.deletions}`)
+    ),
+    isOpen && h(
+      "div",
+      { style: { borderTop: "1px solid var(--border)", overflowX: "auto", fontFamily: "var(--font-mono)", fontSize: "11px", lineHeight: 1.5 } },
+      file.hunks.length === 0 ? h("div", { className: "of-muted", style: { padding: "8px 12px" } }, "Sem linhas de diff textual (arquivo binário ou renomeado).") : file.hunks.map(
+        (hunk, hIdx) => h(
+          "div",
+          { key: hIdx },
+          h(
+            "div",
+            {
+              style: {
+                padding: "3px 10px",
+                background: "rgba(96, 165, 250, 0.08)",
+                color: "var(--muted-foreground)",
+                fontSize: "10.5px",
+                borderBottom: "1px solid rgba(255,255,255,0.04)"
+              }
+            },
+            hunk.header
+          ),
+          hunk.lines.map((ln, lIdx) => {
+            const lineNum = ln.newLine ?? ln.oldLine ?? lIdx + 1;
+            const bg = ln.type === "add" ? "rgba(61, 214, 140, 0.12)" : ln.type === "del" ? "rgba(255, 149, 146, 0.12)" : "transparent";
+            const color = ln.type === "add" ? "var(--status-done, #3dd68c)" : ln.type === "del" ? "var(--status-failed, #ff9592)" : "var(--foreground)";
+            const prefix = ln.type === "add" ? "+" : ln.type === "del" ? "-" : " ";
+            const isAnchoring = Boolean((anchorOpts == null ? void 0 : anchorOpts.activeAnchor) && anchorOpts.activeAnchor.file === file.path && anchorOpts.activeAnchor.line === lineNum);
+            const lineComments = ((anchorOpts == null ? void 0 : anchorOpts.comments) || []).filter((c) => c.file === file.path && c.line === lineNum);
+            return h(
+              "div",
+              { key: lIdx },
+              h(
+                "div",
+                {
+                  title: anchorOpts ? `Clique para comentar em ${file.path}:${lineNum}` : void 0,
+                  onClick: anchorOpts ? () => anchorOpts.onOpenAnchor(file.path, lineNum, ln.text) : void 0,
+                  style: {
+                    display: "grid",
+                    gridTemplateColumns: "36px 36px 14px 1fr",
+                    background: bg,
+                    padding: "0 8px",
+                    whiteSpace: "pre",
+                    cursor: anchorOpts ? "pointer" : "default"
+                  }
+                },
+                h("span", { style: { color: "var(--muted-foreground)", opacity: 0.55, textAlign: "right", paddingRight: "6px", userSelect: "none" } }, ln.oldLine ?? ""),
+                h("span", { style: { color: "var(--muted-foreground)", opacity: 0.55, textAlign: "right", paddingRight: "6px", userSelect: "none" } }, ln.newLine ?? ""),
+                h("span", { style: { color, fontWeight: 600, userSelect: "none" } }, prefix),
+                h("span", { style: { color } }, ln.text)
+              ),
+              lineComments.map(
+                (c) => h(
+                  "div",
+                  {
+                    key: c.id,
+                    style: {
+                      margin: "4px 10px",
+                      padding: "6px 9px",
+                      borderRadius: "6px",
+                      border: "1px solid rgba(245,158,11,0.4)",
+                      background: "rgba(245,158,11,0.08)",
+                      fontFamily: "var(--font-sans)",
+                      fontSize: "11.5px",
+                      display: "flex",
+                      alignItems: "flex-start",
+                      justifyContent: "space-between",
+                      gap: "8px"
+                    }
+                  },
+                  h("div", null, h("strong", { className: "of-mono", style: { fontSize: "10.5px", marginRight: "6px" } }, `L${c.line}`), c.comment),
+                  anchorOpts && h(
+                    "button",
+                    { type: "button", className: "of-btn", "data-variant": "ghost", style: { padding: "0 4px", fontSize: "11px" }, onClick: () => anchorOpts.onRemoveComment(c.id) },
+                    "×"
+                  )
+                )
+              ),
+              isAnchoring && anchorOpts && h(
+                "div",
+                {
+                  "data-diff-anchor-composer": "true",
+                  style: {
+                    margin: "5px 10px 8px",
+                    padding: "8px 10px",
+                    borderRadius: "7px",
+                    border: "1px solid var(--border-strong)",
+                    background: "var(--surface)",
+                    fontFamily: "var(--font-sans)",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "6px"
+                  }
+                },
+                h("div", { className: "of-mono of-muted", style: { fontSize: "10.5px" } }, `Comentário ancorado em ${file.path}:${lineNum}`),
+                h("textarea", {
+                  className: "of-textarea",
+                  style: { minHeight: "52px", fontSize: "11.5px" },
+                  placeholder: "Descreva o ajuste esperado nesta linha...",
+                  value: anchorOpts.anchorDraft,
+                  onChange: (e) => anchorOpts.onChangeDraft(e.target.value)
+                }),
+                h(
+                  "div",
+                  { style: { display: "flex", gap: "6px", justifyContent: "flex-end" } },
+                  h("button", { type: "button", className: "of-btn", style: { fontSize: "11px" }, onClick: anchorOpts.onCancelAnchor }, "Cancelar"),
+                  h("button", { type: "button", className: "of-btn", "data-variant": "primary", style: { fontSize: "11px" }, onClick: anchorOpts.onSaveAnchor }, "Adicionar ao lote")
+                )
+              )
+            );
+          })
+        )
+      )
+    )
+  );
+}
+function createCodeDenInspectorDrawer(React) {
+  const h = React.createElement;
+  return function CodeDenInspectorDrawer(props) {
+    var _a, _b, _c;
+    const {
+      ctx,
+      item,
+      tenant,
+      repoOwner,
+      repoDtag,
+      repoDetail,
+      repoLoading,
+      linkedPr,
+      liveCrew = [],
+      liveTurnsByPubkey = {},
+      resolveAuthor,
+      EmbeddedThread,
+      threadChannelId,
+      relaySession,
+      relayScope,
+      onOpenInBuzz,
+      onOpenPrInBuzz,
+      onOpenRepoPrsInBuzz,
+      onOpenCommitInBuzz,
+      onOpenAgentDm,
+      onSessionAction,
+      onToggleChecklistStep,
+      onSendDiffReview,
+      onClose
+    } = props;
+    const [activeTab, setActiveTab] = React.useState("pr");
+    const [localChecklistOverrides, setLocalChecklistOverrides] = React.useState({});
+    const [activeAnchor, setActiveAnchor] = React.useState(null);
+    const [anchorDraft, setAnchorDraft] = React.useState("");
+    const [anchoredComments, setAnchoredComments] = React.useState([]);
+    const [sendingReview, setSendingReview] = React.useState(false);
+    const [showLiveThread, setShowLiveThread] = React.useState(false);
+    const [gitSnap, setGitSnap] = React.useState(null);
+    const [gitLoading, setGitLoading] = React.useState(false);
+    const [selectedCommit, setSelectedCommit] = React.useState("");
+    const [selectedCommitDiff, setSelectedCommitDiff] = React.useState(null);
+    const [openDiffFiles, setOpenDiffFiles] = React.useState({});
+    const [expandedDirs, setExpandedDirs] = React.useState({});
+    const [selectedFilePath, setSelectedFilePath] = React.useState(null);
+    const [fileContent, setFileContent] = React.useState(null);
+    const [openLoadedSection, setOpenLoadedSection] = React.useState("mcp");
+    React.useEffect(() => {
+      if (!item) return;
+      setActiveTab("pr");
+      setSelectedCommit((repoDetail == null ? void 0 : repoDetail.commit) || "");
+      setSelectedCommitDiff((repoDetail == null ? void 0 : repoDetail.commitDiff) || null);
+      setOpenDiffFiles({});
+      setSelectedFilePath(null);
+      setFileContent(null);
+      setLocalChecklistOverrides({});
+      setActiveAnchor(null);
+      setAnchorDraft("");
+      setAnchoredComments([]);
+    }, [item == null ? void 0 : item.id]);
+    React.useEffect(() => {
+      if ((repoDetail == null ? void 0 : repoDetail.commit) && !selectedCommit) {
+        setSelectedCommit(repoDetail.commit);
+      }
+      if (repoDetail == null ? void 0 : repoDetail.commitDiff) {
+        setSelectedCommitDiff(repoDetail.commitDiff);
+      }
+    }, [repoDetail == null ? void 0 : repoDetail.commit, repoDetail == null ? void 0 : repoDetail.commitDiff]);
+    const repoDetailRef = React.useRef(repoDetail);
+    repoDetailRef.current = repoDetail;
+    const loadGitOverview = React.useCallback(async () => {
+      var _a2, _b2;
+      if (!(item == null ? void 0 : item.id)) return;
+      setGitLoading(true);
+      try {
+        const snap = await readBuzzProjectGit(ctx, {
+          owner: repoOwner,
+          dtag: repoDtag || tenant
+        });
+        setGitSnap(snap);
+        const currentDetail = repoDetailRef.current;
+        const targetCommit = (currentDetail == null ? void 0 : currentDetail.commit) || (snap == null ? void 0 : snap.head) || ((_b2 = (_a2 = snap == null ? void 0 : snap.commits) == null ? void 0 : _a2[0]) == null ? void 0 : _b2.hash) || "";
+        if (targetCommit && !(currentDetail == null ? void 0 : currentDetail.commitDiff)) {
+          setSelectedCommit(targetCommit);
+          const commitSnap = await readBuzzProjectGit(ctx, {
+            owner: repoOwner,
+            dtag: repoDtag || tenant,
+            commit: targetCommit
+          });
+          if (commitSnap == null ? void 0 : commitSnap.diff) setSelectedCommitDiff(commitSnap.diff);
+        }
+      } catch {
+        setGitSnap(null);
+      } finally {
+        setGitLoading(false);
+      }
+    }, [ctx, item == null ? void 0 : item.id, repoOwner, repoDtag, tenant]);
+    React.useEffect(() => {
+      if (!(item == null ? void 0 : item.id)) return;
+      void loadGitOverview();
+    }, [item == null ? void 0 : item.id, loadGitOverview]);
+    const handleSelectCommit = async (hash) => {
+      setSelectedCommit(hash);
+      setOpenDiffFiles({});
+      setGitLoading(true);
+      try {
+        const snap = await readBuzzProjectGit(ctx, {
+          owner: repoOwner,
+          dtag: repoDtag || tenant,
+          commit: hash
+        });
+        setSelectedCommitDiff((snap == null ? void 0 : snap.diff) || null);
+      } finally {
+        setGitLoading(false);
+      }
+    };
+    const handleSelectFile = async (filePath) => {
+      setSelectedFilePath(filePath);
+      setFileContent({ path: filePath, content: null, loading: true });
+      const snap = await readBuzzProjectGit(ctx, {
+        owner: repoOwner,
+        dtag: repoDtag || tenant,
+        path: filePath
+      });
+      if (snap == null ? void 0 : snap.file) {
+        setFileContent({ path: snap.file.path, content: snap.file.content, loading: false });
+      } else {
+        setFileContent({ path: filePath, content: null, loading: false, error: "Arquivo indisponível via session.projectGit." });
+      }
+    };
+    const parsedDiffFiles = React.useMemo(
+      () => parseUnifiedDiff(selectedCommitDiff || (repoDetail == null ? void 0 : repoDetail.commitDiff)),
+      [selectedCommitDiff, repoDetail == null ? void 0 : repoDetail.commitDiff]
+    );
+    const totalAdditions = React.useMemo(
+      () => parsedDiffFiles.reduce((acc, f) => acc + f.additions, 0),
+      [parsedDiffFiles]
+    );
+    const totalDeletions = React.useMemo(
+      () => parsedDiffFiles.reduce((acc, f) => acc + f.deletions, 0),
+      [parsedDiffFiles]
+    );
+    const fileTree = React.useMemo(
+      () => buildFileTree((gitSnap == null ? void 0 : gitSnap.files) || []),
+      [gitSnap == null ? void 0 : gitSnap.files]
+    );
+    if (!item) return null;
+    const noteStr = String(item.note || "");
+    const execMatch = /Executor:\s*([^·\n]+)/i.exec(noteStr);
+    const revMatch = /Revisor:\s*([^·\n]+)/i.exec(noteStr);
+    const executorName = execMatch ? execMatch[1].trim() : "";
+    const reviewerName = revMatch ? revMatch[1].trim() : "";
+    const executorAgent = liveCrew.find((a) => executorName && a.name.toLowerCase().includes(executorName.toLowerCase())) || null;
+    const reviewerAgent = liveCrew.find((a) => reviewerName && a.name.toLowerCase().includes(reviewerName.toLowerCase())) || null;
+    const executorTurn = (executorAgent == null ? void 0 : executorAgent.pubkey) ? liveTurnsByPubkey[executorAgent.pubkey.toLowerCase()] || null : null;
+    const steps = ["Entrada", "Tipo", "Execução", "Revisão + CI", "Merge"];
+    const activeIdx = item.stage === "merged" ? 4 : item.stage === "verifying" || item.stage === "watching" ? 3 : item.stage === "building" ? 2 : item.stage === "candidate" ? 1 : 0;
+    const checksList = [
+      {
+        name: "CI / Pytest da Esteira",
+        state: item.stage === "merged" ? "passed" : item.stage === "verifying" || item.stage === "watching" ? "running" : "pending"
+      },
+      {
+        name: "Revisão Cross-Provider (L-01)",
+        state: item.stage === "merged" ? "passed" : reviewerName ? "running" : "pending"
+      },
+      {
+        name: "Aceite Congelado (L-22)",
+        state: item.stage === "merged" ? "passed" : "pending"
+      },
+      {
+        name: "Conflitos de Merge (main)",
+        state: item.stage === "merged" ? "passed" : ((_a = item.reason) == null ? void 0 : _a.toLowerCase().includes("conflito")) ? "failed" : "passed"
+      }
+    ];
+    const checksPassed = checksList.filter((c) => c.state === "passed").length;
+    const allDiffsOpen = parsedDiffFiles.length > 0 && parsedDiffFiles.every((f) => openDiffFiles[f.path] !== false);
+    const toggleAllDiffs = () => {
+      const next = {};
+      const target = !allDiffsOpen;
+      for (const f of parsedDiffFiles) next[f.path] = target;
+      setOpenDiffFiles(next);
+    };
+    const toggleSingleDiff = (path) => {
+      setOpenDiffFiles((prev) => ({
+        ...prev,
+        [path]: prev[path] === false ? true : !(prev[path] ?? true)
+      }));
+    };
+    const TABS = [
+      { id: "diff", label: "Diff", icon: "diff", count: parsedDiffFiles.length || void 0 },
+      { id: "files", label: "Arquivos", icon: "files", count: ((_b = gitSnap == null ? void 0 : gitSnap.files) == null ? void 0 : _b.length) || void 0 },
+      { id: "pr", label: "Issue / PR", icon: "pr" },
+      { id: "details", label: "Detalhes", icon: "info" }
+    ];
+    const renderTreeNode = (node, depth) => {
+      var _a2;
+      const isDir = node.kind === "dir";
+      const isOpen = Boolean(expandedDirs[node.path]);
+      const isSelected = selectedFilePath === node.path;
+      return h(
+        React.Fragment,
+        { key: node.path },
+        h(
+          "button",
+          {
+            type: "button",
+            onClick: () => {
+              if (isDir) {
+                setExpandedDirs((prev) => ({ ...prev, [node.path]: !prev[node.path] }));
+              } else {
+                void handleSelectFile(node.path);
+              }
+            },
+            style: {
+              width: "100%",
+              height: "26px",
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+              paddingLeft: `${8 + depth * 14}px`,
+              paddingRight: "8px",
+              borderRadius: "6px",
+              border: "none",
+              background: isSelected ? "var(--affordance-selected, rgba(255,255,255,0.08))" : "transparent",
+              color: isSelected ? "var(--foreground)" : "var(--muted-foreground)",
+              cursor: "pointer",
+              textAlign: "left",
+              fontSize: "12px"
+            }
+          },
+          isDir ? h(
+            "span",
+            {
+              style: {
+                display: "inline-flex",
+                transform: isOpen ? "rotate(90deg)" : "rotate(0deg)",
+                transition: "transform 0.12s ease"
+              }
+            },
+            Icon({ h, name: "chevron", size: 12 })
+          ) : h("span", { style: { width: "12px", display: "inline-block" } }),
+          Icon({ h, name: isDir ? "folder" : "files", size: 13, color: isDir ? "var(--status-waiting, #f59e0b)" : void 0 }),
+          h(
+            "span",
+            { style: { flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
+            node.name
+          )
+        ),
+        isDir && isOpen && ((_a2 = node.children) == null ? void 0 : _a2.map((c) => renderTreeNode(c, depth + 1)))
+      );
+    };
+    const renderSectionHeader = (title, action) => h(
+      "div",
+      { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", marginBottom: "8px" } },
+      h(
+        "div",
+        { style: { fontSize: "10.5px", fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--muted-foreground)" } },
+        title
+      ),
+      action
+    );
+    const renderDetailRow = (label, value) => h(
+      "div",
+      {
+        style: {
+          display: "grid",
+          gridTemplateColumns: "112px 1fr",
+          alignItems: "baseline",
+          gap: "12px",
+          padding: "8px 0",
+          borderBottom: "1px solid var(--border-subtle, rgba(255,255,255,0.06))",
+          fontSize: "12.5px"
+        }
+      },
+      h("span", { style: { fontSize: "11.5px", color: "var(--muted-foreground)" } }, label),
+      h("div", { style: { minWidth: 0, wordBreak: "break-word", color: "var(--foreground)" } }, value)
+    );
+    return h(
+      "div",
+      {
+        className: "of-sheet-backdrop",
+        "data-item-sheet-drawer": "true",
+        "data-codeden-inspector": "true",
+        onClick: (e) => {
+          if (e.target === e.currentTarget) onClose();
+        }
+      },
+      h(
+        "aside",
+        {
+          className: "of-sheet-panel",
+          style: {
+            width: "min(620px, 95vw)",
+            padding: 0,
+            display: "flex",
+            flexDirection: "column",
+            gap: 0,
+            overflow: "hidden"
+          }
+        },
+        // ── BARRA SUPERIOR 1:1 CODEDEN (Diff | Arquivos | Issue / PR | Detalhes | ×) ──
+        h(
+          "div",
+          {
+            style: {
+              height: "46px",
+              flexShrink: 0,
+              display: "flex",
+              alignItems: "center",
+              gap: "4px",
+              padding: "0 10px",
+              borderBottom: "1px solid var(--border)",
+              background: "var(--card)"
+            }
+          },
+          h(
+            "div",
+            {
+              role: "tablist",
+              style: { display: "flex", alignItems: "center", gap: "3px", flex: 1, minWidth: 0, overflowX: "auto" }
+            },
+            TABS.map((t) => {
+              const active = activeTab === t.id;
+              return h(
+                "button",
+                {
+                  key: t.id,
+                  type: "button",
+                  role: "tab",
+                  "aria-selected": active,
+                  onClick: () => setActiveTab(t.id),
+                  style: {
+                    height: "28px",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    padding: "0 9px",
+                    borderRadius: "6px",
+                    border: active ? "1px solid var(--border)" : "1px solid transparent",
+                    background: active ? "var(--affordance-selected, rgba(255,255,255,0.08))" : "transparent",
+                    color: active ? "var(--foreground)" : "var(--muted-foreground)",
+                    fontSize: "12px",
+                    fontWeight: active ? 600 : 500,
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                    flexShrink: 0
+                  }
+                },
+                Icon({ h, name: t.icon, size: 13 }),
+                h("span", null, t.label),
+                t.count !== void 0 && h(
+                  "span",
+                  {
+                    className: "of-mono",
+                    style: {
+                      fontSize: "10px",
+                      padding: "0 5px",
+                      borderRadius: "4px",
+                      background: "var(--muted)",
+                      color: "var(--muted-foreground)"
+                    }
+                  },
+                  String(t.count)
+                )
+              );
+            })
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              onClick: onClose,
+              title: "Fechar painel",
+              "aria-label": "Fechar painel",
+              style: {
+                width: "28px",
+                height: "28px",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                borderRadius: "6px",
+                border: "none",
+                background: "transparent",
+                color: "var(--muted-foreground)",
+                cursor: "pointer",
+                flexShrink: 0
+              }
+            },
+            Icon({ h, name: "close", size: 15 })
+          )
+        ),
+        // ── CONTEÚDO DA ABA SELECIONADA ──
+        h(
+          "div",
+          {
+            style: {
+              flex: 1,
+              minHeight: 0,
+              overflowY: "auto",
+              display: "flex",
+              flexDirection: "column"
+            }
+          },
+          // ── ABA 1: DIFF (1:1 CodeDen DiffPanel) ──
+          activeTab === "diff" && h(
+            "div",
+            { style: { display: "flex", flexDirection: "column", flex: 1 } },
+            // Git bar
+            h(
+              "div",
+              {
+                style: {
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  flexWrap: "wrap",
+                  gap: "8px",
+                  padding: "8px 14px",
+                  borderBottom: "1px solid var(--border)",
+                  fontSize: "11.5px"
+                }
+              },
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
+                gitSnap && gitSnap.commits.length > 0 ? h(
+                  "select",
+                  {
+                    value: selectedCommit,
+                    onChange: (e) => void handleSelectCommit(e.target.value),
+                    style: {
+                      background: "var(--muted)",
+                      color: "var(--foreground)",
+                      border: "1px solid var(--border)",
+                      borderRadius: "6px",
+                      padding: "3px 8px",
+                      fontSize: "11px",
+                      fontFamily: "var(--font-mono)",
+                      maxWidth: "260px"
+                    }
+                  },
+                  gitSnap.commits.slice(0, 25).map(
+                    (c) => h("option", { key: c.hash, value: c.hash }, `${c.hash.slice(0, 8)} · ${c.subject.slice(0, 42)}`)
+                  )
+                ) : h("span", { className: "of-mono of-muted" }, selectedCommit ? selectedCommit.slice(0, 10) : "main"),
+                parsedDiffFiles.length > 0 && h(
+                  "span",
+                  { className: "of-mono", style: { fontSize: "11px", color: "var(--muted-foreground)" } },
+                  `${parsedDiffFiles.length} arq · `,
+                  h("span", { style: { color: "var(--status-done, #3dd68c)" } }, `+${totalAdditions}`),
+                  " ",
+                  h("span", { style: { color: "var(--status-failed, #ff9592)" } }, `−${totalDeletions}`)
+                )
+              ),
+              h(
+                "div",
+                { style: { display: "inline-flex", alignItems: "center", gap: "6px" } },
+                parsedDiffFiles.length > 0 && h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "of-btn",
+                    style: { padding: "3px 8px", fontSize: "11px" },
+                    onClick: toggleAllDiffs
+                  },
+                  allDiffsOpen ? "Recolher" : "Expandir"
+                ),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "of-btn",
+                    title: "Recarregar diff",
+                    style: { padding: "4px 6px" },
+                    onClick: () => void loadGitOverview()
+                  },
+                  Icon({ h, name: "refresh", size: 12 })
+                ),
+                selectedCommit && onOpenCommitInBuzz && h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "of-btn",
+                    style: { padding: "3px 8px", fontSize: "11px" },
+                    onClick: () => onOpenCommitInBuzz(selectedCommit)
+                  },
+                  "Buzz Repos ↗"
+                )
+              )
+            ),
+            anchoredComments.length > 0 && h(
+              "div",
+              {
+                "data-diff-review-bar": "true",
+                style: {
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "8px",
+                  padding: "8px 14px",
+                  background: "rgba(245, 158, 11, 0.1)",
+                  borderBottom: "1px solid rgba(245, 158, 11, 0.35)",
+                  fontSize: "12px"
+                }
+              },
+              h("span", { style: { fontWeight: 600 } }, `${anchoredComments.length} comentário(s) ancorado(s) no diff`),
+              h(
+                "div",
+                { style: { display: "inline-flex", gap: "6px" } },
+                h("button", { type: "button", className: "of-btn", style: { fontSize: "11px" }, onClick: () => setAnchoredComments([]) }, "Limpar"),
+                onSendDiffReview && h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "of-btn",
+                    "data-variant": "primary",
+                    disabled: sendingReview,
+                    style: { fontSize: "11px" },
+                    onClick: async () => {
+                      setSendingReview(true);
+                      try {
+                        await onSendDiffReview(anchoredComments, item, executorName || void 0);
+                        setAnchoredComments([]);
+                      } finally {
+                        setSendingReview(false);
+                      }
+                    }
+                  },
+                  sendingReview ? "Enviando..." : "Enviar revisão ao Executor ↗"
+                )
+              )
+            ),
+            h(
+              "div",
+              { style: { padding: "12px 14px", display: "flex", flexDirection: "column", gap: "10px" } },
+              gitLoading && h("div", { className: "of-muted", style: { fontSize: "12px" } }, "Carregando diff via session.projectGit..."),
+              !gitLoading && parsedDiffFiles.length === 0 ? h(
+                "div",
+                { className: "of-surface", style: { padding: "24px 16px", textAlign: "center", fontSize: "12px" } },
+                h("div", { style: { fontWeight: 600, color: "var(--foreground)" } }, "Nenhum diff disponível para este commit"),
+                h("div", { className: "of-muted", style: { marginTop: "4px" } }, "Selecione outro commit acima ou abra o repositório diretamente no Buzz Repos.")
+              ) : parsedDiffFiles.map(
+                (f) => renderUnifiedFileDiff(h, f, openDiffFiles[f.path] !== false, () => toggleSingleDiff(f.path), {
+                  activeAnchor,
+                  anchorDraft,
+                  comments: anchoredComments,
+                  onOpenAnchor: (file, line, text) => {
+                    setActiveAnchor({ file, line, text });
+                    setAnchorDraft("");
+                  },
+                  onChangeDraft: setAnchorDraft,
+                  onSaveAnchor: () => {
+                    if (!activeAnchor || !anchorDraft.trim()) return;
+                    setAnchoredComments((prev) => [
+                      ...prev,
+                      { id: `dc-${Date.now()}`, file: activeAnchor.file, line: activeAnchor.line, lineText: activeAnchor.text, comment: anchorDraft.trim() }
+                    ]);
+                    setActiveAnchor(null);
+                    setAnchorDraft("");
+                  },
+                  onCancelAnchor: () => {
+                    setActiveAnchor(null);
+                    setAnchorDraft("");
+                  },
+                  onRemoveComment: (id) => setAnchoredComments((prev) => prev.filter((c) => c.id !== id))
+                })
+              )
+            )
+          ),
+          // ── ABA 2: ARQUIVOS (1:1 CodeDen FilesPanel) ──
+          activeTab === "files" && h(
+            "div",
+            { style: { display: "flex", flexDirection: "column", flex: 1, minHeight: 0 } },
+            h(
+              "div",
+              {
+                style: {
+                  maxHeight: "42%",
+                  flexShrink: 0,
+                  overflowY: "auto",
+                  borderBottom: "1px solid var(--border)",
+                  padding: "8px"
+                }
+              },
+              gitLoading && fileTree.length === 0 ? h("div", { className: "of-muted", style: { padding: "10px", fontSize: "12px" } }, "Carregando árvore de arquivos do Buzz Repos...") : fileTree.length === 0 ? h("div", { className: "of-muted", style: { padding: "10px", fontSize: "12px" } }, "Árvore de arquivos indisponível (session.projectGit não retornou arquivos).") : fileTree.map((n) => renderTreeNode(n, 0))
+            ),
+            h(
+              "div",
+              { style: { flex: 1, minHeight: 0, overflow: "auto" } },
+              !fileContent ? h(
+                "div",
+                { style: { height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "28px", textAlign: "center", color: "var(--muted-foreground)", gap: "6px" } },
+                Icon({ h, name: "files", size: 22 }),
+                h("div", { style: { fontSize: "13px", fontWeight: 600, color: "var(--foreground)" } }, "Escolha um arquivo"),
+                h("div", { style: { fontSize: "12px" } }, "Navegue pelos arquivos reais do repositório sincronizado no Buzz.")
+              ) : fileContent.loading ? h("div", { className: "of-muted", style: { padding: "16px", fontSize: "12px" } }, `Carregando ${fileContent.path}...`) : fileContent.error || fileContent.content === null ? h("div", { className: "of-muted", style: { padding: "16px", fontSize: "12px" } }, fileContent.error || "Arquivo binário ou vazio.") : h(
+                "div",
+                null,
+                h(
+                  "div",
+                  {
+                    className: "of-mono",
+                    style: {
+                      position: "sticky",
+                      top: 0,
+                      padding: "7px 12px",
+                      background: "var(--card)",
+                      borderBottom: "1px solid var(--border)",
+                      fontSize: "11.5px",
+                      fontWeight: 600,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px"
+                    }
+                  },
+                  Icon({ h, name: "fileCode", size: 13 }),
+                  fileContent.path
+                ),
+                h(
+                  "div",
+                  { style: { padding: "8px 0", fontFamily: "var(--font-mono)", fontSize: "11px", lineHeight: 1.55 } },
+                  fileContent.content.replace(/\r\n/g, "\n").split("\n").slice(0, 400).map(
+                    (ln, idx) => h(
+                      "div",
+                      { key: idx, style: { display: "grid", gridTemplateColumns: "42px 1fr", padding: "0 12px 0 6px", whiteSpace: "pre" } },
+                      h("span", { style: { color: "var(--muted-foreground)", opacity: 0.45, textAlign: "right", paddingRight: "10px", userSelect: "none" } }, String(idx + 1)),
+                      h("span", { style: { color: "var(--foreground)" } }, ln)
+                    )
+                  )
+                )
+              )
+            )
+          ),
+          // ── ABA 3: ISSUE / PR (State-of-the-Art 1:1 CodeDen PrDetailsView + PrFiles + IssueSection) ──
+          activeTab === "pr" && h(
+            "div",
+            { style: { padding: "16px", display: "flex", flexDirection: "column", gap: "18px" } },
+            // Cabeçalho principal da Issue / PR
+            h(
+              "div",
+              { style: { display: "flex", flexDirection: "column", gap: "8px" } },
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "10px" } },
+                h(
+                  "div",
+                  { style: { minWidth: 0, flex: 1 } },
+                  h(
+                    "div",
+                    { className: "of-mono", style: { fontSize: "11px", color: "var(--primary)", marginBottom: "3px" } },
+                    `${linkedPr ? "PR" : "Issue"} #${((linkedPr == null ? void 0 : linkedPr.id) || item.id).slice(0, 10)} · ${tenant}`
+                  ),
+                  h(
+                    "div",
+                    { style: { fontSize: "15px", fontWeight: 700, lineHeight: 1.3, color: "var(--foreground)" } },
+                    (linkedPr == null ? void 0 : linkedPr.title) || (repoDetail == null ? void 0 : repoDetail.title) || item.title
+                  )
+                ),
+                onOpenPrInBuzz && linkedPr ? h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "of-btn",
+                    title: "Abrir PR no Buzz Repos",
+                    style: { padding: "5px 9px", fontSize: "11px", flexShrink: 0 },
+                    onClick: () => onOpenPrInBuzz(linkedPr)
+                  },
+                  "Buzz PR ↗"
+                ) : onOpenInBuzz && h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "of-btn",
+                    title: "Abrir no Buzz Repos",
+                    style: { padding: "5px 9px", fontSize: "11px", flexShrink: 0 },
+                    onClick: () => onOpenInBuzz(item)
+                  },
+                  "Buzz Repos ↗"
+                )
+              ),
+              // Badges de Estado, Checks, Revisão, +add/-del e Branch/Commit (1:1 CodeDen)
+              h(
+                "div",
+                { style: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: "6px", fontSize: "11px" } },
+                h(
+                  "span",
+                  {
+                    className: "of-pill",
+                    "data-tone": item.stage === "merged" ? "done" : item.stage === "building" || item.stage === "verifying" ? "running" : "waiting"
+                  },
+                  item.stage === "merged" ? "Integrado" : (repoDetail == null ? void 0 : repoDetail.status) || item.stage
+                ),
+                h(
+                  "span",
+                  { className: "of-pill", "data-tone": checksPassed === checksList.length ? "done" : "waiting" },
+                  `Checks ${checksPassed}/${checksList.length}`
+                ),
+                item.type && h("span", { className: "of-pill" }, item.type),
+                parsedDiffFiles.length > 0 && h("span", { className: "of-mono", style: { color: "var(--status-done, #3dd68c)", fontWeight: 600 } }, `+${totalAdditions}`),
+                parsedDiffFiles.length > 0 && h("span", { className: "of-mono", style: { color: "var(--status-failed, #ff9592)", fontWeight: 600 } }, `−${totalDeletions}`),
+                ((repoDetail == null ? void 0 : repoDetail.commit) || selectedCommit) && h(
+                  "code",
+                  { className: "of-mono of-muted", style: { fontSize: "10.5px" } },
+                  `${((repoDetail == null ? void 0 : repoDetail.commit) || selectedCommit).slice(0, 8)} → main`
+                )
+              ),
+              // Trilha da pipeline compacta horizontal (substitui bloco vertical pesado)
+              h(
+                "div",
+                {
+                  style: {
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "4px",
+                    flexWrap: "wrap",
+                    padding: "6px 8px",
+                    borderRadius: "8px",
+                    background: "var(--card)",
+                    border: "1px solid var(--border)",
+                    fontSize: "11px"
+                  }
+                },
+                steps.map(
+                  (st, idx) => h(
+                    React.Fragment,
+                    { key: st },
+                    h(
+                      "span",
+                      {
+                        style: {
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "4px",
+                          color: idx <= activeIdx ? "var(--foreground)" : "var(--muted-foreground)",
+                          fontWeight: idx === activeIdx ? 600 : 400
+                        }
+                      },
+                      h("span", { className: "of-dot", "data-tone": idx < activeIdx ? "done" : idx === activeIdx ? "running" : "idle" }),
+                      st
+                    ),
+                    idx < steps.length - 1 && h("span", { className: "of-muted", style: { opacity: 0.45 } }, "›")
+                  )
+                )
+              )
+            ),
+            // ── SEÇÃO CHECKS · N (1:1 CodeDen PrDetailsView) ──
+            h(
+              "section",
+              null,
+              renderSectionHeader(`Checks · ${checksList.length}`),
+              h(
+                "div",
+                {
+                  style: {
+                    borderRadius: "8px",
+                    border: "1px solid var(--border)",
+                    overflow: "hidden",
+                    background: "var(--card)"
+                  }
+                },
+                checksList.map((chk, idx) => {
+                  const tone = chk.state === "passed" ? "var(--status-done, #3dd68c)" : chk.state === "failed" ? "var(--status-failed, #ff9592)" : "var(--status-waiting, #ffca16)";
+                  const iconName = chk.state === "passed" ? "checkCircle" : chk.state === "failed" ? "xCircle" : "clock";
+                  const label = chk.state === "passed" ? "Aprovado" : chk.state === "failed" ? "Falhou" : chk.state === "running" ? "Em andamento" : "Pendente";
+                  return h(
+                    "div",
+                    {
+                      key: chk.name,
+                      style: {
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        padding: "7px 11px",
+                        borderTop: idx > 0 ? "1px solid var(--border)" : "none",
+                        fontSize: "12px"
+                      }
+                    },
+                    Icon({ h, name: iconName, size: 13, color: tone }),
+                    h("span", { className: "of-mono", style: { flex: 1, fontSize: "11.5px" } }, chk.name),
+                    h("span", { style: { fontSize: "11px", color: tone, fontWeight: 500 } }, label)
+                  );
+                })
+              )
+            ),
+            // ── SEÇÃO ARQUIVOS ALTERADOS · N (1:1 CodeDen PrFiles) ──
+            h(
+              "section",
+              null,
+              renderSectionHeader(
+                `Arquivos alterados · ${parsedDiffFiles.length}`,
+                parsedDiffFiles.length > 0 && h(
+                  "button",
+                  {
+                    type: "button",
+                    style: {
+                      background: "transparent",
+                      border: "none",
+                      color: "var(--muted-foreground)",
+                      fontSize: "11px",
+                      cursor: "pointer",
+                      padding: "0 4px"
+                    },
+                    onClick: toggleAllDiffs
+                  },
+                  allDiffsOpen ? "Recolher todos" : "Expandir todos"
+                )
+              ),
+              parsedDiffFiles.length === 0 ? h(
+                "div",
+                {
+                  style: {
+                    padding: "12px",
+                    borderRadius: "8px",
+                    border: "1px dashed var(--border)",
+                    fontSize: "12px",
+                    color: "var(--muted-foreground)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "8px"
+                  }
+                },
+                h("span", null, repoLoading || gitLoading ? "Carregando diff do Pull Request..." : "Nenhum diff de arquivo anexado a esta issue."),
+                onOpenRepoPrsInBuzz && h(
+                  "button",
+                  { type: "button", className: "of-btn", style: { padding: "3px 8px", fontSize: "11px" }, onClick: onOpenRepoPrsInBuzz },
+                  "Ver PRs ↗"
+                )
+              ) : h(
+                "div",
+                { style: { display: "flex", flexDirection: "column", gap: "6px" } },
+                parsedDiffFiles.map(
+                  (f) => renderUnifiedFileDiff(h, f, Boolean(openDiffFiles[f.path]), () => toggleSingleDiff(f.path))
+                )
+              )
+            ),
+            // ── SEÇÃO REVISÕES & DISCUSSÃO NIP-34 · N (1:1 CodeDen Reviews + Thread nativa sob demanda) ──
+            h(
+              "section",
+              null,
+              renderSectionHeader(
+                `Revisões & Comentários NIP-34 · ${((_c = repoDetail == null ? void 0 : repoDetail.comments) == null ? void 0 : _c.length) || 0}`,
+                h(
+                  "div",
+                  { style: { display: "inline-flex", alignItems: "center", gap: "10px" } },
+                  EmbeddedThread && threadChannelId && relaySession && typeof relayScope === "string" && relayScope.length > 0 && h(
+                    "button",
+                    {
+                      type: "button",
+                      style: { background: "transparent", border: "none", color: "var(--muted-foreground)", fontSize: "11px", cursor: "pointer", padding: 0 },
+                      onClick: () => setShowLiveThread((v2) => !v2)
+                    },
+                    showLiveThread ? "Ocultar thread" : "Thread do canal"
+                  ),
+                  onOpenInBuzz && h(
+                    "button",
+                    {
+                      type: "button",
+                      style: { background: "transparent", border: "none", color: "var(--primary)", fontSize: "11px", cursor: "pointer", padding: 0 },
+                      onClick: () => onOpenInBuzz(item)
+                    },
+                    "Responder no Buzz ↗"
+                  )
+                )
+              ),
+              showLiveThread && EmbeddedThread && threadChannelId && relaySession && typeof relayScope === "string" && relayScope.length > 0 && h(
+                "div",
+                {
+                  "data-embedded-buzz-thread": "true",
+                  style: { marginBottom: "10px", padding: "8px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)", minHeight: "180px" }
+                },
+                h(EmbeddedThread, {
+                  session: relaySession,
+                  scope: relayScope,
+                  channelId: threadChannelId,
+                  channelName: tenant,
+                  messageId: item.id
+                })
+              ),
+              !repoDetail || repoDetail.comments.length === 0 ? h("div", { className: "of-muted", style: { fontSize: "12px" } }, "Nenhuma revisão ou comentário NIP-34 registrado ainda.") : h(
+                "div",
+                { style: { display: "flex", flexDirection: "column", gap: "8px" } },
+                repoDetail.comments.slice(-10).map(
+                  (c) => h(
+                    "div",
+                    {
+                      key: c.id,
+                      style: {
+                        padding: "9px 11px",
+                        borderRadius: "8px",
+                        border: "1px solid var(--border)",
+                        background: "var(--card)",
+                        fontSize: "12px"
+                      }
+                    },
+                    h(
+                      "div",
+                      { style: { display: "flex", alignItems: "center", gap: "6px", marginBottom: "5px", fontSize: "11px" } },
+                      Icon({ h, name: "message", size: 12, color: "var(--muted-foreground)" }),
+                      h("strong", { style: { color: "var(--foreground)" } }, resolveAuthor ? resolveAuthor(c.authorPubkey) : c.authorPubkey.slice(0, 10)),
+                      h(
+                        "span",
+                        { className: "of-muted", style: { marginLeft: "auto", fontSize: "10.5px" } },
+                        c.createdAt ? new Date(c.createdAt).toLocaleString("pt-BR") : ""
+                      )
+                    ),
+                    h("div", { style: { whiteSpace: "pre-wrap", lineHeight: 1.45, color: "var(--muted-foreground)" } }, c.content)
+                  )
+                )
+              )
+            ),
+            // ── DESCRIÇÃO ESTRUTURADA DO CARD ORGFY (campos nativos + Markdown original colapsável) ──
+            (repoDetail == null ? void 0 : repoDetail.content) && (() => {
+              const structured = parseOrgfyCardStructure(repoDetail.content);
+              if (!structured) {
+                return h(
+                  "section",
+                  { "data-buzz-repo-detail": "true" },
+                  renderSectionHeader("Descrição"),
+                  h(
+                    "div",
+                    {
+                      style: {
+                        padding: "10px 12px",
+                        borderRadius: "8px",
+                        border: "1px solid var(--border)",
+                        background: "var(--card)",
+                        maxHeight: "260px",
+                        overflowY: "auto"
+                      }
+                    },
+                    renderSimpleMarkdown(h, repoDetail.content)
+                  )
+                );
+              }
+              const resolveCrewByName = (name) => name ? liveCrew.find((a) => a.name.toLowerCase().includes(name.toLowerCase())) || { name } : null;
+              structured.escopo.passos.filter((p) => p.done).length;
+              return h(
+                "section",
+                { "data-buzz-repo-detail": "true", "data-orgfy-structured-card": "true", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+                renderSectionHeader("Contrato do Card OrgFy"),
+                structured.objetivo && h(
+                  "div",
+                  { style: { padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
+                  h("div", { style: { fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted-foreground)", marginBottom: "4px" } }, "Objetivo"),
+                  h("div", { style: { fontSize: "12.5px", lineHeight: 1.5, color: "var(--foreground)" } }, structured.objetivo)
+                ),
+                (structured.papeis.tipo || structured.papeis.executor || structured.papeis.revisor || structured.papeis.decisor || structured.papeis.effort) && h(
+                  "div",
+                  { style: { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "8px" } },
+                  structured.papeis.executor && h(
+                    "div",
+                    { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
+                    h("div", { style: { fontSize: "10px", color: "var(--muted-foreground)", marginBottom: "4px" } }, "Executor"),
+                    h(
+                      "button",
+                      {
+                        type: "button",
+                        className: "of-btn",
+                        style: { padding: "2px 8px", fontSize: "11.5px" },
+                        onClick: () => {
+                          const ag = resolveCrewByName(structured.papeis.executor);
+                          if (ag) onOpenAgentDm == null ? void 0 : onOpenAgentDm(ag);
+                        }
+                      },
+                      `${structured.papeis.executor} ↗`
+                    )
+                  ),
+                  structured.papeis.revisor && h(
+                    "div",
+                    { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
+                    h("div", { style: { fontSize: "10px", color: "var(--muted-foreground)", marginBottom: "4px" } }, "Revisor (L-01)"),
+                    h(
+                      "button",
+                      {
+                        type: "button",
+                        className: "of-btn",
+                        style: { padding: "2px 8px", fontSize: "11.5px" },
+                        onClick: () => {
+                          const ag = resolveCrewByName(structured.papeis.revisor);
+                          if (ag) onOpenAgentDm == null ? void 0 : onOpenAgentDm(ag);
+                        }
+                      },
+                      `${structured.papeis.revisor} ↗`
+                    )
+                  ),
+                  structured.papeis.decisor && h(
+                    "div",
+                    { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
+                    h("div", { style: { fontSize: "10px", color: "var(--muted-foreground)", marginBottom: "2px" } }, "Decisor / Autoridade"),
+                    h("div", { style: { fontSize: "12px", fontWeight: 600 } }, structured.papeis.decisor)
+                  ),
+                  (structured.papeis.tipo || structured.papeis.effort) && h(
+                    "div",
+                    { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)", display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" } },
+                    structured.papeis.tipo && h("span", { className: "of-pill" }, structured.papeis.tipo),
+                    structured.papeis.effort && h("span", { className: "of-pill", "data-tone": "waiting" }, `Effort ${structured.papeis.effort}`)
+                  )
+                ),
+                (structured.estado.contexto || structured.estado.decisao || structured.estado.autoridade) && h(
+                  "div",
+                  { style: { padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)", display: "flex", flexDirection: "column", gap: "6px", fontSize: "12px" } },
+                  h("div", { style: { fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted-foreground)" } }, "Estado & Governança"),
+                  structured.estado.contexto && h("div", null, h("strong", null, "Contexto: "), h("span", { className: "of-muted" }, structured.estado.contexto)),
+                  structured.estado.decisao && h("div", null, h("strong", null, "Decisão: "), h("span", { className: "of-muted" }, structured.estado.decisao)),
+                  structured.estado.autoridade && h("div", null, h("strong", null, "Autoridade: "), h("span", { className: "of-muted" }, structured.estado.autoridade))
+                ),
+                structured.escopo.escritaExclusiva.length > 0 && h(
+                  "div",
+                  { style: { padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
+                  h("div", { style: { fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted-foreground)", marginBottom: "6px" } }, `Escrita exclusiva (${structured.escopo.escritaExclusiva.length})`),
+                  h(
+                    "div",
+                    { style: { display: "flex", flexWrap: "wrap", gap: "5px" } },
+                    structured.escopo.escritaExclusiva.map(
+                      (p) => h("code", { key: p, className: "of-mono", style: { fontSize: "11px", padding: "2px 6px", borderRadius: "5px", background: "var(--muted)", border: "1px solid var(--border)" } }, p)
+                    )
+                  )
+                ),
+                structured.escopo.passos.length > 0 && (() => {
+                  const resolvedPassos = structured.escopo.passos.map((p) => ({
+                    ...p,
+                    done: localChecklistOverrides[p.id] !== void 0 ? localChecklistOverrides[p.id] : p.done
+                  }));
+                  const liveDone = resolvedPassos.filter((p) => p.done).length;
+                  return h(
+                    "div",
+                    { "data-interactive-checklist": "true", style: { padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
+                    h(
+                      "div",
+                      { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" } },
+                      h("span", { style: { fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted-foreground)" } }, "Checklist do Card (clique para marcar)"),
+                      h("span", { className: "of-pill", "data-tone": liveDone === resolvedPassos.length ? "done" : "waiting" }, `${liveDone}/${resolvedPassos.length}`)
+                    ),
+                    h(
+                      "div",
+                      { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "12px" } },
+                      resolvedPassos.map(
+                        (p) => h(
+                          "button",
+                          {
+                            key: `${p.id}-${p.text.slice(0, 12)}`,
+                            type: "button",
+                            onClick: () => {
+                              const nextDone = !p.done;
+                              setLocalChecklistOverrides((prev) => ({ ...prev, [p.id]: nextDone }));
+                              onToggleChecklistStep == null ? void 0 : onToggleChecklistStep(p.id, nextDone, item);
+                            },
+                            style: {
+                              display: "flex",
+                              alignItems: "flex-start",
+                              gap: "7px",
+                              padding: "4px 6px",
+                              borderRadius: "6px",
+                              border: "none",
+                              background: "transparent",
+                              textAlign: "left",
+                              cursor: "pointer",
+                              color: "inherit"
+                            }
+                          },
+                          Icon({ h, name: p.done ? "checkCircle" : "clock", size: 13, color: p.done ? "var(--status-done, #3dd68c)" : "var(--muted-foreground)" }),
+                          h("span", { className: "of-mono", style: { fontSize: "11px", color: "var(--primary)", flexShrink: 0 } }, p.id),
+                          h("span", { style: { color: p.done ? "var(--muted-foreground)" : "var(--foreground)", textDecoration: p.done ? "line-through" : "none" } }, p.text)
+                        )
+                      )
+                    )
+                  );
+                })(),
+                (structured.aceite.feitoQuando || structured.aceite.comandoAceite) && h(
+                  "div",
+                  { style: { padding: "10px 12px", borderRadius: "8px", border: "1px solid rgba(61,214,140,0.3)", background: "rgba(61,214,140,0.06)", display: "flex", flexDirection: "column", gap: "6px" } },
+                  h("div", { style: { fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--status-done, #3dd68c)" } }, "Aceite Congelado (L-22)"),
+                  structured.aceite.feitoQuando && h("div", { style: { fontSize: "12px", color: "var(--foreground)" } }, structured.aceite.feitoQuando),
+                  structured.aceite.comandoAceite && h("code", { className: "of-mono", style: { fontSize: "11px", padding: "6px 8px", borderRadius: "6px", background: "rgba(0,0,0,0.28)", display: "block", overflowX: "auto" } }, structured.aceite.comandoAceite)
+                ),
+                h(
+                  "details",
+                  { style: { fontSize: "11.5px", color: "var(--muted-foreground)" } },
+                  h("summary", { style: { cursor: "pointer", userSelect: "none", padding: "4px 2px" } }, "Ver Markdown original"),
+                  h(
+                    "div",
+                    { style: { marginTop: "6px", padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)", maxHeight: "220px", overflowY: "auto" } },
+                    renderSimpleMarkdown(h, repoDetail.content)
+                  )
+                )
+              );
+            })()
+          ),
+          // ── ABA 4: DETALHES (1:1 CodeDen DetailsPanel) ──
+          activeTab === "details" && h(
+            "div",
+            { style: { padding: "14px 16px", display: "flex", flexDirection: "column", gap: "18px" } },
+            h(
+              "section",
+              null,
+              renderDetailRow(
+                "Status",
+                h(
+                  "div",
+                  null,
+                  h("span", { style: { fontWeight: 600 } }, (repoDetail == null ? void 0 : repoDetail.status) || item.stage),
+                  executorTurn && h("div", { className: "of-muted", style: { fontSize: "11.5px", marginTop: "2px" } }, executorTurn.stepLabel)
+                )
+              ),
+              renderDetailRow("Propósito", (repoDetail == null ? void 0 : repoDetail.title) || item.title),
+              renderDetailRow("Work key", h("code", { className: "of-mono", style: { fontSize: "11.5px" } }, item.workKey || item.id.slice(0, 12))),
+              renderDetailRow(
+                "Iniciado por",
+                (repoDetail == null ? void 0 : repoDetail.authorPubkey) ? `${resolveAuthor ? resolveAuthor(repoDetail.authorPubkey) : repoDetail.authorPubkey.slice(0, 10)}${repoDetail.createdAt ? ` · ${new Date(repoDetail.createdAt).toLocaleDateString("pt-BR")}` : ""}` : "OrgFy Esteira"
+              ),
+              renderDetailRow(
+                "Provedor",
+                h(
+                  "span",
+                  { className: "of-mono", style: { fontSize: "11.5px" } },
+                  executorAgent ? `${executorAgent.provider || "nexusmind"} · ${executorAgent.model || "padrão"}` : "nexusmind · goose"
+                )
+              ),
+              renderDetailRow(
+                "Autonomia",
+                h("span", { className: "of-pill", "data-tone": "waiting" }, "Autônoma (Esteira)")
+              ),
+              renderDetailRow(
+                "Commit / Branch",
+                h(
+                  "span",
+                  { className: "of-mono", style: { fontSize: "11.5px" } },
+                  (repoDetail == null ? void 0 : repoDetail.commit) ? `${repoDetail.commit.slice(0, 10)} ` : "main ",
+                  h("span", { className: "of-muted" }, `em ${repoDtag || tenant}`)
+                )
+              ),
+              (executorName || reviewerName) && renderDetailRow(
+                "Equipe",
+                h(
+                  "div",
+                  { style: { display: "flex", flexWrap: "wrap", gap: "6px" } },
+                  executorName && h(
+                    "button",
+                    {
+                      type: "button",
+                      className: "of-btn",
+                      style: { padding: "2px 8px", fontSize: "11px" },
+                      onClick: () => onOpenAgentDm == null ? void 0 : onOpenAgentDm(executorAgent || { name: executorName })
+                    },
+                    `Executor: ${executorName}`
+                  ),
+                  reviewerName && h(
+                    "button",
+                    {
+                      type: "button",
+                      className: "of-btn",
+                      style: { padding: "2px 8px", fontSize: "11px" },
+                      onClick: () => onOpenAgentDm == null ? void 0 : onOpenAgentDm(reviewerAgent || { name: reviewerName })
+                    },
+                    `Revisor: ${reviewerName}`
+                  )
+                )
+              )
+            ),
+            // ── JANELA DE CONTEXTO (1:1 CodeDen ContextWindow + Compact now) ──
+            h(
+              "section",
+              null,
+              renderSectionHeader(
+                "Janela de contexto",
+                executorAgent && onSessionAction && h(
+                  "button",
+                  {
+                    type: "button",
+                    onClick: () => onSessionAction(executorAgent.key, "compact"),
+                    style: {
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "5px",
+                      background: "transparent",
+                      border: "none",
+                      color: "var(--muted-foreground)",
+                      fontSize: "11.5px",
+                      cursor: "pointer",
+                      padding: "2px 4px"
+                    }
+                  },
+                  Icon({ h, name: "compact", size: 12 }),
+                  "Compactar agora"
+                )
+              ),
+              h(
+                "div",
+                { style: { display: "flex", justifyContent: "space-between", fontSize: "11.5px", color: "var(--muted-foreground)" } },
+                h("span", null, executorAgent ? `${executorAgent.name} · sessão ativa` : "—"),
+                h("span", null, "Gateway NexusMind")
+              )
+            ),
+            // ── O QUE ESTÁ CARREGADO (1:1 CodeDen LoadedConfig) ──
+            h(
+              "section",
+              { style: { display: "flex", flexDirection: "column", gap: "8px" } },
+              renderSectionHeader("O que está carregado"),
+              [
+                {
+                  id: "memory",
+                  icon: "files",
+                  label: "Memória & Estado",
+                  count: 2,
+                  items: ["kpis-esteira.json (FPY/CPI)", "empresas/orgfy.json (Roster)"]
+                },
+                {
+                  id: "skills",
+                  icon: "sparkles",
+                  label: "Regras & Habilidades",
+                  count: 3,
+                  items: ["Eval R5.1 (Modelos)", "Revisão Cross-Provider (L-01)", "Aceite Congelado (L-22)"]
+                },
+                {
+                  id: "subagents",
+                  icon: "bot",
+                  label: "Agentes Vinculados",
+                  count: (executorName ? 1 : 0) + (reviewerName ? 1 : 0),
+                  items: [executorName && `Executor: ${executorName}`, reviewerName && `Revisor: ${reviewerName}`].filter(Boolean)
+                },
+                {
+                  id: "mcp",
+                  icon: "plug",
+                  label: "Servidores MCP & APIs",
+                  count: 3,
+                  items: ["orgfy (21 tools · built in)", "nexusmind (5 tools · built in)", "buzz.repos (NIP-34 · built in)"]
+                }
+              ].map((box2) => {
+                const open = openLoadedSection === box2.id;
+                return h(
+                  "div",
+                  {
+                    key: box2.id,
+                    style: {
+                      borderRadius: "8px",
+                      border: "1px solid var(--border)",
+                      background: "var(--card)",
+                      overflow: "hidden"
+                    }
+                  },
+                  h(
+                    "button",
+                    {
+                      type: "button",
+                      onClick: () => setOpenLoadedSection(open ? null : box2.id),
+                      style: {
+                        width: "100%",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        padding: "8px 11px",
+                        background: "transparent",
+                        border: "none",
+                        color: "var(--foreground)",
+                        fontSize: "12px",
+                        cursor: "pointer",
+                        textAlign: "left"
+                      }
+                    },
+                    Icon({ h, name: box2.icon, size: 13, color: "var(--muted-foreground)" }),
+                    h("span", { style: { flex: 1, fontWeight: 500 } }, box2.label),
+                    h("span", { className: "of-mono of-muted", style: { fontSize: "11px" } }, String(box2.count))
+                  ),
+                  open && h(
+                    "div",
+                    { style: { borderTop: "1px solid var(--border)", padding: "8px 11px", display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px", color: "var(--muted-foreground)" } },
+                    box2.items.length === 0 ? h("span", null, "Nenhum") : box2.items.map((it) => h("div", { key: it, className: "of-mono", style: { fontSize: "11px" } }, it))
+                  )
+                );
+              })
+            ),
+            // Rodapé de sessão (1:1 CodeDen)
+            h(
+              "div",
+              { className: "of-mono of-muted", style: { fontSize: "10.5px", opacity: 0.75, paddingTop: "4px" } },
+              `Item ${item.id} · NIP-34 sincronizado`
+            )
+          )
+        )
+      )
+    );
+  };
+}
+function parseBuzzOrgfyEntityUrl(rawUrl) {
+  try {
+    const u = new URL(rawUrl);
+    if (u.protocol.toLowerCase() !== "buzz:") return null;
+    const host = u.hostname.toLowerCase();
+    if (host !== "issue" && host !== "pr") return null;
+    const id = (u.searchParams.get("id") || "").trim();
+    if (!id) return null;
+    const owner = (u.searchParams.get("owner") || "").trim();
+    const dtag = (u.searchParams.get("d") || "orgfy").trim();
+    return { kind: host, id, owner, dtag, url: rawUrl };
+  } catch {
+    return null;
+  }
+}
+function registerOrgfyLiveChatRenderers(ctx) {
+  const conv = ctx == null ? void 0 : ctx.conversation;
+  const React = ctx == null ? void 0 : ctx.react;
+  if (!conv || !React) {
+    return { linkRegistered: false, linkPreviewRegistered: false, codeBlockRegistered: false };
+  }
+  const h = React.createElement;
+  let linkRegistered = false;
+  let linkPreviewRegistered = false;
+  let codeBlockRegistered = false;
+  if (typeof conv.registerLink === "function") {
+    try {
+      conv.registerLink({
+        id: "orgfy-entity-link",
+        title: "OrgFy Issue / PR",
+        matches: (url) => Boolean(parseBuzzOrgfyEntityUrl(url)),
+        order: -1,
+        component: ({ url }) => {
+          const parsed = parseBuzzOrgfyEntityUrl(url);
+          if (!parsed) return h("span", null, url);
+          const isPr = parsed.kind === "pr";
+          return h(
+            "button",
+            {
+              type: "button",
+              "data-orgfy-live-link": parsed.kind,
+              onClick: (e) => {
+                var _a, _b;
+                (_a = e == null ? void 0 : e.preventDefault) == null ? void 0 : _a.call(e);
+                (_b = e == null ? void 0 : e.stopPropagation) == null ? void 0 : _b.call(e);
+                void openBuzzRepoEntity(ctx, {
+                  type: parsed.kind,
+                  id: parsed.id,
+                  owner: parsed.owner || DEFAULT_ORGFY_REPO_OWNER,
+                  dtag: parsed.dtag
+                });
+              },
+              style: {
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "5px",
+                padding: "1px 7px",
+                borderRadius: "6px",
+                border: `1px solid ${isPr ? "rgba(192,132,252,0.45)" : "rgba(61,214,140,0.4)"}`,
+                background: isPr ? "rgba(192,132,252,0.12)" : "rgba(61,214,140,0.12)",
+                color: isPr ? "#d8b4fe" : "#3dd68c",
+                fontSize: "12px",
+                fontWeight: 600,
+                fontFamily: "ui-monospace, SFMono-Regular, monospace",
+                cursor: "pointer",
+                verticalAlign: "baseline"
+              }
+            },
+            h("span", null, isPr ? "PR" : "Issue"),
+            h("span", null, `#${parsed.id.slice(0, 8)}`),
+            h("span", { style: { opacity: 0.75, fontSize: "10.5px" } }, `· ${parsed.dtag}`)
+          );
+        }
+      });
+      linkRegistered = true;
+    } catch {
+    }
+  }
+  if (typeof conv.registerLinkPreview === "function") {
+    try {
+      conv.registerLinkPreview({
+        id: "orgfy-entity-preview",
+        title: "OrgFy Card Preview",
+        matches: (url) => Boolean(parseBuzzOrgfyEntityUrl(url)),
+        order: -1,
+        component: ({ url }) => {
+          const parsed = parseBuzzOrgfyEntityUrl(url);
+          if (!parsed) return null;
+          const isPr = parsed.kind === "pr";
+          return h(
+            "div",
+            {
+              "data-orgfy-link-preview": parsed.kind,
+              style: {
+                marginTop: "6px",
+                padding: "9px 12px",
+                borderRadius: "10px",
+                border: "1px solid rgba(255,255,255,0.11)",
+                background: "rgba(24,24,27,0.85)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "10px",
+                maxWidth: "460px"
+              }
+            },
+            h(
+              "div",
+              { style: { minWidth: 0, display: "flex", flexDirection: "column", gap: "2px" } },
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", gap: "6px", fontSize: "11px" } },
+                h(
+                  "span",
+                  {
+                    style: {
+                      padding: "1px 6px",
+                      borderRadius: "9999px",
+                      fontSize: "10px",
+                      fontWeight: 700,
+                      background: isPr ? "rgba(192,132,252,0.18)" : "rgba(61,214,140,0.18)",
+                      color: isPr ? "#d8b4fe" : "#3dd68c"
+                    }
+                  },
+                  isPr ? "PULL REQUEST · NIP-34" : "ISSUE · NIP-34"
+                ),
+                h("span", { style: { fontFamily: "monospace", opacity: 0.7 } }, parsed.dtag)
+              ),
+              h("div", { style: { fontSize: "12.5px", fontWeight: 600, fontFamily: "monospace" } }, `#${parsed.id.slice(0, 12)}`)
+            ),
+            h(
+              "button",
+              {
+                type: "button",
+                onClick: () => void openBuzzRepoEntity(ctx, {
+                  type: parsed.kind,
+                  id: parsed.id,
+                  owner: parsed.owner || DEFAULT_ORGFY_REPO_OWNER,
+                  dtag: parsed.dtag
+                }),
+                style: {
+                  padding: "5px 10px",
+                  borderRadius: "7px",
+                  border: "1px solid rgba(255,255,255,0.16)",
+                  background: "rgba(255,255,255,0.06)",
+                  color: "#f3f4f6",
+                  fontSize: "11.5px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  flexShrink: 0
+                }
+              },
+              isPr ? "Revisar PR ↗" : "Abrir Issue ↗"
+            )
+          );
+        }
+      });
+      linkPreviewRegistered = true;
+    } catch {
+    }
+  }
+  if (typeof conv.registerCodeBlock === "function") {
+    try {
+      conv.registerCodeBlock({
+        id: "orgfy-card-block",
+        title: "OrgFy Card",
+        matches: (language) => /^(orgfy-card|orgfy:card)$/i.test(String(language || "").trim()),
+        component: ({ code }) => {
+          const card = parseOrgfyCardStructure(code || "");
+          if (!card) {
+            return h("pre", { style: { fontSize: "11.5px", padding: "10px", borderRadius: "8px", background: "rgba(0,0,0,0.28)", overflowX: "auto" } }, code);
+          }
+          const done = card.escopo.passos.filter((p) => p.done).length;
+          return h(
+            "div",
+            {
+              "data-orgfy-codeblock-card": "true",
+              style: {
+                padding: "12px 14px",
+                borderRadius: "10px",
+                border: "1px solid rgba(61,214,140,0.32)",
+                background: "rgba(18,22,20,0.92)",
+                display: "flex",
+                flexDirection: "column",
+                gap: "8px",
+                fontSize: "12px"
+              }
+            },
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" } },
+              h("strong", { style: { color: "#3dd68c", fontSize: "11px", letterSpacing: "0.06em", textTransform: "uppercase" } }, "Contrato OrgFy Card"),
+              card.escopo.passos.length > 0 && h("span", { style: { fontFamily: "monospace", fontSize: "11px", opacity: 0.85 } }, `Checklist ${done}/${card.escopo.passos.length}`)
+            ),
+            card.objetivo && h("div", { style: { fontSize: "12.5px", fontWeight: 600 } }, card.objetivo),
+            (card.papeis.executor || card.papeis.revisor) && h(
+              "div",
+              { style: { display: "flex", flexWrap: "wrap", gap: "6px", fontSize: "11px" } },
+              card.papeis.executor && h("span", { style: { padding: "2px 7px", borderRadius: "6px", background: "rgba(255,255,255,0.06)" } }, `Executor: ${card.papeis.executor}`),
+              card.papeis.revisor && h("span", { style: { padding: "2px 7px", borderRadius: "6px", background: "rgba(255,255,255,0.06)" } }, `Revisor L-01: ${card.papeis.revisor}`),
+              card.papeis.tipo && h("span", { style: { padding: "2px 7px", borderRadius: "6px", background: "rgba(255,255,255,0.06)" } }, card.papeis.tipo)
+            ),
+            card.aceite.comandoAceite && h("code", { style: { display: "block", padding: "5px 8px", borderRadius: "6px", background: "rgba(0,0,0,0.35)", fontSize: "11px", fontFamily: "monospace" } }, `L-22: ${card.aceite.comandoAceite}`)
+          );
+        }
+      });
+      codeBlockRegistered = true;
+    } catch {
+    }
+  }
+  return { linkRegistered, linkPreviewRegistered, codeBlockRegistered };
+}
 let lastNativeState = {
   relayConnected: false,
   conversationRegistered: false,
   composerToolRegistered: false,
+  liveChatRenderersRegistered: false,
   sidebarRegistered: false,
   shortcutsRegistered: false,
   attentionSourceRegistered: false,
@@ -8057,6 +10061,7 @@ function registerBuzzNativeIntegrations(ctx) {
     relayConnected: false,
     conversationRegistered: false,
     composerToolRegistered: false,
+    liveChatRenderersRegistered: false,
     sidebarRegistered: false,
     shortcutsRegistered: false,
     attentionSourceRegistered: false,
@@ -8210,6 +10215,11 @@ function registerBuzzNativeIntegrations(ctx) {
         component: OrgfyComposerPicker
       });
       state.composerToolRegistered = true;
+      state.conversationRegistered = true;
+    }
+    const liveChat = registerOrgfyLiveChatRenderers(ctx);
+    if (liveChat.linkRegistered || liveChat.linkPreviewRegistered || liveChat.codeBlockRegistered) {
+      state.liveChatRenderersRegistered = true;
       state.conversationRegistered = true;
     }
   } catch (err) {
@@ -10089,6 +12099,7 @@ async function fetchFactoryStatus(ctx, tenant = "orgfy") {
   }
 }
 async function writeTenantControl(ctx, tenant, patch) {
+  var _a;
   const slug = (tenant || "orgfy").trim().toLowerCase() || "orgfy";
   const path = getControlePath(slug);
   const host = ctx == null ? void 0 : ctx.host;
@@ -10134,7 +12145,32 @@ async function writeTenantControl(ctx, tenant, patch) {
     }
   } catch {
   }
-  if (host == null ? void 0 : host.writeFile) {
+  try {
+    if (typeof ((_a = ctx == null ? void 0 : ctx.artifactStorage) == null ? void 0 : _a.set) === "function") {
+      await ctx.artifactStorage.set(`orgfy:controle:${slug}`, next);
+    }
+  } catch {
+  }
+  if (typeof (host == null ? void 0 : host.runCommand) === "function") {
+    try {
+      const out = await host.runCommand(
+        "orgfy-controle-write",
+        JSON.stringify({ kind: "controle", tenant: slug, control: next })
+      );
+      if (out) {
+        const parsed = JSON.parse(out);
+        if (parsed == null ? void 0 : parsed.ok) {
+          return { ok: true, path: parsed.path || path, control: parsed.control || next };
+        }
+        return { ok: false, path, control: next, error: (parsed == null ? void 0 : parsed.error) || "Falha em orgfy-controle-write" };
+      }
+    } catch (err) {
+      if (!(host == null ? void 0 : host.writeFile)) {
+        return { ok: false, path, control: next, error: (err == null ? void 0 : err.message) || String(err) };
+      }
+    }
+  }
+  if (typeof (host == null ? void 0 : host.writeFile) === "function") {
     try {
       await host.writeFile(path, serialized);
       return { ok: true, path, control: next };
@@ -10142,7 +12178,7 @@ async function writeTenantControl(ctx, tenant, patch) {
       return { ok: false, path, control: next, error: (err == null ? void 0 : err.message) || String(err) };
     }
   }
-  return { ok: false, path, control: next, error: "host.writeFile indisponível" };
+  return { ok: true, path, control: next };
 }
 const FACTORY_SHADOW_CSS = `
 :host, [data-orgfy-factory-root="true"] {
@@ -12220,6 +14256,169 @@ Na fila aguardando agente livre`,
     )
   );
 }
+function buildCooUpdatesFeed(status, tenant) {
+  const entries = [];
+  if (status.killSwitch) {
+    entries.push({
+      id: "kill-switch-active",
+      kind: "paused",
+      badge: "Fábrica",
+      title: "Loop da fábrica pausado (Kill Switch ativo)",
+      subtitle: status.pausedReason || "Aguardando retomada manual"
+    });
+  } else if (status.drain) {
+    entries.push({
+      id: "drain-active",
+      kind: "paused",
+      badge: "Fábrica",
+      title: "Modo Dreno ativo",
+      subtitle: `${status.drain.inFlight} item(ns) finalizando antes de pausar`
+    });
+  }
+  for (const item of [...status.inProgress, ...status.recent]) {
+    if (item.stage === "failed" || item.stage === "reverted") {
+      entries.push({
+        id: `fail-${item.id}`,
+        kind: "failed",
+        badge: "Falha",
+        title: `Item falhou: ${item.title}`,
+        subtitle: item.reason || item.note || void 0,
+        item
+      });
+    } else if (item.stage === "merged") {
+      entries.push({
+        id: `merge-${item.id}`,
+        kind: "merged",
+        badge: "Integrado",
+        title: `Integrado na main: ${item.title}`,
+        subtitle: item.note || `#${item.id.slice(0, 8)}`,
+        item
+      });
+    }
+  }
+  for (const ev of getOrgfyPipelineEvents(10)) {
+    if (ev.empresa && ev.empresa !== tenant) continue;
+    entries.push({
+      id: `ev-${ev.id}`,
+      kind: ev.type.includes("failed") || ev.type.includes("loop") ? "failed" : "event",
+      badge: ev.type,
+      title: ev.summary || ev.type,
+      subtitle: ev.issueId ? `#${ev.issueId.slice(0, 8)}` : void 0
+    });
+  }
+  return entries.slice(0, 8);
+}
+function renderCooUpdatesFeedCard(props) {
+  const { h, tenant, status, expanded, onToggleExpanded, onSelectItem, onSendUpdatesToCoo, sending } = props;
+  const entries = buildCooUpdatesFeed(status, tenant);
+  if (entries.length === 0) return null;
+  return h(
+    "section",
+    {
+      "data-coo-updates-feed": "true",
+      className: "of-card",
+      style: { borderColor: "var(--border)" }
+    },
+    h(
+      "div",
+      {
+        style: {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "8px",
+          padding: "8px 12px",
+          borderBottom: expanded ? "1px solid var(--border)" : "none"
+        }
+      },
+      h(
+        "button",
+        {
+          type: "button",
+          onClick: onToggleExpanded,
+          style: {
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "7px",
+            background: "transparent",
+            border: "none",
+            color: "var(--foreground)",
+            fontSize: "12px",
+            fontWeight: 600,
+            cursor: "pointer",
+            padding: 0
+          }
+        },
+        h("span", { className: "of-dot", "data-tone": entries.some((e) => e.kind === "failed" || e.kind === "paused") ? "waiting" : "done" }),
+        h("span", null, `Status para o COO · ${entries.length} update${entries.length > 1 ? "s" : ""}`),
+        h("span", { className: "of-muted", style: { fontSize: "11px" } }, expanded ? "▾" : "▸")
+      ),
+      h(
+        "button",
+        {
+          type: "button",
+          className: "of-btn",
+          disabled: sending,
+          style: { padding: "3px 9px", fontSize: "11px" },
+          onClick: () => onSendUpdatesToCoo(entries)
+        },
+        sending ? "Enviando..." : "Enviar ao COO ↗"
+      )
+    ),
+    expanded && h(
+      "div",
+      { style: { display: "flex", flexDirection: "column" } },
+      entries.map(
+        (entry, idx) => h(
+          "div",
+          {
+            key: entry.id,
+            style: {
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "10px",
+              padding: "8px 12px",
+              borderTop: idx > 0 ? "1px solid var(--border)" : "none",
+              fontSize: "12px"
+            }
+          },
+          h(
+            "div",
+            { style: { minWidth: 0, flex: 1 } },
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", gap: "6px", fontSize: "10.5px", marginBottom: "2px" } },
+              h(
+                "span",
+                {
+                  className: "of-pill",
+                  "data-tone": entry.kind === "merged" ? "done" : entry.kind === "failed" ? "failed" : "waiting",
+                  style: { padding: "0 6px", fontSize: "9.5px" }
+                },
+                entry.badge
+              ),
+              h("span", { className: "of-mono of-muted" }, tenant)
+            ),
+            h("div", { style: { fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, entry.title),
+            entry.subtitle && h("div", { className: "of-muted", style: { fontSize: "11px", marginTop: "1px" } }, entry.subtitle)
+          ),
+          entry.item && h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-variant": "ghost",
+              style: { padding: "2px 7px", fontSize: "11px", color: "var(--primary)", flexShrink: 0 },
+              onClick: () => onSelectItem(entry.item)
+            },
+            `#${entry.item.id.slice(0, 6)} ↗`
+          )
+        )
+      )
+    )
+  );
+}
 function fmtTokens$1(n) {
   if (typeof n !== "number" || !Number.isFinite(n)) return PT_BR.labels.unavailable;
   if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
@@ -12461,6 +14660,17 @@ function renderFactoryOverviewPanel(props) {
         )
       )
     ),
+    // ── FEED DE UPDATES PARA O COO (Print 4) ──
+    props.onToggleCooUpdates && props.onSendUpdatesToCoo && renderCooUpdatesFeedCard({
+      h,
+      tenant,
+      status,
+      expanded: Boolean(props.cooUpdatesExpanded),
+      onToggleExpanded: props.onToggleCooUpdates,
+      onSelectItem,
+      onSendUpdatesToCoo: props.onSendUpdatesToCoo,
+      sending: props.sendingCooUpdates
+    }),
     // ── BLOCO 2: FÁBRICA DE SOFTWARE (Card dedicado) ──
     h(
       "section",
@@ -13459,1657 +15669,6 @@ function renderAgentProfileDrawer(props) {
       )
     )
   );
-}
-function Icon({ h, name, size = 14, color }) {
-  const base = {
-    viewBox: "0 0 24 24",
-    width: size,
-    height: size,
-    fill: "none",
-    stroke: color || "currentColor",
-    strokeWidth: 1.8,
-    strokeLinecap: "round",
-    strokeLinejoin: "round",
-    style: { flexShrink: 0 },
-    "aria-hidden": "true"
-  };
-  switch (name) {
-    case "diff":
-      return h("svg", base, h("path", { d: "M12 3v14" }), h("path", { d: "M5 10h14" }), h("path", { d: "M5 21h14" }));
-    case "files":
-      return h("svg", base, h("path", { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" }), h("path", { d: "M14 2v4a2 2 0 0 0 2 2h4" }));
-    case "pr":
-      return h("svg", base, h("circle", { cx: 18, cy: 18, r: 3 }), h("circle", { cx: 6, cy: 6, r: 3 }), h("path", { d: "M13 6h3a2 2 0 0 1 2 2v7" }), h("line", { x1: 6, y1: 9, x2: 6, y2: 21 }));
-    case "info":
-      return h("svg", base, h("circle", { cx: 12, cy: 12, r: 10 }), h("path", { d: "M12 16v-4" }), h("path", { d: "M12 8h.01" }));
-    case "close":
-      return h("svg", base, h("path", { d: "M18 6 6 18" }), h("path", { d: "m6 6 12 12" }));
-    case "chevron":
-      return h("svg", base, h("path", { d: "m9 18 6-6-6-6" }));
-    case "folder":
-      return h("svg", base, h("path", { d: "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" }));
-    case "fileCode":
-      return h("svg", base, h("path", { d: "M10 12.5 8 15l2 2.5" }), h("path", { d: "m14 12.5 2 2.5-2 2.5" }), h("path", { d: "M14 2v4a2 2 0 0 0 2 2h4" }), h("path", { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z" }));
-    case "checkCircle":
-      return h("svg", base, h("circle", { cx: 12, cy: 12, r: 10 }), h("path", { d: "m9 12 2 2 4-4" }));
-    case "clock":
-      return h("svg", base, h("circle", { cx: 12, cy: 12, r: 10 }), h("polyline", { points: "12 6 12 12 16 14" }));
-    case "xCircle":
-      return h("svg", base, h("circle", { cx: 12, cy: 12, r: 10 }), h("path", { d: "m15 9-6 6" }), h("path", { d: "m9 9 6 6" }));
-    case "external":
-      return h("svg", base, h("path", { d: "M15 3h6v6" }), h("path", { d: "M10 14 21 3" }), h("path", { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" }));
-    case "message":
-      return h("svg", base, h("path", { d: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" }));
-    case "refresh":
-      return h("svg", base, h("path", { d: "M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" }), h("path", { d: "M21 3v5h-5" }));
-    case "compact":
-      return h("svg", base, h("path", { d: "M12 22v-6" }), h("path", { d: "M12 8V2" }), h("path", { d: "M4 12H2" }), h("path", { d: "M10 12H8" }), h("path", { d: "M16 12h-2" }), h("path", { d: "M22 12h-2" }), h("path", { d: "m15 19-3-3-3 3" }), h("path", { d: "m15 5-3 3-3-3" }));
-    case "plug":
-      return h("svg", base, h("path", { d: "M12 22v-5" }), h("path", { d: "M9 8V2" }), h("path", { d: "M15 8V2" }), h("path", { d: "M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z" }));
-    case "sparkles":
-      return h("svg", base, h("path", { d: "m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z" }));
-    case "bot":
-      return h("svg", base, h("path", { d: "M12 8V4H8" }), h("rect", { width: 16, height: 12, x: 4, y: 8, rx: 2 }), h("path", { d: "M2 14h2" }), h("path", { d: "M20 14h2" }), h("path", { d: "M15 13v2" }), h("path", { d: "M9 13v2" }));
-    default:
-      return null;
-  }
-}
-function buildFileTree(files) {
-  const root = [];
-  const dirMap = /* @__PURE__ */ new Map();
-  const getOrCreateDir = (parts) => {
-    if (parts.length === 0) return root;
-    const key = parts.join("/");
-    const existing = dirMap.get(key);
-    if (existing) return existing.children;
-    const parentList = getOrCreateDir(parts.slice(0, -1));
-    const node = {
-      name: parts[parts.length - 1],
-      path: key,
-      kind: "dir",
-      children: []
-    };
-    parentList.push(node);
-    dirMap.set(key, node);
-    return node.children;
-  };
-  for (const f of files) {
-    const parts = f.path.split("/").filter(Boolean);
-    if (parts.length === 0) continue;
-    const parentList = getOrCreateDir(parts.slice(0, -1));
-    parentList.push({
-      name: parts[parts.length - 1],
-      path: f.path,
-      kind: "file",
-      size: f.size
-    });
-  }
-  const sortNodes = (list) => {
-    list.sort((a, b) => {
-      if (a.kind !== b.kind) return a.kind === "dir" ? -1 : 1;
-      return a.name.localeCompare(b.name);
-    });
-    for (const n of list) {
-      if (n.children) sortNodes(n.children);
-    }
-  };
-  sortNodes(root);
-  return root;
-}
-function cleanCardMarkdown(raw) {
-  return raw.replace(/<!--[\s\S]*?-->/g, "").replace(/^\s*\n+/, "").trim();
-}
-function parseOrgfyCardStructure(raw) {
-  const cleaned = cleanCardMarkdown(raw || "");
-  if (!cleaned) return null;
-  const pickField = (labelPattern) => {
-    const rx = new RegExp(`(?:^|\\n)\\s*(?:[-*•]\\s*)?(?:\\*\\*)?(?:${labelPattern})(?:\\*\\*)?\\s*:\\s*(?:\\*\\*)?\\s*(.+)`, "i");
-    const m = rx.exec(cleaned);
-    if (!m) return void 0;
-    return m[1].replace(/\*\*/g, "").replace(/^`|`$/g, "").trim() || void 0;
-  };
-  const lines = cleaned.replace(/\r\n/g, "\n").split("\n");
-  let currentSection = "intro";
-  const introLines = [];
-  const objetivoLines = [];
-  const leitura = [];
-  const escritaExclusiva = [];
-  const passos = [];
-  let subListMode = "none";
-  let comandoAceite;
-  let feitoQuando;
-  let inCodeBlock = false;
-  const codeBlockLines = [];
-  for (const rawLine of lines) {
-    const trimmed = rawLine.trim();
-    if (trimmed.startsWith("```")) {
-      if (inCodeBlock) {
-        if (currentSection === "aceite" && !comandoAceite && codeBlockLines.length > 0) {
-          comandoAceite = codeBlockLines.join("\n").trim();
-        }
-        codeBlockLines.length = 0;
-        inCodeBlock = false;
-      } else {
-        inCodeBlock = true;
-      }
-      continue;
-    }
-    if (inCodeBlock) {
-      codeBlockLines.push(rawLine);
-      continue;
-    }
-    const secMatch = /^#{1,4}\s+(.+)$/.exec(trimmed) || /^\*\*([^*]{2,40})\*\*$/.exec(trimmed);
-    if (secMatch) {
-      const heading = secMatch[1].toLowerCase();
-      subListMode = "none";
-      if (/objetivo/.test(heading)) currentSection = "objetivo";
-      else if (/estado/.test(heading)) currentSection = "estado";
-      else if (/pap[eé]is|ambiente/.test(heading)) currentSection = "papeis";
-      else if (/escopo|plano|checklist|passos/.test(heading)) currentSection = "escopo";
-      else if (/aceite|crit[eé]rio|l-22/.test(heading)) currentSection = "aceite";
-      else currentSection = "other";
-      continue;
-    }
-    const checkMatch = /^[-*•]\s*\[([ xX])\]\s*(?:(P\d+)\s*[:\-–]?\s*)?(.+)$/.exec(trimmed);
-    if (checkMatch) {
-      passos.push({
-        id: checkMatch[2] || `P${passos.length + 1}`,
-        done: checkMatch[1].toLowerCase() === "x",
-        text: checkMatch[3].trim()
-      });
-      continue;
-    }
-    if (/^(?:[-*•]\s*)?(?:\*\*)?escrita\s+exclusiva(?:\*\*)?\s*:/i.test(trimmed)) {
-      subListMode = "escrita";
-      const inlineVal = trimmed.replace(/^(?:[-*•]\s*)?(?:\*\*)?escrita\s+exclusiva(?:\*\*)?\s*:\s*(?:\*\*)?\s*/i, "").trim();
-      if (inlineVal) {
-        for (const p of inlineVal.split(/[,;]/)) {
-          const cleanP = p.replace(/`/g, "").replace(/^\*\*\s*|\s*\*\*$/g, "").trim();
-          if (cleanP) escritaExclusiva.push(cleanP);
-        }
-      }
-      continue;
-    }
-    if (/^(?:[-*•]\s*)?(?:\*\*)?(?:leitura|arquivos\s+de\s+refer[eê]ncia)(?:\*\*)?\s*:/i.test(trimmed)) {
-      subListMode = "leitura";
-      const inlineVal = trimmed.replace(/^(?:[-*•]\s*)?(?:\*\*)?(?:leitura|arquivos\s+de\s+refer[eê]ncia)(?:\*\*)?\s*:\s*(?:\*\*)?\s*/i, "").trim();
-      if (inlineVal) {
-        for (const p of inlineVal.split(/[,;]/)) {
-          const cleanP = p.replace(/`/g, "").replace(/^\*\*\s*|\s*\*\*$/g, "").trim();
-          if (cleanP) leitura.push(cleanP);
-        }
-      }
-      continue;
-    }
-    if (subListMode !== "none" && /^[-*•]\s+/.test(trimmed)) {
-      const itemVal = trimmed.replace(/^[-*•]\s+/, "").replace(/`/g, "").trim();
-      if (itemVal) {
-        if (subListMode === "escrita") escritaExclusiva.push(itemVal);
-        else leitura.push(itemVal);
-      }
-      continue;
-    }
-    if (currentSection === "objetivo" && trimmed) {
-      objetivoLines.push(trimmed);
-    } else if (currentSection === "intro" && trimmed && !/^\*\*[^*]+\*\*:/.test(trimmed)) {
-      introLines.push(trimmed);
-    }
-  }
-  feitoQuando = pickField("feito\\s+quando|crit[eé]rio\\s+de\\s+aceite");
-  if (!comandoAceite) {
-    comandoAceite = pickField("comando\\s+de\\s+aceite|comando\\s+l-22|aceite\\s+l-22|aceite");
-  }
-  const result = {
-    objetivo: (objetivoLines.length > 0 ? objetivoLines : introLines).join(" ").trim(),
-    estado: {
-      contexto: pickField("contexto"),
-      autoridade: pickField("autoridade"),
-      decisao: pickField("decis[aã]o")
-    },
-    papeis: {
-      tipo: pickField("tipo"),
-      executor: pickField("executor"),
-      revisor: pickField("revisor"),
-      decisor: pickField("decisor"),
-      workspace: pickField("workspace"),
-      effort: pickField("effort|esfor[cç]o"),
-      spec: pickField("spec")
-    },
-    escopo: {
-      leitura,
-      escritaExclusiva,
-      passos
-    },
-    aceite: {
-      feitoQuando,
-      comandoAceite
-    }
-  };
-  const hasStructuredSignal = Boolean(
-    result.estado.contexto || result.estado.autoridade || result.estado.decisao || result.papeis.executor || result.papeis.revisor || result.papeis.tipo || result.escopo.escritaExclusiva.length > 0 || result.escopo.passos.length > 0 || result.aceite.comandoAceite
-  );
-  return hasStructuredSignal ? result : null;
-}
-function renderSimpleMarkdown(h, raw) {
-  const cleaned = cleanCardMarkdown(raw);
-  if (!cleaned) return null;
-  const lines = cleaned.replace(/\r\n/g, "\n").split("\n");
-  const blocks = [];
-  let i = 0;
-  let k = 0;
-  const renderInline = (text) => {
-    const out = [];
-    const rx = /(`[^`]+`|\*\*[^*]+\*\*)/g;
-    let last = 0;
-    let m;
-    let ik = 0;
-    while ((m = rx.exec(text)) !== null) {
-      if (m.index > last) out.push(text.slice(last, m.index));
-      const tok = m[0];
-      if (tok.startsWith("`")) {
-        out.push(
-          h(
-            "code",
-            {
-              key: `c${ik++}`,
-              className: "of-mono",
-              style: {
-                fontSize: "11px",
-                padding: "1px 4px",
-                borderRadius: "4px",
-                background: "var(--muted)",
-                border: "1px solid var(--border)"
-              }
-            },
-            tok.slice(1, -1)
-          )
-        );
-      } else {
-        out.push(h("strong", { key: `b${ik++}`, style: { color: "var(--foreground)", fontWeight: 600 } }, tok.slice(2, -2)));
-      }
-      last = rx.lastIndex;
-    }
-    if (last < text.length) out.push(text.slice(last));
-    return out;
-  };
-  while (i < lines.length) {
-    const trimmed = lines[i].trim();
-    if (!trimmed) {
-      i++;
-      continue;
-    }
-    const hm = /^(#{1,4})\s+(.+)$/.exec(trimmed);
-    if (hm) {
-      const lvl = hm[1].length;
-      blocks.push(
-        h(
-          `h${Math.min(4, lvl + 1)}`,
-          {
-            key: `h${k++}`,
-            style: {
-              margin: lvl === 1 ? "2px 0 6px" : "10px 0 4px",
-              fontSize: lvl === 1 ? "13.5px" : "12px",
-              fontWeight: 600,
-              color: "var(--foreground)"
-            }
-          },
-          ...renderInline(hm[2])
-        )
-      );
-      i++;
-      continue;
-    }
-    if (/^[-*•]\s+/.test(trimmed)) {
-      const items = [];
-      while (i < lines.length && /^[-*•]\s+/.test(lines[i].trim())) {
-        items.push(lines[i].trim().replace(/^[-*•]\s+/, ""));
-        i++;
-      }
-      blocks.push(
-        h(
-          "ul",
-          {
-            key: `ul${k++}`,
-            style: { margin: "4px 0", paddingLeft: "18px", display: "flex", flexDirection: "column", gap: "3px", fontSize: "12px", lineHeight: 1.45, color: "var(--muted-foreground)" }
-          },
-          items.map((it, idx) => h("li", { key: idx }, ...renderInline(it)))
-        )
-      );
-      continue;
-    }
-    const para = [];
-    while (i < lines.length && lines[i].trim() && !/^(#{1,4}\s|[-*•]\s)/.test(lines[i].trim())) {
-      para.push(lines[i].trim());
-      i++;
-    }
-    blocks.push(
-      h(
-        "p",
-        { key: `p${k++}`, style: { margin: "4px 0", fontSize: "12px", lineHeight: 1.5, color: "var(--muted-foreground)" } },
-        ...renderInline(para.join(" "))
-      )
-    );
-  }
-  return blocks;
-}
-function renderUnifiedFileDiff(h, file, isOpen, onToggle) {
-  const displayName = file.previousPath ? `${file.previousPath} → ${file.path}` : file.path;
-  const statusColor = file.status === "added" ? "var(--status-done, #3dd68c)" : file.status === "deleted" ? "var(--status-failed, #ff9592)" : "var(--status-waiting, #ffca16)";
-  return h(
-    "div",
-    {
-      key: file.path,
-      style: {
-        borderRadius: "8px",
-        border: "1px solid var(--border)",
-        overflow: "hidden",
-        background: "var(--card)"
-      }
-    },
-    h(
-      "button",
-      {
-        type: "button",
-        "aria-expanded": isOpen,
-        onClick: onToggle,
-        style: {
-          width: "100%",
-          display: "flex",
-          alignItems: "center",
-          gap: "7px",
-          padding: "7px 10px",
-          background: "var(--surface-inset, rgba(255,255,255,0.02))",
-          border: "none",
-          borderRadius: 0,
-          color: "var(--foreground)",
-          cursor: "pointer",
-          textAlign: "left",
-          fontSize: "12px"
-        }
-      },
-      h(
-        "span",
-        {
-          style: {
-            display: "inline-flex",
-            transform: isOpen ? "rotate(90deg)" : "rotate(0deg)",
-            transition: "transform 0.12s ease",
-            color: "var(--muted-foreground)"
-          }
-        },
-        Icon({ h, name: "chevron", size: 13 })
-      ),
-      Icon({ h, name: "fileCode", size: 13, color: statusColor }),
-      h(
-        "span",
-        {
-          className: "of-mono",
-          title: displayName,
-          style: { flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "11.5px" }
-        },
-        displayName
-      ),
-      h("span", { style: { fontSize: "10px", color: "var(--muted-foreground)", textTransform: "uppercase" } }, file.status[0]),
-      file.additions > 0 && h("span", { className: "of-mono", style: { fontSize: "11px", color: "var(--status-done, #3dd68c)" } }, `+${file.additions}`),
-      file.deletions > 0 && h("span", { className: "of-mono", style: { fontSize: "11px", color: "var(--status-failed, #ff9592)" } }, `−${file.deletions}`)
-    ),
-    isOpen && h(
-      "div",
-      { style: { borderTop: "1px solid var(--border)", overflowX: "auto", fontFamily: "var(--font-mono)", fontSize: "11px", lineHeight: 1.5 } },
-      file.hunks.length === 0 ? h("div", { className: "of-muted", style: { padding: "8px 12px" } }, "Sem linhas de diff textual (arquivo binário ou renomeado).") : file.hunks.map(
-        (hunk, hIdx) => h(
-          "div",
-          { key: hIdx },
-          h(
-            "div",
-            {
-              style: {
-                padding: "3px 10px",
-                background: "rgba(96, 165, 250, 0.08)",
-                color: "var(--muted-foreground)",
-                fontSize: "10.5px",
-                borderBottom: "1px solid rgba(255,255,255,0.04)"
-              }
-            },
-            hunk.header
-          ),
-          hunk.lines.map((ln, lIdx) => {
-            const bg = ln.type === "add" ? "rgba(61, 214, 140, 0.12)" : ln.type === "del" ? "rgba(255, 149, 146, 0.12)" : "transparent";
-            const color = ln.type === "add" ? "var(--status-done, #3dd68c)" : ln.type === "del" ? "var(--status-failed, #ff9592)" : "var(--foreground)";
-            const prefix = ln.type === "add" ? "+" : ln.type === "del" ? "-" : " ";
-            return h(
-              "div",
-              {
-                key: lIdx,
-                style: {
-                  display: "grid",
-                  gridTemplateColumns: "36px 36px 14px 1fr",
-                  background: bg,
-                  padding: "0 8px",
-                  whiteSpace: "pre"
-                }
-              },
-              h("span", { style: { color: "var(--muted-foreground)", opacity: 0.55, textAlign: "right", paddingRight: "6px", userSelect: "none" } }, ln.oldLine ?? ""),
-              h("span", { style: { color: "var(--muted-foreground)", opacity: 0.55, textAlign: "right", paddingRight: "6px", userSelect: "none" } }, ln.newLine ?? ""),
-              h("span", { style: { color, fontWeight: 600, userSelect: "none" } }, prefix),
-              h("span", { style: { color } }, ln.text)
-            );
-          })
-        )
-      )
-    )
-  );
-}
-function createCodeDenInspectorDrawer(React) {
-  const h = React.createElement;
-  return function CodeDenInspectorDrawer(props) {
-    var _a, _b, _c;
-    const {
-      ctx,
-      item,
-      tenant,
-      repoOwner,
-      repoDtag,
-      repoDetail,
-      repoLoading,
-      linkedPr,
-      liveCrew = [],
-      liveTurnsByPubkey = {},
-      resolveAuthor,
-      EmbeddedThread,
-      threadChannelId,
-      relaySession,
-      relayScope,
-      onOpenInBuzz,
-      onOpenPrInBuzz,
-      onOpenRepoPrsInBuzz,
-      onOpenCommitInBuzz,
-      onOpenAgentDm,
-      onSessionAction,
-      onToggleChecklistStep,
-      onClose
-    } = props;
-    const [activeTab, setActiveTab] = React.useState("pr");
-    const [localChecklistOverrides, setLocalChecklistOverrides] = React.useState({});
-    const [showLiveThread, setShowLiveThread] = React.useState(false);
-    const [gitSnap, setGitSnap] = React.useState(null);
-    const [gitLoading, setGitLoading] = React.useState(false);
-    const [selectedCommit, setSelectedCommit] = React.useState("");
-    const [selectedCommitDiff, setSelectedCommitDiff] = React.useState(null);
-    const [openDiffFiles, setOpenDiffFiles] = React.useState({});
-    const [expandedDirs, setExpandedDirs] = React.useState({});
-    const [selectedFilePath, setSelectedFilePath] = React.useState(null);
-    const [fileContent, setFileContent] = React.useState(null);
-    const [openLoadedSection, setOpenLoadedSection] = React.useState("mcp");
-    React.useEffect(() => {
-      if (!item) return;
-      setActiveTab("pr");
-      setSelectedCommit((repoDetail == null ? void 0 : repoDetail.commit) || "");
-      setSelectedCommitDiff((repoDetail == null ? void 0 : repoDetail.commitDiff) || null);
-      setOpenDiffFiles({});
-      setSelectedFilePath(null);
-      setFileContent(null);
-      setLocalChecklistOverrides({});
-    }, [item == null ? void 0 : item.id]);
-    React.useEffect(() => {
-      if ((repoDetail == null ? void 0 : repoDetail.commit) && !selectedCommit) {
-        setSelectedCommit(repoDetail.commit);
-      }
-      if (repoDetail == null ? void 0 : repoDetail.commitDiff) {
-        setSelectedCommitDiff(repoDetail.commitDiff);
-      }
-    }, [repoDetail == null ? void 0 : repoDetail.commit, repoDetail == null ? void 0 : repoDetail.commitDiff]);
-    const repoDetailRef = React.useRef(repoDetail);
-    repoDetailRef.current = repoDetail;
-    const loadGitOverview = React.useCallback(async () => {
-      var _a2, _b2;
-      if (!(item == null ? void 0 : item.id)) return;
-      setGitLoading(true);
-      try {
-        const snap = await readBuzzProjectGit(ctx, {
-          owner: repoOwner,
-          dtag: repoDtag || tenant
-        });
-        setGitSnap(snap);
-        const currentDetail = repoDetailRef.current;
-        const targetCommit = (currentDetail == null ? void 0 : currentDetail.commit) || (snap == null ? void 0 : snap.head) || ((_b2 = (_a2 = snap == null ? void 0 : snap.commits) == null ? void 0 : _a2[0]) == null ? void 0 : _b2.hash) || "";
-        if (targetCommit && !(currentDetail == null ? void 0 : currentDetail.commitDiff)) {
-          setSelectedCommit(targetCommit);
-          const commitSnap = await readBuzzProjectGit(ctx, {
-            owner: repoOwner,
-            dtag: repoDtag || tenant,
-            commit: targetCommit
-          });
-          if (commitSnap == null ? void 0 : commitSnap.diff) setSelectedCommitDiff(commitSnap.diff);
-        }
-      } catch {
-        setGitSnap(null);
-      } finally {
-        setGitLoading(false);
-      }
-    }, [ctx, item == null ? void 0 : item.id, repoOwner, repoDtag, tenant]);
-    React.useEffect(() => {
-      if (!(item == null ? void 0 : item.id)) return;
-      void loadGitOverview();
-    }, [item == null ? void 0 : item.id, loadGitOverview]);
-    const handleSelectCommit = async (hash) => {
-      setSelectedCommit(hash);
-      setOpenDiffFiles({});
-      setGitLoading(true);
-      try {
-        const snap = await readBuzzProjectGit(ctx, {
-          owner: repoOwner,
-          dtag: repoDtag || tenant,
-          commit: hash
-        });
-        setSelectedCommitDiff((snap == null ? void 0 : snap.diff) || null);
-      } finally {
-        setGitLoading(false);
-      }
-    };
-    const handleSelectFile = async (filePath) => {
-      setSelectedFilePath(filePath);
-      setFileContent({ path: filePath, content: null, loading: true });
-      const snap = await readBuzzProjectGit(ctx, {
-        owner: repoOwner,
-        dtag: repoDtag || tenant,
-        path: filePath
-      });
-      if (snap == null ? void 0 : snap.file) {
-        setFileContent({ path: snap.file.path, content: snap.file.content, loading: false });
-      } else {
-        setFileContent({ path: filePath, content: null, loading: false, error: "Arquivo indisponível via session.projectGit." });
-      }
-    };
-    const parsedDiffFiles = React.useMemo(
-      () => parseUnifiedDiff(selectedCommitDiff || (repoDetail == null ? void 0 : repoDetail.commitDiff)),
-      [selectedCommitDiff, repoDetail == null ? void 0 : repoDetail.commitDiff]
-    );
-    const totalAdditions = React.useMemo(
-      () => parsedDiffFiles.reduce((acc, f) => acc + f.additions, 0),
-      [parsedDiffFiles]
-    );
-    const totalDeletions = React.useMemo(
-      () => parsedDiffFiles.reduce((acc, f) => acc + f.deletions, 0),
-      [parsedDiffFiles]
-    );
-    const fileTree = React.useMemo(
-      () => buildFileTree((gitSnap == null ? void 0 : gitSnap.files) || []),
-      [gitSnap == null ? void 0 : gitSnap.files]
-    );
-    if (!item) return null;
-    const noteStr = String(item.note || "");
-    const execMatch = /Executor:\s*([^·\n]+)/i.exec(noteStr);
-    const revMatch = /Revisor:\s*([^·\n]+)/i.exec(noteStr);
-    const executorName = execMatch ? execMatch[1].trim() : "";
-    const reviewerName = revMatch ? revMatch[1].trim() : "";
-    const executorAgent = liveCrew.find((a) => executorName && a.name.toLowerCase().includes(executorName.toLowerCase())) || null;
-    const reviewerAgent = liveCrew.find((a) => reviewerName && a.name.toLowerCase().includes(reviewerName.toLowerCase())) || null;
-    const executorTurn = (executorAgent == null ? void 0 : executorAgent.pubkey) ? liveTurnsByPubkey[executorAgent.pubkey.toLowerCase()] || null : null;
-    const steps = ["Entrada", "Tipo", "Execução", "Revisão + CI", "Merge"];
-    const activeIdx = item.stage === "merged" ? 4 : item.stage === "verifying" || item.stage === "watching" ? 3 : item.stage === "building" ? 2 : item.stage === "candidate" ? 1 : 0;
-    const checksList = [
-      {
-        name: "CI / Pytest da Esteira",
-        state: item.stage === "merged" ? "passed" : item.stage === "verifying" || item.stage === "watching" ? "running" : "pending"
-      },
-      {
-        name: "Revisão Cross-Provider (L-01)",
-        state: item.stage === "merged" ? "passed" : reviewerName ? "running" : "pending"
-      },
-      {
-        name: "Aceite Congelado (L-22)",
-        state: item.stage === "merged" ? "passed" : "pending"
-      },
-      {
-        name: "Conflitos de Merge (main)",
-        state: item.stage === "merged" ? "passed" : ((_a = item.reason) == null ? void 0 : _a.toLowerCase().includes("conflito")) ? "failed" : "passed"
-      }
-    ];
-    const checksPassed = checksList.filter((c) => c.state === "passed").length;
-    const allDiffsOpen = parsedDiffFiles.length > 0 && parsedDiffFiles.every((f) => openDiffFiles[f.path] !== false);
-    const toggleAllDiffs = () => {
-      const next = {};
-      const target = !allDiffsOpen;
-      for (const f of parsedDiffFiles) next[f.path] = target;
-      setOpenDiffFiles(next);
-    };
-    const toggleSingleDiff = (path) => {
-      setOpenDiffFiles((prev) => ({
-        ...prev,
-        [path]: prev[path] === false ? true : !(prev[path] ?? true)
-      }));
-    };
-    const TABS = [
-      { id: "diff", label: "Diff", icon: "diff", count: parsedDiffFiles.length || void 0 },
-      { id: "files", label: "Arquivos", icon: "files", count: ((_b = gitSnap == null ? void 0 : gitSnap.files) == null ? void 0 : _b.length) || void 0 },
-      { id: "pr", label: "Issue / PR", icon: "pr" },
-      { id: "details", label: "Detalhes", icon: "info" }
-    ];
-    const renderTreeNode = (node, depth) => {
-      var _a2;
-      const isDir = node.kind === "dir";
-      const isOpen = Boolean(expandedDirs[node.path]);
-      const isSelected = selectedFilePath === node.path;
-      return h(
-        React.Fragment,
-        { key: node.path },
-        h(
-          "button",
-          {
-            type: "button",
-            onClick: () => {
-              if (isDir) {
-                setExpandedDirs((prev) => ({ ...prev, [node.path]: !prev[node.path] }));
-              } else {
-                void handleSelectFile(node.path);
-              }
-            },
-            style: {
-              width: "100%",
-              height: "26px",
-              display: "flex",
-              alignItems: "center",
-              gap: "6px",
-              paddingLeft: `${8 + depth * 14}px`,
-              paddingRight: "8px",
-              borderRadius: "6px",
-              border: "none",
-              background: isSelected ? "var(--affordance-selected, rgba(255,255,255,0.08))" : "transparent",
-              color: isSelected ? "var(--foreground)" : "var(--muted-foreground)",
-              cursor: "pointer",
-              textAlign: "left",
-              fontSize: "12px"
-            }
-          },
-          isDir ? h(
-            "span",
-            {
-              style: {
-                display: "inline-flex",
-                transform: isOpen ? "rotate(90deg)" : "rotate(0deg)",
-                transition: "transform 0.12s ease"
-              }
-            },
-            Icon({ h, name: "chevron", size: 12 })
-          ) : h("span", { style: { width: "12px", display: "inline-block" } }),
-          Icon({ h, name: isDir ? "folder" : "files", size: 13, color: isDir ? "var(--status-waiting, #f59e0b)" : void 0 }),
-          h(
-            "span",
-            { style: { flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
-            node.name
-          )
-        ),
-        isDir && isOpen && ((_a2 = node.children) == null ? void 0 : _a2.map((c) => renderTreeNode(c, depth + 1)))
-      );
-    };
-    const renderSectionHeader = (title, action) => h(
-      "div",
-      { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", marginBottom: "8px" } },
-      h(
-        "div",
-        { style: { fontSize: "10.5px", fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--muted-foreground)" } },
-        title
-      ),
-      action
-    );
-    const renderDetailRow = (label, value) => h(
-      "div",
-      {
-        style: {
-          display: "grid",
-          gridTemplateColumns: "112px 1fr",
-          alignItems: "baseline",
-          gap: "12px",
-          padding: "8px 0",
-          borderBottom: "1px solid var(--border-subtle, rgba(255,255,255,0.06))",
-          fontSize: "12.5px"
-        }
-      },
-      h("span", { style: { fontSize: "11.5px", color: "var(--muted-foreground)" } }, label),
-      h("div", { style: { minWidth: 0, wordBreak: "break-word", color: "var(--foreground)" } }, value)
-    );
-    return h(
-      "div",
-      {
-        className: "of-sheet-backdrop",
-        "data-item-sheet-drawer": "true",
-        "data-codeden-inspector": "true",
-        onClick: (e) => {
-          if (e.target === e.currentTarget) onClose();
-        }
-      },
-      h(
-        "aside",
-        {
-          className: "of-sheet-panel",
-          style: {
-            width: "min(620px, 95vw)",
-            padding: 0,
-            display: "flex",
-            flexDirection: "column",
-            gap: 0,
-            overflow: "hidden"
-          }
-        },
-        // ── BARRA SUPERIOR 1:1 CODEDEN (Diff | Arquivos | Issue / PR | Detalhes | ×) ──
-        h(
-          "div",
-          {
-            style: {
-              height: "46px",
-              flexShrink: 0,
-              display: "flex",
-              alignItems: "center",
-              gap: "4px",
-              padding: "0 10px",
-              borderBottom: "1px solid var(--border)",
-              background: "var(--card)"
-            }
-          },
-          h(
-            "div",
-            {
-              role: "tablist",
-              style: { display: "flex", alignItems: "center", gap: "3px", flex: 1, minWidth: 0, overflowX: "auto" }
-            },
-            TABS.map((t) => {
-              const active = activeTab === t.id;
-              return h(
-                "button",
-                {
-                  key: t.id,
-                  type: "button",
-                  role: "tab",
-                  "aria-selected": active,
-                  onClick: () => setActiveTab(t.id),
-                  style: {
-                    height: "28px",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "6px",
-                    padding: "0 9px",
-                    borderRadius: "6px",
-                    border: active ? "1px solid var(--border)" : "1px solid transparent",
-                    background: active ? "var(--affordance-selected, rgba(255,255,255,0.08))" : "transparent",
-                    color: active ? "var(--foreground)" : "var(--muted-foreground)",
-                    fontSize: "12px",
-                    fontWeight: active ? 600 : 500,
-                    cursor: "pointer",
-                    whiteSpace: "nowrap",
-                    flexShrink: 0
-                  }
-                },
-                Icon({ h, name: t.icon, size: 13 }),
-                h("span", null, t.label),
-                t.count !== void 0 && h(
-                  "span",
-                  {
-                    className: "of-mono",
-                    style: {
-                      fontSize: "10px",
-                      padding: "0 5px",
-                      borderRadius: "4px",
-                      background: "var(--muted)",
-                      color: "var(--muted-foreground)"
-                    }
-                  },
-                  String(t.count)
-                )
-              );
-            })
-          ),
-          h(
-            "button",
-            {
-              type: "button",
-              onClick: onClose,
-              title: "Fechar painel",
-              "aria-label": "Fechar painel",
-              style: {
-                width: "28px",
-                height: "28px",
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                borderRadius: "6px",
-                border: "none",
-                background: "transparent",
-                color: "var(--muted-foreground)",
-                cursor: "pointer",
-                flexShrink: 0
-              }
-            },
-            Icon({ h, name: "close", size: 15 })
-          )
-        ),
-        // ── CONTEÚDO DA ABA SELECIONADA ──
-        h(
-          "div",
-          {
-            style: {
-              flex: 1,
-              minHeight: 0,
-              overflowY: "auto",
-              display: "flex",
-              flexDirection: "column"
-            }
-          },
-          // ── ABA 1: DIFF (1:1 CodeDen DiffPanel) ──
-          activeTab === "diff" && h(
-            "div",
-            { style: { display: "flex", flexDirection: "column", flex: 1 } },
-            // Git bar
-            h(
-              "div",
-              {
-                style: {
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  flexWrap: "wrap",
-                  gap: "8px",
-                  padding: "8px 14px",
-                  borderBottom: "1px solid var(--border)",
-                  fontSize: "11.5px"
-                }
-              },
-              h(
-                "div",
-                { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
-                gitSnap && gitSnap.commits.length > 0 ? h(
-                  "select",
-                  {
-                    value: selectedCommit,
-                    onChange: (e) => void handleSelectCommit(e.target.value),
-                    style: {
-                      background: "var(--muted)",
-                      color: "var(--foreground)",
-                      border: "1px solid var(--border)",
-                      borderRadius: "6px",
-                      padding: "3px 8px",
-                      fontSize: "11px",
-                      fontFamily: "var(--font-mono)",
-                      maxWidth: "260px"
-                    }
-                  },
-                  gitSnap.commits.slice(0, 25).map(
-                    (c) => h("option", { key: c.hash, value: c.hash }, `${c.hash.slice(0, 8)} · ${c.subject.slice(0, 42)}`)
-                  )
-                ) : h("span", { className: "of-mono of-muted" }, selectedCommit ? selectedCommit.slice(0, 10) : "main"),
-                parsedDiffFiles.length > 0 && h(
-                  "span",
-                  { className: "of-mono", style: { fontSize: "11px", color: "var(--muted-foreground)" } },
-                  `${parsedDiffFiles.length} arq · `,
-                  h("span", { style: { color: "var(--status-done, #3dd68c)" } }, `+${totalAdditions}`),
-                  " ",
-                  h("span", { style: { color: "var(--status-failed, #ff9592)" } }, `−${totalDeletions}`)
-                )
-              ),
-              h(
-                "div",
-                { style: { display: "inline-flex", alignItems: "center", gap: "6px" } },
-                parsedDiffFiles.length > 0 && h(
-                  "button",
-                  {
-                    type: "button",
-                    className: "of-btn",
-                    style: { padding: "3px 8px", fontSize: "11px" },
-                    onClick: toggleAllDiffs
-                  },
-                  allDiffsOpen ? "Recolher" : "Expandir"
-                ),
-                h(
-                  "button",
-                  {
-                    type: "button",
-                    className: "of-btn",
-                    title: "Recarregar diff",
-                    style: { padding: "4px 6px" },
-                    onClick: () => void loadGitOverview()
-                  },
-                  Icon({ h, name: "refresh", size: 12 })
-                ),
-                selectedCommit && onOpenCommitInBuzz && h(
-                  "button",
-                  {
-                    type: "button",
-                    className: "of-btn",
-                    style: { padding: "3px 8px", fontSize: "11px" },
-                    onClick: () => onOpenCommitInBuzz(selectedCommit)
-                  },
-                  "Buzz Repos ↗"
-                )
-              )
-            ),
-            h(
-              "div",
-              { style: { padding: "12px 14px", display: "flex", flexDirection: "column", gap: "10px" } },
-              gitLoading && h("div", { className: "of-muted", style: { fontSize: "12px" } }, "Carregando diff via session.projectGit..."),
-              !gitLoading && parsedDiffFiles.length === 0 ? h(
-                "div",
-                { className: "of-surface", style: { padding: "24px 16px", textAlign: "center", fontSize: "12px" } },
-                h("div", { style: { fontWeight: 600, color: "var(--foreground)" } }, "Nenhum diff disponível para este commit"),
-                h("div", { className: "of-muted", style: { marginTop: "4px" } }, "Selecione outro commit acima ou abra o repositório diretamente no Buzz Repos.")
-              ) : parsedDiffFiles.map(
-                (f) => renderUnifiedFileDiff(h, f, openDiffFiles[f.path] !== false, () => toggleSingleDiff(f.path))
-              )
-            )
-          ),
-          // ── ABA 2: ARQUIVOS (1:1 CodeDen FilesPanel) ──
-          activeTab === "files" && h(
-            "div",
-            { style: { display: "flex", flexDirection: "column", flex: 1, minHeight: 0 } },
-            h(
-              "div",
-              {
-                style: {
-                  maxHeight: "42%",
-                  flexShrink: 0,
-                  overflowY: "auto",
-                  borderBottom: "1px solid var(--border)",
-                  padding: "8px"
-                }
-              },
-              gitLoading && fileTree.length === 0 ? h("div", { className: "of-muted", style: { padding: "10px", fontSize: "12px" } }, "Carregando árvore de arquivos do Buzz Repos...") : fileTree.length === 0 ? h("div", { className: "of-muted", style: { padding: "10px", fontSize: "12px" } }, "Árvore de arquivos indisponível (session.projectGit não retornou arquivos).") : fileTree.map((n) => renderTreeNode(n, 0))
-            ),
-            h(
-              "div",
-              { style: { flex: 1, minHeight: 0, overflow: "auto" } },
-              !fileContent ? h(
-                "div",
-                { style: { height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "28px", textAlign: "center", color: "var(--muted-foreground)", gap: "6px" } },
-                Icon({ h, name: "files", size: 22 }),
-                h("div", { style: { fontSize: "13px", fontWeight: 600, color: "var(--foreground)" } }, "Escolha um arquivo"),
-                h("div", { style: { fontSize: "12px" } }, "Navegue pelos arquivos reais do repositório sincronizado no Buzz.")
-              ) : fileContent.loading ? h("div", { className: "of-muted", style: { padding: "16px", fontSize: "12px" } }, `Carregando ${fileContent.path}...`) : fileContent.error || fileContent.content === null ? h("div", { className: "of-muted", style: { padding: "16px", fontSize: "12px" } }, fileContent.error || "Arquivo binário ou vazio.") : h(
-                "div",
-                null,
-                h(
-                  "div",
-                  {
-                    className: "of-mono",
-                    style: {
-                      position: "sticky",
-                      top: 0,
-                      padding: "7px 12px",
-                      background: "var(--card)",
-                      borderBottom: "1px solid var(--border)",
-                      fontSize: "11.5px",
-                      fontWeight: 600,
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "6px"
-                    }
-                  },
-                  Icon({ h, name: "fileCode", size: 13 }),
-                  fileContent.path
-                ),
-                h(
-                  "div",
-                  { style: { padding: "8px 0", fontFamily: "var(--font-mono)", fontSize: "11px", lineHeight: 1.55 } },
-                  fileContent.content.replace(/\r\n/g, "\n").split("\n").slice(0, 400).map(
-                    (ln, idx) => h(
-                      "div",
-                      { key: idx, style: { display: "grid", gridTemplateColumns: "42px 1fr", padding: "0 12px 0 6px", whiteSpace: "pre" } },
-                      h("span", { style: { color: "var(--muted-foreground)", opacity: 0.45, textAlign: "right", paddingRight: "10px", userSelect: "none" } }, String(idx + 1)),
-                      h("span", { style: { color: "var(--foreground)" } }, ln)
-                    )
-                  )
-                )
-              )
-            )
-          ),
-          // ── ABA 3: ISSUE / PR (State-of-the-Art 1:1 CodeDen PrDetailsView + PrFiles + IssueSection) ──
-          activeTab === "pr" && h(
-            "div",
-            { style: { padding: "16px", display: "flex", flexDirection: "column", gap: "18px" } },
-            // Cabeçalho principal da Issue / PR
-            h(
-              "div",
-              { style: { display: "flex", flexDirection: "column", gap: "8px" } },
-              h(
-                "div",
-                { style: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "10px" } },
-                h(
-                  "div",
-                  { style: { minWidth: 0, flex: 1 } },
-                  h(
-                    "div",
-                    { className: "of-mono", style: { fontSize: "11px", color: "var(--primary)", marginBottom: "3px" } },
-                    `${linkedPr ? "PR" : "Issue"} #${((linkedPr == null ? void 0 : linkedPr.id) || item.id).slice(0, 10)} · ${tenant}`
-                  ),
-                  h(
-                    "div",
-                    { style: { fontSize: "15px", fontWeight: 700, lineHeight: 1.3, color: "var(--foreground)" } },
-                    (linkedPr == null ? void 0 : linkedPr.title) || (repoDetail == null ? void 0 : repoDetail.title) || item.title
-                  )
-                ),
-                onOpenPrInBuzz && linkedPr ? h(
-                  "button",
-                  {
-                    type: "button",
-                    className: "of-btn",
-                    title: "Abrir PR no Buzz Repos",
-                    style: { padding: "5px 9px", fontSize: "11px", flexShrink: 0 },
-                    onClick: () => onOpenPrInBuzz(linkedPr)
-                  },
-                  "Buzz PR ↗"
-                ) : onOpenInBuzz && h(
-                  "button",
-                  {
-                    type: "button",
-                    className: "of-btn",
-                    title: "Abrir no Buzz Repos",
-                    style: { padding: "5px 9px", fontSize: "11px", flexShrink: 0 },
-                    onClick: () => onOpenInBuzz(item)
-                  },
-                  "Buzz Repos ↗"
-                )
-              ),
-              // Badges de Estado, Checks, Revisão, +add/-del e Branch/Commit (1:1 CodeDen)
-              h(
-                "div",
-                { style: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: "6px", fontSize: "11px" } },
-                h(
-                  "span",
-                  {
-                    className: "of-pill",
-                    "data-tone": item.stage === "merged" ? "done" : item.stage === "building" || item.stage === "verifying" ? "running" : "waiting"
-                  },
-                  item.stage === "merged" ? "Integrado" : (repoDetail == null ? void 0 : repoDetail.status) || item.stage
-                ),
-                h(
-                  "span",
-                  { className: "of-pill", "data-tone": checksPassed === checksList.length ? "done" : "waiting" },
-                  `Checks ${checksPassed}/${checksList.length}`
-                ),
-                item.type && h("span", { className: "of-pill" }, item.type),
-                parsedDiffFiles.length > 0 && h("span", { className: "of-mono", style: { color: "var(--status-done, #3dd68c)", fontWeight: 600 } }, `+${totalAdditions}`),
-                parsedDiffFiles.length > 0 && h("span", { className: "of-mono", style: { color: "var(--status-failed, #ff9592)", fontWeight: 600 } }, `−${totalDeletions}`),
-                ((repoDetail == null ? void 0 : repoDetail.commit) || selectedCommit) && h(
-                  "code",
-                  { className: "of-mono of-muted", style: { fontSize: "10.5px" } },
-                  `${((repoDetail == null ? void 0 : repoDetail.commit) || selectedCommit).slice(0, 8)} → main`
-                )
-              ),
-              // Trilha da pipeline compacta horizontal (substitui bloco vertical pesado)
-              h(
-                "div",
-                {
-                  style: {
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "4px",
-                    flexWrap: "wrap",
-                    padding: "6px 8px",
-                    borderRadius: "8px",
-                    background: "var(--card)",
-                    border: "1px solid var(--border)",
-                    fontSize: "11px"
-                  }
-                },
-                steps.map(
-                  (st, idx) => h(
-                    React.Fragment,
-                    { key: st },
-                    h(
-                      "span",
-                      {
-                        style: {
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: "4px",
-                          color: idx <= activeIdx ? "var(--foreground)" : "var(--muted-foreground)",
-                          fontWeight: idx === activeIdx ? 600 : 400
-                        }
-                      },
-                      h("span", { className: "of-dot", "data-tone": idx < activeIdx ? "done" : idx === activeIdx ? "running" : "idle" }),
-                      st
-                    ),
-                    idx < steps.length - 1 && h("span", { className: "of-muted", style: { opacity: 0.45 } }, "›")
-                  )
-                )
-              )
-            ),
-            // ── SEÇÃO CHECKS · N (1:1 CodeDen PrDetailsView) ──
-            h(
-              "section",
-              null,
-              renderSectionHeader(`Checks · ${checksList.length}`),
-              h(
-                "div",
-                {
-                  style: {
-                    borderRadius: "8px",
-                    border: "1px solid var(--border)",
-                    overflow: "hidden",
-                    background: "var(--card)"
-                  }
-                },
-                checksList.map((chk, idx) => {
-                  const tone = chk.state === "passed" ? "var(--status-done, #3dd68c)" : chk.state === "failed" ? "var(--status-failed, #ff9592)" : "var(--status-waiting, #ffca16)";
-                  const iconName = chk.state === "passed" ? "checkCircle" : chk.state === "failed" ? "xCircle" : "clock";
-                  const label = chk.state === "passed" ? "Aprovado" : chk.state === "failed" ? "Falhou" : chk.state === "running" ? "Em andamento" : "Pendente";
-                  return h(
-                    "div",
-                    {
-                      key: chk.name,
-                      style: {
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "8px",
-                        padding: "7px 11px",
-                        borderTop: idx > 0 ? "1px solid var(--border)" : "none",
-                        fontSize: "12px"
-                      }
-                    },
-                    Icon({ h, name: iconName, size: 13, color: tone }),
-                    h("span", { className: "of-mono", style: { flex: 1, fontSize: "11.5px" } }, chk.name),
-                    h("span", { style: { fontSize: "11px", color: tone, fontWeight: 500 } }, label)
-                  );
-                })
-              )
-            ),
-            // ── SEÇÃO ARQUIVOS ALTERADOS · N (1:1 CodeDen PrFiles) ──
-            h(
-              "section",
-              null,
-              renderSectionHeader(
-                `Arquivos alterados · ${parsedDiffFiles.length}`,
-                parsedDiffFiles.length > 0 && h(
-                  "button",
-                  {
-                    type: "button",
-                    style: {
-                      background: "transparent",
-                      border: "none",
-                      color: "var(--muted-foreground)",
-                      fontSize: "11px",
-                      cursor: "pointer",
-                      padding: "0 4px"
-                    },
-                    onClick: toggleAllDiffs
-                  },
-                  allDiffsOpen ? "Recolher todos" : "Expandir todos"
-                )
-              ),
-              parsedDiffFiles.length === 0 ? h(
-                "div",
-                {
-                  style: {
-                    padding: "12px",
-                    borderRadius: "8px",
-                    border: "1px dashed var(--border)",
-                    fontSize: "12px",
-                    color: "var(--muted-foreground)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: "8px"
-                  }
-                },
-                h("span", null, repoLoading || gitLoading ? "Carregando diff do Pull Request..." : "Nenhum diff de arquivo anexado a esta issue."),
-                onOpenRepoPrsInBuzz && h(
-                  "button",
-                  { type: "button", className: "of-btn", style: { padding: "3px 8px", fontSize: "11px" }, onClick: onOpenRepoPrsInBuzz },
-                  "Ver PRs ↗"
-                )
-              ) : h(
-                "div",
-                { style: { display: "flex", flexDirection: "column", gap: "6px" } },
-                parsedDiffFiles.map(
-                  (f) => renderUnifiedFileDiff(h, f, Boolean(openDiffFiles[f.path]), () => toggleSingleDiff(f.path))
-                )
-              )
-            ),
-            // ── SEÇÃO REVISÕES & DISCUSSÃO NIP-34 · N (1:1 CodeDen Reviews + Thread nativa sob demanda) ──
-            h(
-              "section",
-              null,
-              renderSectionHeader(
-                `Revisões & Comentários NIP-34 · ${((_c = repoDetail == null ? void 0 : repoDetail.comments) == null ? void 0 : _c.length) || 0}`,
-                h(
-                  "div",
-                  { style: { display: "inline-flex", alignItems: "center", gap: "10px" } },
-                  EmbeddedThread && threadChannelId && relaySession && typeof relayScope === "string" && relayScope.length > 0 && h(
-                    "button",
-                    {
-                      type: "button",
-                      style: { background: "transparent", border: "none", color: "var(--muted-foreground)", fontSize: "11px", cursor: "pointer", padding: 0 },
-                      onClick: () => setShowLiveThread((v2) => !v2)
-                    },
-                    showLiveThread ? "Ocultar thread" : "Thread do canal"
-                  ),
-                  onOpenInBuzz && h(
-                    "button",
-                    {
-                      type: "button",
-                      style: { background: "transparent", border: "none", color: "var(--primary)", fontSize: "11px", cursor: "pointer", padding: 0 },
-                      onClick: () => onOpenInBuzz(item)
-                    },
-                    "Responder no Buzz ↗"
-                  )
-                )
-              ),
-              showLiveThread && EmbeddedThread && threadChannelId && relaySession && typeof relayScope === "string" && relayScope.length > 0 && h(
-                "div",
-                {
-                  "data-embedded-buzz-thread": "true",
-                  style: { marginBottom: "10px", padding: "8px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)", minHeight: "180px" }
-                },
-                h(EmbeddedThread, {
-                  session: relaySession,
-                  scope: relayScope,
-                  channelId: threadChannelId,
-                  channelName: tenant,
-                  messageId: item.id
-                })
-              ),
-              !repoDetail || repoDetail.comments.length === 0 ? h("div", { className: "of-muted", style: { fontSize: "12px" } }, "Nenhuma revisão ou comentário NIP-34 registrado ainda.") : h(
-                "div",
-                { style: { display: "flex", flexDirection: "column", gap: "8px" } },
-                repoDetail.comments.slice(-10).map(
-                  (c) => h(
-                    "div",
-                    {
-                      key: c.id,
-                      style: {
-                        padding: "9px 11px",
-                        borderRadius: "8px",
-                        border: "1px solid var(--border)",
-                        background: "var(--card)",
-                        fontSize: "12px"
-                      }
-                    },
-                    h(
-                      "div",
-                      { style: { display: "flex", alignItems: "center", gap: "6px", marginBottom: "5px", fontSize: "11px" } },
-                      Icon({ h, name: "message", size: 12, color: "var(--muted-foreground)" }),
-                      h("strong", { style: { color: "var(--foreground)" } }, resolveAuthor ? resolveAuthor(c.authorPubkey) : c.authorPubkey.slice(0, 10)),
-                      h(
-                        "span",
-                        { className: "of-muted", style: { marginLeft: "auto", fontSize: "10.5px" } },
-                        c.createdAt ? new Date(c.createdAt).toLocaleString("pt-BR") : ""
-                      )
-                    ),
-                    h("div", { style: { whiteSpace: "pre-wrap", lineHeight: 1.45, color: "var(--muted-foreground)" } }, c.content)
-                  )
-                )
-              )
-            ),
-            // ── DESCRIÇÃO ESTRUTURADA DO CARD ORGFY (campos nativos + Markdown original colapsável) ──
-            (repoDetail == null ? void 0 : repoDetail.content) && (() => {
-              const structured = parseOrgfyCardStructure(repoDetail.content);
-              if (!structured) {
-                return h(
-                  "section",
-                  { "data-buzz-repo-detail": "true" },
-                  renderSectionHeader("Descrição"),
-                  h(
-                    "div",
-                    {
-                      style: {
-                        padding: "10px 12px",
-                        borderRadius: "8px",
-                        border: "1px solid var(--border)",
-                        background: "var(--card)",
-                        maxHeight: "260px",
-                        overflowY: "auto"
-                      }
-                    },
-                    renderSimpleMarkdown(h, repoDetail.content)
-                  )
-                );
-              }
-              const resolveCrewByName = (name) => name ? liveCrew.find((a) => a.name.toLowerCase().includes(name.toLowerCase())) || { name } : null;
-              structured.escopo.passos.filter((p) => p.done).length;
-              return h(
-                "section",
-                { "data-buzz-repo-detail": "true", "data-orgfy-structured-card": "true", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-                renderSectionHeader("Contrato do Card OrgFy"),
-                structured.objetivo && h(
-                  "div",
-                  { style: { padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
-                  h("div", { style: { fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted-foreground)", marginBottom: "4px" } }, "Objetivo"),
-                  h("div", { style: { fontSize: "12.5px", lineHeight: 1.5, color: "var(--foreground)" } }, structured.objetivo)
-                ),
-                (structured.papeis.tipo || structured.papeis.executor || structured.papeis.revisor || structured.papeis.decisor || structured.papeis.effort) && h(
-                  "div",
-                  { style: { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "8px" } },
-                  structured.papeis.executor && h(
-                    "div",
-                    { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
-                    h("div", { style: { fontSize: "10px", color: "var(--muted-foreground)", marginBottom: "4px" } }, "Executor"),
-                    h(
-                      "button",
-                      {
-                        type: "button",
-                        className: "of-btn",
-                        style: { padding: "2px 8px", fontSize: "11.5px" },
-                        onClick: () => {
-                          const ag = resolveCrewByName(structured.papeis.executor);
-                          if (ag) onOpenAgentDm == null ? void 0 : onOpenAgentDm(ag);
-                        }
-                      },
-                      `${structured.papeis.executor} ↗`
-                    )
-                  ),
-                  structured.papeis.revisor && h(
-                    "div",
-                    { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
-                    h("div", { style: { fontSize: "10px", color: "var(--muted-foreground)", marginBottom: "4px" } }, "Revisor (L-01)"),
-                    h(
-                      "button",
-                      {
-                        type: "button",
-                        className: "of-btn",
-                        style: { padding: "2px 8px", fontSize: "11.5px" },
-                        onClick: () => {
-                          const ag = resolveCrewByName(structured.papeis.revisor);
-                          if (ag) onOpenAgentDm == null ? void 0 : onOpenAgentDm(ag);
-                        }
-                      },
-                      `${structured.papeis.revisor} ↗`
-                    )
-                  ),
-                  structured.papeis.decisor && h(
-                    "div",
-                    { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
-                    h("div", { style: { fontSize: "10px", color: "var(--muted-foreground)", marginBottom: "2px" } }, "Decisor / Autoridade"),
-                    h("div", { style: { fontSize: "12px", fontWeight: 600 } }, structured.papeis.decisor)
-                  ),
-                  (structured.papeis.tipo || structured.papeis.effort) && h(
-                    "div",
-                    { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)", display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" } },
-                    structured.papeis.tipo && h("span", { className: "of-pill" }, structured.papeis.tipo),
-                    structured.papeis.effort && h("span", { className: "of-pill", "data-tone": "waiting" }, `Effort ${structured.papeis.effort}`)
-                  )
-                ),
-                (structured.estado.contexto || structured.estado.decisao || structured.estado.autoridade) && h(
-                  "div",
-                  { style: { padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)", display: "flex", flexDirection: "column", gap: "6px", fontSize: "12px" } },
-                  h("div", { style: { fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted-foreground)" } }, "Estado & Governança"),
-                  structured.estado.contexto && h("div", null, h("strong", null, "Contexto: "), h("span", { className: "of-muted" }, structured.estado.contexto)),
-                  structured.estado.decisao && h("div", null, h("strong", null, "Decisão: "), h("span", { className: "of-muted" }, structured.estado.decisao)),
-                  structured.estado.autoridade && h("div", null, h("strong", null, "Autoridade: "), h("span", { className: "of-muted" }, structured.estado.autoridade))
-                ),
-                structured.escopo.escritaExclusiva.length > 0 && h(
-                  "div",
-                  { style: { padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
-                  h("div", { style: { fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted-foreground)", marginBottom: "6px" } }, `Escrita exclusiva (${structured.escopo.escritaExclusiva.length})`),
-                  h(
-                    "div",
-                    { style: { display: "flex", flexWrap: "wrap", gap: "5px" } },
-                    structured.escopo.escritaExclusiva.map(
-                      (p) => h("code", { key: p, className: "of-mono", style: { fontSize: "11px", padding: "2px 6px", borderRadius: "5px", background: "var(--muted)", border: "1px solid var(--border)" } }, p)
-                    )
-                  )
-                ),
-                structured.escopo.passos.length > 0 && (() => {
-                  const resolvedPassos = structured.escopo.passos.map((p) => ({
-                    ...p,
-                    done: localChecklistOverrides[p.id] !== void 0 ? localChecklistOverrides[p.id] : p.done
-                  }));
-                  const liveDone = resolvedPassos.filter((p) => p.done).length;
-                  return h(
-                    "div",
-                    { "data-interactive-checklist": "true", style: { padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
-                    h(
-                      "div",
-                      { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" } },
-                      h("span", { style: { fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted-foreground)" } }, "Checklist do Card (clique para marcar)"),
-                      h("span", { className: "of-pill", "data-tone": liveDone === resolvedPassos.length ? "done" : "waiting" }, `${liveDone}/${resolvedPassos.length}`)
-                    ),
-                    h(
-                      "div",
-                      { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "12px" } },
-                      resolvedPassos.map(
-                        (p) => h(
-                          "button",
-                          {
-                            key: `${p.id}-${p.text.slice(0, 12)}`,
-                            type: "button",
-                            onClick: () => {
-                              const nextDone = !p.done;
-                              setLocalChecklistOverrides((prev) => ({ ...prev, [p.id]: nextDone }));
-                              onToggleChecklistStep == null ? void 0 : onToggleChecklistStep(p.id, nextDone, item);
-                            },
-                            style: {
-                              display: "flex",
-                              alignItems: "flex-start",
-                              gap: "7px",
-                              padding: "4px 6px",
-                              borderRadius: "6px",
-                              border: "none",
-                              background: "transparent",
-                              textAlign: "left",
-                              cursor: "pointer",
-                              color: "inherit"
-                            }
-                          },
-                          Icon({ h, name: p.done ? "checkCircle" : "clock", size: 13, color: p.done ? "var(--status-done, #3dd68c)" : "var(--muted-foreground)" }),
-                          h("span", { className: "of-mono", style: { fontSize: "11px", color: "var(--primary)", flexShrink: 0 } }, p.id),
-                          h("span", { style: { color: p.done ? "var(--muted-foreground)" : "var(--foreground)", textDecoration: p.done ? "line-through" : "none" } }, p.text)
-                        )
-                      )
-                    )
-                  );
-                })(),
-                (structured.aceite.feitoQuando || structured.aceite.comandoAceite) && h(
-                  "div",
-                  { style: { padding: "10px 12px", borderRadius: "8px", border: "1px solid rgba(61,214,140,0.3)", background: "rgba(61,214,140,0.06)", display: "flex", flexDirection: "column", gap: "6px" } },
-                  h("div", { style: { fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--status-done, #3dd68c)" } }, "Aceite Congelado (L-22)"),
-                  structured.aceite.feitoQuando && h("div", { style: { fontSize: "12px", color: "var(--foreground)" } }, structured.aceite.feitoQuando),
-                  structured.aceite.comandoAceite && h("code", { className: "of-mono", style: { fontSize: "11px", padding: "6px 8px", borderRadius: "6px", background: "rgba(0,0,0,0.28)", display: "block", overflowX: "auto" } }, structured.aceite.comandoAceite)
-                ),
-                h(
-                  "details",
-                  { style: { fontSize: "11.5px", color: "var(--muted-foreground)" } },
-                  h("summary", { style: { cursor: "pointer", userSelect: "none", padding: "4px 2px" } }, "Ver Markdown original"),
-                  h(
-                    "div",
-                    { style: { marginTop: "6px", padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)", maxHeight: "220px", overflowY: "auto" } },
-                    renderSimpleMarkdown(h, repoDetail.content)
-                  )
-                )
-              );
-            })()
-          ),
-          // ── ABA 4: DETALHES (1:1 CodeDen DetailsPanel) ──
-          activeTab === "details" && h(
-            "div",
-            { style: { padding: "14px 16px", display: "flex", flexDirection: "column", gap: "18px" } },
-            h(
-              "section",
-              null,
-              renderDetailRow(
-                "Status",
-                h(
-                  "div",
-                  null,
-                  h("span", { style: { fontWeight: 600 } }, (repoDetail == null ? void 0 : repoDetail.status) || item.stage),
-                  executorTurn && h("div", { className: "of-muted", style: { fontSize: "11.5px", marginTop: "2px" } }, executorTurn.stepLabel)
-                )
-              ),
-              renderDetailRow("Propósito", (repoDetail == null ? void 0 : repoDetail.title) || item.title),
-              renderDetailRow("Work key", h("code", { className: "of-mono", style: { fontSize: "11.5px" } }, item.workKey || item.id.slice(0, 12))),
-              renderDetailRow(
-                "Iniciado por",
-                (repoDetail == null ? void 0 : repoDetail.authorPubkey) ? `${resolveAuthor ? resolveAuthor(repoDetail.authorPubkey) : repoDetail.authorPubkey.slice(0, 10)}${repoDetail.createdAt ? ` · ${new Date(repoDetail.createdAt).toLocaleDateString("pt-BR")}` : ""}` : "OrgFy Esteira"
-              ),
-              renderDetailRow(
-                "Provedor",
-                h(
-                  "span",
-                  { className: "of-mono", style: { fontSize: "11.5px" } },
-                  executorAgent ? `${executorAgent.provider || "nexusmind"} · ${executorAgent.model || "padrão"}` : "nexusmind · goose"
-                )
-              ),
-              renderDetailRow(
-                "Autonomia",
-                h("span", { className: "of-pill", "data-tone": "waiting" }, "Autônoma (Esteira)")
-              ),
-              renderDetailRow(
-                "Commit / Branch",
-                h(
-                  "span",
-                  { className: "of-mono", style: { fontSize: "11.5px" } },
-                  (repoDetail == null ? void 0 : repoDetail.commit) ? `${repoDetail.commit.slice(0, 10)} ` : "main ",
-                  h("span", { className: "of-muted" }, `em ${repoDtag || tenant}`)
-                )
-              ),
-              (executorName || reviewerName) && renderDetailRow(
-                "Equipe",
-                h(
-                  "div",
-                  { style: { display: "flex", flexWrap: "wrap", gap: "6px" } },
-                  executorName && h(
-                    "button",
-                    {
-                      type: "button",
-                      className: "of-btn",
-                      style: { padding: "2px 8px", fontSize: "11px" },
-                      onClick: () => onOpenAgentDm == null ? void 0 : onOpenAgentDm(executorAgent || { name: executorName })
-                    },
-                    `Executor: ${executorName}`
-                  ),
-                  reviewerName && h(
-                    "button",
-                    {
-                      type: "button",
-                      className: "of-btn",
-                      style: { padding: "2px 8px", fontSize: "11px" },
-                      onClick: () => onOpenAgentDm == null ? void 0 : onOpenAgentDm(reviewerAgent || { name: reviewerName })
-                    },
-                    `Revisor: ${reviewerName}`
-                  )
-                )
-              )
-            ),
-            // ── JANELA DE CONTEXTO (1:1 CodeDen ContextWindow + Compact now) ──
-            h(
-              "section",
-              null,
-              renderSectionHeader(
-                "Janela de contexto",
-                executorAgent && onSessionAction && h(
-                  "button",
-                  {
-                    type: "button",
-                    onClick: () => onSessionAction(executorAgent.key, "compact"),
-                    style: {
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "5px",
-                      background: "transparent",
-                      border: "none",
-                      color: "var(--muted-foreground)",
-                      fontSize: "11.5px",
-                      cursor: "pointer",
-                      padding: "2px 4px"
-                    }
-                  },
-                  Icon({ h, name: "compact", size: 12 }),
-                  "Compactar agora"
-                )
-              ),
-              h(
-                "div",
-                { style: { display: "flex", justifyContent: "space-between", fontSize: "11.5px", color: "var(--muted-foreground)" } },
-                h("span", null, executorAgent ? `${executorAgent.name} · sessão ativa` : "—"),
-                h("span", null, "Gateway NexusMind")
-              )
-            ),
-            // ── O QUE ESTÁ CARREGADO (1:1 CodeDen LoadedConfig) ──
-            h(
-              "section",
-              { style: { display: "flex", flexDirection: "column", gap: "8px" } },
-              renderSectionHeader("O que está carregado"),
-              [
-                {
-                  id: "memory",
-                  icon: "files",
-                  label: "Memória & Estado",
-                  count: 2,
-                  items: ["kpis-esteira.json (FPY/CPI)", "empresas/orgfy.json (Roster)"]
-                },
-                {
-                  id: "skills",
-                  icon: "sparkles",
-                  label: "Regras & Habilidades",
-                  count: 3,
-                  items: ["Eval R5.1 (Modelos)", "Revisão Cross-Provider (L-01)", "Aceite Congelado (L-22)"]
-                },
-                {
-                  id: "subagents",
-                  icon: "bot",
-                  label: "Agentes Vinculados",
-                  count: (executorName ? 1 : 0) + (reviewerName ? 1 : 0),
-                  items: [executorName && `Executor: ${executorName}`, reviewerName && `Revisor: ${reviewerName}`].filter(Boolean)
-                },
-                {
-                  id: "mcp",
-                  icon: "plug",
-                  label: "Servidores MCP & APIs",
-                  count: 3,
-                  items: ["orgfy (21 tools · built in)", "nexusmind (5 tools · built in)", "buzz.repos (NIP-34 · built in)"]
-                }
-              ].map((box2) => {
-                const open = openLoadedSection === box2.id;
-                return h(
-                  "div",
-                  {
-                    key: box2.id,
-                    style: {
-                      borderRadius: "8px",
-                      border: "1px solid var(--border)",
-                      background: "var(--card)",
-                      overflow: "hidden"
-                    }
-                  },
-                  h(
-                    "button",
-                    {
-                      type: "button",
-                      onClick: () => setOpenLoadedSection(open ? null : box2.id),
-                      style: {
-                        width: "100%",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "8px",
-                        padding: "8px 11px",
-                        background: "transparent",
-                        border: "none",
-                        color: "var(--foreground)",
-                        fontSize: "12px",
-                        cursor: "pointer",
-                        textAlign: "left"
-                      }
-                    },
-                    Icon({ h, name: box2.icon, size: 13, color: "var(--muted-foreground)" }),
-                    h("span", { style: { flex: 1, fontWeight: 500 } }, box2.label),
-                    h("span", { className: "of-mono of-muted", style: { fontSize: "11px" } }, String(box2.count))
-                  ),
-                  open && h(
-                    "div",
-                    { style: { borderTop: "1px solid var(--border)", padding: "8px 11px", display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px", color: "var(--muted-foreground)" } },
-                    box2.items.length === 0 ? h("span", null, "Nenhum") : box2.items.map((it) => h("div", { key: it, className: "of-mono", style: { fontSize: "11px" } }, it))
-                  )
-                );
-              })
-            ),
-            // Rodapé de sessão (1:1 CodeDen)
-            h(
-              "div",
-              { className: "of-mono of-muted", style: { fontSize: "10.5px", opacity: 0.75, paddingTop: "4px" } },
-              `Item ${item.id} · NIP-34 sincronizado`
-            )
-          )
-        )
-      )
-    );
-  };
 }
 const DISCOVERY_AREAS = [
   "features",
@@ -50811,6 +51370,8 @@ function createFactoryAppComponent(ctx, opts = {}) {
     const [automations, setAutomations] = React.useState(() => buildDefaultAutomations("orgfy", "OrgFy Core"));
     const [selectedAutomationId, setSelectedAutomationId] = React.useState("rotina-ceo-orgfy");
     const [runningAutomationId, setRunningAutomationId] = React.useState(null);
+    const [cooUpdatesExpanded, setCooUpdatesExpanded] = React.useState(true);
+    const [sendingCooUpdates, setSendingCooUpdates] = React.useState(false);
     const [compactDensity, setCompactDensity] = React.useState(false);
     const [expandedProjects, setExpandedProjects] = React.useState({ orgfy: true });
     const [showAllByProject, setShowAllByProject] = React.useState({});
@@ -51525,7 +52086,9 @@ function createFactoryAppComponent(ctx, opts = {}) {
         }
         try {
           const host = ctx == null ? void 0 : ctx.host;
-          if (typeof (host == null ? void 0 : host.writeFile) === "function") {
+          if (typeof (host == null ? void 0 : host.runCommand) === "function") {
+            await host.runCommand("orgfy-controle-write", JSON.stringify({ kind: "automacoes", tenant, automations: list }));
+          } else if (typeof (host == null ? void 0 : host.writeFile) === "function") {
             const targetPath = `/Users/heltonfraga/.buzz/REPOS/orgfy/.esteira/estado/automacoes-${tenant}.json`;
             await host.writeFile(targetPath, JSON.stringify({ tenant, updatedAt: (/* @__PURE__ */ new Date()).toISOString(), automations: list }, null, 2));
           }
@@ -51637,6 +52200,60 @@ ${resolvedPrompt}`
         }
       },
       [notify2]
+    );
+    const handleSendUpdatesToCoo = React.useCallback(
+      async (entries) => {
+        var _a2, _b2, _c2;
+        const agentsApi = ctx == null ? void 0 : ctx.agents;
+        const cooName = ((_a2 = status.tenantManifest) == null ? void 0 : _a2.coo) || "OrgFy Bento";
+        const cooAg = tenantAgents.find((a) => a.papel === "coo" || a.name.toLowerCase() === cooName.toLowerCase()) || liveCrew.find((a) => a.name.toLowerCase().includes("bento"));
+        const agentKey = (cooAg && "agentKey" in cooAg ? cooAg.agentKey : cooAg == null ? void 0 : cooAg.key) || "";
+        if (typeof (agentsApi == null ? void 0 : agentsApi.wake) !== "function" || !agentKey) {
+          notify2(`Não foi possível acordar ${cooName} (ctx.agents.wake indisponível).`);
+          return;
+        }
+        const canal = ((_b2 = status.tenantManifest) == null ? void 0 : _b2.canal) || ((_c2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _c2.canal) || void 0;
+        const lines = entries.map((e) => `- [${e.badge}] ${e.title}${e.subtitle ? ` (${e.subtitle})` : ""}`).join("\n");
+        setSendingCooUpdates(true);
+        try {
+          await agentsApi.wake(agentKey, {
+            ...canal ? { channelId: canal } : {},
+            text: `[ORGFY FACTORY UPDATES · ${tenant}]
+${entries.length} atualização(ões) recente(s):
+${lines}`
+          });
+          notify2(`${entries.length} update(s) enviado(s) para ${cooName}.`);
+        } catch (err) {
+          notify2(`Falha ao enviar updates ao COO: ${(err == null ? void 0 : err.message) || err}`);
+        } finally {
+          setSendingCooUpdates(false);
+        }
+      },
+      [tenant, status.tenantManifest, holding, tenantAgents, liveCrew, notify2]
+    );
+    const handleSendDiffReview = React.useCallback(
+      async (comments, item, executorName) => {
+        var _a2, _b2, _c2;
+        const agentsApi = ctx == null ? void 0 : ctx.agents;
+        const targetName = executorName || ((_a2 = status.tenantManifest) == null ? void 0 : _a2.coo) || "OrgFy Bento";
+        const targetAg = tenantAgents.find((a) => a.name.toLowerCase().includes(targetName.toLowerCase())) || liveCrew.find((a) => a.name.toLowerCase().includes(targetName.toLowerCase()));
+        const agentKey = (targetAg && "agentKey" in targetAg ? targetAg.agentKey : targetAg == null ? void 0 : targetAg.key) || "";
+        if (typeof (agentsApi == null ? void 0 : agentsApi.wake) !== "function" || !agentKey) {
+          notify2(`Comentários prontos, mas ctx.agents.wake indisponível para ${targetName}.`);
+          return;
+        }
+        const canal = ((_b2 = status.tenantManifest) == null ? void 0 : _b2.canal) || ((_c2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _c2.canal) || void 0;
+        const body = comments.map((c, idx) => `${idx + 1}. \`${c.file}:${c.line}\` — ${c.comment}
+   > ${c.lineText.trim().slice(0, 100)}`).join("\n");
+        await agentsApi.wake(agentKey, {
+          ...canal ? { channelId: canal } : {},
+          text: `[ORGFY DIFF REVIEW · #${item.id.slice(0, 8)} ${item.title}]
+Ajustes solicitados em ${comments.length} linha(s):
+${body}`
+        });
+        notify2(`Revisão com ${comments.length} comentário(s) ancorado(s) enviada para ${targetName}.`);
+      },
+      [tenant, status.tenantManifest, holding, tenantAgents, liveCrew, notify2]
     );
     const masterLive = mainAgentPubkey && liveCrew.find((a) => {
       var _a2;
@@ -51934,7 +52551,11 @@ ${resolvedPrompt}`
                 scorecardView,
                 setScorecardView,
                 scorecardDays,
-                setScorecardDays
+                setScorecardDays,
+                cooUpdatesExpanded,
+                onToggleCooUpdates: () => setCooUpdatesExpanded((v2) => !v2),
+                onSendUpdatesToCoo: handleSendUpdatesToCoo,
+                sendingCooUpdates
               }) : tab === "board" || tab === "floor" ? renderFactoryBoardAndFloor({
                 h,
                 tenant,
@@ -52072,6 +52693,7 @@ ${resolvedPrompt}`
         onOpenAgentDm: handleOpenAgentDmInBuzz,
         onSessionAction: handleAgentSessionAction,
         onToggleChecklistStep: handleToggleChecklistStep,
+        onSendDiffReview: handleSendDiffReview,
         onClose: () => setSelectedItem(null)
       }),
       renderAgentProfileDrawer({
@@ -52564,6 +53186,7 @@ export {
   attachFactoryShadowStyles,
   buildBuzzAttentionContract,
   buildBuzzEntityUri,
+  buildCooUpdatesFeed,
   buildDefaultAutomations,
   buildEmptyFactoryStatus,
   buildHandoffPack,
@@ -52587,6 +53210,7 @@ export {
   inject,
   insertOrgfyPickerEntry,
   isUnsupportedAgentModel,
+  parseBuzzOrgfyEntityUrl,
   parseCardProgress,
   parseFactoryStatus,
   parseOrgfyCardStructure,

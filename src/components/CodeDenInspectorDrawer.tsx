@@ -24,6 +24,14 @@ import {
 
 export type InspectorTab = "diff" | "files" | "pr" | "details";
 
+export interface DiffAnchoredComment {
+  id: string;
+  file: string;
+  line: number;
+  lineText: string;
+  comment: string;
+}
+
 export interface CodeDenInspectorDrawerProps {
   ctx: Context | any;
   item: FactoryWorkItem | null;
@@ -47,6 +55,7 @@ export interface CodeDenInspectorDrawerProps {
   onOpenAgentDm?: (agent: { key?: string; pubkey?: string; name?: string }) => void;
   onSessionAction?: (agentKey: string, action: "interrupt" | "compact" | "new") => void;
   onToggleChecklistStep?: (stepId: string, nextDone: boolean, item: FactoryWorkItem) => void;
+  onSendDiffReview?: (comments: DiffAnchoredComment[], item: FactoryWorkItem, executorName?: string) => Promise<void> | void;
   onClose: () => void;
 }
 
@@ -449,7 +458,22 @@ function renderSimpleMarkdown(h: any, raw: string) {
   return blocks;
 }
 
-function renderUnifiedFileDiff(h: any, file: ParsedDiffFile, isOpen: boolean, onToggle: () => void) {
+function renderUnifiedFileDiff(
+  h: any,
+  file: ParsedDiffFile,
+  isOpen: boolean,
+  onToggle: () => void,
+  anchorOpts?: {
+    activeAnchor: { file: string; line: number; text: string } | null;
+    anchorDraft: string;
+    comments: DiffAnchoredComment[];
+    onOpenAnchor: (file: string, line: number, text: string) => void;
+    onChangeDraft: (v: string) => void;
+    onSaveAnchor: () => void;
+    onCancelAnchor: () => void;
+    onRemoveComment: (id: string) => void;
+  }
+) {
   const displayName = file.previousPath ? `${file.previousPath} → ${file.path}` : file.path;
   const statusColor =
     file.status === "added"
@@ -542,6 +566,7 @@ function renderUnifiedFileDiff(h: any, file: ParsedDiffFile, isOpen: boolean, on
                   hunk.header
                 ),
                 hunk.lines.map((ln, lIdx) => {
+                  const lineNum = ln.newLine ?? ln.oldLine ?? lIdx + 1;
                   const bg =
                     ln.type === "add"
                       ? "rgba(61, 214, 140, 0.12)"
@@ -555,22 +580,90 @@ function renderUnifiedFileDiff(h: any, file: ParsedDiffFile, isOpen: boolean, on
                       ? "var(--status-failed, #ff9592)"
                       : "var(--foreground)";
                   const prefix = ln.type === "add" ? "+" : ln.type === "del" ? "-" : " ";
+                  const isAnchoring = Boolean(anchorOpts?.activeAnchor && anchorOpts.activeAnchor.file === file.path && anchorOpts.activeAnchor.line === lineNum);
+                  const lineComments = (anchorOpts?.comments || []).filter((c) => c.file === file.path && c.line === lineNum);
                   return h(
                     "div",
-                    {
-                      key: lIdx,
-                      style: {
-                        display: "grid",
-                        gridTemplateColumns: "36px 36px 14px 1fr",
-                        background: bg,
-                        padding: "0 8px",
-                        whiteSpace: "pre",
+                    { key: lIdx },
+                    h(
+                      "div",
+                      {
+                        title: anchorOpts ? `Clique para comentar em ${file.path}:${lineNum}` : undefined,
+                        onClick: anchorOpts ? () => anchorOpts.onOpenAnchor(file.path, lineNum, ln.text) : undefined,
+                        style: {
+                          display: "grid",
+                          gridTemplateColumns: "36px 36px 14px 1fr",
+                          background: bg,
+                          padding: "0 8px",
+                          whiteSpace: "pre",
+                          cursor: anchorOpts ? "pointer" : "default",
+                        },
                       },
-                    },
-                    h("span", { style: { color: "var(--muted-foreground)", opacity: 0.55, textAlign: "right", paddingRight: "6px", userSelect: "none" } }, ln.oldLine ?? ""),
-                    h("span", { style: { color: "var(--muted-foreground)", opacity: 0.55, textAlign: "right", paddingRight: "6px", userSelect: "none" } }, ln.newLine ?? ""),
-                    h("span", { style: { color, fontWeight: 600, userSelect: "none" } }, prefix),
-                    h("span", { style: { color } }, ln.text)
+                      h("span", { style: { color: "var(--muted-foreground)", opacity: 0.55, textAlign: "right", paddingRight: "6px", userSelect: "none" } }, ln.oldLine ?? ""),
+                      h("span", { style: { color: "var(--muted-foreground)", opacity: 0.55, textAlign: "right", paddingRight: "6px", userSelect: "none" } }, ln.newLine ?? ""),
+                      h("span", { style: { color, fontWeight: 600, userSelect: "none" } }, prefix),
+                      h("span", { style: { color } }, ln.text)
+                    ),
+                    lineComments.map((c) =>
+                      h(
+                        "div",
+                        {
+                          key: c.id,
+                          style: {
+                            margin: "4px 10px",
+                            padding: "6px 9px",
+                            borderRadius: "6px",
+                            border: "1px solid rgba(245,158,11,0.4)",
+                            background: "rgba(245,158,11,0.08)",
+                            fontFamily: "var(--font-sans)",
+                            fontSize: "11.5px",
+                            display: "flex",
+                            alignItems: "flex-start",
+                            justifyContent: "space-between",
+                            gap: "8px",
+                          },
+                        },
+                        h("div", null, h("strong", { className: "of-mono", style: { fontSize: "10.5px", marginRight: "6px" } }, `L${c.line}`), c.comment),
+                        anchorOpts &&
+                          h(
+                            "button",
+                            { type: "button", className: "of-btn", "data-variant": "ghost", style: { padding: "0 4px", fontSize: "11px" }, onClick: () => anchorOpts.onRemoveComment(c.id) },
+                            "×"
+                          )
+                      )
+                    ),
+                    isAnchoring && anchorOpts &&
+                      h(
+                        "div",
+                        {
+                          "data-diff-anchor-composer": "true",
+                          style: {
+                            margin: "5px 10px 8px",
+                            padding: "8px 10px",
+                            borderRadius: "7px",
+                            border: "1px solid var(--border-strong)",
+                            background: "var(--surface)",
+                            fontFamily: "var(--font-sans)",
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: "6px",
+                          },
+                        },
+                        h("div", { className: "of-mono of-muted", style: { fontSize: "10.5px" } }, `Comentário ancorado em ${file.path}:${lineNum}`),
+                        h("textarea", {
+                          className: "of-textarea",
+                          style: { minHeight: "52px", fontSize: "11.5px" },
+                          placeholder: "Descreva o ajuste esperado nesta linha...",
+                          value: anchorOpts.anchorDraft,
+                          onChange: (e: any) => anchorOpts.onChangeDraft(e.target.value),
+                        }),
+                        h(
+                          "div",
+                          { style: { display: "flex", gap: "6px", justifyContent: "flex-end" } },
+                          h("button", { type: "button", className: "of-btn", style: { fontSize: "11px" }, onClick: anchorOpts.onCancelAnchor }, "Cancelar"),
+                          h("button", { type: "button", className: "of-btn", "data-variant": "primary", style: { fontSize: "11px" }, onClick: anchorOpts.onSaveAnchor }, "Adicionar ao lote")
+                        )
+                      )
                   );
                 })
               )
@@ -606,11 +699,16 @@ export function createCodeDenInspectorDrawer(React: Context["react"]) {
       onOpenAgentDm,
       onSessionAction,
       onToggleChecklistStep,
+      onSendDiffReview,
       onClose,
     } = props;
 
     const [activeTab, setActiveTab] = React.useState<InspectorTab>("pr");
     const [localChecklistOverrides, setLocalChecklistOverrides] = React.useState<Record<string, boolean>>({});
+    const [activeAnchor, setActiveAnchor] = React.useState<{ file: string; line: number; text: string } | null>(null);
+    const [anchorDraft, setAnchorDraft] = React.useState<string>("");
+    const [anchoredComments, setAnchoredComments] = React.useState<DiffAnchoredComment[]>([]);
+    const [sendingReview, setSendingReview] = React.useState<boolean>(false);
     const [showLiveThread, setShowLiveThread] = React.useState<boolean>(false);
     const [gitSnap, setGitSnap] = React.useState<BuzzGitSnapshot | null>(null);
     const [gitLoading, setGitLoading] = React.useState<boolean>(false);
@@ -632,6 +730,9 @@ export function createCodeDenInspectorDrawer(React: Context["react"]) {
       setSelectedFilePath(null);
       setFileContent(null);
       setLocalChecklistOverrides({});
+      setActiveAnchor(null);
+      setAnchorDraft("");
+      setAnchoredComments([]);
     }, [item?.id]);
 
     // Sync commit diff when repoDetail hydrates
@@ -1103,6 +1204,50 @@ export function createCodeDenInspectorDrawer(React: Context["react"]) {
                     )
                 )
               ),
+              anchoredComments.length > 0 &&
+                h(
+                  "div",
+                  {
+                    "data-diff-review-bar": "true",
+                    style: {
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: "8px",
+                      padding: "8px 14px",
+                      background: "rgba(245, 158, 11, 0.1)",
+                      borderBottom: "1px solid rgba(245, 158, 11, 0.35)",
+                      fontSize: "12px",
+                    },
+                  },
+                  h("span", { style: { fontWeight: 600 } }, `${anchoredComments.length} comentário(s) ancorado(s) no diff`),
+                  h(
+                    "div",
+                    { style: { display: "inline-flex", gap: "6px" } },
+                    h("button", { type: "button", className: "of-btn", style: { fontSize: "11px" }, onClick: () => setAnchoredComments([]) }, "Limpar"),
+                    onSendDiffReview &&
+                      h(
+                        "button",
+                        {
+                          type: "button",
+                          className: "of-btn",
+                          "data-variant": "primary",
+                          disabled: sendingReview,
+                          style: { fontSize: "11px" },
+                          onClick: async () => {
+                            setSendingReview(true);
+                            try {
+                              await onSendDiffReview(anchoredComments, item, executorName || undefined);
+                              setAnchoredComments([]);
+                            } finally {
+                              setSendingReview(false);
+                            }
+                          },
+                        },
+                        sendingReview ? "Enviando..." : "Enviar revisão ao Executor ↗"
+                      )
+                  )
+                ),
               h(
                 "div",
                 { style: { padding: "12px 14px", display: "flex", flexDirection: "column", gap: "10px" } },
@@ -1115,7 +1260,30 @@ export function createCodeDenInspectorDrawer(React: Context["react"]) {
                       h("div", { className: "of-muted", style: { marginTop: "4px" } }, "Selecione outro commit acima ou abra o repositório diretamente no Buzz Repos.")
                     )
                   : parsedDiffFiles.map((f) =>
-                      renderUnifiedFileDiff(h, f, openDiffFiles[f.path] !== false, () => toggleSingleDiff(f.path))
+                      renderUnifiedFileDiff(h, f, openDiffFiles[f.path] !== false, () => toggleSingleDiff(f.path), {
+                        activeAnchor,
+                        anchorDraft,
+                        comments: anchoredComments,
+                        onOpenAnchor: (file, line, text) => {
+                          setActiveAnchor({ file, line, text });
+                          setAnchorDraft("");
+                        },
+                        onChangeDraft: setAnchorDraft,
+                        onSaveAnchor: () => {
+                          if (!activeAnchor || !anchorDraft.trim()) return;
+                          setAnchoredComments((prev: DiffAnchoredComment[]) => [
+                            ...prev,
+                            { id: `dc-${Date.now()}`, file: activeAnchor.file, line: activeAnchor.line, lineText: activeAnchor.text, comment: anchorDraft.trim() },
+                          ]);
+                          setActiveAnchor(null);
+                          setAnchorDraft("");
+                        },
+                        onCancelAnchor: () => {
+                          setActiveAnchor(null);
+                          setAnchorDraft("");
+                        },
+                        onRemoveComment: (id: string) => setAnchoredComments((prev: DiffAnchoredComment[]) => prev.filter((c) => c.id !== id)),
+                      })
                     )
               )
             ),

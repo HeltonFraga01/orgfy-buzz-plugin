@@ -196,6 +196,8 @@ import {
   computeNextAutomationRuns,
   exportAutomationToBuzzWorkflowYaml,
 } from "./factory/AutomationEditor";
+import { parseBuzzOrgfyEntityUrl } from "./components/OrgfyLiveChatRenderers";
+import { buildCooUpdatesFeed } from "./factory/FactoryCooUpdatesFeed";
 import {
   parseFactoryStatus,
   buildEmptyFactoryStatus,
@@ -214,6 +216,8 @@ export {
   buildDefaultAutomations,
   computeNextAutomationRuns,
   exportAutomationToBuzzWorkflowYaml,
+  parseBuzzOrgfyEntityUrl,
+  buildCooUpdatesFeed,
   FACTORY_SHADOW_CSS,
   attachFactoryShadowStyles,
   PT_BR,
