@@ -308,6 +308,36 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     const [storeyFocus, setStoreyFocus] = React.useState<"workshop" | "lookout" | "both">("both");
     const [selectedAgentKey, setSelectedAgentKey] = React.useState<string | null>(null);
     const [inboxFilter, setInboxFilter] = React.useState<"all" | "asks" | "reviews" | "problems">("all");
+    const [inboxDismissedIds, setInboxDismissedIds] = React.useState<string[]>(() => {
+      try {
+        const raw = localStorage.getItem("orgfy_inbox_dismissed_ids");
+        const parsed = raw ? JSON.parse(raw) : [];
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    });
+    const [confirmBulkDismiss, setConfirmBulkDismiss] = React.useState<boolean>(false);
+    const [lastBulkDismiss, setLastBulkDismiss] = React.useState<{ ids: string[]; label: string } | null>(null);
+    const handleInboxDismissIds = React.useCallback((ids: string[], label = "avisos") => {
+      if (!ids.length) return;
+      setInboxDismissedIds((prev) => {
+        const next = Array.from(new Set([...prev, ...ids])).slice(-200);
+        try { localStorage.setItem("orgfy_inbox_dismissed_ids", JSON.stringify(next)); } catch {}
+        return next;
+      });
+      setLastBulkDismiss({ ids, label });
+      setTimeout(() => setLastBulkDismiss((cur) => (cur && cur.ids === ids ? null : cur)), 10_000);
+    }, []);
+    const handleInboxRestoreIds = React.useCallback((ids: string[]) => {
+      const rm = new Set(ids);
+      setInboxDismissedIds((prev) => {
+        const next = prev.filter((id) => !rm.has(id));
+        try { localStorage.setItem("orgfy_inbox_dismissed_ids", JSON.stringify(next)); } catch {}
+        return next;
+      });
+      setLastBulkDismiss(null);
+    }, []);
     const [costRange, setCostRange] = React.useState<"7d" | "30d" | "90d">("30d");
     const [autoTab, setAutoTab] = React.useState<"automations" | "runs" | "templates">("automations");
     const [agentTab, setAgentTab] = React.useState<"eval" | "memory" | "skills" | "mcp" | "hooks">("memory");
@@ -2004,6 +2034,33 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                     pricesOpen,
                     setPricesOpen,
                     onOpenSettings: () => setTab("settings"),
+                    inboxDismissedIds,
+                    onInboxDismissIds: handleInboxDismissIds,
+                    onInboxRestoreIds: handleInboxRestoreIds,
+                    confirmBulkDismiss,
+                    setConfirmBulkDismiss,
+                    lastBulkDismiss,
+                    onOpenItemInBuzz: handleOpenInBuzz,
+                    onRetryInboxItem: (item: FactoryWorkItem) => {
+                      const cooName = status.tenantManifest?.coo || "OrgFy Bento";
+                      const cooAg =
+                        tenantAgents.find((a) => a.papel === "coo" || a.name.toLowerCase() === cooName.toLowerCase()) ||
+                        liveCrew.find((a) => a.name.toLowerCase().includes("bento"));
+                      const agentKey = (cooAg && "agentKey" in cooAg ? cooAg.agentKey : cooAg?.key) || "";
+                      void wakeAgentInBuzz({
+                        agentKey,
+                        agentName: cooName,
+                        pubkey: cooAg?.pubkey,
+                        preferDm: true,
+                        postInChat: true,
+                        text: `@${cooName} [RETRY INBOX · ${tenant}] Reexecutar/destravar #${item.id.slice(0, 8)} — ${item.title}${item.reason ? ` (${item.reason})` : ""}`,
+                      }).then((res) => {
+                        notify(res.ok ? `Reexecução solicitada para ${cooName} ✓` : `Falha ao acionar ${cooName}: ${res.error}`);
+                      });
+                    },
+                    onResumeFactory: () =>
+                      handleControlUpdate({ killSwitch: false, pausedReason: null }, "Fábrica retomada (Kill Switch liberado)."),
+                    onOpenFactoryPanel: () => setTab("overview"),
                   })
             )
           )

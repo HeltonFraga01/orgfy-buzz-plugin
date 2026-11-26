@@ -2355,4 +2355,26 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     assert.ok(bundle.includes("data-codeden-lessons"), "Acordeão Lições deve estar no bundle");
     assert.ok(bundle.includes("data-codeden-digest"), "Barra colapsável Digest deve estar no bundle");
   });
+
+  test("v18.3: Inbox 1:1 CodeDen + Herança real do sistema de cores e acento personalizado do Buzz Desktop", () => {
+    const bundle = fs.readFileSync(path.resolve(__dirname, "plugin.js"), "utf8");
+    const css = orgfyMod.FACTORY_SHADOW_CSS;
+
+    // 1. Herança real dos tokens do Buzz Desktop (tokens.css)
+    assert.ok(css.includes("--affordance-accent-prominent"), "CSS deve herdar --affordance-accent-prominent do Buzz");
+    assert.ok(css.includes("--affordance-accent-prominent-hover"), "CSS deve herdar --affordance-accent-prominent-hover do Buzz");
+    assert.ok(css.includes("--text-on-accent"), "CSS deve herdar --text-on-accent do Buzz para contraste automático");
+    assert.ok(css.includes("--accent-3"), "CSS deve herdar --accent-3 do Buzz para fundos suaves");
+    assert.ok(css.includes("--surface-inset"), "CSS deve herdar --surface-inset do Buzz");
+    assert.ok(!css.includes("--accent-primary"), "Variável inexistente --accent-primary não deve mais existir em shadow-shell.ts");
+
+    // 2. Estrutura 1:1 CodeDen do Inbox
+    assert.ok(bundle.includes("data-orgfy-inbox-v183"), "Página Inbox 1:1 CodeDen v18.3 deve estar no bundle");
+    assert.ok(bundle.includes("data-inbox-header"), "Cabeçalho Inbox com contagem e Dispensar N deve estar no bundle");
+    assert.ok(bundle.includes("data-inbox-filters"), "Abas segmentadas de filtro do Inbox devem estar no bundle");
+    assert.ok(bundle.includes("PULL REQUESTS PRONTOS"), "Grupo Pull Requests Prontos deve estar no bundle");
+    assert.ok(bundle.includes("EXECUÇÕES COM FALHA"), "Grupo Execuções com Falha deve estar no bundle");
+    assert.ok(bundle.includes("RESULTADOS DE AUTOMAÇÃO"), "Grupo Resultados de Automação deve estar no bundle");
+    assert.ok(bundle.includes("Digest da Fábrica"), "Card Digest da Fábrica deve estar no bundle");
+  });
 }
