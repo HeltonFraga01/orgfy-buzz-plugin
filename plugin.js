@@ -5914,14 +5914,14 @@ function buildUnifiedOrgfyTools(ctx) {
           return { text: JSON.stringify({ ok: false, error: "title e question são obrigatórios." }), isError: true };
         }
         const isUuidLike = (v2) => typeof v2 === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v2.trim());
-        const isHex64 = (v2) => typeof v2 === "string" && /^[0-9a-f]{64}$/i.test(v2.trim());
+        const isHex642 = (v2) => typeof v2 === "string" && /^[0-9a-f]{64}$/i.test(v2.trim());
         const ctxChannel = (_a = meta == null ? void 0 : meta.context) == null ? void 0 : _a.channel;
         const argChannel = (args == null ? void 0 : args.channel_id) || (args == null ? void 0 : args.channelId);
         const resolvedChannelId = isUuidLike(ctxChannel) ? String(ctxChannel).trim() : isUuidLike(argChannel) ? String(argChannel).trim() : void 0;
         const ctxRoot = (_b = meta == null ? void 0 : meta.context) == null ? void 0 : _b.root;
         const argRoot = (args == null ? void 0 : args.thread_root) || (args == null ? void 0 : args.threadRoot);
-        const resolvedThreadRoot = isHex64(ctxRoot) ? String(ctxRoot).trim().toLowerCase() : isHex64(argRoot) ? String(argRoot).trim().toLowerCase() : void 0;
-        const resolvedPubkey = isHex64((_c = meta == null ? void 0 : meta.client) == null ? void 0 : _c.pubkey) ? String((_d = meta == null ? void 0 : meta.client) == null ? void 0 : _d.pubkey).trim().toLowerCase() : isHex64((args == null ? void 0 : args.requested_by_pubkey) || (args == null ? void 0 : args.requestedByPubkey)) ? String((args == null ? void 0 : args.requested_by_pubkey) || (args == null ? void 0 : args.requestedByPubkey)).trim().toLowerCase() : void 0;
+        const resolvedThreadRoot = isHex642(ctxRoot) ? String(ctxRoot).trim().toLowerCase() : isHex642(argRoot) ? String(argRoot).trim().toLowerCase() : void 0;
+        const resolvedPubkey = isHex642((_c = meta == null ? void 0 : meta.client) == null ? void 0 : _c.pubkey) ? String((_d = meta == null ? void 0 : meta.client) == null ? void 0 : _d.pubkey).trim().toLowerCase() : isHex642((args == null ? void 0 : args.requested_by_pubkey) || (args == null ? void 0 : args.requestedByPubkey)) ? String((args == null ? void 0 : args.requested_by_pubkey) || (args == null ? void 0 : args.requestedByPubkey)).trim().toLowerCase() : void 0;
         const resolvedRequestedBy = String(
           (args == null ? void 0 : args.requested_by) || (args == null ? void 0 : args.requestedBy) || ((_e = meta == null ? void 0 : meta.client) == null ? void 0 : _e.name) || "OrgFy Bento"
         ).trim();
@@ -52562,6 +52562,140 @@ function createQuestionCardsPanel(React) {
     );
   };
 }
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const HEX64_RE = /^[0-9a-f]{64}$/i;
+const isUuid = (v2) => typeof v2 === "string" && UUID_RE.test(v2.trim());
+const isHex64 = (v2) => typeof v2 === "string" && HEX64_RE.test(v2.trim());
+async function sendBuzzChatMessageOrWake(ctx, opts) {
+  var _a, _b, _c, _d;
+  const text = String(opts.text || "").trim();
+  if (!text) return { ok: false, error: "Mensagem vazia" };
+  const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+  const channelsList = (() => {
+    var _a2, _b2, _c2;
+    try {
+      return ((_c2 = (_b2 = (_a2 = session == null ? void 0 : session.channels) == null ? void 0 : _a2.list) == null ? void 0 : _b2.call(_a2)) == null ? void 0 : _c2.channels) || [];
+    } catch {
+      return [];
+    }
+  })();
+  const pkLower = isHex64(opts.pubkey) ? opts.pubkey.trim().toLowerCase() : "";
+  const nameLower = (opts.agentName || "").trim().toLowerCase();
+  const findDmChannelId = async () => {
+    var _a2;
+    const existing = channelsList.find((ch) => {
+      if ((ch == null ? void 0 : ch.channelType) !== "dm" && (ch == null ? void 0 : ch.channelType) !== "solo") return false;
+      if (pkLower) {
+        const members = [...ch.participants || [], ...ch.members || []];
+        if (members.some((m) => String(m).toLowerCase() === pkLower)) return true;
+      }
+      return Boolean(nameLower && typeof (ch == null ? void 0 : ch.name) === "string" && ch.name.toLowerCase().includes(nameLower));
+    });
+    if (existing == null ? void 0 : existing.id) return String(existing.id);
+    if (pkLower && ((_a2 = session == null ? void 0 : session.directMessages) == null ? void 0 : _a2.available) && typeof session.directMessages.open === "function") {
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), 6e3);
+      try {
+        const opened = await session.directMessages.open([pkLower], ac.signal);
+        if (opened) return String(opened);
+      } catch {
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    return null;
+  };
+  let resolvedChannel = isUuid(opts.channelId) ? opts.channelId.trim() : null;
+  if (!resolvedChannel && opts.preferDm) {
+    resolvedChannel = await findDmChannelId();
+  }
+  if (!resolvedChannel && isUuid(opts.fallbackChannelId)) {
+    resolvedChannel = opts.fallbackChannelId.trim();
+  }
+  if (!resolvedChannel) {
+    resolvedChannel = await findDmChannelId();
+  }
+  if (!resolvedChannel) {
+    return { ok: false, error: "Nenhum canal/DM válido encontrado no Buzz para enviar a mensagem" };
+  }
+  let channelMeta = channelsList.find((ch) => String((ch == null ? void 0 : ch.id) || "") === resolvedChannel) || null;
+  let chatError;
+  if (opts.postInChat !== false && (session == null ? void 0 : session.messages)) {
+    try {
+      if (typeof ((_d = session.channelWrites) == null ? void 0 : _d.refreshMembership) === "function") {
+        try {
+          const fresh = await session.channelWrites.refreshMembership(resolvedChannel);
+          if (fresh) channelMeta = fresh;
+        } catch {
+        }
+      }
+      const isDmOrSolo = (channelMeta == null ? void 0 : channelMeta.channelType) === "dm" || (channelMeta == null ? void 0 : channelMeta.channelType) === "solo";
+      const validRoot = !isDmOrSolo && isHex64(opts.threadRoot) ? opts.threadRoot.trim().toLowerCase() : void 0;
+      let mentions = [];
+      if (pkLower) {
+        const members = Array.isArray(channelMeta == null ? void 0 : channelMeta.members) ? channelMeta.members.map((m) => String(m).toLowerCase()) : null;
+        if (!members || members.includes(pkLower)) {
+          mentions = [pkLower];
+        } else if ((channelMeta == null ? void 0 : channelMeta.channelType) !== "dm") {
+          mentions = [];
+        }
+      }
+      if (validRoot && typeof session.messages.reply === "function") {
+        const eventId = session.messages.reply(resolvedChannel, validRoot, text, mentions);
+        return {
+          ok: true,
+          mode: "chat_message",
+          channel: resolvedChannel,
+          threadRoot: validRoot,
+          eventId: typeof eventId === "string" ? eventId : void 0
+        };
+      }
+      if (typeof session.messages.send === "function") {
+        const eventId = session.messages.send(resolvedChannel, text, mentions);
+        return {
+          ok: true,
+          mode: "chat_message",
+          channel: resolvedChannel,
+          eventId: typeof eventId === "string" ? eventId : void 0
+        };
+      }
+    } catch (err) {
+      chatError = (err == null ? void 0 : err.message) || String(err);
+    }
+  }
+  const agentsApi = ctx == null ? void 0 : ctx.agents;
+  if (typeof (agentsApi == null ? void 0 : agentsApi.wake) === "function" && opts.agentKey) {
+    const isDmOrSolo = (channelMeta == null ? void 0 : channelMeta.channelType) === "dm" || (channelMeta == null ? void 0 : channelMeta.channelType) === "solo";
+    const validRoot = !isDmOrSolo && isHex64(opts.threadRoot) ? opts.threadRoot.trim().toLowerCase() : void 0;
+    const payload = {
+      channel: resolvedChannel,
+      text,
+      ...validRoot ? { root: validRoot } : isDmOrSolo ? {} : { topLevel: true }
+    };
+    try {
+      await agentsApi.wake(opts.agentKey, payload);
+      return {
+        ok: true,
+        mode: opts.postInChat === false ? "wake" : "wake_fallback",
+        channel: resolvedChannel,
+        threadRoot: validRoot,
+        ...chatError ? { chatError } : {}
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        channel: resolvedChannel,
+        chatError,
+        error: (err == null ? void 0 : err.message) || String(err)
+      };
+    }
+  }
+  return {
+    ok: false,
+    channel: resolvedChannel,
+    error: chatError || "session.messages.send e ctx.agents.wake indisponíveis"
+  };
+}
 const GLOBAL_TABS = /* @__PURE__ */ new Set(["holding", "inbox", "costs", "automations"]);
 const DEFAULT_WORKSPACES = [
   { slug: "orgfy", nome: "OrgFy Core", estagio: "operacional", canal: "" },
@@ -53294,73 +53428,12 @@ function createFactoryAppComponent(ctx, opts = {}) {
     );
     const wakeAgentInBuzz = React.useCallback(
       async (opts2) => {
-        var _a2, _b2, _c2, _d2, _e2;
-        const agentsApi = ctx == null ? void 0 : ctx.agents;
-        if (typeof (agentsApi == null ? void 0 : agentsApi.wake) !== "function" || !opts2.agentKey) {
-          return { ok: false, error: "ctx.agents.wake indisponível ou agente sem key" };
-        }
-        const isUuid = (v2) => typeof v2 === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v2.trim());
-        const isHex64 = (v2) => typeof v2 === "string" && /^[0-9a-f]{64}$/i.test(v2.trim());
-        const session = (_c2 = (_b2 = (_a2 = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a2.snapshot) == null ? void 0 : _b2.call(_a2)) == null ? void 0 : _c2.session;
-        const channelsList = (() => {
-          var _a3, _b3, _c3;
-          try {
-            return ((_c3 = (_b3 = (_a3 = session == null ? void 0 : session.channels) == null ? void 0 : _a3.list) == null ? void 0 : _b3.call(_a3)) == null ? void 0 : _c3.channels) || [];
-          } catch {
-            return [];
-          }
-        })();
-        const findDmChannelId = async () => {
-          var _a3;
-          const pkLower = (opts2.pubkey || "").trim().toLowerCase();
-          const nameLower = (opts2.agentName || "").trim().toLowerCase();
-          const existing = channelsList.find((ch) => {
-            if ((ch == null ? void 0 : ch.channelType) !== "dm" && (ch == null ? void 0 : ch.channelType) !== "solo") return false;
-            if (pkLower) {
-              const members = [...ch.participants || [], ...ch.members || []];
-              if (members.some((m) => String(m).toLowerCase() === pkLower)) return true;
-            }
-            return Boolean(nameLower && typeof (ch == null ? void 0 : ch.name) === "string" && ch.name.toLowerCase().includes(nameLower));
-          });
-          if (existing == null ? void 0 : existing.id) return String(existing.id);
-          if (pkLower && ((_a3 = session == null ? void 0 : session.directMessages) == null ? void 0 : _a3.available) && typeof session.directMessages.open === "function") {
-            const ac = new AbortController();
-            const timer = setTimeout(() => ac.abort(), 6e3);
-            try {
-              const opened = await session.directMessages.open([pkLower], ac.signal);
-              if (opened) return String(opened);
-            } catch {
-            } finally {
-              clearTimeout(timer);
-            }
-          }
-          return null;
-        };
-        let resolvedChannel = isUuid(opts2.channelId) ? opts2.channelId.trim() : null;
-        if (!resolvedChannel && opts2.preferDm) {
-          resolvedChannel = await findDmChannelId();
-        }
-        if (!resolvedChannel) {
-          const fallbackCanal = ((_d2 = status.tenantManifest) == null ? void 0 : _d2.canal) || ((_e2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _e2.canal) || null;
-          resolvedChannel = isUuid(fallbackCanal) ? fallbackCanal.trim() : await findDmChannelId();
-        }
-        if (!resolvedChannel) {
-          return { ok: false, error: "Nenhum canal/DM válido encontrado para acordar o agente" };
-        }
-        const matchedCh = channelsList.find((ch) => String((ch == null ? void 0 : ch.id) || "") === resolvedChannel);
-        const isDmOrSolo = (matchedCh == null ? void 0 : matchedCh.channelType) === "dm" || (matchedCh == null ? void 0 : matchedCh.channelType) === "solo";
-        const validRoot = !isDmOrSolo && isHex64(opts2.threadRoot) ? opts2.threadRoot.trim().toLowerCase() : void 0;
-        const payload = {
-          channel: resolvedChannel,
-          text: opts2.text,
-          ...validRoot ? { root: validRoot } : isDmOrSolo ? {} : { topLevel: true }
-        };
-        try {
-          await agentsApi.wake(opts2.agentKey, payload);
-          return { ok: true, channel: resolvedChannel };
-        } catch (err) {
-          return { ok: false, error: (err == null ? void 0 : err.message) || String(err) };
-        }
+        var _a2, _b2;
+        const fallbackCanal = ((_a2 = status.tenantManifest) == null ? void 0 : _a2.canal) || ((_b2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _b2.canal) || null;
+        return sendBuzzChatMessageOrWake(ctx, {
+          ...opts2,
+          fallbackChannelId: fallbackCanal
+        });
       },
       [status.tenantManifest, holding, tenant]
     );
@@ -53604,6 +53677,11 @@ ${body}`
         })) || tenantAgents.find((a) => a.name.toLowerCase().includes(card.requestedBy.toLowerCase())) || liveCrew.find((a) => a.name.toLowerCase().includes(card.requestedBy.toLowerCase()));
         const agentKey = (targetAg && "agentKey" in targetAg ? targetAg.agentKey : targetAg == null ? void 0 : targetAg.key) || "";
         const targetPubkey = card.requestedByPubkey || (targetAg == null ? void 0 : targetAg.pubkey);
+        const replyLines = [
+          `@${card.requestedBy} **${card.title}**`,
+          selectedLabels ? `- **Escolha:** ${selectedLabels}` : "",
+          answer.freeText ? `- **Observação:** ${answer.freeText}` : ""
+        ].filter(Boolean);
         const wakeRes = await wakeAgentInBuzz({
           agentKey,
           agentName: card.requestedBy,
@@ -53611,15 +53689,24 @@ ${body}`
           channelId: card.channelId,
           threadRoot: card.threadRoot,
           preferDm: true,
-          text: `[ORGFY QUESTION CARD RESPONDIDO · ${card.id}]
-Decisão: ${card.title}
-Opções selecionadas: ${selectedLabels || "(texto livre)"}${answer.freeText ? `
-Observação do Fundador: ${answer.freeText}` : ""}`
+          postInChat: true,
+          text: replyLines.join("\n")
         });
         if (wakeRes.ok) {
-          notify2(`Resposta salva e ${card.requestedBy} acordado via Buzz.`);
+          if (wakeRes.mode === "chat_message" && wakeRes.channel && openSideTabRef.current) {
+            try {
+              openSideTabRef.current(
+                { channelId: wakeRes.channel, threadId: wakeRes.threadRoot },
+                { keep: true }
+              );
+            } catch {
+            }
+          }
+          notify2(
+            wakeRes.mode === "chat_message" ? `Resposta enviada no chat de ${card.requestedBy} ✓` : `Resposta salva e ${card.requestedBy} acordado via Buzz (fallback wake).`
+          );
         } else {
-          notify2(`Resposta salva no CRDT, mas não foi possível acordar ${card.requestedBy}: ${wakeRes.error}`);
+          notify2(`Resposta salva no CRDT, mas falhou ao enviar no chat de ${card.requestedBy}: ${wakeRes.error}`);
         }
       },
       [refreshQuestionCards, tenantAgents, liveCrew, wakeAgentInBuzz, notify2]
@@ -54638,6 +54725,7 @@ export {
   resetTelemetryForTests,
   resetThreadWakeGuardForTests,
   runOneShotDecisionDispatch,
+  sendBuzzChatMessageOrWake,
   triageCardWithDecisions,
   triageDiffWithDecisions,
   writeTenantControl

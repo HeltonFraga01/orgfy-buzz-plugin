@@ -199,6 +199,7 @@ import {
 import { parseBuzzOrgfyEntityUrl } from "./components/OrgfyLiveChatRenderers";
 import { buildCooUpdatesFeed } from "./factory/FactoryCooUpdatesFeed";
 import { OrgfyCrdtStore, getOrgfyCrdtStore } from "./services/orgfy-crdt-store";
+import { sendBuzzChatMessageOrWake } from "./services/buzz-chat-dispatch";
 import { createQuestionCardsPanel } from "./factory/QuestionCardsPanel";
 import {
   parseFactoryStatus,
@@ -222,6 +223,7 @@ export {
   buildCooUpdatesFeed,
   OrgfyCrdtStore,
   getOrgfyCrdtStore,
+  sendBuzzChatMessageOrWake,
   createQuestionCardsPanel,
   FACTORY_SHADOW_CSS,
   attachFactoryShadowStyles,
