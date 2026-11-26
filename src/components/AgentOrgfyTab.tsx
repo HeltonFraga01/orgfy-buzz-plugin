@@ -174,9 +174,16 @@ export function createAgentOrgfyTabComponent(ctx: Context) {
       setBusyAction("eval");
       setStatusBanner(null);
       try {
+        // Omite `base` para que o Buzz resolva automaticamente `editorConfig().base`
+        // (passar `configBase` vazio `{}` faz o Buzz rejeitar com "config isn't synced here yet").
+        const freshList = (agentsApi.snapshot?.()?.agents || []) as any[];
+        const freshAgent = freshList.find((x: any) => x?.key === agentKey) || agent;
+        const baseCfg =
+          freshAgent?.config && typeof freshAgent.config === "object"
+            ? freshAgent.config
+            : agentCfg;
         await agentsApi.save(agentKey, {
-          config: { ...agentCfg, provider: recommended.provider, model: recommended.model },
-          ...(agent?.configBase ? { base: agent.configBase } : {}),
+          config: { ...baseCfg, provider: recommended.provider, model: recommended.model },
         });
         setStatusBanner({
           ok: true,
