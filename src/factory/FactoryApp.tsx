@@ -19,6 +19,7 @@ import { createFloor3DComponent } from "./codeden-floor/Floor3DCanvas";
 import { createBoardroom3DComponent } from "./Boardroom3DCanvas";
 import { renderFactorySecondaryPage } from "./FactoryPages";
 import {
+  dismissErrorTurn,
   interruptLiveTurn,
   readBuzzChannelCanvasDetailed,
   readBuzzChannelCanvasHistory,
@@ -936,6 +937,10 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
 
     const handleOpenTurnInSideChat = React.useCallback(
       (turn: LiveAgentTurn) => {
+        if (turn.state === "error") {
+          dismissErrorTurn(turn);
+          setActivityTick((n) => n + 1);
+        }
         if (turn.channelId && openSideTabRef.current) {
           const relaySession = (ctx as any)?.relay?.snapshot?.()?.session;
           const rawThread = typeof turn.threadRootId === "string" ? turn.threadRootId.trim() : "";
@@ -963,11 +968,11 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
             { keep: true }
           );
           if (ok) {
-            notify(`Conversa de ${turn.agentName} aberta na barra lateral.`);
+            notify(turn.state === "error" ? `Erro de ${turn.agentName} visualizado e limpo da fila.` : `Conversa de ${turn.agentName} aberta na barra lateral.`);
             return;
           }
         }
-        notify(`Não foi possível abrir o chat lateral de ${turn.agentName}.`);
+        notify(turn.state === "error" ? `Erro de ${turn.agentName} marcado como visualizado.` : `Não foi possível abrir o chat lateral de ${turn.agentName}.`);
       },
       [notify]
     );
@@ -2094,8 +2099,12 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     const founderEscalatedItems = [...status.inProgress, ...status.recent].filter((i) => i.stage === "escalated");
     const inboxCount = pendingQuestionCardsCount + status.held.length + founderEscalatedItems.length;
 
-    // Contagem REAL de agentes respondendo agora nesta empresa (via session.agentActivity!)
-    const tenantWorkingNowCount = tenantAgents.filter((a) => Boolean(a.pubkey && telemetry.byPubkey[a.pubkey.toLowerCase()])).length;
+    // Contagem REAL de agentes respondendo agora nesta empresa (excluindo turnos em erro)
+    const activeWorkingTurnsCount = telemetry.activeTurns.filter((t) => t.state !== "error").length;
+    const tenantWorkingNowCount = tenantAgents.filter((a) => {
+      const turn = a.pubkey ? telemetry.byPubkey[a.pubkey.toLowerCase()] : undefined;
+      return Boolean(turn && turn.state !== "error");
+    }).length;
     const tenantTotalAgentsCount = tenantAgents.length;
     const boardCount = status.backlog.length + status.inProgress.length;
 
@@ -2296,11 +2305,11 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                     { className: "of-pill", "data-tone": status.killSwitch ? "failed" : "done" },
                     status.killSwitch ? "Kill Switch ativo" : PT_BR.modes[status.mode] || status.mode
                   ),
-                  telemetry.activeTurns.length > 0 &&
+                  activeWorkingTurnsCount > 0 &&
                     h(
                       "span",
                       { className: "of-pill", "data-tone": "running", title: "Turnos ativos em tempo real via session.agentActivity" },
-                      `⚡ ${telemetry.activeTurns.length} respondendo`
+                      `⚡ ${activeWorkingTurnsCount} respondendo`
                     ),
                   focusState.active &&
                     h(

@@ -6766,6 +6766,34 @@ const EMPTY_TELEMETRY = {
   presenceByPubkey: {},
   unreadByChannel: {}
 };
+const ERROR_TURN_TTL_MS = 15 * 60 * 1e3;
+const DISMISSED_ERRORS_STORAGE_KEY = "orgfy_dismissed_error_turns_v1";
+function buildErrorTurnKey(turn) {
+  return `${turn.agentPubkey}:${turn.channelId}:${turn.threadRootId || ""}:${turn.messageId || ""}:${turn.startedAt || 0}`;
+}
+function readDismissedErrorKeys() {
+  try {
+    if (typeof localStorage === "undefined") return /* @__PURE__ */ new Set();
+    const raw = localStorage.getItem(DISMISSED_ERRORS_STORAGE_KEY);
+    if (!raw) return /* @__PURE__ */ new Set();
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? new Set(parsed.map((v2) => String(v2))) : /* @__PURE__ */ new Set();
+  } catch {
+    return /* @__PURE__ */ new Set();
+  }
+}
+function dismissErrorTurn(turn) {
+  try {
+    if (typeof localStorage === "undefined") return;
+    const keys = Array.from(readDismissedErrorKeys());
+    const key = buildErrorTurnKey(turn);
+    if (!keys.includes(key)) {
+      keys.push(key);
+      localStorage.setItem(DISMISSED_ERRORS_STORAGE_KEY, JSON.stringify(keys.slice(-250)));
+    }
+  } catch {
+  }
+}
 function readBuzzLiveTelemetry(ctx, nameByPubkey) {
   var _a, _b, _c, _d, _e, _f, _g, _h;
   try {
@@ -6774,6 +6802,7 @@ function readBuzzLiveTelemetry(ctx, nameByPubkey) {
     if (!session) return EMPTY_TELEMETRY;
     const actSnap = (_c = (_b = session.agentActivity) == null ? void 0 : _b.snapshot) == null ? void 0 : _c.call(_b);
     const now = Date.now();
+    const dismissedErrorKeys = readDismissedErrorKeys();
     const byPubkey = {};
     const turnsByPubkey = {};
     const seenSessionKey = /* @__PURE__ */ new Set();
@@ -6795,20 +6824,30 @@ function readBuzzLiveTelemetry(ctx, nameByPubkey) {
       if (row.state !== "working" && row.state !== "waiting" && row.state !== "error") continue;
       const pk = String(row.agent || "").toLowerCase();
       if (!pk) continue;
+      const startedAt = Number(row.startedAt || now);
+      const channelId = String(row.channelId || "");
+      const threadRootId = row.threadRootId ? String(row.threadRootId) : void 0;
+      const messageId = row.messageId ? String(row.messageId) : void 0;
+      if (row.state === "error") {
+        if (now - startedAt > ERROR_TURN_TTL_MS) continue;
+        if (dismissedErrorKeys.has(buildErrorTurnKey({ agentPubkey: pk, channelId, threadRootId, messageId, startedAt }))) {
+          continue;
+        }
+      }
       const stepTool = ((_d = row.step) == null ? void 0 : _d.tool) ? String(row.step.tool) : void 0;
       const stepTarget = ((_e = row.step) == null ? void 0 : _e.target) ? String(row.step.target) : void 0;
       const stepLabel = row.state === "error" ? `Erro: ${String(row.error || "falha no turno").slice(0, 72)}` : stepTool ? `${stepTool}${stepTarget ? ` · ${stepTarget.slice(0, 40)}` : ""}` : row.state === "waiting" ? "Iniciando turno..." : "Pensando...";
       pushTurn({
         agentPubkey: pk,
         agentName: nameByPubkey.get(pk) || `Agente #${pk.slice(0, 8)}`,
-        channelId: String(row.channelId || ""),
-        threadRootId: row.threadRootId ? String(row.threadRootId) : void 0,
-        messageId: row.messageId ? String(row.messageId) : void 0,
+        channelId,
+        threadRootId,
+        messageId,
         state: row.state === "error" ? "error" : row.state === "waiting" ? "waiting" : "working",
         stepLabel,
         toolName: stepTool,
         toolTarget: stepTarget,
-        startedAt: Number(row.startedAt || now),
+        startedAt,
         error: row.error ? String(row.error) : void 0,
         stoppable: Boolean(row.stoppable)
       });
@@ -50559,7 +50598,7 @@ function createFloor3DComponent(ctx) {
     const lastFiguresRef = React.useRef([]);
     const prevActiveByPubkeyRef = React.useRef({});
     const [webglLost, setWebglLost] = React.useState(false);
-    const [rosterOpen, setRosterOpen] = React.useState(true);
+    const [rosterOpen, setRosterOpen] = React.useState(false);
     const [rosterFilter, setRosterFilter] = React.useState("all");
     const [hoveredKey, setHoveredKey] = React.useState(null);
     const [selectedKey, setSelectedKey] = React.useState(null);
@@ -52055,7 +52094,7 @@ function createBoardroom3DComponent(ctx) {
     const [fitTick, setFitTick] = React.useState(0);
     const [themeVersion, setThemeVersion] = React.useState(0);
     const [isFullscreen, setIsFullscreen] = React.useState(false);
-    const [rosterOpen, setRosterOpen] = React.useState(true);
+    const [rosterOpen, setRosterOpen] = React.useState(false);
     const [rosterFilter, setRosterFilter] = React.useState("all");
     const [hoveredSeatId, setHoveredSeatId] = React.useState(null);
     const [selectedSeatId, setSelectedSeatId] = React.useState(null);
@@ -61728,6 +61767,10 @@ function createFactoryAppComponent(ctx, opts = {}) {
     const handleOpenTurnInSideChat = React.useCallback(
       (turn) => {
         var _a2, _b2, _c2, _d2, _e2, _f3, _g2;
+        if (turn.state === "error") {
+          dismissErrorTurn(turn);
+          setActivityTick((n) => n + 1);
+        }
         if (turn.channelId && openSideTabRef.current) {
           const relaySession = (_c2 = (_b2 = (_a2 = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a2.snapshot) == null ? void 0 : _b2.call(_a2)) == null ? void 0 : _c2.session;
           const rawThread = typeof turn.threadRootId === "string" ? turn.threadRootId.trim() : "";
@@ -61747,11 +61790,11 @@ function createFactoryAppComponent(ctx, opts = {}) {
             { keep: true }
           );
           if (ok2) {
-            notify2(`Conversa de ${turn.agentName} aberta na barra lateral.`);
+            notify2(turn.state === "error" ? `Erro de ${turn.agentName} visualizado e limpo da fila.` : `Conversa de ${turn.agentName} aberta na barra lateral.`);
             return;
           }
         }
-        notify2(`Não foi possível abrir o chat lateral de ${turn.agentName}.`);
+        notify2(turn.state === "error" ? `Erro de ${turn.agentName} marcado como visualizado.` : `Não foi possível abrir o chat lateral de ${turn.agentName}.`);
       },
       [notify2]
     );
@@ -62779,7 +62822,11 @@ Nota: ${evidence.note}`
     const abaixoMinimoCount = (status.modelos || []).filter((m) => m.abaixo_minimo).length;
     const founderEscalatedItems = [...status.inProgress, ...status.recent].filter((i) => i.stage === "escalated");
     const inboxCount = pendingQuestionCardsCount + status.held.length + founderEscalatedItems.length;
-    const tenantWorkingNowCount = tenantAgents.filter((a) => Boolean(a.pubkey && telemetry.byPubkey[a.pubkey.toLowerCase()])).length;
+    const activeWorkingTurnsCount = telemetry.activeTurns.filter((t) => t.state !== "error").length;
+    const tenantWorkingNowCount = tenantAgents.filter((a) => {
+      const turn = a.pubkey ? telemetry.byPubkey[a.pubkey.toLowerCase()] : void 0;
+      return Boolean(turn && turn.state !== "error");
+    }).length;
     const tenantTotalAgentsCount = tenantAgents.length;
     const boardCount = status.backlog.length + status.inProgress.length;
     const boardroomSeats = React.useMemo(() => {
@@ -62949,10 +62996,10 @@ Nota: ${evidence.note}`
                 { className: "of-pill", "data-tone": status.killSwitch ? "failed" : "done" },
                 status.killSwitch ? "Kill Switch ativo" : PT_BR.modes[status.mode] || status.mode
               ),
-              telemetry.activeTurns.length > 0 && h(
+              activeWorkingTurnsCount > 0 && h(
                 "span",
                 { className: "of-pill", "data-tone": "running", title: "Turnos ativos em tempo real via session.agentActivity" },
-                `⚡ ${telemetry.activeTurns.length} respondendo`
+                `⚡ ${activeWorkingTurnsCount} respondendo`
               ),
               focusState.active && h(
                 "span",

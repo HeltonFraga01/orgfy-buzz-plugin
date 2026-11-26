@@ -44,6 +44,37 @@ export const EMPTY_TELEMETRY: BuzzLiveTelemetrySnapshot = {
   unreadByChannel: {},
 };
 
+export const ERROR_TURN_TTL_MS = 15 * 60 * 1000;
+const DISMISSED_ERRORS_STORAGE_KEY = "orgfy_dismissed_error_turns_v1";
+
+export function buildErrorTurnKey(turn: Pick<LiveAgentTurn, "agentPubkey" | "channelId" | "threadRootId" | "messageId" | "startedAt">): string {
+  return `${turn.agentPubkey}:${turn.channelId}:${turn.threadRootId || ""}:${turn.messageId || ""}:${turn.startedAt || 0}`;
+}
+
+function readDismissedErrorKeys(): Set<string> {
+  try {
+    if (typeof localStorage === "undefined") return new Set();
+    const raw = localStorage.getItem(DISMISSED_ERRORS_STORAGE_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? new Set(parsed.map((v) => String(v))) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+export function dismissErrorTurn(turn: Pick<LiveAgentTurn, "agentPubkey" | "channelId" | "threadRootId" | "messageId" | "startedAt">): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    const keys = Array.from(readDismissedErrorKeys());
+    const key = buildErrorTurnKey(turn);
+    if (!keys.includes(key)) {
+      keys.push(key);
+      localStorage.setItem(DISMISSED_ERRORS_STORAGE_KEY, JSON.stringify(keys.slice(-250)));
+    }
+  } catch {}
+}
+
 export function readBuzzLiveTelemetry(
   ctx: Context,
   nameByPubkey: Map<string, string>
@@ -55,6 +86,7 @@ export function readBuzzLiveTelemetry(
 
     const actSnap = session.agentActivity?.snapshot?.();
     const now = Date.now();
+    const dismissedErrorKeys = readDismissedErrorKeys();
     const byPubkey: Record<string, LiveAgentTurn> = {};
     const turnsByPubkey: Record<string, LiveAgentTurn[]> = {};
     const seenSessionKey = new Set<string>();
@@ -79,6 +111,17 @@ export function readBuzzLiveTelemetry(
       if (row.state !== "working" && row.state !== "waiting" && row.state !== "error") continue;
       const pk = String(row.agent || "").toLowerCase();
       if (!pk) continue;
+      const startedAt = Number(row.startedAt || now);
+      const channelId = String(row.channelId || "");
+      const threadRootId = row.threadRootId ? String(row.threadRootId) : undefined;
+      const messageId = row.messageId ? String(row.messageId) : undefined;
+      // Erros de LLM expiram automaticamente após 15 min ou assim que visualizados pelo operador
+      if (row.state === "error") {
+        if (now - startedAt > ERROR_TURN_TTL_MS) continue;
+        if (dismissedErrorKeys.has(buildErrorTurnKey({ agentPubkey: pk, channelId, threadRootId, messageId, startedAt }))) {
+          continue;
+        }
+      }
       const stepTool = row.step?.tool ? String(row.step.tool) : undefined;
       const stepTarget = row.step?.target ? String(row.step.target) : undefined;
       const stepLabel =
@@ -92,14 +135,14 @@ export function readBuzzLiveTelemetry(
       pushTurn({
         agentPubkey: pk,
         agentName: nameByPubkey.get(pk) || `Agente #${pk.slice(0, 8)}`,
-        channelId: String(row.channelId || ""),
-        threadRootId: row.threadRootId ? String(row.threadRootId) : undefined,
-        messageId: row.messageId ? String(row.messageId) : undefined,
+        channelId,
+        threadRootId,
+        messageId,
         state: row.state === "error" ? "error" : row.state === "waiting" ? "waiting" : "working",
         stepLabel,
         toolName: stepTool,
         toolTarget: stepTarget,
-        startedAt: Number(row.startedAt || now),
+        startedAt,
         error: row.error ? String(row.error) : undefined,
         stoppable: Boolean(row.stoppable),
       });

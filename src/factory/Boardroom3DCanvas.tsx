@@ -592,7 +592,7 @@ export function createBoardroom3DComponent(ctx: Context) {
     const [fitTick, setFitTick] = React.useState(0);
     const [themeVersion, setThemeVersion] = React.useState(0);
     const [isFullscreen, setIsFullscreen] = React.useState(false);
-    const [rosterOpen, setRosterOpen] = React.useState(true);
+    const [rosterOpen, setRosterOpen] = React.useState(false);
     const [rosterFilter, setRosterFilter] = React.useState<"all" | "active">("all");
     const [hoveredSeatId, setHoveredSeatId] = React.useState<string | null>(null);
     const [selectedSeatId, setSelectedSeatId] = React.useState<string | null>(null);

@@ -308,7 +308,7 @@ export function createFloor3DComponent(ctx: Context) {
     const lastFiguresRef = React.useRef<readonly ScreenFigure[]>([]);
     const prevActiveByPubkeyRef = React.useRef<Record<string, LiveAgentTurn>>({});
     const [webglLost, setWebglLost] = React.useState<boolean>(false);
-    const [rosterOpen, setRosterOpen] = React.useState<boolean>(true);
+    const [rosterOpen, setRosterOpen] = React.useState<boolean>(false);
     const [rosterFilter, setRosterFilter] = React.useState<"all" | "active">("all");
     const [hoveredKey, setHoveredKey] = React.useState<string | null>(null);
     const [selectedKey, setSelectedKey] = React.useState<string | null>(null);
