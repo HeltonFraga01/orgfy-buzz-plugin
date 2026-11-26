@@ -8220,7 +8220,7 @@ const FACTORY_SHADOW_CSS = `
 
 .of-shell {
   display: grid;
-  grid-template-columns: 236px minmax(0, 1fr);
+  grid-template-columns: 244px minmax(0, 1fr);
   width: 100%;
   height: 100%;
   min-height: 0;
@@ -8228,17 +8228,453 @@ const FACTORY_SHADOW_CSS = `
   color: var(--foreground);
   overflow: hidden;
   box-sizing: border-box;
+  transition: grid-template-columns 0.14s ease;
+}
+
+.of-shell[data-collapsed="true"] {
+  grid-template-columns: 54px minmax(0, 1fr);
+}
+
+.of-shell[data-density="compact"] .of-nav-btn,
+.of-shell[data-density="compact"] .of-sb-child-btn {
+  padding-top: 4px;
+  padding-bottom: 4px;
+  font-size: 11.5px;
 }
 
 .of-sidebar {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 12px 10px;
+  gap: 8px;
+  padding: 10px 10px 0;
   background: var(--sidebar);
   border-right: 1px solid var(--border);
-  overflow-y: auto;
+  overflow: hidden;
   box-sizing: border-box;
+  min-height: 0;
+}
+
+.of-sidebar-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 0 0;
+  background: var(--sidebar);
+  border-right: 1px solid var(--border);
+  overflow: hidden;
+  box-sizing: border-box;
+  min-height: 0;
+}
+
+.of-rail-head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  margin-bottom: 4px;
+}
+
+.of-rail-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+.of-rail-divider {
+  width: 24px;
+  height: 1px;
+  background: var(--border);
+  margin: 8px 0;
+  flex-shrink: 0;
+}
+
+.of-rail-projects {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  width: 100%;
+  padding-bottom: 6px;
+}
+
+.of-rail-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.of-rail-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--foreground);
+}
+
+.of-rail-btn[data-active="true"] {
+  background: var(--accent);
+  border-color: var(--border);
+  color: var(--foreground);
+}
+
+.of-rail-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 9999px;
+  background: var(--status-waiting);
+  color: #0b0d10;
+  font-size: 9px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.of-rail-dot {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: var(--status-waiting);
+  box-shadow: 0 0 0 2px var(--sidebar);
+}
+
+.of-rail-dot[data-tone="running"] {
+  background: var(--status-running);
+}
+
+.of-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.of-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--foreground);
+}
+
+.of-sb-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 31px;
+  width: 100%;
+  padding: 0 9px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--muted-foreground);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease;
+  box-sizing: border-box;
+}
+
+.of-sb-search:hover {
+  border-color: var(--border-strong);
+  color: var(--foreground);
+}
+
+.of-kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--muted-foreground);
+}
+
+.of-sb-bot-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.of-sb-waiting {
+  border-radius: 8px;
+  border: 1px solid rgba(245, 158, 11, 0.22);
+  background: rgba(245, 158, 11, 0.05);
+  padding: 6px 6px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.of-sb-waiting-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px 3px;
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--status-waiting);
+}
+
+.of-sb-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 8px;
+}
+
+.of-sb-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 4px 2px 6px;
+}
+
+.of-sb-project {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.of-sb-project-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px;
+  border-radius: 7px;
+  color: var(--muted-foreground);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.of-sb-project-head:hover {
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--foreground);
+}
+
+.of-sb-project-head[data-active="true"] {
+  color: var(--foreground);
+}
+
+.of-sb-project-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 3px 2px;
+  text-align: left;
+}
+
+.of-sb-chevron {
+  display: inline-flex;
+  color: var(--muted-foreground);
+  transition: transform 0.14s ease;
+}
+
+.of-sb-chevron[data-open="true"] {
+  transform: rotate(90deg);
+}
+
+.of-sb-project-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.of-sb-project-head:hover .of-sb-project-actions,
+.of-sb-project-head:focus-within .of-sb-project-actions {
+  opacity: 1;
+}
+
+.of-sb-tree {
+  margin-left: 11px;
+  padding-left: 8px;
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-bottom: 4px;
+}
+
+.of-sb-child-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 5px 7px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.of-sb-child-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--foreground);
+}
+
+.of-sb-pm-pill {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 9999px;
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.of-sb-age {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--muted-foreground);
+  opacity: 0.75;
+  flex-shrink: 0;
+}
+
+.of-sb-footer {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 4px;
+  border-top: 1px solid var(--border);
+  margin: 0 -10px;
+  padding-left: 10px;
+  padding-right: 8px;
+  flex-shrink: 0;
+}
+
+.of-sb-footer[data-compact="true"] {
+  flex-direction: column;
+  margin: 0;
+  padding: 8px 0;
+  width: 100%;
+}
+
+.of-sb-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+
+.of-palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9500;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+}
+
+.of-palette-box {
+  width: min(520px, 92vw);
+  border-radius: 12px;
+  border: 1px solid var(--border-strong);
+  background: var(--card);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.65);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.of-palette-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted-foreground);
+}
+
+.of-palette-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--foreground);
+  font-size: 13px;
+  outline: none;
+}
+
+.of-palette-list {
+  max-height: 340px;
+  overflow-y: auto;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.of-palette-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 7px;
+  border: none;
+  background: transparent;
+  color: var(--foreground);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.of-palette-row:hover {
+  background: var(--accent);
+}
+
+.of-palette-group {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted-foreground);
+  min-width: 78px;
+  text-align: left;
 }
 
 .of-brand {
@@ -43370,6 +43806,674 @@ async function readBuzzChannelCanvas(ctx, channelId) {
   }
   return null;
 }
+const SESSION_LIMIT = 5;
+function projectHue(slug) {
+  let acc = 0;
+  for (let i = 0; i < slug.length; i++) acc += slug.charCodeAt(i);
+  return acc * 29 % 360;
+}
+function formatShortAge(tsMs) {
+  if (!tsMs || tsMs <= 0) return "";
+  const diffMin = Math.max(0, Math.floor((Date.now() - tsMs) / 6e4));
+  if (diffMin < 1) return "agora";
+  if (diffMin < 60) return `${diffMin}m`;
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24) return `${diffH}h`;
+  return `${Math.floor(diffH / 24)}d`;
+}
+function svgIcon(h, paths, size = 14) {
+  return h(
+    "svg",
+    {
+      width: size,
+      height: size,
+      viewBox: "0 0 24 24",
+      fill: "none",
+      stroke: "currentColor",
+      strokeWidth: 1.8,
+      strokeLinecap: "round",
+      strokeLinejoin: "round",
+      style: { flexShrink: 0, display: "block" },
+      "aria-hidden": "true"
+    },
+    paths.map((d, i) => h("path", { key: i, d }))
+  );
+}
+const ICONS = {
+  panelClose: (h, s = 15) => svgIcon(h, ["M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z", "M9 3v18", "M16 15l-3-3 3-3"], s),
+  panelOpen: (h, s = 15) => svgIcon(h, ["M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z", "M9 3v18", "M14 9l3 3-3 3"], s),
+  search: (h, s = 13) => svgIcon(h, ["M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z", "M21 21l-4.3-4.3"], s),
+  bot: (h, s = 13) => svgIcon(h, ["M12 8V4H8", "M4 8h16v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z", "M9 13h.01", "M15 13h.01"], s),
+  inbox: (h, s = 14) => svgIcon(h, ["M22 12h-6l-2 3h-4l-2-3H2", "M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"], s),
+  chart: (h, s = 14) => svgIcon(h, ["M3 3v18h18", "M7 16v-4", "M12 16V8", "M17 16v-6"], s),
+  board: (h, s = 14) => svgIcon(h, ["M12 2 3 7l9 5 9-5-9-5z", "M3 17l9 5 9-5", "M3 12l9 5 9-5"], s),
+  chevron: (h, s = 12) => svgIcon(h, ["M9 18l6-6-6-6"], s),
+  home: (h, s = 12) => svgIcon(h, ["M3 10.5 12 3l9 7.5", "M5 9.5V20a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9.5"], s),
+  external: (h, s = 12) => svgIcon(h, ["M15 3h6v6", "M10 14 21 3", "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"], s),
+  workflow: (h, s = 13) => svgIcon(h, ["M3 3h6v6H3z", "M15 15h6v6h-6z", "M9 6h6a3 3 0 0 1 3 3v6"], s),
+  archive: (h, s = 13) => svgIcon(h, ["M21 8v13H3V8", "M1 3h22v5H1z", "M10 12h4"], s),
+  keyboard: (h, s = 14) => svgIcon(h, ["M2 6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z", "M6 10h.01", "M10 10h.01", "M14 10h.01", "M18 10h.01", "M8 14h8"], s),
+  sliders: (h, s = 14) => svgIcon(h, ["M4 21v-7", "M4 10V3", "M12 21v-9", "M12 8V3", "M20 21v-5", "M20 12V3", "M1 14h6", "M9 8h6", "M17 16h6"], s),
+  sun: (h, s = 14) => svgIcon(h, ["M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8z", "M12 2v2", "M12 20v2", "M4.93 4.93l1.41 1.41", "M17.66 17.66l1.41 1.41", "M2 12h2", "M20 12h2", "M6.34 17.66l-1.41 1.41", "M19.07 4.93l-1.41 1.41"], s),
+  settings: (h, s = 14) => svgIcon(h, ["M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z", "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.08a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.08a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"], s)
+};
+function renderProjectTile(h, slug, nome, size = 18) {
+  const hue = projectHue(slug);
+  return h(
+    "span",
+    {
+      className: "of-project-tile",
+      style: {
+        width: `${size}px`,
+        height: `${size}px`,
+        fontSize: size >= 22 ? "11px" : "9.5px",
+        background: `oklch(0.7 0.11 ${hue} / 0.22)`,
+        color: `oklch(0.78 0.13 ${hue})`
+      },
+      "aria-hidden": "true"
+    },
+    (nome || slug).charAt(0).toUpperCase()
+  );
+}
+function runnerStatusMeta(status) {
+  if (status.killSwitch) {
+    return { tone: "failed", label: "Kill Switch", detail: status.pausedReason || "Kill switch ativo" };
+  }
+  if (status.drain) {
+    return { tone: "waiting", label: "Drenando", detail: "Modo dreno ativo — aguardando conclusão" };
+  }
+  if (status.coordenador !== "ativo") {
+    return { tone: "failed", label: "Parado", detail: status.pausedReason || "Coordenador parado" };
+  }
+  return { tone: "done", label: "Pronto", detail: `Coordenador ${status.launchAgent || "ativo"} operacional` };
+}
+function renderFactorySidebar(props, showAllByProject, onToggleShowAll) {
+  const { h, collapsed } = props;
+  const runner = runnerStatusMeta(props.status);
+  const globalTabs = /* @__PURE__ */ new Set(["holding", "inbox", "costs", "automations"]);
+  const renderFooter = (compact) => h(
+    "div",
+    { className: "of-sb-footer", "data-compact": compact ? "true" : "false" },
+    !compact ? h(
+      "div",
+      { className: "of-sb-status", title: runner.detail },
+      h("span", { className: "of-dot", "data-tone": runner.tone }),
+      h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, runner.label)
+    ) : h("span", { className: "of-dot", "data-tone": runner.tone, title: `${runner.label} — ${runner.detail}`, style: { marginBottom: "4px" } }),
+    h(
+      "button",
+      {
+        type: "button",
+        className: "of-icon-btn",
+        title: "Busca e atalhos (⌘K / Ctrl+K)",
+        "aria-label": "Busca e atalhos",
+        onClick: () => props.onSetPaletteOpen(true)
+      },
+      ICONS.keyboard(h, 14)
+    ),
+    h(
+      "button",
+      {
+        type: "button",
+        className: "of-icon-btn",
+        title: props.compactDensity ? "Densidade padrão" : "Densidade compacta",
+        "aria-label": "Alternar densidade visual",
+        onClick: props.onToggleDensity
+      },
+      ICONS.sun(h, 14)
+    ),
+    h(
+      "button",
+      {
+        type: "button",
+        className: "of-icon-btn",
+        title: "Agentes & modelos da empresa",
+        "aria-label": "Configuração de agentes",
+        onClick: () => props.onSelectTab("agents")
+      },
+      ICONS.sliders(h, 14)
+    ),
+    h(
+      "button",
+      {
+        type: "button",
+        className: "of-icon-btn",
+        title: "Configurações, Kill Switch e limites",
+        "aria-label": "Configurações",
+        onClick: () => props.onSelectTab("settings")
+      },
+      ICONS.settings(h, 14)
+    )
+  );
+  if (collapsed) {
+    return h(
+      "aside",
+      { className: "of-sidebar-rail", "data-sidebar-rail": "true", "aria-label": "Menu lateral recolhido" },
+      h(
+        "div",
+        { className: "of-rail-head", title: PT_BR.appTitle },
+        h("span", { className: "of-brand-icon" }, "<>")
+      ),
+      h(
+        "div",
+        { className: "of-rail-stack" },
+        h(
+          "button",
+          {
+            type: "button",
+            className: "of-rail-btn",
+            title: "Expandir menu lateral (⌘B / Ctrl+B)",
+            "aria-label": "Expandir menu lateral",
+            onClick: props.onToggleCollapse
+          },
+          ICONS.panelOpen(h, 15)
+        ),
+        h(
+          "button",
+          {
+            type: "button",
+            className: "of-rail-btn",
+            title: "Buscar ou executar (⌘K / Ctrl+K)",
+            "aria-label": "Buscar ou executar",
+            onClick: () => props.onSetPaletteOpen(true)
+          },
+          ICONS.search(h, 15)
+        ),
+        h(
+          "button",
+          {
+            type: "button",
+            className: "of-rail-btn",
+            title: `Orquestrador · ${props.masterAgentName} (abrir DM lateral)`,
+            "aria-label": "Orquestrador",
+            onClick: props.onOpenMasterDm
+          },
+          h("span", { style: { color: "var(--primary)", display: "inline-flex" } }, ICONS.bot(h, 15)),
+          props.masterTurn && h("span", { className: "of-rail-dot", "data-tone": "running" })
+        ),
+        h(
+          "button",
+          {
+            type: "button",
+            className: "of-rail-btn",
+            "data-active": props.tab === "holding" ? "true" : "false",
+            title: props.pendingApprovals > 0 ? `Conselho (Board) · ${props.pendingApprovals} pendente(s)` : "Conselho (Board)",
+            "aria-label": "Conselho (Board)",
+            onClick: () => props.onSelectTab("holding")
+          },
+          ICONS.board(h, 15),
+          props.pendingApprovals > 0 && h("span", { className: "of-rail-badge" }, String(props.pendingApprovals))
+        ),
+        h(
+          "button",
+          {
+            type: "button",
+            className: "of-rail-btn",
+            "data-active": props.tab === "inbox" ? "true" : "false",
+            title: props.inboxCount > 0 ? `Inbox · ${props.inboxCount}` : "Inbox",
+            "aria-label": "Inbox",
+            onClick: () => props.onSelectTab("inbox")
+          },
+          ICONS.inbox(h, 15),
+          props.inboxCount > 0 && h("span", { className: "of-rail-badge" }, String(props.inboxCount))
+        ),
+        h(
+          "button",
+          {
+            type: "button",
+            className: "of-rail-btn",
+            "data-active": props.tab === "costs" ? "true" : "false",
+            title: "Uso & Custos",
+            "aria-label": "Uso & Custos",
+            onClick: () => props.onSelectTab("costs")
+          },
+          ICONS.chart(h, 15)
+        ),
+        h(
+          "button",
+          {
+            type: "button",
+            className: "of-rail-btn",
+            "data-active": props.tab === "automations" ? "true" : "false",
+            title: "Automações",
+            "aria-label": "Automações",
+            onClick: () => props.onSelectTab("automations")
+          },
+          ICONS.workflow(h, 15)
+        )
+      ),
+      h("div", { className: "of-rail-divider" }),
+      h(
+        "div",
+        { className: "of-rail-projects" },
+        props.workspaces.map((w) => {
+          const unread = w.canal ? props.telemetry.unreadByChannel[w.canal] || 0 : 0;
+          const isSelected = !globalTabs.has(props.tab) && props.tenant === w.slug;
+          return h(
+            "button",
+            {
+              key: w.slug,
+              type: "button",
+              className: "of-rail-btn",
+              "data-active": isSelected ? "true" : "false",
+              title: `${w.nome}${unread > 0 ? ` · ${unread} não lida(s)` : ""}`,
+              "aria-label": w.nome,
+              onClick: () => props.onSelectTenant(w.slug, "overview")
+            },
+            renderProjectTile(h, w.slug, w.nome, 24),
+            unread > 0 && h("span", { className: "of-rail-dot", "data-tone": "waiting" })
+          );
+        })
+      ),
+      renderFooter(true)
+    );
+  }
+  return h(
+    "aside",
+    { className: "of-sidebar", "data-sidebar-expanded": "true", "aria-label": "Menu lateral OrgFy Factory" },
+    // 1. Header com logo + botão recolher
+    h(
+      "div",
+      { className: "of-brand" },
+      h(
+        "span",
+        { className: "of-brand-mark" },
+        h("span", { className: "of-brand-icon" }, "<>"),
+        PT_BR.appTitle
+      ),
+      h(
+        "button",
+        {
+          type: "button",
+          className: "of-icon-btn",
+          title: "Recolher menu lateral (⌘B / Ctrl+B)",
+          "aria-label": "Recolher menu lateral",
+          onClick: props.onToggleCollapse
+        },
+        ICONS.panelClose(h, 15)
+      )
+    ),
+    // 2. Barra de busca / Command Palette (⌘K)
+    h(
+      "button",
+      {
+        type: "button",
+        className: "of-sb-search",
+        onClick: () => props.onSetPaletteOpen(true)
+      },
+      ICONS.search(h, 13),
+      h("span", { style: { flex: 1, textAlign: "left" } }, "Buscar ou executar…"),
+      h("kbd", { className: "of-kbd" }, "⌘K")
+    ),
+    // 3. Navegação Global (Orquestrador, Conselho, Inbox, Uso & Custos)
+    h(
+      "nav",
+      { className: "of-nav" },
+      h(
+        "button",
+        {
+          type: "button",
+          className: "of-nav-btn",
+          title: `Abrir DM lateral com ${props.masterAgentName} no Buzz`,
+          onClick: props.onOpenMasterDm
+        },
+        h(
+          "span",
+          { style: { display: "inline-flex", alignItems: "center", gap: "8px", minWidth: 0 } },
+          h("span", { className: "of-sb-bot-badge" }, ICONS.bot(h, 12)),
+          h("span", { style: { fontWeight: 600, color: "var(--foreground)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, "Orquestrador")
+        ),
+        h("span", {
+          className: "of-dot",
+          "data-tone": props.masterTurn ? "running" : "done",
+          title: props.masterTurn ? props.masterTurn.stepLabel : `${props.masterAgentName} online`
+        })
+      ),
+      h(
+        "button",
+        {
+          type: "button",
+          className: "of-nav-btn",
+          "data-active": props.tab === "holding" ? "true" : "false",
+          onClick: () => props.onSelectTab("holding")
+        },
+        h(
+          "span",
+          { style: { display: "inline-flex", alignItems: "center", gap: "8px" } },
+          ICONS.board(h, 14),
+          h("span", null, "Conselho (Board)")
+        ),
+        props.pendingApprovals > 0 && h("span", { className: "of-nav-badge", "data-tone": "warn" }, String(props.pendingApprovals))
+      ),
+      h(
+        "button",
+        {
+          type: "button",
+          className: "of-nav-btn",
+          "data-active": props.tab === "inbox" ? "true" : "false",
+          onClick: () => props.onSelectTab("inbox")
+        },
+        h(
+          "span",
+          { style: { display: "inline-flex", alignItems: "center", gap: "8px" } },
+          ICONS.inbox(h, 14),
+          h("span", null, PT_BR.nav.inbox)
+        ),
+        props.inboxCount > 0 && h("span", { className: "of-nav-badge", "data-tone": props.urgentInbox ? "warn" : void 0 }, String(props.inboxCount))
+      ),
+      h(
+        "button",
+        {
+          type: "button",
+          className: "of-nav-btn",
+          "data-active": props.tab === "costs" ? "true" : "false",
+          onClick: () => props.onSelectTab("costs")
+        },
+        h(
+          "span",
+          { style: { display: "inline-flex", alignItems: "center", gap: "8px" } },
+          ICONS.chart(h, 14),
+          h("span", null, "Uso & Custos")
+        )
+      )
+    ),
+    // 4. Caixa "Aguardando você" (WaitingOnYou do CodeDen)
+    props.waitingItems.length > 0 && h(
+      "div",
+      { className: "of-sb-waiting" },
+      h(
+        "div",
+        { className: "of-sb-waiting-head" },
+        h("span", null, "Aguardando você"),
+        h("span", { className: "of-num" }, String(props.waitingItems.length))
+      ),
+      props.waitingItems.slice(0, 4).map(
+        (item) => h(
+          "button",
+          {
+            key: item.id,
+            type: "button",
+            className: "of-sb-child-btn",
+            onClick: () => props.onSelectItem(item)
+          },
+          h("span", { className: "of-dot", "data-tone": item.stage === "failed" ? "failed" : "waiting" }),
+          h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 } }, item.title)
+        )
+      )
+    ),
+    // 5. Árvore expansível de Projetos / Empresas (scroll interno)
+    h(
+      "div",
+      { className: "of-sb-scroll" },
+      h(
+        "div",
+        { className: "of-sb-section-head" },
+        h("span", { className: "of-nav-group-label", style: { padding: 0 } }, "Empresas"),
+        h(
+          "button",
+          {
+            type: "button",
+            className: "of-icon-btn",
+            title: "Abrir canal da empresa ativa no Buzz",
+            "aria-label": "Abrir canal no Buzz",
+            onClick: () => props.onOpenChannelInBuzz(props.tenant)
+          },
+          ICONS.external(h, 12)
+        )
+      ),
+      props.workspaces.map((w) => {
+        var _a, _b;
+        const isOpen = props.expandedProjects[w.slug] ?? w.slug === props.tenant;
+        const isSelected = !globalTabs.has(props.tab) && props.tenant === w.slug;
+        const unread = w.canal ? props.telemetry.unreadByChannel[w.canal] || 0 : 0;
+        const isCurrentTenant = w.slug === props.tenant;
+        const liveTurnsForWorkspace = w.canal ? props.telemetry.activeTurns.filter((t) => t.channelId === w.canal) : [];
+        const boardItemsForWorkspace = isCurrentTenant ? [...props.status.inProgress, ...props.status.backlog] : [];
+        const mergedCount = isCurrentTenant ? props.status.recent.length : 0;
+        const showAll = Boolean(showAllByProject[w.slug]);
+        const visibleItems = showAll ? boardItemsForWorkspace : boardItemsForWorkspace.slice(0, SESSION_LIMIT);
+        const cooName = isCurrentTenant ? ((_a = props.status.tenantManifest) == null ? void 0 : _a.coo) || w.cooNome || "OrgFy Bento" : w.cooNome || "OrgFy Bento";
+        const cooAgent = isCurrentTenant && ((_b = props.status.tenantManifest) == null ? void 0 : _b.agentes.find((a) => a.name.toLowerCase() === cooName.toLowerCase())) || props.liveCrew.find((a) => a.name.toLowerCase() === cooName.toLowerCase()) || null;
+        const cooPubkey = (cooAgent && "pubkey" in cooAgent ? cooAgent.pubkey : "") || w.cooPubkey || "";
+        const cooTurn = cooPubkey ? props.telemetry.byPubkey[cooPubkey.toLowerCase()] || null : null;
+        return h(
+          "div",
+          { key: w.slug, className: "of-sb-project" },
+          h(
+            "div",
+            { className: "of-sb-project-head", "data-active": isSelected ? "true" : "false" },
+            h(
+              "button",
+              {
+                type: "button",
+                className: "of-sb-project-toggle",
+                "aria-expanded": isOpen ? "true" : "false",
+                onClick: () => {
+                  props.onToggleProject(w.slug);
+                  if (!isSelected) props.onSelectTenant(w.slug, "overview");
+                }
+              },
+              h(
+                "span",
+                { className: "of-sb-chevron", "data-open": isOpen ? "true" : "false" },
+                ICONS.chevron(h, 12)
+              ),
+              renderProjectTile(h, w.slug, w.nome, 18),
+              h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 600, fontSize: "12.5px" } }, w.nome)
+            ),
+            !isOpen && (unread > 0 || liveTurnsForWorkspace.length > 0) && h(
+              "span",
+              { className: "of-nav-badge", "data-tone": "warn", style: { marginLeft: "auto" } },
+              unread > 0 ? String(unread) : `⚡${liveTurnsForWorkspace.length}`
+            ),
+            h(
+              "div",
+              { className: "of-sb-project-actions" },
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "of-icon-btn",
+                  title: `Visão geral de ${w.nome}`,
+                  onClick: () => props.onSelectTenant(w.slug, "overview")
+                },
+                ICONS.home(h, 12)
+              ),
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "of-icon-btn",
+                  title: `Abrir canal de ${w.nome} no Buzz`,
+                  onClick: () => props.onOpenChannelInBuzz(w.slug)
+                },
+                ICONS.external(h, 12)
+              )
+            )
+          ),
+          isOpen && h(
+            "div",
+            { className: "of-sb-tree" },
+            // PM / COO row (igual ao "Project manager [PM] ●" do CodeDen!)
+            h(
+              "button",
+              {
+                type: "button",
+                className: "of-sb-child-btn",
+                title: `Abrir DM lateral com ${cooName} (COO) no Buzz`,
+                onClick: () => props.onOpenAgentDm({ key: cooAgent && "agentKey" in cooAgent ? cooAgent.agentKey : cooAgent == null ? void 0 : cooAgent.key, pubkey: cooPubkey, name: cooName })
+              },
+              h("span", { style: { color: "var(--primary)", display: "inline-flex" } }, ICONS.bot(h, 13)),
+              h("span", { style: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, cooName),
+              h("span", { className: "of-sb-pm-pill" }, "COO"),
+              h("span", { className: "of-dot", "data-tone": cooTurn ? "running" : "done" })
+            ),
+            // Turnos ao vivo no Buzz para esta empresa
+            liveTurnsForWorkspace.map(
+              (turn) => h(
+                "button",
+                {
+                  key: `turn-${turn.agentPubkey}-${turn.threadRootId || turn.channelId}`,
+                  type: "button",
+                  className: "of-sb-child-btn",
+                  title: `${turn.agentName}: ${turn.stepLabel} (abrir chat lateral)`,
+                  onClick: () => props.onOpenTurnInSideChat(turn)
+                },
+                h("span", { className: "of-dot", "data-tone": turn.state === "error" ? "failed" : "running" }),
+                h("span", { style: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, `${turn.agentName} · ${turn.stepLabel}`),
+                h("span", { className: "of-sb-age" }, "vivo")
+              )
+            ),
+            // Itens ativos do Board da empresa selecionada
+            visibleItems.map(
+              (item) => h(
+                "button",
+                {
+                  key: item.id,
+                  type: "button",
+                  className: "of-sb-child-btn",
+                  title: `${item.title} (${item.stage})`,
+                  onClick: () => props.onSelectItem(item)
+                },
+                h("span", {
+                  className: "of-dot",
+                  "data-tone": item.stage === "failed" ? "failed" : item.stage === "escalated" ? "waiting" : item.stage === "building" || item.stage === "verifying" ? "running" : "idle"
+                }),
+                h("span", { style: { flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, item.title),
+                item.updatedAt && h("span", { className: "of-sb-age" }, formatShortAge(item.updatedAt))
+              )
+            ),
+            boardItemsForWorkspace.length > SESSION_LIMIT && h(
+              "button",
+              {
+                type: "button",
+                className: "of-sb-child-btn of-muted",
+                onClick: () => onToggleShowAll(w.slug)
+              },
+              showAll ? "Mostrar menos" : `Mostrar mais ${boardItemsForWorkspace.length - SESSION_LIMIT}`
+            ),
+            // Automações da empresa
+            h(
+              "button",
+              {
+                type: "button",
+                className: "of-sb-child-btn",
+                onClick: () => props.onSelectTab("automations")
+              },
+              ICONS.workflow(h, 13),
+              h("span", { style: { flex: 1 } }, "Automações"),
+              h("span", { className: "of-sb-age" }, w.slug === "orgfy" ? "2 on ›" : "0 on ›")
+            ),
+            // Concluídos / Arquivados
+            mergedCount > 0 && h(
+              "button",
+              {
+                type: "button",
+                className: "of-sb-child-btn of-muted",
+                onClick: () => props.onSelectTenant(w.slug, "board")
+              },
+              ICONS.archive(h, 13),
+              h("span", null, `${mergedCount} concluídos`)
+            )
+          )
+        );
+      })
+    ),
+    // 6. Footer fixo
+    renderFooter(false)
+  );
+}
+function renderCommandPalette(props, query, onQueryChange) {
+  const { h } = props;
+  if (!props.paletteOpen) return null;
+  const q = query.trim().toLowerCase();
+  const entries = [
+    { id: "act-master", group: "Orquestração", label: `DM lateral com ${props.masterAgentName} (Orquestrador)`, hint: "Buzz DM", run: props.onOpenMasterDm },
+    { id: "act-collapse", group: "Interface", label: props.collapsed ? "Expandir menu lateral" : "Recolher menu lateral", hint: "⌘B", run: props.onToggleCollapse },
+    { id: "act-channel", group: "Buzz", label: `Abrir canal de ${props.tenant} no Buzz`, hint: "Deep link", run: () => props.onOpenChannelInBuzz(props.tenant) },
+    { id: "act-refresh", group: "Fábrica", label: "Atualizar snapshot da fábrica agora", hint: "Refresh", run: props.onRefresh },
+    { id: "act-drain", group: "Controles", label: props.status.drain ? "Cancelar modo Dreno" : "Ativar modo Dreno", hint: "Drain", run: props.onToggleDrain },
+    { id: "act-kill", group: "Controles", label: props.status.killSwitch ? "Liberar Kill Switch" : "Acionar Kill Switch imediatamente", hint: "P0", run: () => props.onToggleKillSwitch(!props.status.killSwitch) },
+    { id: "nav-holding", group: "Navegação", label: "Conselho (Board da Holding)", run: () => props.onSelectTab("holding") },
+    { id: "nav-inbox", group: "Navegação", label: "Inbox de alertas e aprovações", run: () => props.onSelectTab("inbox") },
+    { id: "nav-costs", group: "Navegação", label: "Uso & Custos", run: () => props.onSelectTab("costs") },
+    { id: "nav-board", group: "Navegação", label: "Fábrica · Board", run: () => props.onSelectTab("board") },
+    { id: "nav-floor", group: "Navegação", label: "Andar 3D", run: () => props.onSelectTab("floor") },
+    { id: "nav-agents", group: "Navegação", label: "Agentes & Modelos", run: () => props.onSelectTab("agents") },
+    { id: "nav-settings", group: "Navegação", label: "Configurações", run: () => props.onSelectTab("settings") },
+    ...props.workspaces.map((w) => ({
+      id: `ws-${w.slug}`,
+      group: "Empresas",
+      label: `Ir para ${w.nome}`,
+      hint: w.slug,
+      run: () => props.onSelectTenant(w.slug, "overview")
+    })),
+    ...props.liveCrew.slice(0, 20).map((a) => ({
+      id: `ag-${a.key}`,
+      group: "Agentes (DM Buzz)",
+      label: `Conversar com ${a.name}`,
+      hint: a.model,
+      run: () => props.onOpenAgentDm(a)
+    }))
+  ];
+  const filtered = q ? entries.filter((e) => e.label.toLowerCase().includes(q) || e.group.toLowerCase().includes(q) || (e.hint || "").toLowerCase().includes(q)) : entries.slice(0, 14);
+  return h(
+    "div",
+    {
+      className: "of-palette-backdrop",
+      onClick: () => props.onSetPaletteOpen(false)
+    },
+    h(
+      "div",
+      {
+        className: "of-palette-box",
+        onClick: (e) => e.stopPropagation()
+      },
+      h(
+        "div",
+        { className: "of-palette-head" },
+        ICONS.search(h, 14),
+        h("input", {
+          type: "text",
+          autoFocus: true,
+          className: "of-palette-input",
+          placeholder: "Buscar empresa, agente, aba ou comando…",
+          value: query,
+          onChange: (e) => onQueryChange(e.target.value),
+          onKeyDown: (e) => {
+            if (e.key === "Escape") props.onSetPaletteOpen(false);
+            if (e.key === "Enter" && filtered[0]) {
+              filtered[0].run();
+              props.onSetPaletteOpen(false);
+            }
+          }
+        }),
+        h("kbd", { className: "of-kbd" }, "ESC")
+      ),
+      h(
+        "div",
+        { className: "of-palette-list" },
+        filtered.length === 0 ? h("div", { className: "of-muted", style: { padding: "16px", textAlign: "center" } }, "Nenhum resultado.") : filtered.map(
+          (e) => h(
+            "button",
+            {
+              key: e.id,
+              type: "button",
+              className: "of-palette-row",
+              onClick: () => {
+                e.run();
+                props.onSetPaletteOpen(false);
+              }
+            },
+            h("span", { className: "of-palette-group" }, e.group),
+            h("span", { style: { flex: 1, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, e.label),
+            e.hint && h("span", { className: "of-mono of-muted", style: { fontSize: "10.5px" } }, e.hint)
+          )
+        )
+      )
+    )
+  );
+}
 const GLOBAL_TABS = /* @__PURE__ */ new Set(["holding", "inbox", "costs", "automations"]);
 const DEFAULT_WORKSPACES = [
   { slug: "orgfy", nome: "OrgFy Core", estagio: "operacional", canal: "" },
@@ -43381,7 +44485,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
   const h = React.createElement;
   const Floor3D = createFloor3DComponent(ctx);
   return function OrgFyFactoryApp() {
-    var _a, _b, _c, _d, _e, _f, _g, _h;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
     const [tenant, setTenant] = React.useState("orgfy");
     const [tab, setTab] = React.useState("overview");
     const [dmAgentKey, setDmAgentKey] = React.useState("");
@@ -43398,6 +44502,43 @@ function createFactoryAppComponent(ctx, opts = {}) {
     const [activeHelpKey, setActiveHelpKey] = React.useState(null);
     const [selectedItem, setSelectedItem] = React.useState(null);
     const [confirmKill, setConfirmKill] = React.useState(false);
+    const [sidebarCollapsed, setSidebarCollapsed] = React.useState(() => {
+      try {
+        return localStorage.getItem("orgfy_factory_sidebar_collapsed") === "1";
+      } catch {
+        return false;
+      }
+    });
+    const [paletteOpen, setPaletteOpen] = React.useState(false);
+    const [paletteQuery, setPaletteQuery] = React.useState("");
+    const [compactDensity, setCompactDensity] = React.useState(false);
+    const [expandedProjects, setExpandedProjects] = React.useState({ orgfy: true });
+    const [showAllByProject, setShowAllByProject] = React.useState({});
+    const toggleSidebarCollapsed = React.useCallback(() => {
+      setSidebarCollapsed((prev) => {
+        const next = !prev;
+        try {
+          localStorage.setItem("orgfy_factory_sidebar_collapsed", next ? "1" : "0");
+        } catch {
+        }
+        return next;
+      });
+    }, []);
+    React.useEffect(() => {
+      const onKey = (ev) => {
+        if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "b") {
+          ev.preventDefault();
+          toggleSidebarCollapsed();
+        } else if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "k") {
+          ev.preventDefault();
+          setPaletteOpen((v2) => !v2);
+        } else if (ev.key === "Escape") {
+          setPaletteOpen(false);
+        }
+      };
+      window.addEventListener("keydown", onKey);
+      return () => window.removeEventListener("keydown", onKey);
+    }, [toggleSidebarCollapsed]);
     const openSideTabRef = React.useRef(null);
     React.useEffect(() => {
       const relay = ctx == null ? void 0 : ctx.relay;
@@ -43554,10 +44695,11 @@ function createFactoryAppComponent(ctx, opts = {}) {
       }
       return null;
     }, []);
-    const handleOpenChannelInBuzz = React.useCallback(async () => {
+    const handleOpenChannelInBuzz = React.useCallback(async (targetSlug) => {
       var _a2, _b2;
-      const emp = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant);
-      const canal = ((_a2 = status.tenantManifest) == null ? void 0 : _a2.canal) || (emp == null ? void 0 : emp.canal);
+      const slug = typeof targetSlug === "string" && targetSlug ? targetSlug : tenant;
+      const emp = holding == null ? void 0 : holding.empresas.find((e) => e.slug === slug);
+      const canal = (slug === tenant ? (_a2 = status.tenantManifest) == null ? void 0 : _a2.canal : null) || (emp == null ? void 0 : emp.canal);
       const scope = resolveBuzzScope();
       try {
         if (canal && openSideTabRef.current) {
@@ -43779,18 +44921,6 @@ function createFactoryAppComponent(ctx, opts = {}) {
     const tenantWorkingNowCount = tenantAgents.filter((a) => Boolean(a.pubkey && telemetry.byPubkey[a.pubkey.toLowerCase()])).length;
     const tenantTotalAgentsCount = tenantAgents.length;
     const boardCount = status.backlog.length + status.inProgress.length;
-    const renderNavBtn = (id, label, badge, tone) => h(
-      "button",
-      {
-        key: id,
-        type: "button",
-        className: "of-nav-btn",
-        "data-active": tab === id ? "true" : "false",
-        onClick: () => setTab(id)
-      },
-      h("span", null, label),
-      badge && h("span", { className: "of-nav-badge", "data-tone": tone }, badge)
-    );
     const projectTabs = [
       { id: "overview", label: PT_BR.nav.overview },
       { id: "board", label: "Fábrica · Board", badge: String(boardCount) },
@@ -43829,99 +44959,71 @@ function createFactoryAppComponent(ctx, opts = {}) {
       h("style", { "data-orgfy-factory-inline-fallback": "true" }, FACTORY_SHADOW_CSS),
       h(
         "div",
-        { className: "of-shell" },
-        h(
-          "aside",
-          { className: "of-sidebar" },
-          h(
-            "div",
-            { className: "of-brand" },
-            h(
-              "span",
-              { className: "of-brand-mark" },
-              h("span", { className: "of-brand-icon" }, "<>"),
-              PT_BR.appTitle
-            ),
-            h("span", { className: "of-dot", "data-tone": status.coordenador === "ativo" ? "done" : "failed", title: `Coordenador: ${status.coordenador}` })
-          ),
-          h(
-            "button",
-            {
-              type: "button",
-              className: "of-surface",
-              title: `Abrir chat lateral nativo com ${masterAgentName}`,
-              onClick: () => {
-                var _a2;
-                return handleOpenAgentDmInBuzz(
-                  masterLive || { name: masterAgentName, pubkey: ((_a2 = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _a2.pubkey) || "" }
-                );
-              },
-              style: {
-                padding: "8px 10px",
-                display: "flex",
-                flexDirection: "column",
-                gap: "3px",
-                textAlign: "left",
-                cursor: "pointer",
-                width: "100%"
-              }
+        {
+          className: "of-shell",
+          "data-collapsed": sidebarCollapsed ? "true" : "false",
+          "data-density": compactDensity ? "compact" : "default"
+        },
+        renderFactorySidebar(
+          {
+            h,
+            collapsed: sidebarCollapsed,
+            onToggleCollapse: toggleSidebarCollapsed,
+            paletteOpen,
+            onSetPaletteOpen: (open) => {
+              setPaletteOpen(open);
+              if (!open) setPaletteQuery("");
             },
-            h(
-              "div",
-              { style: { display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "10px", color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.06em" } },
-              h("span", null, "CEO Master · Orquestrador"),
-              h("span", { style: { color: "var(--primary)", fontWeight: 600, textTransform: "none", letterSpacing: 0 } }, "DM ↗")
-            ),
-            h(
-              "div",
-              { style: { display: "flex", alignItems: "center", gap: "6px", fontSize: "12.5px", fontWeight: 700, color: "var(--foreground)" } },
-              h("span", { className: "of-dot", "data-tone": masterTurn ? "running" : "done" }),
-              masterAgentName
-            ),
-            h(
-              "div",
-              { className: "of-mono of-muted", style: { fontSize: "10px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
-              masterTurn ? `⚡ ${masterTurn.stepLabel}` : masterLive ? masterLive.model : "Ativa no Buzz"
-            )
-          ),
-          h("div", { className: "of-nav-group-label" }, "Holding & Global"),
-          h(
-            "nav",
-            { className: "of-nav" },
-            renderNavBtn("holding", "Conselho (Board)", pendingApprovals > 0 ? String(pendingApprovals) : void 0, pendingApprovals > 0 ? "warn" : void 0),
-            renderNavBtn("inbox", PT_BR.nav.inbox, inboxCount > 0 ? String(inboxCount) : void 0, inboxCount > 0 ? "warn" : void 0),
-            renderNavBtn("costs", "Uso & Custos"),
-            renderNavBtn("automations", PT_BR.nav.automations)
-          ),
-          h("div", { className: "of-nav-group-label" }, "Empresas · Workspaces"),
-          h(
-            "nav",
-            { className: "of-nav" },
-            workspaces.map((w) => {
-              const isSelectedEmpresa = !isGlobalView && tenant === w.slug;
-              const unread = w.canal ? telemetry.unreadByChannel[w.canal] || 0 : 0;
-              return h(
-                "button",
-                {
-                  key: w.slug,
-                  type: "button",
-                  className: "of-nav-btn",
-                  "data-active": isSelectedEmpresa ? "true" : "false",
-                  onClick: () => {
-                    setTenant(w.slug);
-                    if (GLOBAL_TABS.has(tab)) setTab("overview");
-                  }
-                },
-                h(
-                  "span",
-                  { style: { display: "inline-flex", alignItems: "center", gap: "7px", overflow: "hidden" } },
-                  h("span", { className: "of-project-tile", style: { width: "18px", height: "18px", fontSize: "10px" } }, w.nome.charAt(0).toUpperCase()),
-                  h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, w.nome)
-                ),
-                unread > 0 ? h("span", { className: "of-nav-badge", "data-tone": "warn", title: `${unread} não lida(s) no canal` }, String(unread)) : w.agentesInfo && h("span", { className: "of-nav-badge" }, w.agentesInfo)
+            tab,
+            onSelectTab: setTab,
+            tenant,
+            onSelectTenant: (slug, targetTab) => {
+              setTenant(slug);
+              if (targetTab) setTab(targetTab);
+              else if (GLOBAL_TABS.has(tab)) setTab("overview");
+            },
+            workspaces,
+            expandedProjects,
+            onToggleProject: (slug) => setExpandedProjects((prev) => ({ ...prev, [slug]: !(prev[slug] ?? slug === tenant) })),
+            status,
+            telemetry,
+            masterAgentName,
+            masterAgentPubkey: (masterLive == null ? void 0 : masterLive.pubkey) || ((_h = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _h.pubkey) || "",
+            masterTurn,
+            pendingApprovals,
+            inboxCount,
+            urgentInbox: pendingApprovals > 0 || status.held.length > 0,
+            waitingItems: [
+              ...status.held,
+              ...[...status.inProgress, ...status.recent].filter(
+                (i) => i.stage === "escalated" || i.stage === "failed" || i.stage === "reverted"
+              )
+            ],
+            onOpenMasterDm: () => {
+              var _a2;
+              return handleOpenAgentDmInBuzz(
+                masterLive || { name: masterAgentName, pubkey: ((_a2 = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _a2.pubkey) || "" }
               );
-            })
-          )
+            },
+            onOpenAgentDm: handleOpenAgentDmInBuzz,
+            onOpenChannelInBuzz: handleOpenChannelInBuzz,
+            onSelectItem: setSelectedItem,
+            onOpenTurnInSideChat: handleOpenTurnInSideChat,
+            onRefresh: () => refresh(tenant),
+            onToggleDrain: () => handleControlUpdate(
+              { drain: !status.drain },
+              status.drain ? "Dreno cancelado." : "Modo Dreno ativado (finaliza os itens em andamento)."
+            ),
+            onToggleKillSwitch: (next) => handleControlUpdate(
+              { killSwitch: next, pausedReason: next ? "Kill Switch acionado pelo operador" : null },
+              next ? "Kill Switch ativado imediatamente." : "Kill Switch liberado."
+            ),
+            compactDensity,
+            onToggleDensity: () => setCompactDensity((v2) => !v2),
+            liveCrew
+          },
+          showAllByProject,
+          (slug) => setShowAllByProject((prev) => ({ ...prev, [slug]: !prev[slug] }))
         ),
         h(
           "div",
@@ -43983,7 +45085,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
                   onChange: (e) => setDmAgentKey(e.target.value),
                   style: { width: "auto", maxWidth: "210px", padding: "4px 8px", fontSize: "11.5px" }
                 },
-                dmPool.length > 0 ? dmPool.map((a) => h("option", { key: a.key, value: a.key }, a.label)) : h("option", { value: "" }, ((_h = status.tenantManifest) == null ? void 0 : _h.coo) || "OrgFy Bento (COO)")
+                dmPool.length > 0 ? dmPool.map((a) => h("option", { key: a.key, value: a.key }, a.label)) : h("option", { value: "" }, ((_i = status.tenantManifest) == null ? void 0 : _i.coo) || "OrgFy Bento (COO)")
               ),
               h(
                 "button",
@@ -44126,7 +45228,63 @@ function createFactoryAppComponent(ctx, opts = {}) {
         tenant,
         onClose: () => setSelectedItem(null),
         onOpenInBuzz: handleOpenInBuzz
-      })
+      }),
+      renderCommandPalette(
+        {
+          h,
+          collapsed: sidebarCollapsed,
+          onToggleCollapse: toggleSidebarCollapsed,
+          paletteOpen,
+          onSetPaletteOpen: (open) => {
+            setPaletteOpen(open);
+            if (!open) setPaletteQuery("");
+          },
+          tab,
+          onSelectTab: setTab,
+          tenant,
+          onSelectTenant: (slug, targetTab) => {
+            setTenant(slug);
+            if (targetTab) setTab(targetTab);
+          },
+          workspaces,
+          expandedProjects,
+          onToggleProject: () => {
+          },
+          status,
+          telemetry,
+          masterAgentName,
+          masterAgentPubkey: (masterLive == null ? void 0 : masterLive.pubkey) || ((_j = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _j.pubkey) || "",
+          masterTurn,
+          pendingApprovals,
+          inboxCount,
+          urgentInbox: pendingApprovals > 0 || status.held.length > 0,
+          waitingItems: [],
+          onOpenMasterDm: () => {
+            var _a2;
+            return handleOpenAgentDmInBuzz(
+              masterLive || { name: masterAgentName, pubkey: ((_a2 = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _a2.pubkey) || "" }
+            );
+          },
+          onOpenAgentDm: handleOpenAgentDmInBuzz,
+          onOpenChannelInBuzz: handleOpenChannelInBuzz,
+          onSelectItem: setSelectedItem,
+          onOpenTurnInSideChat: handleOpenTurnInSideChat,
+          onRefresh: () => refresh(tenant),
+          onToggleDrain: () => handleControlUpdate(
+            { drain: !status.drain },
+            status.drain ? "Dreno cancelado." : "Modo Dreno ativado (finaliza os itens em andamento)."
+          ),
+          onToggleKillSwitch: (next) => handleControlUpdate(
+            { killSwitch: next, pausedReason: next ? "Kill Switch acionado pelo operador" : null },
+            next ? "Kill Switch ativado imediatamente." : "Kill Switch liberado."
+          ),
+          compactDensity,
+          onToggleDensity: () => setCompactDensity((v2) => !v2),
+          liveCrew
+        },
+        paletteQuery,
+        setPaletteQuery
+      )
     );
     if (useNativeSideTabs) {
       return h(NativeTabs, {

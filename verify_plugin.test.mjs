@@ -1551,4 +1551,12 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     assert.ok(!bundle.includes("Control Room clássico"), "botão da UI antiga deve estar removido");
     assert.ok(!bundle.includes("orgfy.view.toggle"), "switcher da UI antiga deve estar removido");
   });
+
+  test("sidebar CodeDen 1:1 recolhível (SidebarRail + Command Palette Cmd+K) presente no bundle", () => {
+    const bundle = fs.readFileSync(path.resolve(__dirname, "plugin.js"), "utf8");
+    assert.ok(bundle.includes("of-sidebar-rail"), "SidebarRail recolhida deve estar no bundle");
+    assert.ok(bundle.includes("Buscar ou executar"), "barra de busca Command Palette deve estar no bundle");
+    assert.ok(bundle.includes("of-sb-tree"), "árvore expansível de empresas estilo CodeDen deve estar no bundle");
+    assert.ok(bundle.includes("of-sb-footer"), "footer com status e 4 utilitários deve estar no bundle");
+  });
 }
