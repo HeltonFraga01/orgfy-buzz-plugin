@@ -2408,4 +2408,15 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     const overviewSrc = fs.readFileSync(path.resolve(__dirname, "src", "factory", "FactoryOverviewPanel.tsx"), "utf8");
     assert.ok(!overviewSrc.includes("rgba(245, 158, 11"), "FactoryOverviewPanel.tsx não deve conter borda âmbar hardcoded no Digest");
   });
+
+  test("v18.6: Boardroom 3D reconstruído 1:1 com motor isométrico CodeDen (crewGeometry, Lights, readPalette + MutationObserver)", () => {
+    const bundle = fs.readFileSync(path.resolve(__dirname, "plugin.js"), "utf8");
+    const boardSrc = fs.readFileSync(path.resolve(__dirname, "src", "factory", "Boardroom3DCanvas.tsx"), "utf8");
+    assert.ok(bundle.includes("data-boardroom-codeden-v2"), "Novo Boardroom 3D CodeDen v2 deve estar no bundle");
+    assert.ok(boardSrc.includes("crewGeometry"), "Boardroom3DCanvas deve usar os bonequinhos oficiais crewGeometry do Andar 3D");
+    assert.ok(boardSrc.includes("readPalette"), "Boardroom3DCanvas deve herdar a paleta dinâmica do Buzz via readPalette()");
+    assert.ok(boardSrc.includes("MutationObserver") && boardSrc.includes("data-accent"), "Boardroom3DCanvas deve reagir ao vivo à troca de acento do Buzz");
+    assert.ok(boardSrc.includes("OrthographicCamera"), "Boardroom3DCanvas deve usar câmera ortográfica isométrica igual ao Andar 3D");
+    assert.ok(boardSrc.includes("PCFSoftShadowMap"), "Boardroom3DCanvas deve ativar sombras suaves PCFSoftShadowMap");
+  });
 }

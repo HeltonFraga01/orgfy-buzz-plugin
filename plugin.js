@@ -29997,13 +29997,13 @@ class Mesh extends Object3D {
   }
 }
 function checkIntersection$1(object, material, raycaster, ray, pA, pB, pC, point) {
-  let intersect;
+  let intersect2;
   if (material.side === BackSide) {
-    intersect = ray.intersectTriangle(pC, pB, pA, true, point);
+    intersect2 = ray.intersectTriangle(pC, pB, pA, true, point);
   } else {
-    intersect = ray.intersectTriangle(pA, pB, pC, material.side === FrontSide, point);
+    intersect2 = ray.intersectTriangle(pA, pB, pC, material.side === FrontSide, point);
   }
-  if (intersect === null) return null;
+  if (intersect2 === null) return null;
   _intersectionPointWorld.copy(point);
   _intersectionPointWorld.applyMatrix4(object.matrixWorld);
   const distance = raycaster.ray.origin.distanceTo(_intersectionPointWorld);
@@ -30234,10 +30234,10 @@ class InstancedMesh extends Mesh {
       _mesh$1.matrixWorld = _instanceWorldMatrix;
       _mesh$1.raycast(raycaster, _instanceIntersects);
       for (let i = 0, l = _instanceIntersects.length; i < l; i++) {
-        const intersect = _instanceIntersects[i];
-        intersect.instanceId = instanceId;
-        intersect.object = this;
-        intersects.push(intersect);
+        const intersect2 = _instanceIntersects[i];
+        intersect2.instanceId = instanceId;
+        intersect2.object = this;
+        intersects.push(intersect2);
       }
       _instanceIntersects.length = 0;
     }
@@ -31253,6 +31253,384 @@ class ConeGeometry extends CylinderGeometry {
     return new ConeGeometry(data.radius, data.height, data.radialSegments, data.heightSegments, data.openEnded, data.thetaStart, data.thetaLength);
   }
 }
+class PolyhedronGeometry extends BufferGeometry {
+  /**
+   * Constructs a new polyhedron geometry.
+   *
+   * @param {Array<number>} [vertices] - A flat array of vertices describing the base shape.
+   * @param {Array<number>} [indices] - A flat array of indices describing the base shape.
+   * @param {number} [radius=1] - The radius of the shape.
+   * @param {number} [detail=0] - How many levels to subdivide the geometry. The more detail, the smoother the shape.
+   */
+  constructor(vertices = [], indices = [], radius = 1, detail = 0) {
+    super();
+    this.type = "PolyhedronGeometry";
+    this.parameters = {
+      vertices,
+      indices,
+      radius,
+      detail
+    };
+    const vertexBuffer = [];
+    const uvBuffer = [];
+    subdivide(detail);
+    applyRadius(radius);
+    generateUVs();
+    this.setAttribute("position", new Float32BufferAttribute(vertexBuffer, 3));
+    this.setAttribute("normal", new Float32BufferAttribute(vertexBuffer.slice(), 3));
+    this.setAttribute("uv", new Float32BufferAttribute(uvBuffer, 2));
+    if (detail === 0) {
+      this.computeVertexNormals();
+    } else {
+      this.normalizeNormals();
+    }
+    function subdivide(detail2) {
+      const a = new Vector3();
+      const b = new Vector3();
+      const c = new Vector3();
+      for (let i = 0; i < indices.length; i += 3) {
+        getVertexByIndex(indices[i + 0], a);
+        getVertexByIndex(indices[i + 1], b);
+        getVertexByIndex(indices[i + 2], c);
+        subdivideFace(a, b, c, detail2);
+      }
+    }
+    function subdivideFace(a, b, c, detail2) {
+      const cols = detail2 + 1;
+      const v2 = [];
+      for (let i = 0; i <= cols; i++) {
+        v2[i] = [];
+        const aj = a.clone().lerp(c, i / cols);
+        const bj = b.clone().lerp(c, i / cols);
+        const rows = cols - i;
+        for (let j = 0; j <= rows; j++) {
+          if (j === 0 && i === cols) {
+            v2[i][j] = aj;
+          } else {
+            v2[i][j] = aj.clone().lerp(bj, j / rows);
+          }
+        }
+      }
+      for (let i = 0; i < cols; i++) {
+        for (let j = 0; j < 2 * (cols - i) - 1; j++) {
+          const k = Math.floor(j / 2);
+          if (j % 2 === 0) {
+            pushVertex(v2[i][k + 1]);
+            pushVertex(v2[i + 1][k]);
+            pushVertex(v2[i][k]);
+          } else {
+            pushVertex(v2[i][k + 1]);
+            pushVertex(v2[i + 1][k + 1]);
+            pushVertex(v2[i + 1][k]);
+          }
+        }
+      }
+    }
+    function applyRadius(radius2) {
+      const vertex2 = new Vector3();
+      for (let i = 0; i < vertexBuffer.length; i += 3) {
+        vertex2.x = vertexBuffer[i + 0];
+        vertex2.y = vertexBuffer[i + 1];
+        vertex2.z = vertexBuffer[i + 2];
+        vertex2.normalize().multiplyScalar(radius2);
+        vertexBuffer[i + 0] = vertex2.x;
+        vertexBuffer[i + 1] = vertex2.y;
+        vertexBuffer[i + 2] = vertex2.z;
+      }
+    }
+    function generateUVs() {
+      const vertex2 = new Vector3();
+      for (let i = 0; i < vertexBuffer.length; i += 3) {
+        vertex2.x = vertexBuffer[i + 0];
+        vertex2.y = vertexBuffer[i + 1];
+        vertex2.z = vertexBuffer[i + 2];
+        const u = azimuth(vertex2) / 2 / Math.PI + 0.5;
+        const v2 = inclination(vertex2) / Math.PI + 0.5;
+        uvBuffer.push(u, 1 - v2);
+      }
+      correctUVs();
+      correctSeam();
+    }
+    function correctSeam() {
+      for (let i = 0; i < uvBuffer.length; i += 6) {
+        const x0 = uvBuffer[i + 0];
+        const x1 = uvBuffer[i + 2];
+        const x2 = uvBuffer[i + 4];
+        const max = Math.max(x0, x1, x2);
+        const min = Math.min(x0, x1, x2);
+        if (max > 0.9 && min < 0.1) {
+          if (x0 < 0.2) uvBuffer[i + 0] += 1;
+          if (x1 < 0.2) uvBuffer[i + 2] += 1;
+          if (x2 < 0.2) uvBuffer[i + 4] += 1;
+        }
+      }
+    }
+    function pushVertex(vertex2) {
+      vertexBuffer.push(vertex2.x, vertex2.y, vertex2.z);
+    }
+    function getVertexByIndex(index, vertex2) {
+      const stride = index * 3;
+      vertex2.x = vertices[stride + 0];
+      vertex2.y = vertices[stride + 1];
+      vertex2.z = vertices[stride + 2];
+    }
+    function correctUVs() {
+      const a = new Vector3();
+      const b = new Vector3();
+      const c = new Vector3();
+      const centroid = new Vector3();
+      const uvA = new Vector2();
+      const uvB = new Vector2();
+      const uvC = new Vector2();
+      for (let i = 0, j = 0; i < vertexBuffer.length; i += 9, j += 6) {
+        a.set(vertexBuffer[i + 0], vertexBuffer[i + 1], vertexBuffer[i + 2]);
+        b.set(vertexBuffer[i + 3], vertexBuffer[i + 4], vertexBuffer[i + 5]);
+        c.set(vertexBuffer[i + 6], vertexBuffer[i + 7], vertexBuffer[i + 8]);
+        uvA.set(uvBuffer[j + 0], uvBuffer[j + 1]);
+        uvB.set(uvBuffer[j + 2], uvBuffer[j + 3]);
+        uvC.set(uvBuffer[j + 4], uvBuffer[j + 5]);
+        centroid.copy(a).add(b).add(c).divideScalar(3);
+        const azi = azimuth(centroid);
+        correctUV(uvA, j + 0, a, azi);
+        correctUV(uvB, j + 2, b, azi);
+        correctUV(uvC, j + 4, c, azi);
+      }
+    }
+    function correctUV(uv, stride, vector, azimuth2) {
+      if (azimuth2 < 0 && uv.x === 1) {
+        uvBuffer[stride] = uv.x - 1;
+      }
+      if (vector.x === 0 && vector.z === 0) {
+        uvBuffer[stride] = azimuth2 / 2 / Math.PI + 0.5;
+      }
+    }
+    function azimuth(vector) {
+      return Math.atan2(vector.z, -vector.x);
+    }
+    function inclination(vector) {
+      return Math.atan2(-vector.y, Math.sqrt(vector.x * vector.x + vector.z * vector.z));
+    }
+  }
+  copy(source) {
+    super.copy(source);
+    this.parameters = Object.assign({}, source.parameters);
+    return this;
+  }
+  /**
+   * Factory method for creating an instance of this class from the given
+   * JSON object.
+   *
+   * @param {Object} data - A JSON object representing the serialized geometry.
+   * @return {PolyhedronGeometry} A new instance.
+   */
+  static fromJSON(data) {
+    return new PolyhedronGeometry(data.vertices, data.indices, data.radius, data.detail);
+  }
+}
+class DodecahedronGeometry extends PolyhedronGeometry {
+  /**
+   * Constructs a new dodecahedron geometry.
+   *
+   * @param {number} [radius=1] - Radius of the dodecahedron.
+   * @param {number} [detail=0] - Setting this to a value greater than `0` adds vertices making it no longer a dodecahedron.
+   */
+  constructor(radius = 1, detail = 0) {
+    const t = (1 + Math.sqrt(5)) / 2;
+    const r = 1 / t;
+    const vertices = [
+      // (±1, ±1, ±1)
+      -1,
+      -1,
+      -1,
+      -1,
+      -1,
+      1,
+      -1,
+      1,
+      -1,
+      -1,
+      1,
+      1,
+      1,
+      -1,
+      -1,
+      1,
+      -1,
+      1,
+      1,
+      1,
+      -1,
+      1,
+      1,
+      1,
+      // (0, ±1/φ, ±φ)
+      0,
+      -r,
+      -t,
+      0,
+      -r,
+      t,
+      0,
+      r,
+      -t,
+      0,
+      r,
+      t,
+      // (±1/φ, ±φ, 0)
+      -r,
+      -t,
+      0,
+      -r,
+      t,
+      0,
+      r,
+      -t,
+      0,
+      r,
+      t,
+      0,
+      // (±φ, 0, ±1/φ)
+      -t,
+      0,
+      -r,
+      t,
+      0,
+      -r,
+      -t,
+      0,
+      r,
+      t,
+      0,
+      r
+    ];
+    const indices = [
+      3,
+      11,
+      7,
+      3,
+      7,
+      15,
+      3,
+      15,
+      13,
+      7,
+      19,
+      17,
+      7,
+      17,
+      6,
+      7,
+      6,
+      15,
+      17,
+      4,
+      8,
+      17,
+      8,
+      10,
+      17,
+      10,
+      6,
+      8,
+      0,
+      16,
+      8,
+      16,
+      2,
+      8,
+      2,
+      10,
+      0,
+      12,
+      1,
+      0,
+      1,
+      18,
+      0,
+      18,
+      16,
+      6,
+      10,
+      2,
+      6,
+      2,
+      13,
+      6,
+      13,
+      15,
+      2,
+      16,
+      18,
+      2,
+      18,
+      3,
+      2,
+      3,
+      13,
+      18,
+      1,
+      9,
+      18,
+      9,
+      11,
+      18,
+      11,
+      3,
+      4,
+      14,
+      12,
+      4,
+      12,
+      0,
+      4,
+      0,
+      8,
+      11,
+      9,
+      5,
+      11,
+      5,
+      19,
+      11,
+      19,
+      7,
+      19,
+      5,
+      14,
+      19,
+      14,
+      4,
+      19,
+      4,
+      17,
+      1,
+      12,
+      14,
+      1,
+      14,
+      5,
+      1,
+      5,
+      9
+    ];
+    super(vertices, indices, radius, detail);
+    this.type = "DodecahedronGeometry";
+    this.parameters = {
+      radius,
+      detail
+    };
+  }
+  /**
+   * Factory method for creating an instance of this class from the given
+   * JSON object.
+   *
+   * @param {Object} data - A JSON object representing the serialized geometry.
+   * @return {DodecahedronGeometry} A new instance.
+   */
+  static fromJSON(data) {
+    return new DodecahedronGeometry(data.radius, data.detail);
+  }
+}
 class LatheGeometry extends BufferGeometry {
   /**
    * Constructs a new lathe geometry.
@@ -32130,6 +32508,265 @@ class MeshStandardMaterial extends Material {
     return this;
   }
 }
+class MeshPhysicalMaterial extends MeshStandardMaterial {
+  /**
+   * Constructs a new mesh physical material.
+   *
+   * @param {Object} [parameters] - An object with one or more properties
+   * defining the material's appearance. Any property of the material
+   * (including any property from inherited materials) can be passed
+   * in here. Color values can be passed any type of value accepted
+   * by {@link Color#set}.
+   */
+  constructor(parameters) {
+    super();
+    this.isMeshPhysicalMaterial = true;
+    this.defines = {
+      "STANDARD": "",
+      "PHYSICAL": ""
+    };
+    this.type = "MeshPhysicalMaterial";
+    this.anisotropyRotation = 0;
+    this.anisotropyMap = null;
+    this.clearcoatMap = null;
+    this.clearcoatRoughness = 0;
+    this.clearcoatRoughnessMap = null;
+    this.clearcoatNormalScale = new Vector2(1, 1);
+    this.clearcoatNormalMap = null;
+    this.diffuseRoughnessMap = null;
+    this.ior = 1.5;
+    Object.defineProperty(this, "reflectivity", {
+      get: function() {
+        return clamp(2.5 * (this.ior - 1) / (this.ior + 1), 0, 1);
+      },
+      set: function(reflectivity) {
+        this.ior = (1 + 0.4 * reflectivity) / (1 - 0.4 * reflectivity);
+      }
+    });
+    this.iridescenceMap = null;
+    this.iridescenceIOR = 1.3;
+    this.iridescenceThicknessMinimum = 100;
+    this.iridescenceThicknessMaximum = 400;
+    this.iridescenceThicknessMap = null;
+    this.sheenColor = new Color(0);
+    this.sheenColorMap = null;
+    this.sheenRoughness = 1;
+    this.sheenRoughnessMap = null;
+    this.transmissionMap = null;
+    this.thickness = 0;
+    this.thicknessMap = null;
+    this.attenuationDistance = Infinity;
+    this.attenuationColor = new Color(1, 1, 1);
+    this.specularIntensity = 1;
+    this.specularIntensityMap = null;
+    this.specularColor = new Color(1, 1, 1);
+    this.specularColorMap = null;
+    this._anisotropy = 0;
+    this._clearcoat = 0;
+    this._diffuseRoughness = 0;
+    this._dispersion = 0;
+    this._iridescence = 0;
+    this._retroreflectivity = 0;
+    this._sheen = 0;
+    this._transmission = 0;
+    this.setValues(parameters);
+  }
+  /**
+   * The anisotropy strength, from `0.0` to `1.0`.
+   *
+   * @type {number}
+   * @default 0
+   */
+  get anisotropy() {
+    return this._anisotropy;
+  }
+  set anisotropy(value) {
+    if (this._anisotropy > 0 !== value > 0) {
+      this.version++;
+    }
+    this._anisotropy = value;
+  }
+  /**
+   * Represents the intensity of the clear coat layer, from `0.0` to `1.0`. Use
+   * clear coat related properties to enable multilayer materials that have a
+   * thin translucent layer over the base layer.
+   *
+   * @type {number}
+   * @default 0
+   */
+  get clearcoat() {
+    return this._clearcoat;
+  }
+  set clearcoat(value) {
+    if (this._clearcoat > 0 !== value > 0) {
+      this.version++;
+    }
+    this._clearcoat = value;
+  }
+  /**
+   * Roughness of the diffuse layer, from `0.0` to `1.0`. A value of `0.0`
+   * uses Lambertian diffuse reflection. Values above `0.0` use the EON
+   * energy-preserving rough diffuse model.
+   *
+   * @type {number}
+   * @default 0
+   */
+  get diffuseRoughness() {
+    return this._diffuseRoughness;
+  }
+  set diffuseRoughness(value) {
+    if (this._diffuseRoughness > 0 !== value > 0) {
+      this.version++;
+    }
+    this._diffuseRoughness = value;
+  }
+  /**
+   * The intensity of the iridescence layer, simulating RGB color shift based on the angle between
+   * the surface and the viewer, from `0.0` to `1.0`.
+   *
+   * @type {number}
+   * @default 0
+   */
+  get iridescence() {
+    return this._iridescence;
+  }
+  set iridescence(value) {
+    if (this._iridescence > 0 !== value > 0) {
+      this.version++;
+    }
+    this._iridescence = value;
+  }
+  /**
+   * Defines the strength of the angular separation of colors (chromatic aberration) transmitting
+   * through a relatively clear volume. Any value zero or larger is valid, the typical range of
+   * realistic values is `[0, 1]`. This property can be only be used with transmissive objects.
+   *
+   * @type {number}
+   * @default 0
+   */
+  get dispersion() {
+    return this._dispersion;
+  }
+  set dispersion(value) {
+    if (this._dispersion > 0 !== value > 0) {
+      this.version++;
+    }
+    this._dispersion = value;
+  }
+  /**
+   * The strength of retroreflection, from `0.0` to `1.0`. A value of `1.0`
+   * evaluates the material's microfacet reflection with the view direction
+   * reflected about the surface normal, redirecting the specular lobe back
+   * toward the light source.
+   *
+   * @type {number}
+   * @default 0
+   */
+  get retroreflectivity() {
+    return this._retroreflectivity;
+  }
+  set retroreflectivity(value) {
+    if (this._retroreflectivity > 0 !== value > 0) {
+      this.version++;
+    }
+    this._retroreflectivity = value;
+  }
+  /**
+   * The intensity of the sheen layer, from `0.0` to `1.0`.
+   *
+   * @type {number}
+   * @default 0
+   */
+  get sheen() {
+    return this._sheen;
+  }
+  set sheen(value) {
+    if (this._sheen > 0 !== value > 0) {
+      this.version++;
+    }
+    this._sheen = value;
+  }
+  /**
+   * Degree of transmission (or optical transparency), from `0.0` to `1.0`.
+   *
+   * Thin, transparent or semitransparent, plastic or glass materials remain
+   * largely reflective even if they are fully transmissive. The transmission
+   * property can be used to model these materials.
+   *
+   * When transmission is non-zero, `opacity` should be  set to `1`.
+   *
+   * @type {number}
+   * @default 0
+   */
+  get transmission() {
+    return this._transmission;
+  }
+  set transmission(value) {
+    if (this._transmission > 0 !== value > 0) {
+      this.version++;
+    }
+    this._transmission = value;
+  }
+  /**
+   * Array of exactly 2 elements, specifying minimum and maximum thickness of the iridescence layer.
+   *
+   * @deprecated since r187. Use {@link MeshPhysicalMaterial#iridescenceThicknessMinimum} and {@link MeshPhysicalMaterial#iridescenceThicknessMaximum} instead.
+   * @type {Array<number,number>}
+   * @default [100,400]
+   */
+  get iridescenceThicknessRange() {
+    warnOnce('MeshPhysicalMaterial: The "iridescenceThicknessRange" property has been replaced by "iridescenceThicknessMinimum" and "iridescenceThicknessMaximum".');
+    return [this.iridescenceThicknessMinimum, this.iridescenceThicknessMaximum];
+  }
+  set iridescenceThicknessRange(value) {
+    warnOnce('MeshPhysicalMaterial: The "iridescenceThicknessRange" property has been replaced by "iridescenceThicknessMinimum" and "iridescenceThicknessMaximum".');
+    this.iridescenceThicknessMinimum = value[0];
+    this.iridescenceThicknessMaximum = value[1];
+  }
+  copy(source) {
+    super.copy(source);
+    this.defines = {
+      "STANDARD": "",
+      "PHYSICAL": ""
+    };
+    this.anisotropy = source.anisotropy;
+    this.anisotropyRotation = source.anisotropyRotation;
+    this.anisotropyMap = source.anisotropyMap;
+    this.clearcoat = source.clearcoat;
+    this.clearcoatMap = source.clearcoatMap;
+    this.clearcoatRoughness = source.clearcoatRoughness;
+    this.clearcoatRoughnessMap = source.clearcoatRoughnessMap;
+    this.clearcoatNormalMap = source.clearcoatNormalMap;
+    this.clearcoatNormalScale.copy(source.clearcoatNormalScale);
+    this.diffuseRoughness = source.diffuseRoughness;
+    this.diffuseRoughnessMap = source.diffuseRoughnessMap;
+    this.dispersion = source.dispersion;
+    this.ior = source.ior;
+    this.iridescence = source.iridescence;
+    this.iridescenceMap = source.iridescenceMap;
+    this.iridescenceIOR = source.iridescenceIOR;
+    this.iridescenceThicknessMinimum = source.iridescenceThicknessMinimum;
+    this.iridescenceThicknessMaximum = source.iridescenceThicknessMaximum;
+    this.iridescenceThicknessMap = source.iridescenceThicknessMap;
+    this.retroreflectivity = source.retroreflectivity;
+    this.sheen = source.sheen;
+    this.sheenColor.copy(source.sheenColor);
+    this.sheenColorMap = source.sheenColorMap;
+    this.sheenRoughness = source.sheenRoughness;
+    this.sheenRoughnessMap = source.sheenRoughnessMap;
+    this.transmission = source.transmission;
+    this.transmissionMap = source.transmissionMap;
+    this.thickness = source.thickness;
+    this.thicknessMap = source.thicknessMap;
+    this.attenuationDistance = source.attenuationDistance;
+    this.attenuationColor.copy(source.attenuationColor);
+    this.specularIntensity = source.specularIntensity;
+    this.specularIntensityMap = source.specularIntensityMap;
+    this.specularColor.copy(source.specularColor);
+    this.specularColorMap = source.specularColorMap;
+    return this;
+  }
+}
 class MeshDepthMaterial extends Material {
   /**
    * Constructs a new mesh depth material.
@@ -32977,19 +33614,6 @@ class DirectionalLight extends Light {
     return data;
   }
 }
-class AmbientLight extends Light {
-  /**
-   * Constructs a new ambient light.
-   *
-   * @param {(number|Color|string)} [color=0xffffff] - The light's color.
-   * @param {number} [intensity=1] - The light's strength/intensity.
-   */
-  constructor(color, intensity) {
-    super(color, intensity);
-    this.isAmbientLight = true;
-    this.type = "AmbientLight";
-  }
-}
 const fov = -90;
 const aspect = 1;
 class CubeCamera extends Object3D {
@@ -33131,6 +33755,151 @@ class ArrayCamera extends PerspectiveCamera {
     this.isMultiViewCamera = false;
     this.cameras = array;
     this.perCameraFrustumCulled = false;
+  }
+}
+const _matrix = /* @__PURE__ */ new Matrix4();
+class Raycaster {
+  /**
+   * Constructs a new raycaster.
+   *
+   * @param {Vector3} origin - The origin vector where the ray casts from.
+   * @param {Vector3} direction - The (normalized) direction vector that gives direction to the ray.
+   * @param {number} [near=0] - All results returned are further away than near. Near can't be negative.
+   * @param {number} [far=Infinity] - All results returned are closer than far. Far can't be lower than near.
+   */
+  constructor(origin, direction, near = 0, far = Infinity) {
+    this.ray = new Ray(origin, direction);
+    this.near = near;
+    this.far = far;
+    this.camera = null;
+    this.layers = new Layers();
+    this.params = {
+      Mesh: {},
+      Line: { threshold: 1 },
+      LOD: {},
+      Points: { threshold: 1 },
+      Sprite: {}
+    };
+  }
+  /**
+   * Updates the ray with a new origin and direction by copying the values from the arguments.
+   *
+   * @param {Vector3} origin - The origin vector where the ray casts from.
+   * @param {Vector3} direction - The (normalized) direction vector that gives direction to the ray.
+   */
+  set(origin, direction) {
+    this.ray.set(origin, direction);
+  }
+  /**
+   * Uses the given coordinates and camera to compute a new origin and direction for the internal ray.
+   *
+   * @param {Vector2} coords - 2D coordinates of the mouse, in normalized device coordinates (NDC).
+   * X and Y components should be between `-1` and `1`.
+   * @param {Camera} camera - The camera from which the ray should originate.
+   */
+  setFromCamera(coords, camera) {
+    if (camera.isPerspectiveCamera) {
+      this.ray.origin.setFromMatrixPosition(camera.matrixWorld);
+      this.ray.direction.set(coords.x, coords.y, 0.5).unproject(camera).sub(this.ray.origin).normalize();
+      this.camera = camera;
+    } else if (camera.isOrthographicCamera) {
+      this.ray.origin.set(coords.x, coords.y, camera.projectionMatrix.elements[14]).unproject(camera);
+      this.ray.direction.set(0, 0, -1).transformDirection(camera.matrixWorld);
+      this.camera = camera;
+    } else {
+      error("Raycaster: Unsupported camera type: " + camera.type);
+    }
+  }
+  /**
+   * Uses the given WebXR controller to compute a new origin and direction for the internal ray.
+   *
+   * @param {WebXRController} controller - The controller to copy the position and direction from.
+   * @return {Raycaster} A reference to this raycaster.
+   */
+  setFromXRController(controller) {
+    _matrix.identity().extractRotation(controller.matrixWorld);
+    this.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+    this.ray.direction.set(0, 0, -1).applyMatrix4(_matrix);
+    return this;
+  }
+  /**
+   * The intersection point of a raycaster intersection test.
+   * @typedef {Object} Raycaster~Intersection
+   * @property {number} distance - The distance from the ray's origin to the intersection point.
+   * @property {number} distanceToRay -  Some 3D objects e.g. {@link Points} provide the distance of the
+   * intersection to the nearest point on the ray. For other objects it will be `undefined`.
+   * @property {Vector3} point - The intersection point, in world coordinates.
+   * @property {Object} face - The face that has been intersected.
+   * @property {number} faceIndex - The face index.
+   * @property {Object3D} object - The 3D object that has been intersected.
+   * @property {Vector2} uv - U,V coordinates at point of intersection.
+   * @property {Vector2} uv1 - Second set of U,V coordinates at point of intersection.
+   * @property {Vector3} normal - Interpolated normal vector at point of intersection.
+   * @property {number} instanceId - The index number of the instance where the ray
+   * intersects the {@link InstancedMesh}.
+   * @property {number} batchId - The index number of the instance where the ray
+   * intersects the {@link BatchedMesh}.
+   */
+  /**
+   * Checks all intersection between the ray and the object with or without the
+   * descendants. Intersections are returned sorted by distance, closest first.
+   *
+   * `Raycaster` delegates to the `raycast()` method of the passed 3D object, when
+   * evaluating whether the ray intersects the object or not. This allows meshes to respond
+   * differently to ray casting than lines or points.
+   *
+   * Note that for meshes, faces must be pointed towards the origin of the ray in order
+   * to be detected; intersections of the ray passing through the back of a face will not
+   * be detected. To raycast against both faces of an object, you'll want to set  {@link Material#side}
+   * to `THREE.DoubleSide`.
+   *
+   * Note that a ray hitting a triangle mesh exactly along an edge shared by two faces may be
+   * reported by both faces, resulting in two coincident intersections (identical point and
+   * distance) in the returned array.
+   *
+   * @param {Object3D} object - The 3D object to check for intersection with the ray.
+   * @param {boolean} [recursive=true] - If set to `true`, it also checks all descendants.
+   * Otherwise it only checks intersection with the object.
+   * @param {Array<Raycaster~Intersection>} [intersects=[]] The target array that holds the result of the method.
+   * @return {Array<Raycaster~Intersection>} An array holding the intersection points.
+   */
+  intersectObject(object, recursive = true, intersects = []) {
+    intersect(object, this, intersects, recursive);
+    intersects.sort(ascSort);
+    return intersects;
+  }
+  /**
+   * Checks all intersection between the ray and the objects with or without
+   * the descendants. Intersections are returned sorted by distance, closest first.
+   *
+   * @param {Array<Object3D>} objects - The 3D objects to check for intersection with the ray.
+   * @param {boolean} [recursive=true] - If set to `true`, it also checks all descendants.
+   * Otherwise it only checks intersection with the object.
+   * @param {Array<Raycaster~Intersection>} [intersects=[]] The target array that holds the result of the method.
+   * @return {Array<Raycaster~Intersection>} An array holding the intersection points.
+   */
+  intersectObjects(objects, recursive = true, intersects = []) {
+    for (let i = 0, l = objects.length; i < l; i++) {
+      intersect(objects[i], this, intersects, recursive);
+    }
+    intersects.sort(ascSort);
+    return intersects;
+  }
+}
+function ascSort(a, b) {
+  return a.distance - b.distance;
+}
+function intersect(object, raycaster, intersects, recursive) {
+  let propagate = true;
+  if (object.layers.test(raycaster.layers)) {
+    const result = object.raycast(raycaster, intersects);
+    if (result === false) propagate = false;
+  }
+  if (propagate === true && recursive === true) {
+    const children = object.children;
+    for (let i = 0, l = children.length; i < l; i++) {
+      intersect(children[i], raycaster, intersects, true);
+    }
   }
 }
 class Clock {
@@ -49824,170 +50593,775 @@ function createFloor3DComponent(ctx) {
     );
   };
 }
+function rgbToCss([r, g, b], alpha = 1) {
+  const rr = Math.round(Math.max(0, Math.min(1, r)) * 255);
+  const gg = Math.round(Math.max(0, Math.min(1, g)) * 255);
+  const bb = Math.round(Math.max(0, Math.min(1, b)) * 255);
+  return alpha >= 1 ? `rgb(${rr}, ${gg}, ${bb})` : `rgba(${rr}, ${gg}, ${bb}, ${alpha})`;
+}
+function makeWallSignTexture(kit, text, p) {
+  const c = canvasOf(512, 112);
+  const g = c.getContext("2d");
+  g.fillStyle = rgbToCss(p.sign);
+  g.fillRect(0, 0, c.width, c.height);
+  g.strokeStyle = "rgba(255,255,255,0.14)";
+  g.lineWidth = 4;
+  g.strokeRect(4, 4, c.width - 8, c.height - 8);
+  g.fillStyle = rgbToCss(p.lane);
+  g.fillRect(18, c.height - 14, c.width - 36, 7);
+  g.fillStyle = p.signInk;
+  g.font = "700 40px ui-monospace, SFMono-Regular, Menlo, monospace";
+  g.textAlign = "center";
+  g.textBaseline = "middle";
+  g.fillText(text.toUpperCase(), c.width / 2, c.height / 2 - 4);
+  return kit.canvasTexture(c);
+}
+function makeExecutiveScreenTexture(kit, seats, p) {
+  const c = canvasOf(1024, 420);
+  const g = c.getContext("2d");
+  const accent = rgbToCss(p.lane);
+  const accentSoft = rgbToCss(p.lane, 0.16);
+  const blue = rgbToCss(p.accent.reviewer);
+  g.fillStyle = p.dark ? "#0e1116" : "#161922";
+  g.fillRect(0, 0, c.width, c.height);
+  g.strokeStyle = "rgba(255,255,255,0.035)";
+  g.lineWidth = 1;
+  for (let x = 32; x < c.width; x += 48) {
+    g.beginPath();
+    g.moveTo(x, 0);
+    g.lineTo(x, c.height);
+    g.stroke();
+  }
+  for (let y = 32; y < c.height; y += 48) {
+    g.beginPath();
+    g.moveTo(0, y);
+    g.lineTo(c.width, y);
+    g.stroke();
+  }
+  g.fillStyle = "rgba(255,255,255,0.04)";
+  g.fillRect(0, 0, c.width, 58);
+  g.fillStyle = accent;
+  g.fillRect(0, 56, c.width, 3);
+  g.fillStyle = "#f4f6fb";
+  g.font = "700 22px -apple-system, BlinkMacSystemFont, sans-serif";
+  g.fillText("CONSELHO DA HOLDING · PAINEL EXECUTIVO", 28, 37);
+  g.fillStyle = accentSoft;
+  g.fillRect(c.width - 170, 14, 142, 30);
+  g.strokeStyle = accent;
+  g.lineWidth = 1.5;
+  g.strokeRect(c.width - 170, 14, 142, 30);
+  g.fillStyle = accent;
+  g.beginPath();
+  g.arc(c.width - 150, 29, 5, 0, Math.PI * 2);
+  g.fill();
+  g.font = "700 14px ui-monospace, Menlo, monospace";
+  g.fillText("L-01 · ATIVO", c.width - 134, 34);
+  const activeCnt = seats.filter((s) => s.status === "active").length;
+  const workingCnt = seats.filter((s) => s.status === "working").length;
+  const plannedCnt = seats.filter((s) => s.status === "planned").length;
+  const kpis = [
+    { label: "ASSENTOS ATIVOS", val: String(activeCnt + workingCnt), sub: `${seats.length} no conselho`, col: accent },
+    { label: "EM EXECUÇÃO", val: String(workingCnt), sub: "turnos ao vivo", col: blue },
+    { label: "PLANEJADOS", val: String(plannedCnt), sub: "em incubação", col: "#9ca3af" }
+  ];
+  kpis.forEach((k, idx) => {
+    const x = 28 + idx * 324;
+    const y = 78;
+    const w = 304;
+    const h = 104;
+    g.fillStyle = "rgba(255,255,255,0.035)";
+    g.fillRect(x, y, w, h);
+    g.strokeStyle = "rgba(255,255,255,0.09)";
+    g.lineWidth = 1.5;
+    g.strokeRect(x, y, w, h);
+    g.fillStyle = k.col;
+    g.fillRect(x, y, 5, h);
+    g.fillStyle = "#94a3b8";
+    g.font = "600 13px ui-monospace, Menlo, monospace";
+    g.fillText(k.label, x + 18, y + 28);
+    g.fillStyle = "#f8fafc";
+    g.font = "700 40px ui-monospace, Menlo, monospace";
+    g.fillText(k.val, x + 18, y + 72);
+    g.fillStyle = k.col;
+    g.font = "500 13px -apple-system, sans-serif";
+    g.fillText(k.sub, x + 98, y + 68);
+  });
+  const listY = 204;
+  g.fillStyle = "rgba(255,255,255,0.025)";
+  g.fillRect(28, listY, 510, 190);
+  g.strokeStyle = "rgba(255,255,255,0.08)";
+  g.strokeRect(28, listY, 510, 190);
+  g.fillStyle = "#94a3b8";
+  g.font = "700 12px ui-monospace, Menlo, monospace";
+  g.fillText("CADEIRAS DO CONSELHO", 46, listY + 26);
+  seats.slice(0, 5).forEach((s, idx) => {
+    const ry = listY + 52 + idx * 27;
+    const dotCol = s.status === "working" ? blue : s.status === "active" ? accent : "#6b7280";
+    g.fillStyle = dotCol;
+    g.beginPath();
+    g.arc(52, ry - 4, 4.5, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = "#f1f5f9";
+    g.font = "600 15px -apple-system, sans-serif";
+    g.fillText(s.label.slice(0, 24), 68, ry);
+    g.fillStyle = "#94a3b8";
+    g.font = "500 13px ui-monospace, Menlo, monospace";
+    g.fillText(s.role.slice(0, 22), 290, ry);
+  });
+  const chartX = 560;
+  g.fillStyle = "rgba(255,255,255,0.025)";
+  g.fillRect(chartX, listY, 436, 190);
+  g.strokeStyle = "rgba(255,255,255,0.08)";
+  g.strokeRect(chartX, listY, 436, 190);
+  g.fillStyle = "#94a3b8";
+  g.font = "700 12px ui-monospace, Menlo, monospace";
+  g.fillText("CADÊNCIA & CONFIANÇA DA HOLDING", chartX + 18, listY + 26);
+  const bars = [0.42, 0.56, 0.51, 0.68, 0.74, 0.82, 0.79, 0.91, 0.95, 0.97];
+  bars.forEach((v2, i) => {
+    const bw = 28;
+    const gap = 11;
+    const bx = chartX + 24 + i * (bw + gap);
+    const bh = Math.round(v2 * 116);
+    const by = listY + 168 - bh;
+    g.fillStyle = i >= 8 ? accent : rgbToCss(p.lane, 0.42 + i * 0.05);
+    g.fillRect(bx, by, bw, bh);
+  });
+  return kit.canvasTexture(c);
+}
+function makeTableVisionBoardTexture(kit, seats, p) {
+  var _a;
+  const c = canvasOf(512, 256);
+  const g = c.getContext("2d");
+  g.fillStyle = "#f4f1e8";
+  g.fillRect(0, 0, c.width, c.height);
+  g.strokeStyle = "#cbd5e1";
+  g.lineWidth = 4;
+  g.strokeRect(10, 10, c.width - 20, c.height - 20);
+  g.strokeStyle = "rgba(100,116,139,0.16)";
+  g.lineWidth = 1;
+  for (let x = 28; x < c.width - 14; x += 28) {
+    g.beginPath();
+    g.moveTo(x, 14);
+    g.lineTo(x, c.height - 14);
+    g.stroke();
+  }
+  for (let y = 28; y < c.height - 14; y += 28) {
+    g.beginPath();
+    g.moveTo(14, y);
+    g.lineTo(c.width - 14, y);
+    g.stroke();
+  }
+  const paletteBlocks = [
+    rgbToCss(p.lane, 0.35),
+    "rgba(96, 165, 250, 0.32)",
+    "rgba(192, 132, 252, 0.3)",
+    "rgba(251, 191, 36, 0.32)"
+  ];
+  const cols = Math.min(4, Math.max(2, seats.length));
+  const bw = Math.floor((c.width - 72 - (cols - 1) * 14) / cols);
+  for (let i = 0; i < cols; i++) {
+    const bx = 36 + i * (bw + 14);
+    const by = 48;
+    g.fillStyle = paletteBlocks[i % paletteBlocks.length];
+    g.fillRect(bx, by, bw, 152);
+    g.strokeStyle = "rgba(30,41,59,0.28)";
+    g.lineWidth = 2;
+    g.strokeRect(bx, by, bw, 152);
+    g.fillStyle = "#1e293b";
+    g.font = "700 13px ui-monospace, Menlo, monospace";
+    g.fillText((((_a = seats[i]) == null ? void 0 : _a.label) || `EMPRESA ${i + 1}`).slice(0, 12).toUpperCase(), bx + 8, by + 26);
+    g.fillStyle = "rgba(30,41,59,0.25)";
+    g.fillRect(bx + 8, by + 44, bw - 20, 7);
+    g.fillRect(bx + 8, by + 60, bw - 34, 7);
+    g.fillRect(bx + 8, by + 76, bw - 16, 7);
+    g.fillStyle = rgbToCss(p.lane);
+    g.fillRect(bx + 8, by + 124, Math.round((bw - 16) * 0.72), 10);
+  }
+  return kit.canvasTexture(c);
+}
+function makeFloorPaintTexture(kit, text, p) {
+  const c = canvasOf(512, 96);
+  const g = c.getContext("2d");
+  g.clearRect(0, 0, c.width, c.height);
+  g.fillStyle = p.paint;
+  g.font = "700 42px ui-monospace, SFMono-Regular, Menlo, monospace";
+  g.textAlign = "center";
+  g.textBaseline = "middle";
+  g.fillText(text.toUpperCase(), c.width / 2, c.height / 2);
+  return kit.canvasTexture(c);
+}
+function buildExecutiveChair(kit, matLeather, matSteel, matChrome) {
+  const chair = new Group();
+  const baseRing = new Mesh(kit.own(new CylinderGeometry(0.24, 0.27, 0.04, 16)), matChrome);
+  baseRing.position.y = 0.02;
+  baseRing.castShadow = true;
+  baseRing.receiveShadow = true;
+  chair.add(baseRing);
+  const stem = new Mesh(kit.own(new CylinderGeometry(0.038, 0.045, 0.34, 12)), matSteel);
+  stem.position.y = 0.21;
+  stem.castShadow = true;
+  chair.add(stem);
+  const seat = new Mesh(kit.own(new BoxGeometry(0.56, 0.09, 0.54)), matLeather);
+  seat.position.y = 0.42;
+  seat.castShadow = true;
+  seat.receiveShadow = true;
+  chair.add(seat);
+  const back = new Mesh(kit.own(new BoxGeometry(0.54, 0.64, 0.09)), matLeather);
+  back.position.set(0, 0.74, -0.24);
+  back.rotation.x = -0.08;
+  back.castShadow = true;
+  back.receiveShadow = true;
+  chair.add(back);
+  for (const sx of [-0.27, 0.27]) {
+    const post = new Mesh(kit.own(new BoxGeometry(0.04, 0.2, 0.05)), matSteel);
+    post.position.set(sx, 0.54, -0.02);
+    chair.add(post);
+    const pad = new Mesh(kit.own(new BoxGeometry(0.06, 0.04, 0.34)), matLeather);
+    pad.position.set(sx, 0.64, 0.02);
+    pad.castShadow = true;
+    chair.add(pad);
+  }
+  return chair;
+}
+function buildCodeDenDirector(kit, crew, p, seat, index) {
+  const root = new Group();
+  const isCeo = index === 0 || /ceo|iris|holding/i.test(`${seat.label} ${seat.role}`);
+  const isPlanned = seat.status === "planned";
+  const isWorking = seat.status === "working";
+  const bodyRgb = isCeo ? [0.46, 0.66, 0.94] : isPlanned ? [0.55, 0.58, 0.64] : [0.92, 0.93, 0.95];
+  const matBody = kit.matte(bodyRgb, {
+    roughness: 0.62,
+    transparent: isPlanned,
+    opacity: isPlanned ? 0.42 : 1
+  });
+  const matInk = kit.matte(p.ink, { roughness: 0.4 });
+  const matWhite = kit.matte([1, 1, 1], { roughness: 0.3 });
+  const accentRgb = isWorking ? p.accent.reviewer : isCeo ? p.lane : isPlanned ? [0.45, 0.48, 0.54] : p.lane;
+  const matAccent = kit.matte(accentRgb, {
+    roughness: 0.35,
+    emissive: colour(accentRgb),
+    emissiveIntensity: isPlanned ? 0.08 : isWorking ? 0.72 : 0.45
+  });
+  const bodyGroup = new Group();
+  bodyGroup.position.set(0, 0.45, 0.04);
+  bodyGroup.scale.setScalar(1.18);
+  root.add(bodyGroup);
+  const bodyMesh = new Mesh(crew.body, matBody);
+  bodyMesh.castShadow = !isPlanned;
+  bodyMesh.receiveShadow = true;
+  bodyGroup.add(bodyMesh);
+  const tipMesh = new Mesh(crew.tip, matAccent);
+  bodyGroup.add(tipMesh);
+  const eyesMesh = new Mesh(crew.eyes, matInk);
+  bodyGroup.add(eyesMesh);
+  const catchMesh = new Mesh(crew.catchlights, matWhite);
+  bodyGroup.add(catchMesh);
+  const mouthGeo = isPlanned ? crew["mouth:flat-short"] : isCeo ? crew["mouth:wide-smile"] : crew["mouth:smile"];
+  const mouthMesh = new Mesh(mouthGeo, matInk);
+  bodyGroup.add(mouthMesh);
+  const leftHand = new Mesh(crew.hand, matBody);
+  leftHand.position.set(-0.21, 0.24, 0.14);
+  leftHand.castShadow = !isPlanned;
+  bodyGroup.add(leftHand);
+  const rightHand = new Mesh(crew.hand, matBody);
+  rightHand.position.set(0.21, 0.24, 0.14);
+  rightHand.castShadow = !isPlanned;
+  bodyGroup.add(rightHand);
+  for (const fx of [-0.09, 0.09]) {
+    const foot = new Mesh(crew.foot, matBody);
+    foot.position.set(fx, 0.03, 0.08);
+    bodyGroup.add(foot);
+  }
+  const matAccessory = kit.matte(isCeo ? p.ink : accentRgb, { roughness: 0.45 });
+  if (isCeo) {
+    bodyGroup.add(new Mesh(crew.headset, matAccessory));
+    bodyGroup.add(new Mesh(crew.mic, matAccessory));
+  } else if (index % 3 === 1) {
+    bodyGroup.add(new Mesh(crew.neckerchief, matAccessory));
+  } else if (index % 3 === 2) {
+    bodyGroup.add(new Mesh(crew.glasses, matInk));
+    bodyGroup.add(new Mesh(crew.collar, matAccessory));
+  } else {
+    bodyGroup.add(new Mesh(crew.collar, matAccessory));
+  }
+  const rimMesh = new Mesh(crew.rim, matAccent);
+  bodyGroup.add(rimMesh);
+  let dotsMesh = null;
+  if (isWorking) {
+    dotsMesh = new Mesh(crew.dots, matAccent);
+    dotsMesh.position.set(0, 0.72, 0);
+    bodyGroup.add(dotsMesh);
+  }
+  const matRing = kit.own(
+    new MeshBasicMaterial({
+      color: colour(accentRgb),
+      transparent: true,
+      opacity: isPlanned ? 0.32 : 0.85,
+      side: DoubleSide
+    })
+  );
+  const ringMesh = new Mesh(crew.ring, matRing);
+  ringMesh.scale.setScalar(1.38);
+  ringMesh.position.y = 0.025;
+  root.add(ringMesh);
+  return { root, bodyGroup, eyesMesh, dotsMesh, ringMesh };
+}
+function buildSeatDeskProps(kit, p, status) {
+  const g = new Group();
+  const matLaptop = kit.matte(p.laptop, { roughness: 0.42, metalness: 0.25 });
+  const screenRgb = status === "working" ? p.accent.reviewer : status === "active" ? p.lane : [0.22, 0.24, 0.28];
+  const matScreen = kit.matte(screenRgb, {
+    roughness: 0.25,
+    emissive: colour(screenRgb),
+    emissiveIntensity: status === "planned" ? 0.05 : 0.45
+  });
+  const base = new Mesh(kit.own(new BoxGeometry(0.42, 0.022, 0.28)), matLaptop);
+  base.position.set(0, 0.011, 0);
+  base.castShadow = true;
+  base.receiveShadow = true;
+  g.add(base);
+  const lid = new Group();
+  lid.position.set(0, 0.022, 0.13);
+  lid.rotation.x = -0.28;
+  const lidBack = new Mesh(kit.own(new BoxGeometry(0.42, 0.28, 0.018)), matLaptop);
+  lidBack.position.set(0, 0.14, 0);
+  lidBack.castShadow = true;
+  lid.add(lidBack);
+  const lidDisplay = new Mesh(kit.own(new PlaneGeometry(0.38, 0.24)), matScreen);
+  lidDisplay.position.set(0, 0.14, -0.01);
+  lidDisplay.rotation.y = Math.PI;
+  lid.add(lidDisplay);
+  g.add(lid);
+  const mug = new Mesh(kit.own(new CylinderGeometry(0.042, 0.036, 0.085, 12)), kit.matte(p.paper, { roughness: 0.4 }));
+  mug.position.set(0.31, 0.043, -0.03);
+  mug.castShadow = true;
+  g.add(mug);
+  const pad = new Mesh(kit.own(new BoxGeometry(0.16, 0.012, 0.2)), kit.matte(p.notes[0] || p.paper, { roughness: 0.85 }));
+  pad.position.set(-0.33, 6e-3, 0.01);
+  pad.rotation.y = 0.12;
+  pad.receiveShadow = true;
+  g.add(pad);
+  return g;
+}
+function buildCornerPlant(kit, p) {
+  const g = new Group();
+  const pot = new Mesh(
+    kit.own(new CylinderGeometry(0.28, 0.21, 0.44, 14)),
+    kit.matte(p.steel, { roughness: 0.65 })
+  );
+  pot.position.y = 0.22;
+  pot.castShadow = true;
+  pot.receiveShadow = true;
+  g.add(pot);
+  const soil = new Mesh(
+    kit.own(new CylinderGeometry(0.25, 0.25, 0.03, 12)),
+    kit.matte([0.16, 0.13, 0.11], { roughness: 0.95 })
+  );
+  soil.position.y = 0.43;
+  g.add(soil);
+  const leafMat = kit.matte(p.lamp.green, { roughness: 0.72 });
+  const leafDark = kit.matte([p.lamp.green[0] * 0.78, p.lamp.green[1] * 0.78, p.lamp.green[2] * 0.78], { roughness: 0.75 });
+  const fronds = [
+    [0, 0.82, 0, 0.26],
+    [-0.14, 0.66, 0.12, 0.2],
+    [0.15, 0.69, -0.09, 0.21],
+    [-0.08, 0.62, -0.15, 0.18],
+    [0.12, 0.64, 0.14, 0.19]
+  ];
+  fronds.forEach(([x, y, z, r], i) => {
+    const f = new Mesh(kit.own(new DodecahedronGeometry(r, 0)), i % 2 === 0 ? leafMat : leafDark);
+    f.position.set(x, y, z);
+    f.castShadow = true;
+    g.add(f);
+  });
+  return g;
+}
 function createBoardroom3DComponent(ctx) {
   const React = ctx.react;
   const h = React.createElement;
   return function Boardroom3DCanvas(props) {
+    const hostRef = React.useRef(null);
     const mountRef = React.useRef(null);
     const [fitTick, setFitTick] = React.useState(0);
+    const [themeVersion, setThemeVersion] = React.useState(0);
+    const [isFullscreen, setIsFullscreen] = React.useState(false);
+    const [hoveredSeat, setHoveredSeat] = React.useState(null);
+    React.useEffect(() => {
+      var _a;
+      const root = (_a = globalThis.document) == null ? void 0 : _a.documentElement;
+      if (!root || typeof MutationObserver === "undefined") return;
+      const obs = new MutationObserver(() => setThemeVersion((v2) => v2 + 1));
+      obs.observe(root, {
+        attributes: true,
+        attributeFilter: ["class", "style", "data-accent", "data-color-mode", "data-color-level"]
+      });
+      return () => obs.disconnect();
+    }, []);
+    const seats = React.useMemo(
+      () => props.seats.length > 0 ? props.seats : [
+        { id: "ceo", label: "OrgFy Iris", role: "CEO Holding", status: "active" },
+        { id: "orgfy", label: "OrgFy Core", role: "16/16 agentes", status: "active" },
+        { id: "lumen", label: "Lumen IPTV", role: "10/10 agentes", status: "active" },
+        { id: "saas", label: "SaaS Tributário", role: "planejado", status: "planned" }
+      ],
+      [props.seats]
+    );
+    const seatsKey = seats.map((s) => `${s.id}:${s.status}:${s.label}:${s.role}`).join("|");
     React.useEffect(() => {
       const container = mountRef.current;
       if (!container) return;
-      const width = Math.max(320, container.clientWidth || 680);
-      const height = Math.max(220, container.clientHeight || 280);
+      const palette = readPalette();
+      const kit = new Kit();
+      const crew = crewGeometry();
+      for (const geo of Object.values(crew)) kit.own(geo);
+      const width = Math.max(320, container.clientWidth || 720);
+      const height = Math.max(260, container.clientHeight || 380);
       const scene = new Scene();
-      scene.background = new Color(855827);
-      const camera = new PerspectiveCamera(36, width / height, 0.1, 100);
-      let theta = 0.65;
-      let phi = 0.88;
-      let radius = 11.5;
+      const bgColor = palette.dark ? new Color(855827) : colour(palette.sky);
+      scene.background = bgColor;
+      let theta = 0.62;
+      let phi = 0.96;
+      let frustum = 9.4;
+      const target = new Vector3(0, 0.72, -0.15);
+      const aspect2 = width / height;
+      const camera = new OrthographicCamera(
+        -frustum * aspect2 / 2,
+        frustum * aspect2 / 2,
+        frustum / 2,
+        -frustum / 2,
+        0.1,
+        120
+      );
       const updateCamera = () => {
+        const w = Math.max(320, container.clientWidth || width);
+        const hh = Math.max(260, container.clientHeight || height);
+        const asp = w / hh;
+        camera.left = -frustum * asp / 2;
+        camera.right = frustum * asp / 2;
+        camera.top = frustum / 2;
+        camera.bottom = -frustum / 2;
+        const dist = 28;
         camera.position.set(
-          radius * Math.sin(phi) * Math.sin(theta),
-          radius * Math.cos(phi),
-          radius * Math.sin(phi) * Math.cos(theta)
+          target.x + dist * Math.sin(phi) * Math.sin(theta),
+          target.y + dist * Math.cos(phi),
+          target.z + dist * Math.sin(phi) * Math.cos(theta)
         );
-        camera.lookAt(0, 0.65, 0);
+        camera.lookAt(target);
+        camera.updateProjectionMatrix();
       };
       updateCamera();
       let renderer;
       try {
-        renderer = new WebGLRenderer({ antialias: true, alpha: false, powerPreference: "low-power" });
+        renderer = new WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
       } catch {
+        kit.dispose();
         return;
       }
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
       renderer.setSize(width, height);
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = PCFSoftShadowMap;
+      renderer.toneMapping = ACESFilmicToneMapping;
+      renderer.toneMappingExposure = palette.dark ? 1.12 : 1.02;
+      renderer.outputColorSpace = SRGBColorSpace;
       container.innerHTML = "";
       container.appendChild(renderer.domElement);
-      const ambient = new AmbientLight(14412542, 0.65);
-      scene.add(ambient);
-      const keyLight = new DirectionalLight(16777215, 0.9);
-      keyLight.position.set(5, 9, 6);
-      scene.add(keyLight);
-      const rimLight = new PointLight(4052620, 0.9, 18);
-      rimLight.position.set(-4, 3.2, -3);
-      scene.add(rimLight);
-      const floor = new Mesh(
-        new PlaneGeometry(24, 18),
-        new MeshStandardMaterial({ color: 1119258, roughness: 0.9, metalness: 0.05 })
-      );
-      floor.rotation.x = -Math.PI / 2;
-      scene.add(floor);
-      const rug = new Mesh(
-        new BoxGeometry(8.2, 0.02, 5.2),
-        new MeshStandardMaterial({ color: 1514275, roughness: 0.95 })
-      );
-      rug.position.y = 0.01;
-      scene.add(rug);
-      const tableTop = new Mesh(
-        new BoxGeometry(5.2, 0.14, 2.3),
-        new MeshStandardMaterial({ color: 2238e3, roughness: 0.35, metalness: 0.25 })
-      );
-      tableTop.position.set(0, 0.85, 0);
-      scene.add(tableTop);
-      const inlay = new Mesh(
-        new BoxGeometry(3.6, 0.02, 0.24),
-        new MeshStandardMaterial({ color: 4052620, emissive: 1727548, emissiveIntensity: 0.7 })
-      );
-      inlay.position.set(0, 0.93, 0);
-      scene.add(inlay);
-      for (const xOff of [-1.6, 1.6]) {
-        const leg = new Mesh(
-          new CylinderGeometry(0.14, 0.22, 0.82, 14),
-          new MeshStandardMaterial({ color: 1579810, metalness: 0.5, roughness: 0.4 })
-        );
-        leg.position.set(xOff, 0.41, 0);
-        scene.add(leg);
-      }
-      const wall = new Mesh(
-        new BoxGeometry(10.5, 3.6, 0.16),
-        new MeshStandardMaterial({ color: 1382432, roughness: 0.85 })
-      );
-      wall.position.set(0, 1.8, -3.4);
-      scene.add(wall);
-      const screen = new Mesh(
-        new BoxGeometry(4.4, 1.5, 0.06),
-        new MeshStandardMaterial({ color: 726290, emissive: 1194024, emissiveIntensity: 0.85, roughness: 0.2 })
-      );
-      screen.position.set(0, 2.05, -3.28);
-      scene.add(screen);
-      const seats = props.seats.length > 0 ? props.seats : [
-        { id: "ceo", label: "CEO Holding", role: "Orquestração", status: "active" },
-        { id: "orgfy", label: "OrgFy Core", role: "Operacional", status: "active" },
-        { id: "lumen", label: "Lumen IPTV", role: "Operacional", status: "active" },
-        { id: "saas", label: "SaaS Tributário", role: "Planejado", status: "planned" }
-      ];
-      const seatCoords = [
-        [-3.25, 0, 0],
-        // cabeceira esquerda (CEO Holding)
-        [-1.3, 0, 1.65],
-        [0, 0, 1.65],
-        [1.3, 0, 1.65],
-        [-1.3, 0, -1.65],
-        [0, 0, -1.65],
-        [1.3, 0, -1.65],
-        [3.25, 0, 0]
-      ];
-      const pulseMeshes = [];
-      seats.slice(0, seatCoords.length).forEach((seat, idx) => {
-        const [sx, , sz] = seatCoords[idx];
-        const toneHex = seat.status === "working" ? 6333946 : seat.status === "active" ? 4052620 : 5395035;
-        const chair = new Mesh(
-          new BoxGeometry(0.62, 0.45, 0.62),
-          new MeshStandardMaterial({ color: 2040880, roughness: 0.7 })
-        );
-        chair.position.set(sx, 0.45, sz);
-        scene.add(chair);
-        const body = new Mesh(
-          new CylinderGeometry(0.18, 0.24, 0.42, 16),
-          new MeshStandardMaterial({ color: 2830656, roughness: 0.5 })
-        );
-        body.position.set(sx, 0.9, sz);
-        scene.add(body);
-        const head = new Mesh(
-          new SphereGeometry(0.17, 16, 16),
-          new MeshStandardMaterial({ color: 13949154, roughness: 0.4 })
-        );
-        head.position.set(sx, 1.28, sz);
-        scene.add(head);
-        const ring = new Mesh(
-          new RingGeometry(0.36, 0.44, 24),
-          new MeshBasicMaterial({ color: toneHex, side: DoubleSide })
-        );
-        ring.rotation.x = -Math.PI / 2;
-        ring.position.set(sx, 0.03, sz);
-        scene.add(ring);
-        if (seat.status === "working") pulseMeshes.push(ring);
+      const lights = new Lights();
+      scene.add(lights.hemi, lights.sun, lights.sun.target);
+      lights.set([{ x0: -6.2, x1: 6.2, y0: 0, y1: 3.8, z0: -4.2, z1: 4.2 }], palette, false);
+      const accentFill = new PointLight(colour(palette.lane), palette.dark ? 0.55 : 0.25, 14);
+      accentFill.position.set(0, 2.5, -2);
+      scene.add(accentFill);
+      const matFloor = kit.matte(palette.floor, { roughness: 0.88 });
+      const matWall = kit.matte(palette.wall, { roughness: 0.84 });
+      const matSteel = kit.matte(palette.steel, { roughness: 0.48, metalness: 0.35 });
+      const matChrome = kit.matte(palette.chrome, { roughness: 0.25, metalness: 0.72 });
+      const matWood = kit.matte(palette.wood, { roughness: 0.55 });
+      const matLane = kit.matte(palette.lane, {
+        roughness: 0.35,
+        emissive: colour(palette.lane),
+        emissiveIntensity: 0.45
       });
+      const matLeather = kit.matte(palette.dark ? [0.16, 0.18, 0.23] : [0.26, 0.29, 0.35], { roughness: 0.65 });
+      const matGlass = kit.own(
+        new MeshPhysicalMaterial({
+          color: colour(palette.glass),
+          transparent: true,
+          opacity: palette.dark ? 0.18 : 0.28,
+          roughness: 0.12,
+          metalness: 0.05
+        })
+      );
+      const slab = new Mesh(kit.own(new BoxGeometry(11.4, 0.34, 7.6)), matFloor);
+      slab.position.set(0, -0.17, 0);
+      slab.receiveShadow = true;
+      scene.add(slab);
+      const frontTrim = new Mesh(kit.own(new BoxGeometry(11.44, 0.08, 0.08)), matLane);
+      frontTrim.position.set(0, -0.04, 3.8);
+      scene.add(frontTrim);
+      const rightTrim = new Mesh(kit.own(new BoxGeometry(0.08, 0.08, 7.64)), matLane);
+      rightTrim.position.set(5.7, -0.04, 0);
+      scene.add(rightTrim);
+      const rug = new Mesh(
+        kit.own(new BoxGeometry(8.6, 0.024, 5.1)),
+        kit.matte(palette.dark ? [0.22, 0.24, 0.29] : [0.85, 0.84, 0.81], { roughness: 0.95 })
+      );
+      rug.position.set(0, 0.012, 0.1);
+      rug.receiveShadow = true;
+      scene.add(rug);
+      for (const rz of [-2.45, 2.65]) {
+        const line = new Mesh(kit.own(new BoxGeometry(8.62, 0.015, 0.045)), matLane);
+        line.position.set(0, 0.024, rz);
+        scene.add(line);
+      }
+      const paintTex = makeFloorPaintTexture(kit, "CONSELHO DA HOLDING", palette);
+      const floorPaint = new Mesh(
+        kit.own(new PlaneGeometry(4.4, 0.78)),
+        kit.own(new MeshBasicMaterial({ map: paintTex, transparent: true, depthWrite: false }))
+      );
+      floorPaint.rotation.x = -Math.PI / 2;
+      floorPaint.position.set(0, 0.018, 3.22);
+      scene.add(floorPaint);
+      const backWall = new Mesh(kit.own(new BoxGeometry(11.4, 3.3, 0.24)), matWall);
+      backWall.position.set(0, 1.65, -3.68);
+      backWall.castShadow = true;
+      backWall.receiveShadow = true;
+      scene.add(backWall);
+      const leftWall = new Mesh(kit.own(new BoxGeometry(0.24, 3.3, 7.6)), matWall);
+      leftWall.position.set(-5.58, 1.65, 0);
+      leftWall.castShadow = true;
+      leftWall.receiveShadow = true;
+      scene.add(leftWall);
+      const backCap = new Mesh(kit.own(new BoxGeometry(11.44, 0.08, 0.28)), matSteel);
+      backCap.position.set(0, 3.32, -3.68);
+      scene.add(backCap);
+      const leftCap = new Mesh(kit.own(new BoxGeometry(0.28, 0.08, 7.64)), matSteel);
+      leftCap.position.set(-5.58, 3.32, 0);
+      scene.add(leftCap);
+      const glassPane = new Mesh(kit.own(new BoxGeometry(0.06, 2.75, 4.2)), matGlass);
+      glassPane.position.set(5.58, 1.38, -1.5);
+      scene.add(glassPane);
+      for (const gz of [-3.56, -1.5, 0.56]) {
+        const mullion = new Mesh(kit.own(new BoxGeometry(0.1, 2.82, 0.1)), matSteel);
+        mullion.position.set(5.58, 1.41, gz);
+        mullion.castShadow = true;
+        scene.add(mullion);
+      }
+      const glassTopRail = new Mesh(kit.own(new BoxGeometry(0.1, 0.08, 4.22)), matSteel);
+      glassTopRail.position.set(5.58, 2.8, -1.5);
+      scene.add(glassTopRail);
+      const screenBezel = new Mesh(kit.own(new BoxGeometry(5.1, 2.02, 0.12)), kit.matte(palette.sign, { roughness: 0.45 }));
+      screenBezel.position.set(0, 1.68, -3.5);
+      screenBezel.castShadow = true;
+      scene.add(screenBezel);
+      const screenTex = makeExecutiveScreenTexture(kit, seats, palette);
+      const screenDisplay = new Mesh(
+        kit.own(new PlaneGeometry(4.84, 1.78)),
+        kit.own(new MeshBasicMaterial({ map: screenTex }))
+      );
+      screenDisplay.position.set(0, 1.68, -3.435);
+      scene.add(screenDisplay);
+      const screenTrim = new Mesh(kit.own(new BoxGeometry(5.1, 0.05, 0.14)), matLane);
+      screenTrim.position.set(0, 0.65, -3.49);
+      scene.add(screenTrim);
+      const signTex = makeWallSignTexture(kit, "CONSELHO", palette);
+      const signBoard = new Mesh(
+        kit.own(new BoxGeometry(2.1, 0.44, 0.08)),
+        [
+          matSteel,
+          matSteel,
+          matSteel,
+          matSteel,
+          kit.own(new MeshBasicMaterial({ map: signTex })),
+          matSteel
+        ]
+      );
+      signBoard.position.set(0, 2.98, -3.52);
+      signBoard.castShadow = true;
+      scene.add(signBoard);
+      const credenza = new Mesh(kit.own(new BoxGeometry(0.75, 0.72, 2.8)), matWood);
+      credenza.position.set(-5.05, 0.36, -0.1);
+      credenza.castShadow = true;
+      credenza.receiveShadow = true;
+      scene.add(credenza);
+      const credenzaTop = new Mesh(kit.own(new BoxGeometry(0.8, 0.06, 2.86)), matSteel);
+      credenzaTop.position.set(-5.05, 0.75, -0.1);
+      credenzaTop.receiveShadow = true;
+      scene.add(credenzaTop);
+      const blueprint = new Mesh(
+        kit.own(new CylinderGeometry(0.055, 0.055, 0.56, 12)),
+        kit.matte(palette.blueprint, { roughness: 0.6 })
+      );
+      blueprint.rotation.x = Math.PI / 2;
+      blueprint.position.set(-5, 0.84, 0.45);
+      blueprint.castShadow = true;
+      scene.add(blueprint);
+      const stackPaper = new Mesh(
+        kit.own(new BoxGeometry(0.32, 0.09, 0.42)),
+        kit.matte(palette.paper, { roughness: 0.85 })
+      );
+      stackPaper.position.set(-5.02, 0.82, -0.55);
+      stackPaper.castShadow = true;
+      scene.add(stackPaper);
+      const plantL = buildCornerPlant(kit, palette);
+      plantL.position.set(-4.65, 0, -2.85);
+      scene.add(plantL);
+      const plantR = buildCornerPlant(kit, palette);
+      plantR.position.set(4.65, 0, -2.85);
+      scene.add(plantR);
+      const tableGroup = new Group();
+      tableGroup.position.set(0, 0, 0.15);
+      scene.add(tableGroup);
+      const tableFrame = new Mesh(kit.own(new BoxGeometry(5.68, 0.09, 2.38)), matSteel);
+      tableFrame.position.y = 0.78;
+      tableFrame.castShadow = true;
+      tableFrame.receiveShadow = true;
+      tableGroup.add(tableFrame);
+      const tableTop = new Mesh(kit.own(new BoxGeometry(5.54, 0.07, 2.24)), matWood);
+      tableTop.position.y = 0.855;
+      tableTop.castShadow = true;
+      tableTop.receiveShadow = true;
+      tableGroup.add(tableTop);
+      const tray = new Mesh(kit.own(new BoxGeometry(3.8, 0.02, 0.24)), matSteel);
+      tray.position.y = 0.895;
+      tableGroup.add(tray);
+      const inlay = new Mesh(kit.own(new BoxGeometry(3.6, 0.015, 0.06)), matLane);
+      inlay.position.y = 0.908;
+      tableGroup.add(inlay);
+      const visionBoardTex = makeTableVisionBoardTexture(kit, seats, palette);
+      const visionBoard = new Mesh(
+        kit.own(new BoxGeometry(1.75, 0.026, 0.9)),
+        [
+          matWood,
+          matWood,
+          kit.own(new MeshBasicMaterial({ map: visionBoardTex })),
+          matWood,
+          matWood,
+          matWood
+        ]
+      );
+      visionBoard.position.set(0, 0.915, 0);
+      visionBoard.castShadow = true;
+      visionBoard.receiveShadow = true;
+      tableGroup.add(visionBoard);
+      for (const lx of [-1.75, 1.75]) {
+        const pillar = new Mesh(kit.own(new BoxGeometry(0.24, 0.72, 1.1)), matSteel);
+        pillar.position.set(lx, 0.39, 0);
+        pillar.castShadow = true;
+        pillar.receiveShadow = true;
+        tableGroup.add(pillar);
+        const foot = new Mesh(kit.own(new BoxGeometry(0.46, 0.05, 1.48)), matChrome);
+        foot.position.set(lx, 0.025, 0);
+        foot.castShadow = true;
+        foot.receiveShadow = true;
+        tableGroup.add(foot);
+      }
+      const seatSlots = [
+        { pos: [-3.42, 0, 0.15], rotY: Math.PI / 2, deskPos: [-2.32, 0.89, 0.15] },
+        // Cabeceira esquerda (CEO Holding)
+        { pos: [-1.55, 0, 1.78], rotY: Math.PI, deskPos: [-1.55, 0.89, 0.95] },
+        { pos: [0, 0, 1.78], rotY: Math.PI, deskPos: [0, 0.89, 0.95] },
+        { pos: [1.55, 0, 1.78], rotY: Math.PI, deskPos: [1.55, 0.89, 0.95] },
+        { pos: [-1.55, 0, -1.48], rotY: 0, deskPos: [-1.55, 0.89, -0.65] },
+        { pos: [0, 0, -1.48], rotY: 0, deskPos: [0, 0.89, -0.65] },
+        { pos: [1.55, 0, -1.48], rotY: 0, deskPos: [1.55, 0.89, -0.65] },
+        { pos: [3.42, 0, 0.15], rotY: -Math.PI / 2, deskPos: [2.32, 0.89, 0.15] }
+      ];
+      const animated = [];
+      const hitTargets = [];
+      const seatByObject = /* @__PURE__ */ new WeakMap();
+      seats.slice(0, seatSlots.length).forEach((seat, idx) => {
+        const slot = seatSlots[idx];
+        const seatGroup = new Group();
+        seatGroup.position.set(...slot.pos);
+        seatGroup.rotation.y = slot.rotY;
+        scene.add(seatGroup);
+        const chair = buildExecutiveChair(kit, matLeather, matSteel, matChrome);
+        seatGroup.add(chair);
+        const director = buildCodeDenDirector(kit, crew, palette, seat, idx);
+        seatGroup.add(director.root);
+        const propsGroup = buildSeatDeskProps(kit, palette, seat.status);
+        propsGroup.position.set(...slot.deskPos);
+        propsGroup.rotation.y = slot.rotY;
+        scene.add(propsGroup);
+        const hitBox = new Mesh(
+          kit.own(new BoxGeometry(0.95, 1.45, 0.95)),
+          kit.own(new MeshBasicMaterial({ visible: false }))
+        );
+        hitBox.position.set(0, 0.72, 0);
+        seatGroup.add(hitBox);
+        hitTargets.push(hitBox);
+        seatByObject.set(hitBox, seat);
+        animated.push({
+          seat,
+          bodyGroup: director.bodyGroup,
+          eyesMesh: director.eyesMesh,
+          dotsMesh: director.dotsMesh,
+          ringMesh: director.ringMesh,
+          phase: idx * 1.37,
+          baseY: director.bodyGroup.position.y,
+          hitTarget: hitBox
+        });
+      });
+      const raycaster = new Raycaster();
+      const pointer = new Vector2();
       let dragging = false;
+      let moved = false;
       let lastX = 0;
       let lastY = 0;
+      const pickSeat = (e) => {
+        const rect = renderer.domElement.getBoundingClientRect();
+        pointer.x = (e.clientX - rect.left) / rect.width * 2 - 1;
+        pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        raycaster.setFromCamera(pointer, camera);
+        const hits = raycaster.intersectObjects(hitTargets, false);
+        if (hits.length === 0) return null;
+        return seatByObject.get(hits[0].object) || null;
+      };
       const onDown = (e) => {
         dragging = true;
+        moved = false;
         lastX = e.clientX;
         lastY = e.clientY;
+        renderer.domElement.style.cursor = "grabbing";
       };
       const onMove = (e) => {
-        if (!dragging) return;
-        theta -= (e.clientX - lastX) * 8e-3;
-        phi = Math.max(0.45, Math.min(1.25, phi - (e.clientY - lastY) * 6e-3));
-        lastX = e.clientX;
-        lastY = e.clientY;
-        updateCamera();
+        if (dragging) {
+          const dx = e.clientX - lastX;
+          const dy = e.clientY - lastY;
+          if (Math.abs(dx) > 2 || Math.abs(dy) > 2) moved = true;
+          theta -= dx * 8e-3;
+          phi = Math.max(0.48, Math.min(1.22, phi - dy * 6e-3));
+          lastX = e.clientX;
+          lastY = e.clientY;
+          updateCamera();
+          return;
+        }
+        const hit2 = pickSeat(e);
+        setHoveredSeat((cur) => (cur == null ? void 0 : cur.id) === (hit2 == null ? void 0 : hit2.id) ? cur : hit2);
+        renderer.domElement.style.cursor = hit2 ? "pointer" : "grab";
       };
-      const onUp = () => {
+      const onUp = (e) => {
+        if (dragging && !moved) {
+          const hit2 = pickSeat(e);
+          if (hit2 == null ? void 0 : hit2.onClick) hit2.onClick();
+        }
         dragging = false;
+        renderer.domElement.style.cursor = "grab";
       };
       const onWheel = (e) => {
         e.preventDefault();
-        radius = Math.max(7.5, Math.min(16, radius + e.deltaY * 8e-3));
+        frustum = Math.max(5.8, Math.min(14.5, frustum + e.deltaY * 8e-3));
         updateCamera();
+      };
+      const onLeave = () => {
+        setHoveredSeat(null);
       };
       const dom = renderer.domElement;
       dom.style.cursor = "grab";
       dom.addEventListener("mousedown", onDown);
-      window.addEventListener("mousemove", onMove);
+      dom.addEventListener("mousemove", onMove);
+      dom.addEventListener("mouseleave", onLeave);
       window.addEventListener("mouseup", onUp);
       dom.addEventListener("wheel", onWheel, { passive: false });
       let rafId = 0;
@@ -49995,36 +51369,51 @@ function createBoardroom3DComponent(ctx) {
       const animate = () => {
         rafId = requestAnimationFrame(animate);
         const t = clock.getElapsedTime();
-        for (const m of pulseMeshes) {
-          const s = 1 + Math.sin(t * 4) * 0.09;
-          m.scale.set(s, s, 1);
+        for (const a of animated) {
+          const speed = a.seat.status === "working" ? 3.2 : 1.7;
+          const amp = a.seat.status === "planned" ? 4e-3 : 0.015;
+          a.bodyGroup.position.y = a.baseY + Math.sin(t * speed + a.phase) * amp;
+          const blinkCycle = (t + a.phase) % 4.2;
+          const blinkScale = blinkCycle > 4.06 ? 0.14 : 1;
+          a.eyesMesh.scale.y = blinkScale;
+          if (a.dotsMesh) {
+            a.dotsMesh.rotation.y = t * 2.4;
+          }
+          if (a.seat.status === "working") {
+            const s = 1.38 + Math.sin(t * 3.6 + a.phase) * 0.08;
+            a.ringMesh.scale.set(s, s, 1);
+          }
         }
         renderer.render(scene, camera);
       };
       animate();
-      const onResize = () => {
-        const w = Math.max(320, container.clientWidth || 680);
-        const hh = Math.max(220, container.clientHeight || 280);
-        camera.aspect = w / hh;
-        camera.updateProjectionMatrix();
+      const resizeObserver = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => {
+        const w = Math.max(320, container.clientWidth || width);
+        const hh = Math.max(260, container.clientHeight || height);
         renderer.setSize(w, hh);
-      };
-      window.addEventListener("resize", onResize);
+        updateCamera();
+      }) : null;
+      resizeObserver == null ? void 0 : resizeObserver.observe(container);
       return () => {
         cancelAnimationFrame(rafId);
+        resizeObserver == null ? void 0 : resizeObserver.disconnect();
         dom.removeEventListener("mousedown", onDown);
-        window.removeEventListener("mousemove", onMove);
+        dom.removeEventListener("mousemove", onMove);
+        dom.removeEventListener("mouseleave", onLeave);
         window.removeEventListener("mouseup", onUp);
         dom.removeEventListener("wheel", onWheel);
-        window.removeEventListener("resize", onResize);
+        lights.dispose();
+        kit.dispose();
         renderer.dispose();
       };
-    }, [props.seats.length, fitTick]);
+    }, [seatsKey, fitTick, themeVersion]);
     return h(
       "div",
       {
+        ref: hostRef,
         className: "of-card",
         "data-boardroom-3d": "true",
+        "data-boardroom-codeden-v2": "true",
         style: { position: "relative", overflow: "hidden" }
       },
       h(
@@ -50042,25 +51431,97 @@ function createBoardroom3DComponent(ctx) {
         h(
           "div",
           { style: { display: "inline-flex", alignItems: "center", gap: "8px" } },
-          h("strong", null, props.title || "Sala de Reunião do Conselho · Tema Boardroom 3D"),
-          h("span", { className: "of-pill", "data-tone": "done" }, `${props.seats.length} assentos`)
+          h("strong", null, props.title || "Sala de Reunião do Conselho · Boardroom 3D"),
+          h(
+            "span",
+            {
+              className: "of-pill",
+              style: {
+                background: "var(--primary-soft)",
+                borderColor: "var(--primary-border)",
+                color: "var(--primary-text)"
+              }
+            },
+            `${seats.length} assentos`
+          )
         ),
         h(
-          "button",
-          {
-            type: "button",
-            className: "of-btn",
-            "data-variant": "ghost",
-            style: { fontSize: "11px", padding: "3px 8px" },
-            onClick: () => setFitTick((n) => n + 1)
-          },
-          "Enquadrar"
+          "div",
+          { style: { display: "inline-flex", alignItems: "center", gap: "6px" } },
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-variant": "ghost",
+              style: { fontSize: "11px", padding: "3px 8px" },
+              onClick: () => {
+                var _a, _b;
+                const el = hostRef.current;
+                if (!el) return;
+                try {
+                  if (document.fullscreenElement) {
+                    void ((_a = document.exitFullscreen) == null ? void 0 : _a.call(document));
+                    setIsFullscreen(false);
+                  } else {
+                    void ((_b = el.requestFullscreen) == null ? void 0 : _b.call(el));
+                    setIsFullscreen(true);
+                  }
+                } catch {
+                }
+              }
+            },
+            isFullscreen ? "↙ Sair" : "⛶ Tela cheia"
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-variant": "ghost",
+              style: { fontSize: "11px", padding: "3px 8px" },
+              onClick: () => setFitTick((n) => n + 1)
+            },
+            "⤢ Enquadrar"
+          )
         )
       ),
-      h("div", {
-        ref: mountRef,
-        style: { width: "100%", height: "270px", background: "#0d0f13" }
-      }),
+      h(
+        "div",
+        { style: { position: "relative", width: "100%", height: isFullscreen ? "calc(100vh - 88px)" : "380px" } },
+        h("div", {
+          ref: mountRef,
+          style: { width: "100%", height: "100%", background: "var(--background)" }
+        }),
+        hoveredSeat && h(
+          "div",
+          {
+            style: {
+              position: "absolute",
+              top: "12px",
+              left: "12px",
+              pointerEvents: "none",
+              padding: "7px 11px",
+              borderRadius: "8px",
+              border: "1px solid var(--primary-border)",
+              background: "rgba(15, 17, 22, 0.92)",
+              backdropFilter: "blur(8px)",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "8px",
+              fontSize: "11.5px",
+              boxShadow: "0 8px 22px rgba(0,0,0,0.45)"
+            }
+          },
+          h("span", {
+            className: "of-dot",
+            "data-tone": hoveredSeat.status === "working" ? "running" : hoveredSeat.status === "active" ? "done" : "idle"
+          }),
+          h("strong", null, hoveredSeat.label),
+          h("span", { className: "of-muted" }, `· ${hoveredSeat.role}`),
+          hoveredSeat.onClick && h("span", { style: { color: "var(--primary-text)", fontSize: "10.5px" } }, "Clique para abrir ↗")
+        )
+      ),
       h(
         "div",
         {
@@ -50073,7 +51534,7 @@ function createBoardroom3DComponent(ctx) {
             background: "var(--panel)"
           }
         },
-        props.seats.map(
+        seats.map(
           (s) => h(
             "button",
             {
@@ -50081,6 +51542,8 @@ function createBoardroom3DComponent(ctx) {
               type: "button",
               className: "of-chip",
               onClick: s.onClick,
+              onMouseEnter: () => setHoveredSeat(s),
+              onMouseLeave: () => setHoveredSeat((cur) => (cur == null ? void 0 : cur.id) === s.id ? null : cur),
               title: `${s.label} — ${s.role}`
             },
             h("span", {
