@@ -11304,7 +11304,7 @@ function renderFactoryBoardAndFloor(props) {
 }
 function renderItemSheetDrawer(props) {
   var _a;
-  const { h, item, tenant, repoDetail, repoLoading, resolveAuthor, EmbeddedThread, threadChannelId, relaySession, onOpenCommitInBuzz, onClose, onOpenInBuzz } = props;
+  const { h, item, tenant, repoDetail, repoLoading, resolveAuthor, EmbeddedThread, threadChannelId, relaySession, relayScope, onOpenCommitInBuzz, onClose, onOpenInBuzz } = props;
   if (!item) return null;
   const steps = ["Entrada", "Identificar tipo", "Execução (Worktree)", "Revisão L-01 + CI", "Merge na main"];
   const activeIdx = item.stage === "merged" ? 4 : item.stage === "verifying" || item.stage === "watching" ? 3 : item.stage === "building" ? 2 : item.stage === "candidate" ? 1 : 0;
@@ -11420,11 +11420,17 @@ function renderItemSheetDrawer(props) {
           )
         )
       ),
-      EmbeddedThread && threadChannelId && relaySession && h(
+      EmbeddedThread && threadChannelId && relaySession && typeof relayScope === "string" && relayScope.length > 0 && /^[0-9a-f]{64}$/i.test(String(item.id || "")) && h(
         "section",
         { className: "of-surface", style: { padding: "10px 12px", minHeight: "220px" }, "data-embedded-buzz-thread": "true" },
         h("div", { className: "of-meter-label", style: { marginBottom: "6px" } }, "Thread ao vivo no Buzz"),
-        h(EmbeddedThread, { session: relaySession, channelId: threadChannelId, rootId: item.id })
+        h(EmbeddedThread, {
+          session: relaySession,
+          scope: relayScope,
+          channelId: threadChannelId,
+          channelName: tenant,
+          messageId: item.id
+        })
       )
     )
   );
@@ -11465,16 +11471,23 @@ function renderAgentProfileDrawer(props) {
         onSessionAction && agent.key && h("button", { type: "button", className: "of-btn", onClick: () => onSessionAction(agent.key, "new") }, "Nova sessão"),
         onSessionAction && agent.key && h("button", { type: "button", className: "of-btn", "data-variant": "danger", onClick: () => onSessionAction(agent.key, "interrupt") }, "Parar")
       ),
-      TranscriptComponent ? h(
+      h(
         "section",
-        { className: "of-surface", style: { padding: "10px 12px", flex: 1, minHeight: "260px", overflowY: "auto" }, "data-agent-transcript": "true" },
-        h("div", { className: "of-meter-label", style: { marginBottom: "8px" } }, "Transcript ao vivo (ctx.agents.ui.Transcript)"),
-        h(TranscriptComponent, { agentKey: agent.key, channelId: (liveTurn == null ? void 0 : liveTurn.channelId) || channelId || void 0 })
-      ) : h(
-        "section",
-        { className: "of-surface", style: { padding: "12px" }, "data-agent-transcript-fallback": "true" },
-        h("div", { className: "of-meter-label", style: { marginBottom: "6px" } }, "Atividade do agente"),
-        h("div", { className: "of-muted", style: { fontSize: "12px" } }, liveTurn ? `Em execução agora: ${liveTurn.stepLabel}` : "Nenhum turno ativo no momento. Clique em DM lateral ↗ para conversar com o agente.")
+        { className: "of-surface", style: { padding: "12px", display: "flex", flexDirection: "column", gap: "8px" }, "data-agent-transcript": "true" },
+        h("div", { className: "of-meter-label" }, "Atividade & Turno ao vivo (session.agentActivity)"),
+        liveTurn ? h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: "6px", fontSize: "12px" } },
+          h("div", { style: { fontWeight: 600, color: liveTurn.state === "error" ? "var(--status-failed)" : "var(--status-running)" } }, liveTurn.stepLabel),
+          liveTurn.toolName && h("div", { className: "of-mono of-muted", style: { fontSize: "11px" } }, `Tool: ${liveTurn.toolName}${liveTurn.toolTarget ? ` · ${liveTurn.toolTarget}` : ""}`),
+          liveTurn.error && h("div", { style: { color: "var(--status-failed)", fontSize: "11.5px" } }, liveTurn.error)
+        ) : h("div", { className: "of-muted", style: { fontSize: "12px" } }, "Nenhum turno em execução agora. Clique em DM lateral ↗ para conversar ou acompanhar o histórico completo no Buzz."),
+        agent.instructions && h(
+          "details",
+          { style: { marginTop: "4px" } },
+          h("summary", { className: "of-muted", style: { cursor: "pointer", fontSize: "11px" } }, "Instructions NIP-AP ativas"),
+          h("pre", { className: "of-muted", style: { margin: "6px 0 0", whiteSpace: "pre-wrap", fontSize: "11px", maxHeight: "200px", overflowY: "auto", fontFamily: "inherit" } }, agent.instructions)
+        )
       )
     )
   );
@@ -46009,7 +46022,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
   const Floor3D = createFloor3DComponent(ctx);
   const Boardroom3D = createBoardroom3DComponent(ctx);
   return function OrgFyFactoryApp() {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t;
     const [tenant, setTenant] = React.useState("orgfy");
     const [tab, setTab] = React.useState("overview");
     const [dmAgentKey, setDmAgentKey] = React.useState("");
@@ -46647,7 +46660,9 @@ function createFactoryAppComponent(ctx, opts = {}) {
         return null;
       }
     }, [relayTick, status.lastTickAt]);
-    const useNativeSideTabs = Boolean(NativeTabs && (relaySnap == null ? void 0 : relaySnap.session) && (relaySnap == null ? void 0 : relaySnap.scope));
+    const useNativeSideTabs = Boolean(
+      NativeTabs && (relaySnap == null ? void 0 : relaySnap.session) && typeof (relaySnap == null ? void 0 : relaySnap.scope) === "string" && relaySnap.scope.length > 0 && typeof ((_i = relaySnap == null ? void 0 : relaySnap.session) == null ? void 0 : _i.viewer) === "string" && relaySnap.session.viewer.length > 0
+    );
     const pageContent = h(
       "div",
       {
@@ -46692,7 +46707,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
             status,
             telemetry,
             masterAgentName,
-            masterAgentPubkey: (masterLive == null ? void 0 : masterLive.pubkey) || ((_i = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _i.pubkey) || "",
+            masterAgentPubkey: (masterLive == null ? void 0 : masterLive.pubkey) || ((_j = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _j.pubkey) || "",
             masterTurn,
             pendingApprovals,
             inboxCount,
@@ -46850,7 +46865,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
                     if (picked) handleOpenAgentDmInBuzz(picked);
                   }
                 },
-                dmPool.length > 0 ? dmPool.map((a) => h("option", { key: a.key, value: a.key }, a.label)) : h("option", { value: "" }, ((_j = status.tenantManifest) == null ? void 0 : _j.coo) || "OrgFy Bento (COO)")
+                dmPool.length > 0 ? dmPool.map((a) => h("option", { key: a.key, value: a.key }, a.label)) : h("option", { value: "" }, ((_k = status.tenantManifest) == null ? void 0 : _k.coo) || "OrgFy Bento (COO)")
               )
             ),
             toast && h("span", { className: "of-pill", "data-tone": "done" }, toast),
@@ -46982,9 +46997,10 @@ function createFactoryAppComponent(ctx, opts = {}) {
         repoDetail: selectedItemDetail,
         repoLoading: selectedItemDetailLoading,
         resolveAuthor: (pk) => resolveBuzzIdentityName(ctx, pk, nameByPubkey),
-        EmbeddedThread: (_l = (_k = ctx == null ? void 0 : ctx.conversation) == null ? void 0 : _k.ui) == null ? void 0 : _l.Thread,
-        threadChannelId: ((_m2 = status.tenantManifest) == null ? void 0 : _m2.canal) || ((_n = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _n.canal) || null,
+        EmbeddedThread: (_m2 = (_l = ctx == null ? void 0 : ctx.conversation) == null ? void 0 : _l.ui) == null ? void 0 : _m2.Thread,
+        threadChannelId: ((_n = status.tenantManifest) == null ? void 0 : _n.canal) || ((_o = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _o.canal) || null,
         relaySession: relaySnap == null ? void 0 : relaySnap.session,
+        relayScope: typeof (relaySnap == null ? void 0 : relaySnap.scope) === "string" ? relaySnap.scope : null,
         onOpenCommitInBuzz: handleOpenCommitInBuzz,
         onClose: () => setSelectedItem(null),
         onOpenInBuzz: handleOpenInBuzz
@@ -46996,8 +47012,8 @@ function createFactoryAppComponent(ctx, opts = {}) {
           const ag = liveCrew.find((a) => a.key === selectedAgentKey);
           return (ag == null ? void 0 : ag.pubkey) ? telemetry.byPubkey[ag.pubkey.toLowerCase()] || null : null;
         })(),
-        TranscriptComponent: (_p = (_o = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _o.ui) == null ? void 0 : _p.Transcript,
-        channelId: ((_q = status.tenantManifest) == null ? void 0 : _q.canal) || ((_r = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _r.canal) || null,
+        TranscriptComponent: (_q = (_p = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _p.ui) == null ? void 0 : _q.Transcript,
+        channelId: ((_r = status.tenantManifest) == null ? void 0 : _r.canal) || ((_s = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _s.canal) || null,
         onOpenDm: handleOpenAgentDmInBuzz,
         onSessionAction: handleAgentSessionAction,
         onClose: () => setSelectedAgentKey(null)
@@ -47026,7 +47042,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
           status,
           telemetry,
           masterAgentName,
-          masterAgentPubkey: (masterLive == null ? void 0 : masterLive.pubkey) || ((_s = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _s.pubkey) || "",
+          masterAgentPubkey: (masterLive == null ? void 0 : masterLive.pubkey) || ((_t = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _t.pubkey) || "",
           masterTurn,
           pendingApprovals,
           inboxCount,
