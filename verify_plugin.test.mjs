@@ -2021,4 +2021,16 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     assert.ok(factoryAppSrc.includes("wakeAgentInBuzz"), "FactoryApp deve centralizar wakes em wakeAgentInBuzz");
     assert.ok(!factoryAppSrc.includes("threadRoot: card.threadRoot } : {}"), "não deve passar threadRoot em vez de root para ctx.agents.wake");
   });
+
+  test("v17.8: Balões de chat ao vivo no Andar 3D (pensando/executando -> concluído com Abrir resposta)", () => {
+    const bundle = fs.readFileSync(path.resolve(__dirname, "plugin.js"), "utf8");
+    assert.ok(bundle.includes("data-floor3d-speech-layer"), "Camada de balões de fala 3D deve estar no bundle");
+    assert.ok(bundle.includes("data-floor3d-speech-bubble"), "Balões de fala individuais ancorados no 3D devem estar no bundle");
+    assert.ok(bundle.includes("data-floor3d-open-response"), "Botão Abrir resposta no balão 3D deve estar no bundle");
+    assert.ok(bundle.includes("Abrir resposta ↗"), "CTA Abrir resposta ↗ deve estar no bundle");
+    assert.ok(bundle.includes("Resposta pronta no chat do Buzz"), "Estado concluído do balão 3D deve estar no bundle");
+    const floorSrc = fs.readFileSync(path.resolve(__dirname, "src", "factory", "codeden-floor", "Floor3DCanvas.tsx"), "utf8");
+    assert.ok(floorSrc.includes("onOpenTurnInSideChat"), "Floor3DCanvas deve aceitar onOpenTurnInSideChat para abrir a resposta exata");
+    assert.ok(floorSrc.includes("positionBubblesRef.current(figures)"), "FloorStage onFrame deve posicionar balões diretamente via DOM sem re-render");
+  });
 }
