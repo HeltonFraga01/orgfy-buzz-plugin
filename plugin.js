@@ -5557,10 +5557,446 @@ function buildUnifiedOrgfyTools(ctx) {
     }
   }));
 }
-const CARD_BG$1 = "rgba(255, 255, 255, 0.03)";
-const BORDER$1 = "1px solid rgba(255, 255, 255, 0.08)";
+const DEFAULT_ORGFY_REPO_OWNER = "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20";
+function resolveBuzzNavigationScope(ctx) {
+  var _a, _b, _c, _d;
+  try {
+    const navSnap = typeof ((_a = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a.snapshot) === "function" ? ctx.navigation.snapshot() : null;
+    const navScope = (_c = (_b = navSnap == null ? void 0 : navSnap.entry) == null ? void 0 : _b.target) == null ? void 0 : _c.scope;
+    if ((navScope == null ? void 0 : navScope.viewer) && (navScope == null ? void 0 : navScope.communityOrigin)) {
+      return {
+        viewer: String(navScope.viewer),
+        communityOrigin: String(navScope.communityOrigin)
+      };
+    }
+  } catch {
+  }
+  try {
+    const relaySnap = typeof ((_d = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _d.snapshot) === "function" ? ctx.relay.snapshot() : null;
+    const viewer = (relaySnap == null ? void 0 : relaySnap.viewer) ? String(relaySnap.viewer) : "";
+    let communityOrigin = (relaySnap == null ? void 0 : relaySnap.origin) ? String(relaySnap.origin) : "";
+    if (!communityOrigin && viewer && typeof (relaySnap == null ? void 0 : relaySnap.scope) === "string" && relaySnap.scope.endsWith(`:${viewer}`)) {
+      communityOrigin = relaySnap.scope.slice(0, -(viewer.length + 1));
+    }
+    if (viewer && communityOrigin) {
+      return { viewer, communityOrigin };
+    }
+  } catch {
+  }
+  return null;
+}
+async function openBuzzRepoEntity(ctx, route) {
+  var _a;
+  const scope = resolveBuzzNavigationScope(ctx);
+  if (!scope || typeof ((_a = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a.open) !== "function") {
+    return false;
+  }
+  const normalizedRoute = "id" in route ? {
+    type: route.type,
+    owner: route.owner.toLowerCase().trim(),
+    dtag: route.dtag.trim(),
+    id: route.id.toLowerCase().replace(/^#/, "").trim()
+  } : {
+    type: "repo",
+    owner: route.owner.toLowerCase().trim(),
+    dtag: route.dtag.trim(),
+    ...route.tab ? { tab: route.tab } : {},
+    ...route.commit ? { commit: route.commit.toLowerCase().trim() } : {}
+  };
+  try {
+    const res = await ctx.navigation.open({
+      version: 1,
+      kind: "page",
+      pluginId: "buzz.repos",
+      pageId: "repos",
+      scope,
+      route: {
+        version: 1,
+        params: normalizedRoute
+      }
+    });
+    return !res || res.status === "opened";
+  } catch (err) {
+    console.warn("[OrgFy BuzzRepos] ctx.navigation.open falhou:", err);
+    return false;
+  }
+}
+async function openRepoTabInBuzz(ctx, opts) {
+  const owner = /^[0-9a-f]{64}$/i.test(String(opts.owner || "")) ? String(opts.owner).toLowerCase() : DEFAULT_ORGFY_REPO_OWNER;
+  const dtag = String(opts.dtag || "orgfy").trim() || "orgfy";
+  return openBuzzRepoEntity(ctx, {
+    type: "repo",
+    owner,
+    dtag,
+    ...opts.tab ? { tab: opts.tab } : {},
+    ...opts.commit ? { tab: "commits", commit: opts.commit } : {}
+  });
+}
+function tagValue(event, name) {
+  const tags = Array.isArray(event == null ? void 0 : event.tags) ? event.tags : [];
+  const found = tags.find((t) => Array.isArray(t) && t[0] === name && typeof t[1] === "string");
+  return found ? String(found[1]) : void 0;
+}
+async function loadLiveRepoSnapshot(ctx, opts) {
+  var _a, _b, _c, _d;
+  const fallbackOwner = /^[0-9a-f]{64}$/i.test(String(opts.owner || "")) ? String(opts.owner).toLowerCase() : DEFAULT_ORGFY_REPO_OWNER;
+  const fallbackDtag = String(opts.dtag || "orgfy").trim() || "orgfy";
+  const session = typeof ((_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) === "function" ? (_b = ctx.relay.snapshot()) == null ? void 0 : _b.session : null;
+  if (!(session == null ? void 0 : session.repositories) || typeof session.repositories.load !== "function") {
+    return { available: false, owner: fallbackOwner, dtag: fallbackDtag, issues: [], prs: [] };
+  }
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 8e3);
+  try {
+    let owner = fallbackOwner;
+    let dtag = fallbackDtag;
+    let name;
+    if (opts.channelId && typeof session.repositories.home === "function") {
+      try {
+        const home = await session.repositories.home(opts.channelId, ac.signal);
+        if ((home == null ? void 0 : home.status) === "home" && Array.isArray(home.repositories) && home.repositories.length > 0) {
+          const picked = home.repositories.find((r) => String(r.dtag || "").toLowerCase() === fallbackDtag.toLowerCase()) || home.repositories[0];
+          if ((picked == null ? void 0 : picked.owner) && (picked == null ? void 0 : picked.dtag)) {
+            owner = String(picked.owner).toLowerCase();
+            dtag = String(picked.dtag);
+            name = typeof picked.name === "string" ? picked.name : dtag;
+          }
+        }
+      } catch {
+      }
+    }
+    const [issuesDetail, prsDetail] = await Promise.all([
+      session.repositories.load({ type: "repo", owner, dtag, tab: "issues" }, ac.signal).catch(() => null),
+      session.repositories.load({ type: "repo", owner, dtag, tab: "prs" }, ac.signal).catch(() => null)
+    ]);
+    const mapItems = (detail, kind) => {
+      const items = Array.isArray(detail == null ? void 0 : detail.items) ? detail.items : [];
+      return items.map((ev) => {
+        var _a2;
+        const content = String((ev == null ? void 0 : ev.content) || "");
+        const title = tagValue(ev, "subject") || ((_a2 = content.split("\n").find((l) => l.trim())) == null ? void 0 : _a2.replace(/^#+\s*/, "").slice(0, 120)) || `${kind.toUpperCase()} #${String((ev == null ? void 0 : ev.id) || "").slice(0, 8)}`;
+        return {
+          id: String((ev == null ? void 0 : ev.id) || ""),
+          kind,
+          owner,
+          dtag,
+          title,
+          authorPubkey: String((ev == null ? void 0 : ev.pubkey) || "").toLowerCase(),
+          createdAt: Number((ev == null ? void 0 : ev.created_at) || 0) * 1e3,
+          content
+        };
+      });
+    };
+    return {
+      available: Boolean(issuesDetail || prsDetail),
+      owner,
+      dtag,
+      name: name || ((_c = issuesDetail == null ? void 0 : issuesDetail.entity) == null ? void 0 : _c.name) || ((_d = prsDetail == null ? void 0 : prsDetail.entity) == null ? void 0 : _d.name) || dtag,
+      issues: mapItems(issuesDetail, "issue"),
+      prs: mapItems(prsDetail, "pr")
+    };
+  } catch {
+    return { available: false, owner: fallbackOwner, dtag: fallbackDtag, issues: [], prs: [] };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+async function loadLiveRepoEntityDetail(ctx, route) {
+  var _a, _b, _c;
+  const id = String(route.id || "").toLowerCase().replace(/^#/, "").trim();
+  if (!/^[0-9a-f]{64}$/i.test(id)) return null;
+  const session = typeof ((_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) === "function" ? (_b = ctx.relay.snapshot()) == null ? void 0 : _b.session : null;
+  if (!(session == null ? void 0 : session.repositories) || typeof session.repositories.load !== "function") return null;
+  const owner = /^[0-9a-f]{64}$/i.test(String(route.owner)) ? String(route.owner).toLowerCase() : DEFAULT_ORGFY_REPO_OWNER;
+  const dtag = String(route.dtag || "orgfy").trim() || "orgfy";
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 8e3);
+  try {
+    const fullRoute = { type: route.type, owner, dtag, id };
+    const detail = await session.repositories.load(fullRoute, ac.signal);
+    if (!(detail == null ? void 0 : detail.item)) return null;
+    let commitDiff = null;
+    if (detail.commit && session.projectGit && typeof session.projectGit.read === "function") {
+      try {
+        const git = await session.projectGit.read({ owner, dtag, commit: detail.commit }, ac.signal);
+        if (git && typeof git.diff === "string") {
+          commitDiff = git.diff.slice(0, 12e3);
+        }
+      } catch {
+      }
+    }
+    const content = String(detail.item.content || "");
+    const title = tagValue(detail.item, "subject") || ((_c = content.split("\n").find((l) => l.trim())) == null ? void 0 : _c.replace(/^#+\s*/, "").slice(0, 140)) || `#${id.slice(0, 8)}`;
+    const activity = Array.isArray(detail.activity) ? detail.activity : [];
+    return {
+      route: fullRoute,
+      title,
+      content,
+      status: String(detail.status || "Open"),
+      authorPubkey: String(detail.item.pubkey || "").toLowerCase(),
+      createdAt: Number(detail.item.created_at || 0) * 1e3,
+      commit: detail.commit ? String(detail.commit) : void 0,
+      commitDiff,
+      channels: Array.isArray(detail.channels) ? detail.channels.map(String) : [],
+      comments: activity.map((ev) => ({
+        id: String((ev == null ? void 0 : ev.id) || ""),
+        authorPubkey: String((ev == null ? void 0 : ev.pubkey) || "").toLowerCase(),
+        createdAt: Number((ev == null ? void 0 : ev.created_at) || 0) * 1e3,
+        content: String((ev == null ? void 0 : ev.content) || "")
+      }))
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+function resolveBuzzIdentityName(ctx, pubkey, fallbackMap) {
+  var _a, _b;
+  const pk = String(pubkey || "").trim().toLowerCase();
+  if (!pk) return "Desconhecido";
+  try {
+    const session = typeof ((_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) === "function" ? (_b = ctx.relay.snapshot()) == null ? void 0 : _b.session : null;
+    const idView = (session == null ? void 0 : session.identityNames) || (ctx == null ? void 0 : ctx.identityNames);
+    if (typeof (idView == null ? void 0 : idView.resolve) === "function") {
+      const resolved = idView.resolve(pk);
+      if (resolved && typeof resolved === "string" && resolved.trim()) return resolved.trim();
+    }
+    if (typeof (idView == null ? void 0 : idView.lookup) === "function") {
+      const looked = idView.lookup(pk);
+      if (looked == null ? void 0 : looked.name) return String(looked.name);
+    }
+  } catch {
+  }
+  if (fallbackMap == null ? void 0 : fallbackMap.has(pk)) return fallbackMap.get(pk);
+  return /^[0-9a-f]{64}$/i.test(pk) ? `#${pk.slice(0, 8)}` : pk;
+}
+const EMPTY_TELEMETRY = {
+  connected: false,
+  activityStatus: "unavailable",
+  activeTurns: [],
+  byPubkey: {},
+  presenceByPubkey: {},
+  unreadByChannel: {}
+};
+function readBuzzLiveTelemetry(ctx, nameByPubkey) {
+  var _a, _b, _c, _d, _e, _f, _g, _h;
+  try {
+    const relaySnap = typeof ((_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) === "function" ? ctx.relay.snapshot() : null;
+    const session = relaySnap == null ? void 0 : relaySnap.session;
+    if (!session) return EMPTY_TELEMETRY;
+    const actSnap = (_c = (_b = session.agentActivity) == null ? void 0 : _b.snapshot) == null ? void 0 : _c.call(_b);
+    const now = Date.now();
+    const byPubkey = {};
+    const turns = [];
+    const localList = Array.isArray(actSnap == null ? void 0 : actSnap.local) ? actSnap.local : [];
+    for (const row of localList) {
+      if (!row || row.dismissed) continue;
+      if (row.state !== "working" && row.state !== "waiting" && row.state !== "error") continue;
+      const pk = String(row.agent || "").toLowerCase();
+      if (!pk) continue;
+      const stepTool = ((_d = row.step) == null ? void 0 : _d.tool) ? String(row.step.tool) : void 0;
+      const stepTarget = ((_e = row.step) == null ? void 0 : _e.target) ? String(row.step.target) : void 0;
+      const stepLabel = row.state === "error" ? `Erro: ${String(row.error || "falha no turno").slice(0, 72)}` : stepTool ? `${stepTool}${stepTarget ? ` · ${stepTarget.slice(0, 40)}` : ""}` : row.state === "waiting" ? "Iniciando turno..." : "Pensando...";
+      const item = {
+        agentPubkey: pk,
+        agentName: nameByPubkey.get(pk) || `Agente #${pk.slice(0, 8)}`,
+        channelId: String(row.channelId || ""),
+        threadRootId: row.threadRootId ? String(row.threadRootId) : void 0,
+        messageId: row.messageId ? String(row.messageId) : void 0,
+        state: row.state === "error" ? "error" : row.state === "waiting" ? "waiting" : "working",
+        stepLabel,
+        toolName: stepTool,
+        toolTarget: stepTarget,
+        startedAt: Number(row.startedAt || now),
+        error: row.error ? String(row.error) : void 0,
+        stoppable: Boolean(row.stoppable)
+      };
+      byPubkey[pk] = item;
+      turns.push(item);
+    }
+    const typingList = Array.isArray(actSnap == null ? void 0 : actSnap.typing) ? actSnap.typing : [];
+    for (const t of typingList) {
+      if (!t || !t.working) continue;
+      if (typeof t.expiresAt === "number" && t.expiresAt < now) continue;
+      const pk = String(t.agent || "").toLowerCase();
+      if (!pk || byPubkey[pk]) continue;
+      const item = {
+        agentPubkey: pk,
+        agentName: nameByPubkey.get(pk) || `Agente #${pk.slice(0, 8)}`,
+        channelId: String(t.channelId || ""),
+        threadRootId: t.threadRootId ? String(t.threadRootId) : void 0,
+        state: "typing",
+        stepLabel: "Respondendo no Buzz...",
+        startedAt: Number(t.startedAt || t.timestamp || now),
+        stoppable: false
+      };
+      byPubkey[pk] = item;
+      turns.push(item);
+    }
+    const remoteTurns = Array.isArray(actSnap == null ? void 0 : actSnap.turns) ? actSnap.turns : [];
+    for (const rt of remoteTurns) {
+      if (!rt || rt.state !== "working") continue;
+      const pk = String(rt.agent || "").toLowerCase();
+      if (!pk || byPubkey[pk]) continue;
+      const firstReq = Array.isArray(rt.requests) ? rt.requests[0] : null;
+      const item = {
+        agentPubkey: pk,
+        agentName: nameByPubkey.get(pk) || `Agente #${pk.slice(0, 8)}`,
+        channelId: String(rt.channelId || ""),
+        threadRootId: (firstReq == null ? void 0 : firstReq.threadRootId) ? String(firstReq.threadRootId) : void 0,
+        messageId: (firstReq == null ? void 0 : firstReq.messageId) ? String(firstReq.messageId) : void 0,
+        state: "working",
+        stepLabel: "Executando turno...",
+        startedAt: Number(rt.timestamp || now),
+        stoppable: false
+      };
+      byPubkey[pk] = item;
+      turns.push(item);
+    }
+    const presenceByPubkey = {};
+    if (typeof ((_f = session.presence) == null ? void 0 : _f.status) === "function") {
+      for (const pk of nameByPubkey.keys()) {
+        try {
+          const st = session.presence.status(pk);
+          if (st === "online" || st === "away" || st === "offline" || st === "unknown") {
+            presenceByPubkey[pk] = st;
+          }
+        } catch {
+        }
+      }
+    }
+    const unreadByChannel = {};
+    try {
+      const uSnap = (_h = (_g = session.unread) == null ? void 0 : _g.snapshot) == null ? void 0 : _h.call(_g);
+      if (uSnap && typeof uSnap === "object") {
+        const channelsMap = uSnap.channels || uSnap.byChannel;
+        if (channelsMap instanceof Map) {
+          for (const [cid, val] of channelsMap.entries()) {
+            const count = typeof val === "number" ? val : Number((val == null ? void 0 : val.count) ?? (val == null ? void 0 : val.unread) ?? 0);
+            if (count > 0) unreadByChannel[String(cid)] = count;
+          }
+        } else if (channelsMap && typeof channelsMap === "object") {
+          for (const [cid, val] of Object.entries(channelsMap)) {
+            const count = typeof val === "number" ? val : Number((val == null ? void 0 : val.count) ?? (val == null ? void 0 : val.unread) ?? 0);
+            if (count > 0) unreadByChannel[String(cid)] = count;
+          }
+        }
+      }
+    } catch {
+    }
+    return {
+      connected: (relaySnap == null ? void 0 : relaySnap.status) === "ready",
+      activityStatus: String((actSnap == null ? void 0 : actSnap.status) || "unavailable"),
+      activeTurns: turns,
+      byPubkey,
+      presenceByPubkey,
+      unreadByChannel
+    };
+  } catch {
+    return EMPTY_TELEMETRY;
+  }
+}
+async function interruptLiveTurn(ctx, turn) {
+  var _a, _b, _c, _d;
+  try {
+    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+    if (((_d = session == null ? void 0 : session.agentActivity) == null ? void 0 : _d.interrupt) && turn.agentPubkey && turn.channelId && turn.messageId) {
+      await session.agentActivity.interrupt(turn.agentPubkey, turn.channelId, turn.messageId);
+      return true;
+    }
+  } catch {
+  }
+  return false;
+}
+async function readBuzzMainAgentPubkey(ctx) {
+  var _a, _b, _c, _d;
+  try {
+    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+    if (typeof ((_d = session == null ? void 0 : session.mainAgent) == null ? void 0 : _d.read) === "function") {
+      const pk = await session.mainAgent.read();
+      return typeof pk === "string" && pk.trim() ? pk.trim().toLowerCase() : null;
+    }
+  } catch {
+  }
+  return null;
+}
+async function readBuzzChannelCanvasDetailed(ctx, channelId) {
+  var _a, _b, _c, _d, _e;
+  if (!channelId) return { content: null, writable: false };
+  try {
+    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+    const writable = Boolean(((_d = session == null ? void 0 : session.canvas) == null ? void 0 : _d.available) && typeof session.canvas.save === "function");
+    if (((_e = session == null ? void 0 : session.canvas) == null ? void 0 : _e.available) && typeof session.canvas.read === "function") {
+      const ev = await session.canvas.read(channelId);
+      if (ev && typeof ev.content === "string") {
+        return {
+          content: ev.content.trim() ? ev.content : null,
+          eventId: typeof ev.id === "string" ? ev.id : void 0,
+          writable
+        };
+      }
+    }
+    return { content: null, writable };
+  } catch {
+    return { content: null, writable: false };
+  }
+}
+async function saveBuzzChannelCanvas(ctx, channelId, content, expectedEventId) {
+  var _a, _b, _c, _d;
+  if (!channelId) return { ok: false, error: "Canal da empresa não configurado." };
+  try {
+    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+    if (!((_d = session == null ? void 0 : session.canvas) == null ? void 0 : _d.available) || typeof session.canvas.save !== "function") {
+      return { ok: false, error: "API session.canvas.save indisponível no Buzz." };
+    }
+    const saved = await session.canvas.save(channelId, content, expectedEventId);
+    return { ok: true, eventId: typeof (saved == null ? void 0 : saved.id) === "string" ? saved.id : void 0 };
+  } catch (err) {
+    return { ok: false, error: (err == null ? void 0 : err.message) || String(err) };
+  }
+}
+async function readBuzzChannelCanvasHistory(ctx, channelId) {
+  var _a, _b, _c, _d;
+  if (!channelId) return [];
+  try {
+    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+    if (!((_d = session == null ? void 0 : session.canvas) == null ? void 0 : _d.available) || typeof session.canvas.history !== "function") return [];
+    const page = await session.canvas.history(channelId);
+    const entries = Array.isArray(page == null ? void 0 : page.entries) ? page.entries : Array.isArray(page == null ? void 0 : page.events) ? page.events : Array.isArray(page) ? page : [];
+    return entries.slice(0, 8).map((ev) => {
+      var _a2, _b2, _c2, _d2;
+      return {
+        id: String((ev == null ? void 0 : ev.id) || ((_a2 = ev == null ? void 0 : ev.event) == null ? void 0 : _a2.id) || ""),
+        createdAt: Number((ev == null ? void 0 : ev.created_at) || ((_b2 = ev == null ? void 0 : ev.event) == null ? void 0 : _b2.created_at) || 0) * 1e3,
+        authorPubkey: String((ev == null ? void 0 : ev.pubkey) || ((_c2 = ev == null ? void 0 : ev.event) == null ? void 0 : _c2.pubkey) || "").toLowerCase(),
+        preview: String((ev == null ? void 0 : ev.content) || ((_d2 = ev == null ? void 0 : ev.event) == null ? void 0 : _d2.content) || "").replace(/\s+/g, " ").slice(0, 100)
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+const EVAL_R51_WINNERS = /* @__PURE__ */ new Set(["claude-sonnet-5-5", "claude-sonnet-4-6", "gemini-2.5-flash"]);
+const SURFACE_BG = "var(--affordance-subtle, rgba(255, 255, 255, 0.035))";
+const CARD_BG$1 = "var(--bg-panel, rgba(255, 255, 255, 0.03))";
+const BORDER$1 = "1px solid var(--border-primary, rgba(255, 255, 255, 0.09))";
+const TEXT_PRIMARY = "var(--text-primary, #f3f4f6)";
+const TEXT_MUTED = "var(--text-tertiary, #9ca3af)";
+const ACCENT = "var(--accent-primary, var(--green-11, #3dd68c))";
+const BLUE = "var(--blue-11, #60a5fa)";
+const AMBER = "var(--amber-11, #fbbf24)";
+const RED = "var(--red-11, #f87171)";
 function normName(s) {
   return String(s || "").trim().toLowerCase();
+}
+function recommendedModelForAgent(name) {
+  const lower = normName(name);
+  const isTier1 = /(iris|bento|arquit|teo|vera|hugo|lara|ceo|coo|revis|qa|segur|oraculo)/.test(lower);
+  if (isTier1) {
+    return { provider: "nexusmind_anthropic", model: "claude-sonnet-5-5", tierLabel: "Tier 1 (Liderança/Revisão)" };
+  }
+  return { provider: "nexusmind_antigravity", model: "gemini-2.5-flash", tierLabel: "Tier 2 (Execução rápida)" };
 }
 function createAgentOrgfyTabComponent(ctx) {
   const React = ctx == null ? void 0 : ctx.react;
@@ -5572,24 +6008,59 @@ function createAgentOrgfyTabComponent(ctx) {
   const h = React.createElement;
   return function AgentOrgfyTab({ agent }) {
     const [cards, setCards] = React.useState([]);
+    const [repoItems, setRepoItems] = React.useState([]);
+    const [repoOwner, setRepoOwner] = React.useState(DEFAULT_ORGFY_REPO_OWNER);
     const [sessions, setSessions] = React.useState([]);
     const [telemetry, setTelemetry] = React.useState(() => getTelemetrySnapshot());
+    const [activityTick, setActivityTick] = React.useState(0);
     const [loading, setLoading] = React.useState(true);
-    const [failoverBusy, setFailoverBusy] = React.useState(false);
+    const [busyAction, setBusyAction] = React.useState(null);
     const [statusBanner, setStatusBanner] = React.useState(null);
     const agentName = String((agent == null ? void 0 : agent.name) || (agent == null ? void 0 : agent.key) || "Agente");
     const agentKey = String((agent == null ? void 0 : agent.key) || "");
-    const agentPubkey = String((agent == null ? void 0 : agent.pubkey) || "");
+    const agentPubkey = String((agent == null ? void 0 : agent.pubkey) || "").toLowerCase();
     const agentCfg = (agent == null ? void 0 : agent.config) && typeof agent.config === "object" ? agent.config : {};
     const currentModel = String(agentCfg.model || (agent == null ? void 0 : agent.model) || "padrão");
     const currentProvider = String(agentCfg.provider || (agent == null ? void 0 : agent.provider) || "padrão");
-    const currentHarness = String(agentCfg.harness || (agent == null ? void 0 : agent.harness) || "goose");
+    const currentHarness = String(agentCfg.harness || (agent == null ? void 0 : agent.harness) || (agent == null ? void 0 : agent.type) || "goose");
+    const shortModel = String(currentModel.split("/").pop() || currentModel).trim();
+    const isCompliantR51 = EVAL_R51_WINNERS.has(shortModel);
+    const recommended = recommendedModelForAgent(agentName);
+    React.useEffect(() => {
+      var _a, _b, _c;
+      const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+      if (!(session == null ? void 0 : session.agentActivity)) return;
+      const disposers = [];
+      const bump = () => setActivityTick((n) => n + 1);
+      try {
+        if (typeof session.agentActivity.activate === "function") disposers.push(session.agentActivity.activate());
+        if (typeof session.agentActivity.subscribe === "function") disposers.push(session.agentActivity.subscribe(bump));
+        if (typeof session.agentActivity.subscribeWorking === "function") disposers.push(session.agentActivity.subscribeWorking(bump));
+      } catch {
+      }
+      return () => {
+        for (const d of disposers) {
+          try {
+            d();
+          } catch {
+          }
+        }
+      };
+    }, []);
+    const liveTelemetry = React.useMemo(() => {
+      const map = /* @__PURE__ */ new Map();
+      if (agentPubkey) map.set(agentPubkey, agentName);
+      return readBuzzLiveTelemetry(ctx, map);
+    }, [agentPubkey, agentName, activityTick]);
+    const liveTurn = agentPubkey ? liveTelemetry.byPubkey[agentPubkey] || null : null;
+    const presence = agentPubkey ? liveTelemetry.presenceByPubkey[agentPubkey] : void 0;
     const loadAgentContext = React.useCallback(async () => {
       setLoading(true);
       try {
-        const [allCards, radar] = await Promise.all([
+        const [allCards, radar, repoSnap] = await Promise.all([
           fetchLiveKanbanCards(ctx, { empresa: "all" }).catch(() => []),
-          fetchGooseLoopRadar(ctx).catch(() => null)
+          fetchGooseLoopRadar(ctx).catch(() => null),
+          loadLiveRepoSnapshot(ctx, { dtag: "orgfy" }).catch(() => null)
         ]);
         const targetName = normName(agentName);
         const targetKey = normName(agentKey);
@@ -5601,6 +6072,15 @@ function createAgentOrgfyTabComponent(ctx) {
           return targetName && (ex === targetName || rv === targetName || dc === targetName || ex.includes(targetName) || rv.includes(targetName)) || targetKey && (ex === targetKey || rv === targetKey);
         });
         setCards(matchedCards);
+        if (repoSnap == null ? void 0 : repoSnap.available) {
+          setRepoOwner(repoSnap.owner);
+          const allNip34 = [...repoSnap.prs, ...repoSnap.issues].filter((it) => {
+            if (targetPk && it.authorPubkey === targetPk) return true;
+            if (targetName && it.content.toLowerCase().includes(targetName)) return true;
+            return false;
+          });
+          setRepoItems(allNip34.slice(0, 10));
+        }
         const matchedSessions = ((radar == null ? void 0 : radar.sessoes) || []).filter((s) => {
           const sn = normName(s.agente);
           const spk = normName(s.agent_pubkey);
@@ -5616,55 +6096,103 @@ function createAgentOrgfyTabComponent(ctx) {
       const unsub = subscribeTelemetry(() => setTelemetry(getTelemetrySnapshot()));
       return () => unsub();
     }, [loadAgentContext]);
-    const handleFailover = async () => {
-      setFailoverBusy(true);
+    const handleApplyEvalR51 = async () => {
+      const agentsApi = ctx == null ? void 0 : ctx.agents;
+      if (!agentKey || typeof (agentsApi == null ? void 0 : agentsApi.save) !== "function") {
+        setStatusBanner({ ok: false, text: "API ctx.agents.save indisponível nesta versão do Buzz." });
+        return;
+      }
+      setBusyAction("eval");
       setStatusBanner(null);
       try {
-        const res = await requestModelFailover(ctx, {
-          agente: agentName,
-          agent_pubkey: agentPubkey || void 0,
-          failed_model: currentModel !== "padrão" ? currentModel : void 0,
-          prefer_free: false,
-          apply: true,
-          retrigger: false
+        await agentsApi.save(agentKey, {
+          config: { ...agentCfg, provider: recommended.provider, model: recommended.model },
+          ...(agent == null ? void 0 : agent.configBase) ? { base: agent.configBase } : {}
         });
-        setStatusBanner({ ok: res.ok, text: res.message });
-        if (res.ok) {
-          await loadAgentContext();
-        }
+        setStatusBanner({
+          ok: true,
+          text: `Modelo atualizado via ctx.agents.save(): ${recommended.provider}/${recommended.model} (${recommended.tierLabel}).`
+        });
+        await loadAgentContext();
       } catch (err) {
-        setStatusBanner({ ok: false, text: `Erro no failover: ${(err == null ? void 0 : err.message) || err}` });
+        setStatusBanner({ ok: false, text: `Falha ao atualizar modelo: ${(err == null ? void 0 : err.message) || err}` });
       } finally {
-        setFailoverBusy(false);
+        setBusyAction(null);
       }
     };
-    const handleOpenCockpit = () => {
+    const handleSessionAction = async (action) => {
+      setBusyAction(action);
+      setStatusBanner(null);
+      try {
+        if (action === "interrupt" && (liveTurn == null ? void 0 : liveTurn.stoppable)) {
+          const interrupted = await interruptLiveTurn(ctx, liveTurn);
+          if (interrupted) {
+            setStatusBanner({ ok: true, text: `Turno ao vivo de ${agentName} interrompido via session.agentActivity.` });
+            return;
+          }
+        }
+        const agentsApi = ctx == null ? void 0 : ctx.agents;
+        if (!agentKey || typeof (agentsApi == null ? void 0 : agentsApi.session) !== "function") {
+          setStatusBanner({ ok: false, text: "API ctx.agents.session indisponível nesta versão do Buzz." });
+          return;
+        }
+        const place = (liveTurn == null ? void 0 : liveTurn.channelId) ? { channelId: liveTurn.channelId } : {};
+        await agentsApi.session(agentKey, place, action);
+        const label = action === "interrupt" ? "interrompida" : action === "compact" ? "compactada" : "reiniciada";
+        setStatusBanner({ ok: true, text: `Sessão de ${agentName} ${label} via ctx.agents.session().` });
+      } catch (err) {
+        setStatusBanner({ ok: false, text: `Erro ao executar ${action}: ${(err == null ? void 0 : err.message) || err}` });
+      } finally {
+        setBusyAction(null);
+      }
+    };
+    const handleOpenFactory = () => {
       try {
         const nav = ctx == null ? void 0 : ctx.navigation;
         if (nav == null ? void 0 : nav.open) {
           nav.open({ version: 1, kind: "page", pluginId: "digital.cortexx.orgfy", pageId: "orgfy" });
         } else if (nav == null ? void 0 : nav.navigate) {
           nav.navigate("orgfy");
-        } else if (typeof window !== "undefined") {
-          window.location.hash = "#/orgfy";
         }
       } catch {
+      }
+    };
+    const handleOpenDirectIssue = async (item) => {
+      const ok2 = await openBuzzRepoEntity(ctx, {
+        type: item.kind === "pr" ? "pr" : "issue",
+        owner: item.owner || repoOwner,
+        dtag: item.dtag || "orgfy",
+        id: item.id
+      }).catch(() => false);
+      if (!ok2) {
+        await openIssueInBuzz(ctx, { id: item.id, owner: item.owner || repoOwner, dtag: item.dtag || "orgfy" }).catch(() => false);
       }
     };
     const targetLower = normName(agentName);
     const agentSpans = telemetry.recentSpans.filter((sp) => {
       const spName = normName(sp.agentName);
       return spName === targetLower || spName.includes(targetLower) || targetLower.includes(spName);
-    }).slice(0, 8);
+    }).slice(0, 6);
     const agentMetric = telemetry.agentMetrics.find((m) => {
       const mn = normName(m.agentName);
       return mn === targetLower || mn.includes(targetLower);
     });
     const activeCards = cards.filter((c) => c.stage !== "feito");
     const doneCards = cards.filter((c) => c.stage === "feito");
+    const btnBase = {
+      padding: "5px 9px",
+      borderRadius: "7px",
+      border: BORDER$1,
+      backgroundColor: SURFACE_BG,
+      color: TEXT_PRIMARY,
+      fontSize: "11px",
+      fontWeight: "600",
+      cursor: "pointer"
+    };
     return h(
       "div",
       {
+        "data-agent-orgfy-tab": "v17.3",
         style: {
           display: "flex",
           flexDirection: "column",
@@ -5675,47 +6203,62 @@ function createAgentOrgfyTabComponent(ctx) {
           minWidth: 0,
           boxSizing: "border-box",
           overflowX: "hidden",
-          color: "#f3f4f6",
-          fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          color: TEXT_PRIMARY,
+          fontFamily: "inherit",
           fontSize: "12px"
         }
       },
-      // Header do Perfil OrgFy
+      // 1. Cabeçalho OrgFy Factory + Status ao vivo + Ações nativas Buzz API
       h(
         "div",
         {
           style: {
             padding: "12px",
-            borderRadius: "10px",
+            borderRadius: "11px",
             backgroundColor: CARD_BG$1,
-            border: "1px solid rgba(16, 185, 129, 0.28)",
+            border: liveTurn ? `1px solid ${BLUE}` : BORDER$1,
             display: "flex",
             flexDirection: "column",
             gap: "10px",
             width: "100%",
-            maxWidth: "100%",
-            minWidth: 0,
             boxSizing: "border-box"
           }
         },
         h(
           "div",
-          { style: { display: "flex", flexDirection: "column", gap: "4px", minWidth: 0, width: "100%" } },
+          { style: { display: "flex", flexDirection: "column", gap: "5px", minWidth: 0 } },
           h(
             "div",
-            { style: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: "6px", minWidth: 0 } },
+            { style: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: "6px" } },
+            h("span", { style: { fontSize: "13px", fontWeight: "700", color: ACCENT } }, `OrgFy Factory · ${agentName}`),
             h(
               "span",
               {
                 style: {
-                  fontSize: "13px",
+                  fontSize: "10px",
                   fontWeight: "700",
-                  color: "#10b981",
-                  overflowWrap: "anywhere",
-                  wordBreak: "break-word"
+                  padding: "2px 7px",
+                  borderRadius: "9999px",
+                  backgroundColor: liveTurn ? "rgba(96, 165, 250, 0.16)" : "rgba(61, 214, 140, 0.14)",
+                  color: liveTurn ? BLUE : ACCENT
                 }
               },
-              `OrgFy Control Plane · ${agentName}`
+              liveTurn ? "⚡ Respondendo agora" : presence === "online" ? "Online" : "Disponível"
+            ),
+            !isCompliantR51 && h(
+              "span",
+              {
+                "data-eval-r51-alert": "true",
+                style: {
+                  fontSize: "10px",
+                  fontWeight: "700",
+                  padding: "2px 7px",
+                  borderRadius: "9999px",
+                  backgroundColor: "rgba(248, 113, 113, 0.16)",
+                  color: RED
+                }
+              },
+              "Fora do Eval R5.1"
             ),
             (agentMetric == null ? void 0 : agentMetric.retryCascadeRisk) && h(
               "span",
@@ -5725,12 +6268,11 @@ function createAgentOrgfyTabComponent(ctx) {
                   fontWeight: "700",
                   padding: "2px 7px",
                   borderRadius: "9999px",
-                  backgroundColor: "rgba(239, 68, 68, 0.2)",
-                  color: "#f87171",
-                  flexShrink: 0
+                  backgroundColor: "rgba(248, 113, 113, 0.2)",
+                  color: RED
                 }
               },
-              "RISCO RETRY CASCADE"
+              "Retry Cascade"
             )
           ),
           h(
@@ -5738,71 +6280,104 @@ function createAgentOrgfyTabComponent(ctx) {
             {
               style: {
                 fontSize: "11px",
-                color: "#9ca3af",
-                fontFamily: "monospace",
+                color: TEXT_MUTED,
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
                 lineHeight: "1.45",
-                overflowWrap: "anywhere",
-                wordBreak: "break-word"
+                overflowWrap: "anywhere"
               }
             },
             `Harness: ${currentHarness} · Provider: ${currentProvider} · Modelo: ${currentModel}${agentPubkey ? ` · pk: ${agentPubkey.slice(0, 10)}…` : ""}`
           )
         ),
-        h(
+        // Turno em execução ao vivo (session.agentActivity)
+        liveTurn && h(
           "div",
-          { style: { display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap", width: "100%" } },
+          {
+            style: {
+              padding: "8px 10px",
+              borderRadius: "8px",
+              backgroundColor: SURFACE_BG,
+              border: `1px solid ${liveTurn.state === "error" ? RED : BLUE}`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "8px"
+            }
+          },
           h(
-            "button",
-            {
-              onClick: handleFailover,
-              disabled: failoverBusy,
-              style: {
-                padding: "6px 10px",
-                borderRadius: "6px",
-                border: "1px solid rgba(56, 189, 248, 0.45)",
-                backgroundColor: "rgba(56, 189, 248, 0.14)",
-                color: "#38bdf8",
-                fontSize: "11px",
-                fontWeight: "700",
-                cursor: failoverBusy ? "wait" : "pointer",
-                maxWidth: "100%"
-              }
-            },
-            failoverBusy ? "Testando NexusMind..." : "⚡ Melhor Modelo"
+            "div",
+            { style: { minWidth: 0, flex: 1 } },
+            h("div", { style: { fontSize: "11.5px", fontWeight: "600", color: liveTurn.state === "error" ? RED : BLUE } }, liveTurn.stepLabel),
+            liveTurn.toolName && h("div", { style: { fontSize: "10px", color: TEXT_MUTED, fontFamily: "monospace" } }, `tool: ${liveTurn.toolName}`)
           ),
           h(
             "button",
             {
-              onClick: loadAgentContext,
-              disabled: loading,
+              type: "button",
+              disabled: busyAction === "interrupt",
+              onClick: () => handleSessionAction("interrupt"),
+              style: { ...btnBase, borderColor: "rgba(248, 113, 113, 0.45)", color: RED }
+            },
+            "Parar"
+          )
+        ),
+        // Barra de ações nativas (Eval R5.1, Sessão, Factory, Repos)
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" } },
+          !isCompliantR51 && h(
+            "button",
+            {
+              type: "button",
+              disabled: busyAction === "eval",
+              onClick: handleApplyEvalR51,
+              "data-apply-eval-r51": "true",
               style: {
-                padding: "6px 10px",
-                borderRadius: "6px",
-                border: BORDER$1,
-                backgroundColor: "rgba(255,255,255,0.05)",
-                color: "#cbd5e1",
-                fontSize: "11px",
-                cursor: "pointer"
+                ...btnBase,
+                borderColor: "rgba(96, 165, 250, 0.45)",
+                backgroundColor: "rgba(96, 165, 250, 0.14)",
+                color: BLUE
               }
             },
+            busyAction === "eval" ? "Salvando..." : `Aplicar ${recommended.model}`
+          ),
+          h(
+            "button",
+            { type: "button", disabled: busyAction === "compact", onClick: () => handleSessionAction("compact"), style: btnBase },
+            "Compactar"
+          ),
+          h(
+            "button",
+            { type: "button", disabled: busyAction === "new", onClick: () => handleSessionAction("new"), style: btnBase },
+            "Nova sessão"
+          ),
+          h(
+            "button",
+            { type: "button", disabled: loading, onClick: loadAgentContext, style: btnBase },
             loading ? "..." : "Atualizar"
           ),
           h(
             "button",
             {
-              onClick: handleOpenCockpit,
+              type: "button",
+              onClick: () => openRepoTabInBuzz(ctx, { owner: repoOwner, dtag: "orgfy", tab: "issues" }),
+              style: btnBase
+            },
+            "Buzz Repos ↗"
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              onClick: handleOpenFactory,
               style: {
-                padding: "6px 10px",
-                borderRadius: "6px",
+                ...btnBase,
                 border: "none",
-                backgroundColor: "#10b981",
-                color: "#000000",
-                fontSize: "11px",
-                fontWeight: "700",
-                cursor: "pointer"
+                backgroundColor: ACCENT,
+                color: "var(--text-on-prominent, #08120c)"
               }
             },
-            "Abrir Control Room"
+            "Abrir OrgFy Factory"
           )
         )
       ),
@@ -5810,39 +6385,34 @@ function createAgentOrgfyTabComponent(ctx) {
         "div",
         {
           style: {
-            padding: "10px 12px",
+            padding: "9px 11px",
             borderRadius: "8px",
-            backgroundColor: statusBanner.ok ? "rgba(16, 185, 129, 0.12)" : "rgba(245, 158, 11, 0.12)",
-            border: statusBanner.ok ? "1px solid rgba(16, 185, 129, 0.35)" : "1px solid rgba(245, 158, 11, 0.35)",
-            color: statusBanner.ok ? "#a7f3d0" : "#fde68a",
+            backgroundColor: statusBanner.ok ? "rgba(61, 214, 140, 0.12)" : "rgba(251, 191, 36, 0.12)",
+            border: `1px solid ${statusBanner.ok ? ACCENT : AMBER}`,
+            color: statusBanner.ok ? ACCENT : AMBER,
             fontSize: "11px",
-            fontFamily: "monospace",
-            overflowWrap: "anywhere",
-            wordBreak: "break-word",
-            boxSizing: "border-box",
-            width: "100%"
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+            overflowWrap: "anywhere"
           }
         },
         statusBanner.text
       ),
-      // 4 KPIs do Agente (2x2 em drawers estreitos, 4x1 em telas largas)
+      // 2. 4 KPIs compactos
       h(
         "div",
         {
           style: {
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(115px, 1fr))",
+            gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))",
             gap: "8px",
-            width: "100%",
-            minWidth: 0,
-            boxSizing: "border-box"
+            width: "100%"
           }
         },
         [
-          { label: "Cards Ativos", value: String(activeCards.length), color: "#38bdf8" },
-          { label: "Cards Concluídos", value: String(doneCards.length), color: "#10b981" },
-          { label: "Sessões Goose (3h)", value: String(sessions.length), color: sessions.some((s) => s.severidade === "critical") ? "#f87171" : "#cbd5e1" },
-          { label: "Turnos OTel", value: agentMetric ? `${agentMetric.totalTurns} (${agentMetric.errorTurns} err)` : `${agentSpans.length} spans`, color: "#c084fc" }
+          { label: "Cards Ativos", value: String(activeCards.length), color: BLUE },
+          { label: "Concluídos", value: String(doneCards.length), color: ACCENT },
+          { label: "NIP-34 (Repos)", value: String(repoItems.length), color: TEXT_PRIMARY },
+          { label: "OTel Spans", value: agentMetric ? `${agentMetric.totalTurns} (${agentMetric.errorTurns} err)` : String(agentSpans.length), color: "#c084fc" }
         ].map(
           (k) => h(
             "div",
@@ -5850,19 +6420,78 @@ function createAgentOrgfyTabComponent(ctx) {
               key: k.label,
               style: {
                 padding: "9px 10px",
-                borderRadius: "8px",
+                borderRadius: "9px",
                 backgroundColor: CARD_BG$1,
                 border: BORDER$1,
-                minWidth: 0,
-                boxSizing: "border-box"
+                minWidth: 0
               }
             },
-            h("div", { style: { fontSize: "9.5px", color: "#9ca3af", textTransform: "uppercase", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, k.label),
-            h("div", { style: { fontSize: "15px", fontWeight: "700", color: k.color, fontFamily: "monospace", marginTop: "3px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, k.value)
+            h("div", { style: { fontSize: "9.5px", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.05em" } }, k.label),
+            h("div", { style: { fontSize: "15px", fontWeight: "700", color: k.color, fontFamily: "ui-monospace, monospace", marginTop: "3px" } }, k.value)
           )
         )
       ),
-      // Cards Atribuídos na Esteira
+      // 3. Issues & PRs ao vivo do Buzz Repos (NIP-34) — abertura direta em 1 salto
+      repoItems.length > 0 && h(
+        "div",
+        {
+          "data-agent-nip34-list": "true",
+          style: {
+            padding: "12px",
+            borderRadius: "10px",
+            backgroundColor: CARD_BG$1,
+            border: BORDER$1,
+            display: "flex",
+            flexDirection: "column",
+            gap: "7px"
+          }
+        },
+        h(
+          "div",
+          { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+          h("span", { style: { fontSize: "12px", fontWeight: "700" } }, `Buzz Repos NIP-34 (${repoItems.length})`),
+          h("span", { style: { fontSize: "10px", color: TEXT_MUTED, fontFamily: "monospace" } }, "session.repositories")
+        ),
+        repoItems.slice(0, 6).map(
+          (it) => h(
+            "div",
+            {
+              key: it.id,
+              style: {
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "8px",
+                padding: "7px 9px",
+                borderRadius: "7px",
+                backgroundColor: SURFACE_BG,
+                border: BORDER$1
+              }
+            },
+            h(
+              "div",
+              { style: { minWidth: 0, flex: 1 } },
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", gap: "5px", marginBottom: "2px" } },
+                h("span", { style: { fontFamily: "monospace", fontSize: "10px", color: BLUE, fontWeight: "700" } }, `#${String(it.id || "").slice(0, 8)}`),
+                h("span", { style: { fontSize: "9px", fontWeight: "700", padding: "1px 5px", borderRadius: "4px", backgroundColor: it.kind === "pr" ? "rgba(61, 214, 140, 0.16)" : "rgba(96, 165, 250, 0.16)", color: it.kind === "pr" ? ACCENT : BLUE, textTransform: "uppercase" } }, it.kind)
+              ),
+              h("div", { title: it.title, style: { fontSize: "11.5px", fontWeight: "600", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, it.title)
+            ),
+            h(
+              "button",
+              {
+                type: "button",
+                onClick: () => handleOpenDirectIssue({ id: it.id, kind: it.kind, owner: it.owner, dtag: it.dtag }),
+                style: { ...btnBase, color: BLUE, padding: "4px 8px", fontSize: "10px", flexShrink: 0 }
+              },
+              "Abrir ↗"
+            )
+          )
+        )
+      ),
+      // 4. Cards OrgFy atribuídos na esteira
       h(
         "div",
         {
@@ -5873,22 +6502,18 @@ function createAgentOrgfyTabComponent(ctx) {
             border: BORDER$1,
             display: "flex",
             flexDirection: "column",
-            gap: "8px",
-            width: "100%",
-            maxWidth: "100%",
-            minWidth: 0,
-            boxSizing: "border-box"
+            gap: "8px"
           }
         },
         h(
           "div",
-          { style: { display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "4px", minWidth: 0 } },
-          h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, `Cards OrgFy Atribuídos (${cards.length})`),
-          h("span", { style: { fontSize: "10px", color: "#9ca3af", fontFamily: "monospace" } }, "Executor / Revisor / Decisor")
+          { style: { display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "4px" } },
+          h("span", { style: { fontSize: "12px", fontWeight: "700" } }, `Cards OrgFy Atribuídos (${cards.length})`),
+          h("span", { style: { fontSize: "10px", color: TEXT_MUTED, fontFamily: "monospace" } }, "Executor / Revisor / Decisor")
         ),
-        loading ? h("div", { style: { fontSize: "11px", color: "#9ca3af" } }, "Carregando cards da esteira...") : cards.length === 0 ? h("div", { style: { fontSize: "11px", color: "#9ca3af" } }, `Nenhum card ativo ou recente vinculado a ${agentName} no Kanban atual.`) : h(
+        loading ? h("div", { style: { fontSize: "11px", color: TEXT_MUTED } }, "Carregando cards da esteira...") : cards.length === 0 ? h("div", { style: { fontSize: "11px", color: TEXT_MUTED } }, `Nenhum card ativo ou recente vinculado a ${agentName}.`) : h(
           "div",
-          { style: { display: "flex", flexDirection: "column", gap: "6px", maxHeight: "220px", overflowY: "auto", overflowX: "hidden", minWidth: 0 } },
+          { style: { display: "flex", flexDirection: "column", gap: "6px", maxHeight: "220px", overflowY: "auto" } },
           cards.slice(0, 12).map((c) => {
             const role = normName(c.executor) === targetLower ? "EXECUTOR" : normName(c.revisor) === targetLower ? "REVISOR" : "DECISOR";
             return h(
@@ -5901,57 +6526,30 @@ function createAgentOrgfyTabComponent(ctx) {
                   alignItems: "center",
                   gap: "8px",
                   padding: "8px 10px",
-                  borderRadius: "6px",
-                  backgroundColor: "rgba(0,0,0,0.28)",
+                  borderRadius: "7px",
+                  backgroundColor: SURFACE_BG,
                   border: BORDER$1,
-                  minWidth: 0,
-                  width: "100%",
-                  boxSizing: "border-box"
+                  minWidth: 0
                 }
               },
               h(
                 "div",
-                { style: { display: "flex", flexDirection: "column", gap: "3px", minWidth: 0, flex: 1, overflow: "hidden" } },
+                { style: { display: "flex", flexDirection: "column", gap: "3px", minWidth: 0, flex: 1 } },
                 h(
                   "div",
-                  { style: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: "5px", minWidth: 0 } },
-                  h("span", { style: { fontFamily: "monospace", fontSize: "10px", color: "#38bdf8", fontWeight: "700" } }, `#${c.issueId.slice(0, 8)}`),
-                  h("span", { style: { fontSize: "9px", fontWeight: "700", padding: "1px 5px", borderRadius: "4px", backgroundColor: role === "EXECUTOR" ? "rgba(16,185,129,0.18)" : "rgba(192,132,252,0.18)", color: role === "EXECUTOR" ? "#34d399" : "#d8b4fe" } }, role),
-                  h("span", { style: { fontSize: "9px", fontWeight: "700", padding: "1px 5px", borderRadius: "4px", backgroundColor: "rgba(255,255,255,0.08)", color: "#cbd5e1", textTransform: "uppercase" } }, c.stage)
+                  { style: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: "5px" } },
+                  h("span", { style: { fontFamily: "monospace", fontSize: "10px", color: BLUE, fontWeight: "700" } }, `#${String(c.issueId || "").slice(0, 8)}`),
+                  h("span", { style: { fontSize: "9px", fontWeight: "700", padding: "1px 5px", borderRadius: "4px", backgroundColor: role === "EXECUTOR" ? "rgba(61,214,140,0.16)" : "rgba(192,132,252,0.16)", color: role === "EXECUTOR" ? ACCENT : "#d8b4fe" } }, role),
+                  h("span", { style: { fontSize: "9px", fontWeight: "700", padding: "1px 5px", borderRadius: "4px", backgroundColor: "rgba(255,255,255,0.07)", color: TEXT_MUTED, textTransform: "uppercase" } }, c.stage)
                 ),
-                h(
-                  "span",
-                  {
-                    title: c.title,
-                    style: {
-                      fontSize: "11.5px",
-                      fontWeight: "600",
-                      color: "#f3f4f6",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                      display: "block",
-                      maxWidth: "100%"
-                    }
-                  },
-                  c.title
-                )
+                h("span", { title: c.title, style: { fontSize: "11.5px", fontWeight: "600", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, c.title)
               ),
               c.fullIssueId && h(
                 "button",
                 {
-                  onClick: () => openIssueInBuzz(ctx, { id: c.fullIssueId, owner: c.owner, dtag: c.empresa || "orgfy" }),
-                  style: {
-                    padding: "4px 8px",
-                    borderRadius: "5px",
-                    border: "1px solid rgba(56, 189, 248, 0.35)",
-                    backgroundColor: "rgba(56, 189, 248, 0.1)",
-                    color: "#38bdf8",
-                    fontSize: "10px",
-                    fontWeight: "600",
-                    cursor: "pointer",
-                    flexShrink: 0
-                  }
+                  type: "button",
+                  onClick: () => handleOpenDirectIssue({ id: c.fullIssueId, kind: "issue", owner: c.owner, dtag: c.empresa || "orgfy" }),
+                  style: { ...btnBase, color: BLUE, padding: "4px 8px", fontSize: "10px", flexShrink: 0 }
                 },
                 "Abrir ↗"
               )
@@ -5959,20 +6557,17 @@ function createAgentOrgfyTabComponent(ctx) {
           })
         )
       ),
-      // Sessões Goose & OTel Spans (empilha em 1 coluna no drawer estreito, 2 colunas em telas largas)
+      // 5. Sessões Goose & Spans OTel GenAI
       h(
         "div",
         {
           style: {
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
             gap: "10px",
-            width: "100%",
-            minWidth: 0,
-            boxSizing: "border-box"
+            width: "100%"
           }
         },
-        // Sessões Goose
         h(
           "div",
           {
@@ -5984,13 +6579,11 @@ function createAgentOrgfyTabComponent(ctx) {
               display: "flex",
               flexDirection: "column",
               gap: "6px",
-              minWidth: 0,
-              boxSizing: "border-box",
-              overflow: "hidden"
+              minWidth: 0
             }
           },
-          h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, "Sessões Goose Recentes (3h)"),
-          sessions.length === 0 ? h("div", { style: { fontSize: "11px", color: "#9ca3af" } }, "Nenhuma sessão recente no radar Goose.") : sessions.map(
+          h("span", { style: { fontSize: "12px", fontWeight: "700" } }, "Sessões Goose Recentes (3h)"),
+          sessions.length === 0 ? h("div", { style: { fontSize: "11px", color: TEXT_MUTED } }, "Nenhuma sessão recente no radar Goose.") : sessions.map(
             (s) => h(
               "div",
               {
@@ -5998,32 +6591,25 @@ function createAgentOrgfyTabComponent(ctx) {
                 style: {
                   padding: "6px 8px",
                   borderRadius: "6px",
-                  backgroundColor: "rgba(0,0,0,0.28)",
-                  border: s.severidade === "critical" ? "1px solid rgba(239,68,68,0.35)" : BORDER$1,
+                  backgroundColor: SURFACE_BG,
+                  border: s.severidade === "critical" ? `1px solid ${RED}` : BORDER$1,
                   fontSize: "10px",
                   fontFamily: "monospace",
                   display: "flex",
                   flexDirection: "column",
-                  gap: "2px",
-                  minWidth: 0,
-                  overflow: "hidden"
+                  gap: "2px"
                 }
               },
               h(
                 "div",
-                { style: { display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "4px", minWidth: 0 } },
-                h("span", { style: { color: s.ativa ? "#34d399" : "#9ca3af", fontWeight: "700", overflowWrap: "anywhere" } }, `${s.ativa ? "ATIVA" : "HIST"} · ${s.session_id}`),
-                h("span", { style: { color: "#cbd5e1", flexShrink: 0 } }, `${s.duracao_min.toFixed(0)}m · ${s.shells} shells`)
+                { style: { display: "flex", justifyContent: "space-between", gap: "4px" } },
+                h("span", { style: { color: s.ativa ? ACCENT : TEXT_MUTED, fontWeight: "700" } }, `${s.ativa ? "ATIVA" : "HIST"} · ${s.session_id}`),
+                h("span", { style: { color: TEXT_PRIMARY } }, `${s.duracao_min.toFixed(0)}m · ${s.shells} shells`)
               ),
-              h(
-                "span",
-                { style: { color: s.flags.length > 0 ? "#fbbf24" : "#10b981", overflowWrap: "anywhere", wordBreak: "break-word" } },
-                s.flags.length > 0 ? s.flags.join(" · ") : "OK"
-              )
+              h("span", { style: { color: s.flags.length > 0 ? AMBER : ACCENT } }, s.flags.length > 0 ? s.flags.join(" · ") : "OK")
             )
           )
         ),
-        // Spans OTel GenAI
         h(
           "div",
           {
@@ -6035,13 +6621,11 @@ function createAgentOrgfyTabComponent(ctx) {
               display: "flex",
               flexDirection: "column",
               gap: "6px",
-              minWidth: 0,
-              boxSizing: "border-box",
-              overflow: "hidden"
+              minWidth: 0
             }
           },
-          h("span", { style: { fontSize: "12px", fontWeight: "700", color: "#f3f4f6" } }, "Spans OTel GenAI deste Agente"),
-          agentSpans.length === 0 ? h("div", { style: { fontSize: "11px", color: "#9ca3af" } }, "Nenhum span OTel capturado ainda nesta sessão do Buzz.") : agentSpans.map(
+          h("span", { style: { fontSize: "12px", fontWeight: "700" } }, "Spans OTel GenAI deste Agente"),
+          agentSpans.length === 0 ? h("div", { style: { fontSize: "11px", color: TEXT_MUTED } }, "Nenhum span OTel capturado ainda nesta sessão do Buzz.") : agentSpans.map(
             (sp) => h(
               "div",
               {
@@ -6050,18 +6634,16 @@ function createAgentOrgfyTabComponent(ctx) {
                   display: "flex",
                   justifyContent: "space-between",
                   alignItems: "center",
-                  flexWrap: "wrap",
                   gap: "6px",
                   padding: "5px 8px",
                   borderRadius: "6px",
-                  backgroundColor: "rgba(0,0,0,0.28)",
+                  backgroundColor: SURFACE_BG,
                   fontSize: "10px",
-                  fontFamily: "monospace",
-                  minWidth: 0
+                  fontFamily: "monospace"
                 }
               },
-              h("span", { style: { color: "#38bdf8", fontWeight: "600", overflowWrap: "anywhere", minWidth: 0 } }, sp.toolName || sp.operationName),
-              h("span", { style: { color: sp.status === "error" ? "#f87171" : "#10b981", fontWeight: "700", flexShrink: 0 } }, `${sp.status.toUpperCase()} · ${sp.durationMs}ms`)
+              h("span", { style: { color: BLUE, fontWeight: "600", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, sp.toolName || sp.operationName),
+              h("span", { style: { color: sp.status === "error" ? RED : ACCENT, fontWeight: "700", flexShrink: 0 } }, `${sp.status.toUpperCase()} · ${sp.durationMs}ms`)
             )
           )
         )
@@ -44921,426 +45503,6 @@ function renderFactorySecondaryPage(props) {
       )
     )
   );
-}
-const EMPTY_TELEMETRY = {
-  connected: false,
-  activityStatus: "unavailable",
-  activeTurns: [],
-  byPubkey: {},
-  presenceByPubkey: {},
-  unreadByChannel: {}
-};
-function readBuzzLiveTelemetry(ctx, nameByPubkey) {
-  var _a, _b, _c, _d, _e, _f, _g, _h;
-  try {
-    const relaySnap = typeof ((_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) === "function" ? ctx.relay.snapshot() : null;
-    const session = relaySnap == null ? void 0 : relaySnap.session;
-    if (!session) return EMPTY_TELEMETRY;
-    const actSnap = (_c = (_b = session.agentActivity) == null ? void 0 : _b.snapshot) == null ? void 0 : _c.call(_b);
-    const now = Date.now();
-    const byPubkey = {};
-    const turns = [];
-    const localList = Array.isArray(actSnap == null ? void 0 : actSnap.local) ? actSnap.local : [];
-    for (const row of localList) {
-      if (!row || row.dismissed) continue;
-      if (row.state !== "working" && row.state !== "waiting" && row.state !== "error") continue;
-      const pk = String(row.agent || "").toLowerCase();
-      if (!pk) continue;
-      const stepTool = ((_d = row.step) == null ? void 0 : _d.tool) ? String(row.step.tool) : void 0;
-      const stepTarget = ((_e = row.step) == null ? void 0 : _e.target) ? String(row.step.target) : void 0;
-      const stepLabel = row.state === "error" ? `Erro: ${String(row.error || "falha no turno").slice(0, 72)}` : stepTool ? `${stepTool}${stepTarget ? ` · ${stepTarget.slice(0, 40)}` : ""}` : row.state === "waiting" ? "Iniciando turno..." : "Pensando...";
-      const item = {
-        agentPubkey: pk,
-        agentName: nameByPubkey.get(pk) || `Agente #${pk.slice(0, 8)}`,
-        channelId: String(row.channelId || ""),
-        threadRootId: row.threadRootId ? String(row.threadRootId) : void 0,
-        messageId: row.messageId ? String(row.messageId) : void 0,
-        state: row.state === "error" ? "error" : row.state === "waiting" ? "waiting" : "working",
-        stepLabel,
-        toolName: stepTool,
-        toolTarget: stepTarget,
-        startedAt: Number(row.startedAt || now),
-        error: row.error ? String(row.error) : void 0,
-        stoppable: Boolean(row.stoppable)
-      };
-      byPubkey[pk] = item;
-      turns.push(item);
-    }
-    const typingList = Array.isArray(actSnap == null ? void 0 : actSnap.typing) ? actSnap.typing : [];
-    for (const t of typingList) {
-      if (!t || !t.working) continue;
-      if (typeof t.expiresAt === "number" && t.expiresAt < now) continue;
-      const pk = String(t.agent || "").toLowerCase();
-      if (!pk || byPubkey[pk]) continue;
-      const item = {
-        agentPubkey: pk,
-        agentName: nameByPubkey.get(pk) || `Agente #${pk.slice(0, 8)}`,
-        channelId: String(t.channelId || ""),
-        threadRootId: t.threadRootId ? String(t.threadRootId) : void 0,
-        state: "typing",
-        stepLabel: "Respondendo no Buzz...",
-        startedAt: Number(t.startedAt || t.timestamp || now),
-        stoppable: false
-      };
-      byPubkey[pk] = item;
-      turns.push(item);
-    }
-    const remoteTurns = Array.isArray(actSnap == null ? void 0 : actSnap.turns) ? actSnap.turns : [];
-    for (const rt of remoteTurns) {
-      if (!rt || rt.state !== "working") continue;
-      const pk = String(rt.agent || "").toLowerCase();
-      if (!pk || byPubkey[pk]) continue;
-      const firstReq = Array.isArray(rt.requests) ? rt.requests[0] : null;
-      const item = {
-        agentPubkey: pk,
-        agentName: nameByPubkey.get(pk) || `Agente #${pk.slice(0, 8)}`,
-        channelId: String(rt.channelId || ""),
-        threadRootId: (firstReq == null ? void 0 : firstReq.threadRootId) ? String(firstReq.threadRootId) : void 0,
-        messageId: (firstReq == null ? void 0 : firstReq.messageId) ? String(firstReq.messageId) : void 0,
-        state: "working",
-        stepLabel: "Executando turno...",
-        startedAt: Number(rt.timestamp || now),
-        stoppable: false
-      };
-      byPubkey[pk] = item;
-      turns.push(item);
-    }
-    const presenceByPubkey = {};
-    if (typeof ((_f = session.presence) == null ? void 0 : _f.status) === "function") {
-      for (const pk of nameByPubkey.keys()) {
-        try {
-          const st = session.presence.status(pk);
-          if (st === "online" || st === "away" || st === "offline" || st === "unknown") {
-            presenceByPubkey[pk] = st;
-          }
-        } catch {
-        }
-      }
-    }
-    const unreadByChannel = {};
-    try {
-      const uSnap = (_h = (_g = session.unread) == null ? void 0 : _g.snapshot) == null ? void 0 : _h.call(_g);
-      if (uSnap && typeof uSnap === "object") {
-        const channelsMap = uSnap.channels || uSnap.byChannel;
-        if (channelsMap instanceof Map) {
-          for (const [cid, val] of channelsMap.entries()) {
-            const count = typeof val === "number" ? val : Number((val == null ? void 0 : val.count) ?? (val == null ? void 0 : val.unread) ?? 0);
-            if (count > 0) unreadByChannel[String(cid)] = count;
-          }
-        } else if (channelsMap && typeof channelsMap === "object") {
-          for (const [cid, val] of Object.entries(channelsMap)) {
-            const count = typeof val === "number" ? val : Number((val == null ? void 0 : val.count) ?? (val == null ? void 0 : val.unread) ?? 0);
-            if (count > 0) unreadByChannel[String(cid)] = count;
-          }
-        }
-      }
-    } catch {
-    }
-    return {
-      connected: (relaySnap == null ? void 0 : relaySnap.status) === "ready",
-      activityStatus: String((actSnap == null ? void 0 : actSnap.status) || "unavailable"),
-      activeTurns: turns,
-      byPubkey,
-      presenceByPubkey,
-      unreadByChannel
-    };
-  } catch {
-    return EMPTY_TELEMETRY;
-  }
-}
-async function interruptLiveTurn(ctx, turn) {
-  var _a, _b, _c, _d;
-  try {
-    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
-    if (((_d = session == null ? void 0 : session.agentActivity) == null ? void 0 : _d.interrupt) && turn.agentPubkey && turn.channelId && turn.messageId) {
-      await session.agentActivity.interrupt(turn.agentPubkey, turn.channelId, turn.messageId);
-      return true;
-    }
-  } catch {
-  }
-  return false;
-}
-async function readBuzzMainAgentPubkey(ctx) {
-  var _a, _b, _c, _d;
-  try {
-    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
-    if (typeof ((_d = session == null ? void 0 : session.mainAgent) == null ? void 0 : _d.read) === "function") {
-      const pk = await session.mainAgent.read();
-      return typeof pk === "string" && pk.trim() ? pk.trim().toLowerCase() : null;
-    }
-  } catch {
-  }
-  return null;
-}
-async function readBuzzChannelCanvasDetailed(ctx, channelId) {
-  var _a, _b, _c, _d, _e;
-  if (!channelId) return { content: null, writable: false };
-  try {
-    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
-    const writable = Boolean(((_d = session == null ? void 0 : session.canvas) == null ? void 0 : _d.available) && typeof session.canvas.save === "function");
-    if (((_e = session == null ? void 0 : session.canvas) == null ? void 0 : _e.available) && typeof session.canvas.read === "function") {
-      const ev = await session.canvas.read(channelId);
-      if (ev && typeof ev.content === "string") {
-        return {
-          content: ev.content.trim() ? ev.content : null,
-          eventId: typeof ev.id === "string" ? ev.id : void 0,
-          writable
-        };
-      }
-    }
-    return { content: null, writable };
-  } catch {
-    return { content: null, writable: false };
-  }
-}
-async function saveBuzzChannelCanvas(ctx, channelId, content, expectedEventId) {
-  var _a, _b, _c, _d;
-  if (!channelId) return { ok: false, error: "Canal da empresa não configurado." };
-  try {
-    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
-    if (!((_d = session == null ? void 0 : session.canvas) == null ? void 0 : _d.available) || typeof session.canvas.save !== "function") {
-      return { ok: false, error: "API session.canvas.save indisponível no Buzz." };
-    }
-    const saved = await session.canvas.save(channelId, content, expectedEventId);
-    return { ok: true, eventId: typeof (saved == null ? void 0 : saved.id) === "string" ? saved.id : void 0 };
-  } catch (err) {
-    return { ok: false, error: (err == null ? void 0 : err.message) || String(err) };
-  }
-}
-async function readBuzzChannelCanvasHistory(ctx, channelId) {
-  var _a, _b, _c, _d;
-  if (!channelId) return [];
-  try {
-    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
-    if (!((_d = session == null ? void 0 : session.canvas) == null ? void 0 : _d.available) || typeof session.canvas.history !== "function") return [];
-    const page = await session.canvas.history(channelId);
-    const entries = Array.isArray(page == null ? void 0 : page.entries) ? page.entries : Array.isArray(page == null ? void 0 : page.events) ? page.events : Array.isArray(page) ? page : [];
-    return entries.slice(0, 8).map((ev) => {
-      var _a2, _b2, _c2, _d2;
-      return {
-        id: String((ev == null ? void 0 : ev.id) || ((_a2 = ev == null ? void 0 : ev.event) == null ? void 0 : _a2.id) || ""),
-        createdAt: Number((ev == null ? void 0 : ev.created_at) || ((_b2 = ev == null ? void 0 : ev.event) == null ? void 0 : _b2.created_at) || 0) * 1e3,
-        authorPubkey: String((ev == null ? void 0 : ev.pubkey) || ((_c2 = ev == null ? void 0 : ev.event) == null ? void 0 : _c2.pubkey) || "").toLowerCase(),
-        preview: String((ev == null ? void 0 : ev.content) || ((_d2 = ev == null ? void 0 : ev.event) == null ? void 0 : _d2.content) || "").replace(/\s+/g, " ").slice(0, 100)
-      };
-    });
-  } catch {
-    return [];
-  }
-}
-const DEFAULT_ORGFY_REPO_OWNER = "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20";
-function resolveBuzzNavigationScope(ctx) {
-  var _a, _b, _c, _d;
-  try {
-    const navSnap = typeof ((_a = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a.snapshot) === "function" ? ctx.navigation.snapshot() : null;
-    const navScope = (_c = (_b = navSnap == null ? void 0 : navSnap.entry) == null ? void 0 : _b.target) == null ? void 0 : _c.scope;
-    if ((navScope == null ? void 0 : navScope.viewer) && (navScope == null ? void 0 : navScope.communityOrigin)) {
-      return {
-        viewer: String(navScope.viewer),
-        communityOrigin: String(navScope.communityOrigin)
-      };
-    }
-  } catch {
-  }
-  try {
-    const relaySnap = typeof ((_d = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _d.snapshot) === "function" ? ctx.relay.snapshot() : null;
-    const viewer = (relaySnap == null ? void 0 : relaySnap.viewer) ? String(relaySnap.viewer) : "";
-    let communityOrigin = (relaySnap == null ? void 0 : relaySnap.origin) ? String(relaySnap.origin) : "";
-    if (!communityOrigin && viewer && typeof (relaySnap == null ? void 0 : relaySnap.scope) === "string" && relaySnap.scope.endsWith(`:${viewer}`)) {
-      communityOrigin = relaySnap.scope.slice(0, -(viewer.length + 1));
-    }
-    if (viewer && communityOrigin) {
-      return { viewer, communityOrigin };
-    }
-  } catch {
-  }
-  return null;
-}
-async function openBuzzRepoEntity(ctx, route) {
-  var _a;
-  const scope = resolveBuzzNavigationScope(ctx);
-  if (!scope || typeof ((_a = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a.open) !== "function") {
-    return false;
-  }
-  const normalizedRoute = "id" in route ? {
-    type: route.type,
-    owner: route.owner.toLowerCase().trim(),
-    dtag: route.dtag.trim(),
-    id: route.id.toLowerCase().replace(/^#/, "").trim()
-  } : {
-    type: "repo",
-    owner: route.owner.toLowerCase().trim(),
-    dtag: route.dtag.trim(),
-    ...route.tab ? { tab: route.tab } : {},
-    ...route.commit ? { commit: route.commit.toLowerCase().trim() } : {}
-  };
-  try {
-    const res = await ctx.navigation.open({
-      version: 1,
-      kind: "page",
-      pluginId: "buzz.repos",
-      pageId: "repos",
-      scope,
-      route: {
-        version: 1,
-        params: normalizedRoute
-      }
-    });
-    return !res || res.status === "opened";
-  } catch (err) {
-    console.warn("[OrgFy BuzzRepos] ctx.navigation.open falhou:", err);
-    return false;
-  }
-}
-async function openRepoTabInBuzz(ctx, opts) {
-  const owner = /^[0-9a-f]{64}$/i.test(String(opts.owner)) ? String(opts.owner).toLowerCase() : DEFAULT_ORGFY_REPO_OWNER;
-  const dtag = String(opts.dtag || "orgfy").trim() || "orgfy";
-  return openBuzzRepoEntity(ctx, {
-    type: "repo",
-    owner,
-    dtag,
-    ...opts.tab ? { tab: opts.tab } : {},
-    ...opts.commit ? { tab: "commits", commit: opts.commit } : {}
-  });
-}
-function tagValue(event, name) {
-  const tags = Array.isArray(event == null ? void 0 : event.tags) ? event.tags : [];
-  const found = tags.find((t) => Array.isArray(t) && t[0] === name && typeof t[1] === "string");
-  return found ? String(found[1]) : void 0;
-}
-async function loadLiveRepoSnapshot(ctx, opts) {
-  var _a, _b, _c, _d;
-  const fallbackOwner = /^[0-9a-f]{64}$/i.test(String(opts.owner || "")) ? String(opts.owner).toLowerCase() : DEFAULT_ORGFY_REPO_OWNER;
-  const fallbackDtag = String(opts.dtag || "orgfy").trim() || "orgfy";
-  const session = typeof ((_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) === "function" ? (_b = ctx.relay.snapshot()) == null ? void 0 : _b.session : null;
-  if (!(session == null ? void 0 : session.repositories) || typeof session.repositories.load !== "function") {
-    return { available: false, owner: fallbackOwner, dtag: fallbackDtag, issues: [], prs: [] };
-  }
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), 8e3);
-  try {
-    let owner = fallbackOwner;
-    let dtag = fallbackDtag;
-    let name;
-    if (opts.channelId && typeof session.repositories.home === "function") {
-      try {
-        const home = await session.repositories.home(opts.channelId, ac.signal);
-        if ((home == null ? void 0 : home.status) === "home" && Array.isArray(home.repositories) && home.repositories.length > 0) {
-          const picked = home.repositories.find((r) => String(r.dtag || "").toLowerCase() === fallbackDtag.toLowerCase()) || home.repositories[0];
-          if ((picked == null ? void 0 : picked.owner) && (picked == null ? void 0 : picked.dtag)) {
-            owner = String(picked.owner).toLowerCase();
-            dtag = String(picked.dtag);
-            name = typeof picked.name === "string" ? picked.name : dtag;
-          }
-        }
-      } catch {
-      }
-    }
-    const [issuesDetail, prsDetail] = await Promise.all([
-      session.repositories.load({ type: "repo", owner, dtag, tab: "issues" }, ac.signal).catch(() => null),
-      session.repositories.load({ type: "repo", owner, dtag, tab: "prs" }, ac.signal).catch(() => null)
-    ]);
-    const mapItems = (detail, kind) => {
-      const items = Array.isArray(detail == null ? void 0 : detail.items) ? detail.items : [];
-      return items.map((ev) => {
-        var _a2;
-        const content = String((ev == null ? void 0 : ev.content) || "");
-        const title = tagValue(ev, "subject") || ((_a2 = content.split("\n").find((l) => l.trim())) == null ? void 0 : _a2.replace(/^#+\s*/, "").slice(0, 120)) || `${kind.toUpperCase()} #${String((ev == null ? void 0 : ev.id) || "").slice(0, 8)}`;
-        return {
-          id: String((ev == null ? void 0 : ev.id) || ""),
-          kind,
-          owner,
-          dtag,
-          title,
-          authorPubkey: String((ev == null ? void 0 : ev.pubkey) || "").toLowerCase(),
-          createdAt: Number((ev == null ? void 0 : ev.created_at) || 0) * 1e3,
-          content
-        };
-      });
-    };
-    return {
-      available: Boolean(issuesDetail || prsDetail),
-      owner,
-      dtag,
-      name: name || ((_c = issuesDetail == null ? void 0 : issuesDetail.entity) == null ? void 0 : _c.name) || ((_d = prsDetail == null ? void 0 : prsDetail.entity) == null ? void 0 : _d.name) || dtag,
-      issues: mapItems(issuesDetail, "issue"),
-      prs: mapItems(prsDetail, "pr")
-    };
-  } catch {
-    return { available: false, owner: fallbackOwner, dtag: fallbackDtag, issues: [], prs: [] };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-async function loadLiveRepoEntityDetail(ctx, route) {
-  var _a, _b, _c;
-  const id = String(route.id || "").toLowerCase().replace(/^#/, "").trim();
-  if (!/^[0-9a-f]{64}$/i.test(id)) return null;
-  const session = typeof ((_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) === "function" ? (_b = ctx.relay.snapshot()) == null ? void 0 : _b.session : null;
-  if (!(session == null ? void 0 : session.repositories) || typeof session.repositories.load !== "function") return null;
-  const owner = /^[0-9a-f]{64}$/i.test(String(route.owner)) ? String(route.owner).toLowerCase() : DEFAULT_ORGFY_REPO_OWNER;
-  const dtag = String(route.dtag || "orgfy").trim() || "orgfy";
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), 8e3);
-  try {
-    const fullRoute = { type: route.type, owner, dtag, id };
-    const detail = await session.repositories.load(fullRoute, ac.signal);
-    if (!(detail == null ? void 0 : detail.item)) return null;
-    let commitDiff = null;
-    if (detail.commit && session.projectGit && typeof session.projectGit.read === "function") {
-      try {
-        const git = await session.projectGit.read({ owner, dtag, commit: detail.commit }, ac.signal);
-        if (git && typeof git.diff === "string") {
-          commitDiff = git.diff.slice(0, 12e3);
-        }
-      } catch {
-      }
-    }
-    const content = String(detail.item.content || "");
-    const title = tagValue(detail.item, "subject") || ((_c = content.split("\n").find((l) => l.trim())) == null ? void 0 : _c.replace(/^#+\s*/, "").slice(0, 140)) || `#${id.slice(0, 8)}`;
-    const activity = Array.isArray(detail.activity) ? detail.activity : [];
-    return {
-      route: fullRoute,
-      title,
-      content,
-      status: String(detail.status || "Open"),
-      authorPubkey: String(detail.item.pubkey || "").toLowerCase(),
-      createdAt: Number(detail.item.created_at || 0) * 1e3,
-      commit: detail.commit ? String(detail.commit) : void 0,
-      commitDiff,
-      channels: Array.isArray(detail.channels) ? detail.channels.map(String) : [],
-      comments: activity.map((ev) => ({
-        id: String((ev == null ? void 0 : ev.id) || ""),
-        authorPubkey: String((ev == null ? void 0 : ev.pubkey) || "").toLowerCase(),
-        createdAt: Number((ev == null ? void 0 : ev.created_at) || 0) * 1e3,
-        content: String((ev == null ? void 0 : ev.content) || "")
-      }))
-    };
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-function resolveBuzzIdentityName(ctx, pubkey, fallbackMap) {
-  var _a, _b;
-  const pk = String(pubkey || "").trim().toLowerCase();
-  if (!pk) return "Desconhecido";
-  try {
-    const session = typeof ((_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) === "function" ? (_b = ctx.relay.snapshot()) == null ? void 0 : _b.session : null;
-    const idView = (session == null ? void 0 : session.identityNames) || (ctx == null ? void 0 : ctx.identityNames);
-    if (typeof (idView == null ? void 0 : idView.resolve) === "function") {
-      const resolved = idView.resolve(pk);
-      if (resolved && typeof resolved === "string" && resolved.trim()) return resolved.trim();
-    }
-    if (typeof (idView == null ? void 0 : idView.lookup) === "function") {
-      const looked = idView.lookup(pk);
-      if (looked == null ? void 0 : looked.name) return String(looked.name);
-    }
-  } catch {
-  }
-  if (fallbackMap == null ? void 0 : fallbackMap.has(pk)) return fallbackMap.get(pk);
-  return /^[0-9a-f]{64}$/i.test(pk) ? `#${pk.slice(0, 8)}` : pk;
 }
 const SESSION_LIMIT = 5;
 function projectHue(slug) {
