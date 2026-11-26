@@ -34,8 +34,8 @@ const ORGFY_EMPRESAS_DIR = joinHome(".buzz", "REPOS", "orgfy", "empresas");
 const ORGFY_CARDS_DIR = joinHome(".buzz", "REPOS", "orgfy", "cards");
 joinHome(".buzz", "vault-forense", "sentinela-esteira.env");
 const KPI_SNAPSHOT_PATH = joinHome(".buzz", ".scratch", "kpis-esteira.json");
-const KPI_SCRIPT_PATH = joinHome(".buzz", "REPOS", "orgfy", "ferramentas", "esteira", "gerar_kpis_esteira.py");
-const GOOSE_LOOP_RADAR_SCRIPT_PATH = joinHome(".buzz", "REPOS", "orgfy-buzz-plugin", "scripts", "goose_loop_radar.py");
+joinHome(".buzz", "REPOS", "orgfy", "ferramentas", "esteira", "gerar_kpis_esteira.py");
+joinHome(".buzz", "REPOS", "orgfy-buzz-plugin", "scripts", "goose_loop_radar.py");
 const GOOSE_LOOP_RADAR_SNAPSHOT_PATH = joinHome(".buzz", ".scratch", "goose-loop-radar.json");
 const FABRICA_STATUS_SCRIPT_PATH = joinHome(".buzz", "REPOS", "orgfy", "ferramentas", "esteira", "fabrica_status.py");
 function getControlePath(tenant) {
@@ -1085,14 +1085,17 @@ async function recalculateKpisNow(ctx) {
   let output = "";
   try {
     if (host == null ? void 0 : host.exec) {
-      const res = await host.exec("python", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
+      const res = await host.exec("orgfy-kpis", ["--output", KPI_SNAPSHOT_PATH]);
       output = [res == null ? void 0 : res.stdout, res == null ? void 0 : res.stderr].filter(Boolean).join("\n").trim();
     } else if (host == null ? void 0 : host.spawn) {
-      const proc = await host.spawn("python", { args: [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH] });
+      const proc = await host.spawn("orgfy-kpis", {
+        args: ["--output", KPI_SNAPSHOT_PATH],
+        cwd: ORGFY_REPO_ROOT
+      });
       if (proc == null ? void 0 : proc.exited) {
         await proc.exited;
       }
-      output = "Recálculo executado via subprocesso (python).";
+      output = "Recálculo executado via subprocesso restrito (orgfy-kpis).";
     }
   } catch (err) {
     output = `Aviso ao executar script: ${(err == null ? void 0 : err.message) || err}`;
@@ -1125,12 +1128,12 @@ async function fetchGooseLoopRadar(ctx) {
   };
   try {
     if (host == null ? void 0 : host.spawn) {
-      const proc = await host.spawn("python", { args: [GOOSE_LOOP_RADAR_SCRIPT_PATH] });
+      const proc = await host.spawn("orgfy-loop-radar", { args: [], cwd: ORGFY_REPO_ROOT });
       if (proc == null ? void 0 : proc.exited) {
         await proc.exited;
       }
     } else if (host == null ? void 0 : host.exec) {
-      await host.exec("python", [GOOSE_LOOP_RADAR_SCRIPT_PATH]);
+      await host.exec("orgfy-loop-radar", []);
     }
   } catch {
   }

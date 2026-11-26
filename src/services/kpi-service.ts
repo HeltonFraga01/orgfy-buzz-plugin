@@ -112,7 +112,7 @@ export interface KpiReadResult {
   history: KpiHistoryPoint[];
 }
 
-import { KPI_SNAPSHOT_PATH, KPI_SCRIPT_PATH, GOOSE_LOOP_RADAR_SCRIPT_PATH, GOOSE_LOOP_RADAR_SNAPSHOT_PATH } from "../config";
+import { ORGFY_REPO_ROOT, KPI_SNAPSHOT_PATH, KPI_SCRIPT_PATH, GOOSE_LOOP_RADAR_SCRIPT_PATH, GOOSE_LOOP_RADAR_SNAPSHOT_PATH } from "../config";
 export { KPI_SNAPSHOT_PATH, KPI_SCRIPT_PATH, GOOSE_LOOP_RADAR_SCRIPT_PATH, GOOSE_LOOP_RADAR_SNAPSHOT_PATH };
 const ARTIFACT_COLLECTION = "orgfy_kpi_history_v1";
 const LOCAL_STORAGE_KEY = "orgfy_kpi_history_v1";
@@ -255,17 +255,19 @@ export async function recalculateKpisNow(ctx: Context): Promise<{
   let output = "";
 
   try {
-    // manifest.json declara o processo pelo id "python" (program: "python3") e "bash" (args: ["-c"]).
-    // Chamar "python3" como id disparava "Process is not declared" no sandbox do Buzz Desktop.
+    // Usa o processo/comando declarado com args fixos "orgfy-kpis" no manifest.json (sem python irrestrito)
     if (host?.exec) {
-      const res = await host.exec("python", [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH]);
+      const res = await host.exec("orgfy-kpis", ["--output", KPI_SNAPSHOT_PATH]);
       output = [res?.stdout, res?.stderr].filter(Boolean).join("\n").trim();
     } else if (host?.spawn) {
-      const proc = await host.spawn("python", { args: [KPI_SCRIPT_PATH, "--output", KPI_SNAPSHOT_PATH] });
+      const proc = await host.spawn("orgfy-kpis", {
+        args: ["--output", KPI_SNAPSHOT_PATH],
+        cwd: ORGFY_REPO_ROOT,
+      });
       if (proc?.exited) {
         await proc.exited;
       }
-      output = "Recálculo executado via subprocesso (python).";
+      output = "Recálculo executado via subprocesso restrito (orgfy-kpis).";
     }
   } catch (err: any) {
     output = `Aviso ao executar script: ${err?.message || err}`;
@@ -352,15 +354,15 @@ export async function fetchGooseLoopRadar(ctx: Context): Promise<GooseLoopRadarP
     sessoes: [],
   };
 
-  // 1. Tenta atualizar o snapshot via host.spawn("python", { args: [...] }) (API oficial @buzz/author)
+  // 1. Tenta atualizar o snapshot via processo restrito "orgfy-loop-radar" declarado no manifest.json
   try {
     if (host?.spawn) {
-      const proc = await host.spawn("python", { args: [GOOSE_LOOP_RADAR_SCRIPT_PATH] });
+      const proc = await host.spawn("orgfy-loop-radar", { args: [], cwd: ORGFY_REPO_ROOT });
       if (proc?.exited) {
         await proc.exited;
       }
     } else if (host?.exec) {
-      await host.exec("python", [GOOSE_LOOP_RADAR_SCRIPT_PATH]);
+      await host.exec("orgfy-loop-radar", []);
     }
   } catch {
     // Se falhar o spawn, segue para ler o último snapshot gravado em disco
