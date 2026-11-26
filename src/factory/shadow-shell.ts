@@ -3,32 +3,39 @@
 
 export const FACTORY_SHADOW_CSS = `
 :host, [data-orgfy-factory-root="true"] {
-  /* Cores 100% nativas do Buzz Desktop (herda tema e cor de destaque personalizada do usuário) */
+  /* Cores 100% nativas do Buzz Desktop (herda modo light/dark e acento personalizado: bee, citrus, cobalt, iris, magenta, mono) */
   --background: var(--bg-app, var(--surface-base, #101010));
   --foreground: var(--text-primary, var(--text-standard, #f3f4f6));
   --card: var(--bg-panel, var(--surface-panel, #18181b));
-  --surface: var(--affordance-subtle, var(--surface-elevated, #202024));
-  --panel: var(--bg-panel, #161619);
-  --sidebar: var(--bg-app, #121215);
+  --surface: var(--affordance-subtle, var(--surface-inset, #202024));
+  --bg-inset: var(--surface-inset, var(--surface-inset-subtle, var(--surface)));
+  --panel: var(--bg-panel, var(--surface-panel, #161619));
+  --sidebar: var(--bg-app, var(--surface-base, #121215));
   --muted: var(--affordance-subtle, #232327);
-  --muted-foreground: var(--text-tertiary, var(--text-subtle, #9ca3af));
-  --accent: var(--affordance-selected, #2c2c32);
+  --muted-foreground: var(--text-tertiary, var(--text-metadata, var(--text-subtle, #9ca3af)));
+  --accent: var(--affordance-selected, var(--affordance-subtle-hover, #2c2c32));
   --border: var(--border-primary, var(--border-standard, rgba(255, 255, 255, 0.09)));
-  --border-strong: var(--border-primary, rgba(255, 255, 255, 0.16));
-  --primary: var(--accent-primary, var(--brand-primary, var(--green-11, #3dd68c)));
-  --primary-soft: color-mix(in srgb, var(--primary) 14%, transparent);
-  --primary-foreground: var(--text-on-prominent, #08120c);
+  --border-strong: var(--border-prominent, var(--border-control, var(--border-primary, rgba(255, 255, 255, 0.16))));
+  --primary: var(--affordance-accent-prominent, var(--accent-9, var(--green-11, #3dd68c)));
+  --primary-hover: var(--affordance-accent-prominent-hover, var(--accent-10, var(--primary)));
+  --primary-pressed: var(--affordance-accent-prominent-pressed, var(--accent-pressed, var(--primary)));
+  --primary-soft: var(--accent-3, color-mix(in srgb, var(--primary) 14%, transparent));
+  --primary-border: var(--accent-7, color-mix(in srgb, var(--primary) 42%, transparent));
+  --primary-text: var(--accent-link, var(--accent-11, var(--primary)));
+  --primary-foreground: var(--text-on-accent, var(--accent-contrast, var(--text-on-prominent, #08120c)));
 
   --status-running: var(--blue-11, #60a5fa);
   --status-waiting: var(--amber-11, #fbbf24);
   --status-done: var(--green-11, #3dd68c);
   --status-failed: var(--red-11, var(--surface-status-danger, #f87171));
   --status-idle: var(--text-tertiary, #71717a);
+  --diff-add: var(--green-11, #3dd68c);
+  --diff-del: var(--red-11, #f87171);
 
   --chart-1: var(--primary);
-  --chart-2: var(--blue-11, #60a5fa);
-  --chart-3: var(--green-11, #3dd68c);
-  --chart-4: #c084fc;
+  --chart-2: var(--chart-series-1, var(--blue-11, #60a5fa));
+  --chart-3: var(--chart-series-3, var(--green-11, #3dd68c));
+  --chart-4: var(--chart-series-4, var(--purple-11, #c084fc));
   --chart-5: var(--red-11, #f87171);
 
   --radius: 10px;
@@ -1152,6 +1159,18 @@ export const FACTORY_SHADOW_CSS = `
 .of-btn[data-variant="primary"] {
   background: var(--primary);
   border-color: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.of-btn[data-variant="primary"]:hover:not(:disabled) {
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
+  color: var(--primary-foreground);
+}
+
+.of-btn[data-variant="primary"]:active:not(:disabled) {
+  background: var(--primary-pressed);
+  border-color: var(--primary-pressed);
   color: var(--primary-foreground);
 }
 

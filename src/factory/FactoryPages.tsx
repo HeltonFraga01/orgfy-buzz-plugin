@@ -20,6 +20,7 @@ import type { BuzzFocusState } from "../services/buzz-focus";
 import type { CommandIntegrityAuditSummary } from "../services/command-integrity";
 import { PT_BR } from "../i18n/pt-BR";
 import { renderFactoryUsageAndCostPage, type UsageDimension, type UsageMetric } from "./FactoryUsageAndCostPage";
+import { renderFactoryInboxPage } from "./FactoryInboxPage";
 
 export interface FactorySecondaryPagesProps {
   h: any;
@@ -145,6 +146,16 @@ export interface FactorySecondaryPagesProps {
   pricesOpen?: boolean;
   setPricesOpen?: (v: boolean) => void;
   onOpenSettings?: () => void;
+  inboxDismissedIds?: string[];
+  onInboxDismissIds?: (ids: string[], label?: string) => void;
+  onInboxRestoreIds?: (ids: string[]) => void;
+  confirmBulkDismiss?: boolean;
+  setConfirmBulkDismiss?: (v: boolean) => void;
+  lastBulkDismiss?: { ids: string[]; label: string } | null;
+  onOpenItemInBuzz?: (item: FactoryWorkItem) => void;
+  onRetryInboxItem?: (item: FactoryWorkItem) => void;
+  onResumeFactory?: () => void;
+  onOpenFactoryPanel?: () => void;
 }
 
 const CHART_COLORS = ["var(--chart-2)", "var(--chart-1)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"];
@@ -557,86 +568,34 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
     );
   }
 
-  // ── 2. INBOX (routes/inbox.tsx + Question Cards CRDT · Onda 3) ──
+  // ── 2. INBOX (1:1 CodeDen via FactoryInboxPage.tsx + Herança de Tema do Buzz + Question Cards CRDT) ──
   if (tab === "inbox") {
-    const problems = [...status.inProgress, ...status.recent].filter((i) => i.stage === "failed" || i.stage === "reverted");
-    const asks = [...status.inProgress, ...status.recent].filter((i) => i.stage === "escalated");
-    const reviews = status.inProgress.filter((i) => i.stage === "verifying");
-    const qCards = props.questionCards || [];
-    const pendingQuestionCards = qCards.filter((c) => c.status === "pending");
-    const asksTotal = asks.length + pendingQuestionCards.length;
-    const allCount = problems.length + asksTotal + reviews.length + status.held.length;
-    const showQuestionCards = Boolean(props.QuestionCardsPanel && qCards.length > 0 && (inboxFilter === "all" || inboxFilter === "asks"));
-
-    const shown =
-      inboxFilter === "asks"
-        ? asks
-        : inboxFilter === "reviews"
-        ? reviews
-        : inboxFilter === "problems"
-        ? problems
-        : [...asks, ...reviews, ...problems];
-
-    return h(
-      "div",
-      { style: { display: "flex", flexDirection: "column", gap: "12px", maxWidth: "820px" } },
-      h(
-        "div",
-        { className: "of-segmented", style: { width: "fit-content" } },
-        ([
-          { id: "all", label: `Todos (${allCount})` },
-          { id: "asks", label: `Para você · Fundador (${asksTotal})` },
-          { id: "reviews", label: `Revisões L-01 (${reviews.length})` },
-          { id: "problems", label: `Problemas · COO (${problems.length})` },
-        ] as const).map((f) =>
-          h(
-            "button",
-            {
-              key: f.id,
-              type: "button",
-              className: "of-seg-btn",
-              "data-active": inboxFilter === f.id ? "true" : "false",
-              onClick: () => setInboxFilter(f.id),
-            },
-            f.label
-          )
-        )
-      ),
-      showQuestionCards &&
-        h(props.QuestionCardsPanel, {
-          cards: qCards,
-          backendInfo: props.crdtBackendInfo,
-          onAnswer: props.onAnswerQuestionCard || (() => {}),
-          onDismiss: props.onDismissQuestionCard || (() => {}),
-        }),
-      shown.length === 0 && !showQuestionCards
-        ? h(
-            "div",
-            { className: "of-card-pad", style: { textAlign: "center", padding: "36px 20px" } },
-            h("div", { style: { fontSize: "14px", fontWeight: 700 } }, "Você está em dia"),
-            h("div", { className: "of-muted", style: { marginTop: "4px" } }, "Perguntas de agentes (Question Cards), aprovações de spec, PRs aguardando revisão e falhas aparecem aqui.")
-          )
-        : shown.map((item) =>
-            h(
-              "button",
-              {
-                key: item.id,
-                type: "button",
-                className: "of-view-card",
-                "data-state": item.stage === "failed" ? "failed" : "person",
-                onClick: () => onSelectItem(item),
-              },
-              h(
-                "div",
-                { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
-                h("span", { className: "of-mono", style: { color: "var(--primary)", fontSize: "11px" } }, `#${item.id.slice(0, 8)}`),
-                h("span", { className: "of-pill", "data-tone": item.stage === "failed" ? "failed" : "waiting" }, item.stage)
-              ),
-              h("div", { style: { fontSize: "13px", fontWeight: 600 } }, item.title),
-              item.reason && h("div", { className: "of-muted" }, item.reason)
-            )
-          )
-    );
+    return renderFactoryInboxPage({
+      h,
+      tenant,
+      companyName: status.tenantManifest?.nome || tenant,
+      status,
+      automations: props.automations,
+      inboxFilter,
+      setInboxFilter,
+      dismissedIds: props.inboxDismissedIds || [],
+      onDismissIds: props.onInboxDismissIds || (() => {}),
+      onRestoreIds: props.onInboxRestoreIds || (() => {}),
+      confirmBulkDismiss: Boolean(props.confirmBulkDismiss),
+      setConfirmBulkDismiss: props.setConfirmBulkDismiss || (() => {}),
+      lastBulkDismiss: props.lastBulkDismiss || null,
+      onSelectItem,
+      onOpenItemInBuzz: props.onOpenItemInBuzz,
+      onRetryItem: props.onRetryInboxItem,
+      onResumeFactory: props.onResumeFactory,
+      onOpenFactoryPanel: props.onOpenFactoryPanel,
+      onOpenSession: onOpenAgentDm,
+      QuestionCardsPanel: props.QuestionCardsPanel,
+      questionCards: props.questionCards,
+      crdtBackendInfo: props.crdtBackendInfo,
+      onAnswerQuestionCard: props.onAnswerQuestionCard,
+      onDismissQuestionCard: props.onDismissQuestionCard,
+    });
   }
 
   // ── 3. USO & CUSTOS (1:1 CodeDen Usage & Cost via FactoryUsageAndCostPage.tsx) ──
