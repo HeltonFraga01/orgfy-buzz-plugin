@@ -16418,72 +16418,160 @@ function renderFactoryOverviewPanel(props) {
     h(
       "section",
       { className: "of-card", "aria-label": "Fábrica de Software" },
-      // Header da Fábrica
-      h(
-        "div",
-        { className: "of-panel-head" },
-        h("span", { className: "of-brand-icon", style: { width: "32px", height: "32px", fontSize: "14px" } }, "⚙"),
-        h(
+      // Header da Fábrica (compacto, subtexto enxuto e ações em ícones minimalistas)
+      (() => {
+        const hIcon = (paths, size = 14) => h(
+          "svg",
+          {
+            width: size,
+            height: size,
+            viewBox: "0 0 24 24",
+            fill: "none",
+            stroke: "currentColor",
+            strokeWidth: 1.85,
+            strokeLinecap: "round",
+            strokeLinejoin: "round",
+            style: { width: `${size}px`, height: `${size}px`, display: "block", flexShrink: 0 },
+            "aria-hidden": "true"
+          },
+          paths.map((d, idx) => h("path", { key: idx, d }))
+        );
+        const iconBtn = {
+          width: "28px",
+          height: "28px",
+          padding: 0,
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          borderRadius: "7px"
+        };
+        return h(
           "div",
-          { style: { minWidth: 0 } },
+          { className: "of-panel-head", style: { flexWrap: "nowrap", gap: "10px" } },
+          h("span", { className: "of-brand-icon", style: { width: "30px", height: "30px", fontSize: "13px", flexShrink: 0 } }, "⚙"),
           h(
             "div",
-            { style: { display: "flex", alignItems: "center", gap: "7px", flexWrap: "wrap", fontSize: "14px", fontWeight: 600 } },
-            h("span", null, props.isBoardTenant ? "Pipeline de Gestão · Conselho da Holding" : `${PT_BR.modes[status.mode] || status.mode} · ${tenant}`),
-            !props.isBoardTenant && status.experimental && h("span", { className: "of-exp-badge" }, "experimental"),
+            { style: { minWidth: 0, flex: 1 } },
             h(
-              "span",
-              { className: "of-pill", "data-tone": status.coordenador === "ativo" ? "done" : "failed" },
-              props.isBoardTenant ? "Governança ativa" : status.coordenador === "ativo" ? PT_BR.labels.coordinatorActive : PT_BR.labels.coordinatorStopped
+              "div",
+              { style: { display: "flex", alignItems: "center", gap: "7px", flexWrap: "wrap", fontSize: "13.5px", fontWeight: 600 } },
+              h("span", null, props.isBoardTenant ? "Pipeline de Gestão · Conselho da Holding" : `${PT_BR.modes[status.mode] || status.mode} · ${tenant}`),
+              !props.isBoardTenant && status.experimental && h("span", { className: "of-exp-badge" }, "experimental"),
+              h(
+                "span",
+                { className: "of-pill", "data-tone": status.coordenador === "ativo" ? "done" : "failed" },
+                props.isBoardTenant ? "Governança ativa" : status.coordenador === "ativo" ? PT_BR.labels.coordinatorActive : PT_BR.labels.coordinatorStopped
+              )
+            ),
+            h(
+              "div",
+              { className: "of-muted", style: { marginTop: "2px", fontSize: "11px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } },
+              props.isBoardTenant ? "Pautas escaladas → comitês técnicos · Bestie (OrgFy Iris) aciona o Fundador." : status.limits.autoMerge ? "Issues NIP-34 nas pipelines · auto-merge ativo quando os checks passam." : "Issues NIP-34 nas pipelines · revisão L-01 e aprovação manual."
             )
           ),
           h(
             "div",
-            { className: "of-muted", style: { marginTop: "2px" } },
-            props.isBoardTenant ? "Pautas escaladas pelas subsidiárias (COO → CEO) passam pelos comitês técnicos; apenas a Bestie (OrgFy Iris) aciona o Fundador em DM." : (status.mode === "dark_factory" ? "O Oráculo e issues confiáveis alimentam as pipelines; " : "Issues NIP-34 confiáveis alimentam as pipelines; ") + (status.limits.autoMerge ? "a OrgFy faz merge quando todos os checks passam." : "você e o Revisor L-01 aprovam os PRs.")
-          )
-        ),
-        h(
-          "div",
-          { style: { marginLeft: "auto", display: "flex", flexWrap: "wrap", alignItems: "center", gap: "6px" } },
-          h("button", { type: "button", className: "of-btn", onClick: onOpenBoard }, "Visão da Fábrica"),
-          h(
-            "button",
-            { type: "button", className: "of-btn", onClick: onRefresh, disabled: loading },
-            loading ? "Verificando..." : PT_BR.actions.checkNow
-          ),
-          h("button", { type: "button", className: "of-btn", "data-variant": "ghost", onClick: onOpenSettings }, "Configurações"),
-          h("button", { type: "button", className: "of-btn", "data-variant": "ghost", onClick: onOpenVision }, "Visão"),
-          h("button", { type: "button", className: "of-btn", onClick: onToggleDrain }, status.drain ? PT_BR.actions.drainOff : PT_BR.actions.drainOn),
-          !confirmKill ? h(
-            "button",
-            {
-              type: "button",
-              className: "of-btn",
-              "data-variant": "danger",
-              onClick: () => status.killSwitch ? onToggleKillSwitch(false) : setConfirmKill(true)
-            },
-            status.killSwitch ? PT_BR.actions.killSwitchOff : PT_BR.actions.killSwitchOn
-          ) : h(
-            "div",
-            { style: { display: "inline-flex", gap: "4px" } },
+            { style: { marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: "4px", flexShrink: 0 }, "data-factory-header-icons": "true" },
             h(
               "button",
               {
                 type: "button",
                 className: "of-btn",
-                "data-variant": "danger",
-                onClick: () => {
-                  setConfirmKill(false);
-                  onToggleKillSwitch(true);
-                }
+                "data-variant": "ghost",
+                title: props.isBoardTenant ? "Abrir Sala de Reunião 3D" : "Visão da Fábrica (Andar 3D)",
+                "aria-label": "Visão da Fábrica",
+                style: iconBtn,
+                onClick: onOpenBoard
               },
-              "Confirmar Kill Switch"
+              hIcon(["M12 2 3 7l9 5 9-5-9-5z", "M3 12l9 5 9-5", "M3 17l9 5 9-5"])
             ),
-            h("button", { type: "button", className: "of-btn", onClick: () => setConfirmKill(false) }, "Cancelar")
+            h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                "data-variant": "ghost",
+                title: loading ? "Verificando..." : PT_BR.actions.checkNow,
+                "aria-label": PT_BR.actions.checkNow,
+                style: iconBtn,
+                onClick: onRefresh,
+                disabled: loading
+              },
+              hIcon(["M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8", "M3 3v5h5", "M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16", "M16 16h5v5"])
+            ),
+            h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                "data-variant": "ghost",
+                title: "Configurações",
+                "aria-label": "Configurações",
+                style: iconBtn,
+                onClick: onOpenSettings
+              },
+              hIcon(["M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z", "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.08a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.08a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"])
+            ),
+            h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                "data-variant": "ghost",
+                title: props.isBoardTenant ? "Estatuto & Regras" : "Canvas / Visão",
+                "aria-label": "Visão",
+                style: iconBtn,
+                onClick: onOpenVision
+              },
+              hIcon(["M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z", "M14 2v6h6", "M8 13h8", "M8 17h5"])
+            ),
+            h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                "data-variant": "ghost",
+                title: status.drain ? PT_BR.actions.drainOff : PT_BR.actions.drainOn,
+                "aria-label": status.drain ? PT_BR.actions.drainOff : PT_BR.actions.drainOn,
+                style: { ...iconBtn, color: status.drain ? "var(--status-waiting)" : void 0, border: status.drain ? "1px solid var(--status-waiting)" : void 0 },
+                onClick: onToggleDrain
+              },
+              hIcon(["M5 22h14", "M5 2h14", "M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22", "M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"])
+            ),
+            !confirmKill ? h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                "data-variant": "danger",
+                title: status.killSwitch ? PT_BR.actions.killSwitchOff : PT_BR.actions.killSwitchOn,
+                "aria-label": status.killSwitch ? PT_BR.actions.killSwitchOff : PT_BR.actions.killSwitchOn,
+                style: iconBtn,
+                onClick: () => status.killSwitch ? onToggleKillSwitch(false) : setConfirmKill(true)
+              },
+              hIcon(["M18.36 6.64a9 9 0 1 1-12.73 0", "M12 2v10"])
+            ) : h(
+              "div",
+              { style: { display: "inline-flex", gap: "4px" } },
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "of-btn",
+                  "data-variant": "danger",
+                  style: { fontSize: "11px", padding: "3px 8px" },
+                  onClick: () => {
+                    setConfirmKill(false);
+                    onToggleKillSwitch(true);
+                  }
+                },
+                "Confirmar Kill Switch"
+              ),
+              h("button", { type: "button", className: "of-btn", style: { fontSize: "11px", padding: "3px 8px" }, onClick: () => setConfirmKill(false) }, "Cancelar")
+            )
           )
-        )
-      ),
+        );
+      })(),
       // Corpo da Fábrica
       h(
         "div",
@@ -57751,11 +57839,37 @@ function renderFactorySecondaryPage(props) {
             {
               type: "button",
               className: "of-btn",
-              "data-variant": "primary",
+              "data-variant": "ghost",
               "data-reconcile-r51": "true",
+              title: "Reconciliar modelos (Eval R5.1)",
+              "aria-label": "Reconciliar modelos (Eval R5.1)",
+              style: { width: "28px", height: "28px", padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: "7px", color: "var(--primary)", border: "1px solid var(--border)" },
               onClick: props.onReconcileAgents
             },
-            "Reconciliar modelos (Eval R5.1)"
+            h(
+              "svg",
+              {
+                width: 14,
+                height: 14,
+                viewBox: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                strokeWidth: 1.9,
+                strokeLinecap: "round",
+                strokeLinejoin: "round",
+                style: { width: "14px", height: "14px", display: "block", flexShrink: 0 },
+                "aria-hidden": "true"
+              },
+              h("path", { d: "M4 21v-7" }),
+              h("path", { d: "M4 10V3" }),
+              h("path", { d: "M12 21v-9" }),
+              h("path", { d: "M12 8V3" }),
+              h("path", { d: "M20 21v-5" }),
+              h("path", { d: "M20 12V3" }),
+              h("path", { d: "M1 14h6" }),
+              h("path", { d: "M9 8h6" }),
+              h("path", { d: "M17 16h6" })
+            )
           )
         )
       ),
@@ -57796,7 +57910,7 @@ function renderFactorySecondaryPage(props) {
               h(
                 "tr",
                 null,
-                h("th", null, "Agente"),
+                h("th", { style: { paddingRight: "24px", minWidth: "168px" } }, "Agente"),
                 h("th", null, "Função & Papel"),
                 h("th", null, "Modelo (Buzz)"),
                 h(
@@ -57848,7 +57962,7 @@ function renderFactorySecondaryPage(props) {
                   { key: a.name },
                   h(
                     "td",
-                    { style: { fontWeight: 600, whiteSpace: "nowrap" } },
+                    { style: { fontWeight: 600, whiteSpace: "nowrap", paddingRight: "24px", minWidth: "168px" } },
                     h(
                       "button",
                       {

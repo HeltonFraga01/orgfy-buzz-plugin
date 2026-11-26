@@ -842,11 +842,37 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
               {
                 type: "button",
                 className: "of-btn",
-                "data-variant": "primary",
+                "data-variant": "ghost",
                 "data-reconcile-r51": "true",
+                title: "Reconciliar modelos (Eval R5.1)",
+                "aria-label": "Reconciliar modelos (Eval R5.1)",
+                style: { width: "28px", height: "28px", padding: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: "7px", color: "var(--primary)", border: "1px solid var(--border)" },
                 onClick: props.onReconcileAgents,
               },
-              "Reconciliar modelos (Eval R5.1)"
+              h(
+                "svg",
+                {
+                  width: 14,
+                  height: 14,
+                  viewBox: "0 0 24 24",
+                  fill: "none",
+                  stroke: "currentColor",
+                  strokeWidth: 1.9,
+                  strokeLinecap: "round",
+                  strokeLinejoin: "round",
+                  style: { width: "14px", height: "14px", display: "block", flexShrink: 0 },
+                  "aria-hidden": "true",
+                },
+                h("path", { d: "M4 21v-7" }),
+                h("path", { d: "M4 10V3" }),
+                h("path", { d: "M12 21v-9" }),
+                h("path", { d: "M12 8V3" }),
+                h("path", { d: "M20 21v-5" }),
+                h("path", { d: "M20 12V3" }),
+                h("path", { d: "M1 14h6" }),
+                h("path", { d: "M9 8h6" }),
+                h("path", { d: "M17 16h6" })
+              )
             )
         )
       ),
@@ -888,7 +914,7 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                       h(
                         "tr",
                         null,
-                        h("th", null, "Agente"),
+                        h("th", { style: { paddingRight: "24px", minWidth: "168px" } }, "Agente"),
                         h("th", null, "Função & Papel"),
                         h("th", null, "Modelo (Buzz)"),
                         h(
@@ -937,7 +963,7 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                           { key: a.name },
                           h(
                             "td",
-                            { style: { fontWeight: 600, whiteSpace: "nowrap" } },
+                            { style: { fontWeight: 600, whiteSpace: "nowrap", paddingRight: "24px", minWidth: "168px" } },
                             h(
                               "button",
                               {
