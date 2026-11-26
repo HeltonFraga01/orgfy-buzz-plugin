@@ -2172,4 +2172,21 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
     const adapterSrc = fs.readFileSync(path.resolve(__dirname, "src", "factory", "factory-adapter.ts"), "utf8");
     assert.ok(adapterSrc.includes("esteira-minima-state.json"), "factory-adapter deve hidratar open_prs e open_issues reais de esteira-minima-state.json");
   });
+
+  test("v17.11: Hierarquia OrgFy (quarentena -> COO, nunca direto para Aguardando você) + Ações no Drawer + Automações 1:1 CodeDen", () => {
+    const bundle = fs.readFileSync(path.resolve(__dirname, "plugin.js"), "utf8");
+    assert.ok(bundle.includes("data-orgfy-escalation-bar"), "CodeDenInspectorDrawer deve exibir barra de ações e cadeia de escalada OrgFy");
+    assert.ok(bundle.includes("Acionar COO (OrgFy Bento) ↗"), "Drawer deve oferecer ação direta para o COO OrgFy Bento");
+    assert.ok(bundle.includes("Escalar para OrgFy Iris ↗"), "Drawer deve oferecer ação direta para OrgFy Iris");
+    assert.ok(bundle.includes("data-codeden-automation-v2"), "Editor de Automações 1:1 CodeDen v2 deve estar no bundle");
+    assert.ok(bundle.includes("data-orgfy-automation-templates"), "Catálogo de 7 templates de Automações deve estar no bundle");
+    assert.ok(bundle.includes("Conjunto inicial (Starter set)"), "Banner de Starter Set 1:1 CodeDen deve estar no bundle");
+    assert.ok(bundle.includes("Opções avançadas"), "Seção colapsável de Guardas/Opções avançadas deve estar no bundle");
+
+    const adapterSrc = fs.readFileSync(path.resolve(__dirname, "src", "factory", "factory-adapter.ts"), "utf8");
+    assert.ok(adapterSrc.includes('stage: isQuarantined ? "failed" : "verifying"'), "PR em quarentena deve ir para failed (COO), não escalated (Fundador)");
+
+    const appSrc = fs.readFileSync(path.resolve(__dirname, "src", "factory", "FactoryApp.tsx"), "utf8");
+    assert.ok(appSrc.includes("waitingItems: [...status.held, ...founderEscalatedItems]"), "Aguardando você deve listar apenas itens do Fundador/Iris");
+  });
 }

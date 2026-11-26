@@ -79,11 +79,17 @@ export interface FactorySecondaryPagesProps {
   selectedAutomationId?: string;
   onSelectAutomationId?: (id: string) => void;
   onUpdateAutomation?: (id: string, patch: Partial<OrgfyAutomation>) => void;
-  onCreateAutomation?: () => void;
+  onCreateAutomation?: (initial?: Partial<OrgfyAutomation>) => void;
+  onDuplicateAutomation?: (auto: OrgfyAutomation) => void;
   onDeleteAutomation?: (id: string) => void;
   onSaveAutomations?: () => void;
   onRunAutomationNow?: (auto: OrgfyAutomation) => void;
   onExportAutomationYaml?: (auto: OrgfyAutomation) => void;
+  onExportAutomationMarkdown?: (auto: OrgfyAutomation) => void;
+  onImportAutomation?: (auto: OrgfyAutomation) => void;
+  onAddStarterSet?: () => void;
+  automationView?: "list" | "detail";
+  setAutomationView?: (v: "list" | "detail") => void;
   runningAutomationId?: string | null;
   QuestionCardsPanel?: any;
   questionCards?: OrgfyQuestionCard[];
@@ -344,9 +350,9 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
         { className: "of-segmented", style: { width: "fit-content" } },
         ([
           { id: "all", label: `Todos (${allCount})` },
-          { id: "asks", label: `Precisa de resposta (${asksTotal})` },
-          { id: "reviews", label: `Revisões (${reviews.length})` },
-          { id: "problems", label: `Problemas (${problems.length})` },
+          { id: "asks", label: `Para você · Fundador (${asksTotal})` },
+          { id: "reviews", label: `Revisões L-01 (${reviews.length})` },
+          { id: "problems", label: `Problemas · COO (${problems.length})` },
         ] as const).map((f) =>
           h(
             "button",
@@ -575,113 +581,73 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
     );
   }
 
-  // ── 4. AUTOMAÇÕES (100% REAIS DO ORGFY: LaunchAgents + Workflow Buzz + CI Runner + Probes) ──
+  // ── 4. AUTOMAÇÕES 1:1 CODEDEN (Automações | Execuções | Templates + Editor em 2 colunas) ──
   if (tab === "automations") {
     const tm = status.tenantManifest;
+    const list = props.automations || [];
+    const totalRuns = list.reduce((acc, a) => acc + (a.recentRuns?.length || 0), 0);
     return h(
       "div",
-      { style: { display: "flex", flexDirection: "column", gap: "12px" } },
+      { style: { display: "flex", flexDirection: "column", gap: "14px" } },
       h(
         "div",
-        { className: "of-segmented", style: { width: "fit-content" } },
-        ([
-          { id: "automations", label: "Editor Visual (Workflows)" },
-          { id: "runs", label: "CI & Probes da Empresa" },
-          { id: "templates", label: "LaunchAgents & Regras" },
-        ] as const).map((t) =>
-          h(
-            "button",
-            {
-              key: t.id,
-              type: "button",
-              className: "of-seg-btn",
-              "data-active": autoTab === t.id ? "true" : "false",
-              onClick: () => setAutoTab(t.id),
-            },
-            t.label
+        { style: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px" } },
+        h(
+          "div",
+          { className: "of-segmented", style: { width: "fit-content" } },
+          ([
+            { id: "automations", label: `Automações (${list.length})` },
+            { id: "runs", label: `Execuções (${totalRuns})` },
+            { id: "templates", label: "Templates (7)" },
+          ] as const).map((t) =>
+            h(
+              "button",
+              {
+                key: t.id,
+                type: "button",
+                className: "of-seg-btn",
+                "data-active": autoTab === t.id ? "true" : "false",
+                onClick: () => {
+                  setAutoTab(t.id);
+                  if (t.id === "automations") props.setAutomationView?.("list");
+                },
+              },
+              t.label
+            )
           )
+        ),
+        h(
+          "div",
+          { style: { display: "inline-flex", alignItems: "center", gap: "8px", fontSize: "11px" } },
+          h("span", { className: "of-muted" }, `Coordenador: ${status.launchAgent || "xyz.orgfy.esteira-minima"}`),
+          h("span", { className: "of-pill", "data-tone": status.coordenador === "ativo" ? "done" : "waiting" }, status.coordenador)
         )
       ),
-      autoTab === "automations" && props.automations && props.onSelectAutomationId && props.onUpdateAutomation && props.onCreateAutomation && props.onDeleteAutomation && props.onSaveAutomations && props.onRunAutomationNow && props.onExportAutomationYaml
-        ? renderAutomationEditor({
-            h,
-            tenant,
-            companyName: tm?.nome || tenant,
-            automations: props.automations,
-            selectedId: props.selectedAutomationId || props.automations[0]?.id || "",
-            onSelectId: props.onSelectAutomationId,
-            onUpdateAutomation: props.onUpdateAutomation,
-            onCreateAutomation: props.onCreateAutomation,
-            onDeleteAutomation: props.onDeleteAutomation,
-            onSaveAutomations: props.onSaveAutomations,
-            onRunNow: props.onRunAutomationNow,
-            onExportYaml: props.onExportAutomationYaml,
-            runningId: props.runningAutomationId || null,
-            availableAgents: (tm?.agentes || []).map((a) => a.name),
-          })
-        : autoTab === "runs"
-        ? h(
-            "div",
-            { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-            h("div", { style: { fontSize: "13.5px", fontWeight: 700 } }, `CI Runner & Probes Caixa-Preta · ${tm?.nome || tenant}`),
-            h(
-              "div",
-              { className: "of-grid-2" },
-              h(
-                "div",
-                { className: "of-surface", style: { padding: "10px 12px" } },
-                h("div", { className: "of-meter-label" }, "CI Runner"),
-                h("div", { style: { fontWeight: 700, marginTop: "4px" } }, tm?.ciModo || PT_BR.labels.unavailable),
-                h("div", { className: "of-mono of-muted", style: { marginTop: "4px" } }, `cmd: ${tm?.ciCmd || "—"}`)
-              ),
-              h(
-                "div",
-                { className: "of-surface", style: { padding: "10px 12px" } },
-                h("div", { className: "of-meter-label" }, "Probes Caixa-Preta no Gate"),
-                h("div", { style: { fontWeight: 700, marginTop: "4px" } }, tm?.probesObrigatorios ? `Obrigatórios (${tm.probesCount})` : "Opcional neste tenant"),
-                h("div", { className: "of-muted", style: { marginTop: "4px" } }, `Modo de workers: ${tm?.modoExecucao || "efemero_headless"}`)
-              )
-            )
-          )
-        : h(
-            "div",
-            { className: "of-grid-2" },
-            h(
-              "div",
-              { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-              h("div", { style: { fontSize: "13.5px", fontWeight: 700 } }, "Processos agendados (máx. 2 LaunchAgents)"),
-              h(
-                "div",
-                { className: "of-surface", style: { padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" } },
-                h(
-                  "div",
-                  null,
-                  h("div", { style: { fontWeight: 600, fontSize: "12.5px" } }, status.launchAgent || "com.orgfy.esteira-minima"),
-                  h("div", { className: "of-muted" }, "Coordenador da esteira (respeita Kill Switch e Dreno de controle-<tenant>.json)")
-                ),
-                h("span", { className: "of-pill", "data-tone": status.coordenador === "ativo" ? "done" : "failed" }, status.coordenador)
-              ),
-              h(
-                "div",
-                { className: "of-surface", style: { padding: "10px 12px", display: "flex", justifyContent: "space-between", alignItems: "center" } },
-                h(
-                  "div",
-                  null,
-                  h("div", { style: { fontWeight: 600, fontSize: "12.5px" } }, "Rotina CEO (Workflow Buzz Kind 30620)"),
-                  h("div", { className: "of-muted" }, "YAML: .buzz/workflows/orgfy-rotina-ceo.yaml · Canal #esteira-orgfy")
-                ),
-                h("span", { className: "of-pill", "data-tone": "waiting" }, "Nativo no Buzz")
-              )
-            ),
-            h(
-              "div",
-              { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "8px" } },
-              h("div", { style: { fontSize: "13.5px", fontWeight: 700 } }, "Regras determinísticas de operação"),
-              h("div", { className: "of-muted", style: { lineHeight: 1.55 } }, "• Kill Switch e Dreno em estado/controle-<tenant>.json interrompem novos despachos imediatamente."),
-              h("div", { className: "of-muted", style: { lineHeight: 1.55 } }, "• Failover de modelos é delegado exclusivamente ao NexusMind (evento orgfy.failover.requested)."),
-              h("div", { className: "of-muted", style: { lineHeight: 1.55 } }, "• Gate L-01 exige revisor independente por superfície (código, método, segurança, UI, arquitetura).")
-            )
-          )
+      props.automations && props.onSelectAutomationId && props.onUpdateAutomation && props.onCreateAutomation && props.onDeleteAutomation && props.onSaveAutomations && props.onRunAutomationNow && props.onExportAutomationYaml &&
+        renderAutomationEditor({
+          h,
+          tenant,
+          companyName: tm?.nome || tenant,
+          automations: props.automations,
+          selectedId: props.selectedAutomationId || props.automations[0]?.id || "",
+          onSelectId: props.onSelectAutomationId,
+          onUpdateAutomation: props.onUpdateAutomation,
+          onCreateAutomation: props.onCreateAutomation,
+          onDuplicateAutomation: props.onDuplicateAutomation,
+          onDeleteAutomation: props.onDeleteAutomation,
+          onSaveAutomations: props.onSaveAutomations,
+          onRunNow: props.onRunAutomationNow,
+          onExportYaml: props.onExportAutomationYaml,
+          onExportMarkdown: props.onExportAutomationMarkdown,
+          onImportAutomation: props.onImportAutomation,
+          onAddStarterSet: props.onAddStarterSet,
+          runningId: props.runningAutomationId || null,
+          availableAgents: (tm?.agentes || []).map((a) => a.name),
+          activeSubTab: autoTab,
+          onChangeSubTab: setAutoTab,
+          editingView: props.automationView || "detail",
+          onChangeEditingView: props.setAutomationView,
+        })
     );
   }
 

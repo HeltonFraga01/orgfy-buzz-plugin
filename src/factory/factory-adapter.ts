@@ -427,22 +427,35 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
   const openPrsRaw: any[] = Array.isArray(boardSnap?.open_prs) ? boardSnap.open_prs : [];
   const openIssuesRaw: any[] = Array.isArray(boardSnap?.open_issues) ? boardSnap.open_issues : [];
   const seenIds = new Set<string>([...kanbanBacklog, ...kanbanInProgress].map((w) => w.id));
+  const quarentenaMap =
+    esteiraState?.quarentena && typeof esteiraState.quarentena === "object"
+      ? (esteiraState.quarentena as Record<string, any>)
+      : {};
   const prWorkItems: FactoryWorkItem[] = openPrsRaw
     .filter((p) => p?.id && !seenIds.has(String(p.id)))
     .map((p) => {
       const pid = String(p.id);
       const title = String(p.title || `PR ${pid.slice(0, 8)}`);
+      const qEntry = quarentenaMap[pid];
+      const isQuarantined = Boolean(p.quarentena || qEntry);
+      const qReason =
+        typeof qEntry?.motivo === "string" && qEntry.motivo.trim()
+          ? `Quarentena (COO): ${qEntry.motivo.trim().slice(0, 180)}`
+          : isQuarantined
+          ? "PR em quarentena no coordenador (requer ação do COO OrgFy Bento)"
+          : null;
       return {
         id: pid,
         title,
         workKey: `pr:${pid.slice(0, 12)}`,
-        stage: p.quarentena ? "escalated" : "verifying",
-        step: p.quarentena ? "quarantine" : "review",
+        // Na governança OrgFy (board.json), falhas/quarentena da esteira vão para Problemas (COO Bento -> CEO Empresa -> Iris), nunca direto para "Aguardando você" (Fundador)
+        stage: isQuarantined ? "failed" : "verifying",
+        step: isQuarantined ? "quarantine" : "review",
         type: /fix|bug|hotfix/i.test(title) ? "bug" : /doc|readme|prd/i.test(title) ? "docs" : "feature",
         attempts: 1,
         sessionId: null,
         activeSessionId: null,
-        reason: p.quarentena ? "PR em quarentena no coordenador" : null,
+        reason: qReason,
         note: p.branch ? `PR aberto · ${p.branch}` : "PR aberto aguardando revisão/GATE",
         updatedAt: typeof p.created_at === "number" ? (p.created_at < 1e12 ? p.created_at * 1000 : p.created_at) : Date.now(),
       };
