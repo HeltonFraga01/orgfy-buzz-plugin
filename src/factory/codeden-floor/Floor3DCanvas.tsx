@@ -197,13 +197,14 @@ export interface Floor3DProps {
   focus: StoreyFocus;
   onSelectItem: (item: OrgfyWorkItem) => void;
   onOpenAgentDm?: (agent: { key?: string; pubkey?: string; name?: string }) => void;
+  onOpenAgentProfile?: (agentKey: string) => void;
 }
 
 export function createFloor3DComponent(ctx: Context) {
   const React = ctx.react;
   const h = React.createElement;
 
-  return function CodeDenFloor3D({ tenant, status, liveCrew, telemetry, focus, onSelectItem, onOpenAgentDm }: Floor3DProps) {
+  return function CodeDenFloor3D({ tenant, status, liveCrew, telemetry, focus, onSelectItem, onOpenAgentDm, onOpenAgentProfile }: Floor3DProps) {
     const hostRef = React.useRef<HTMLDivElement | null>(null);
     const stageRef = React.useRef<FloorStage | null>(null);
     const seatingRef = React.useRef<Seating>(NO_SEATING);
@@ -212,6 +213,7 @@ export function createFloor3DComponent(ctx: Context) {
     const [rosterOpen, setRosterOpen] = React.useState<boolean>(true);
     const [hoveredKey, setHoveredKey] = React.useState<string | null>(null);
     const [selectedKey, setSelectedKey] = React.useState<string | null>(null);
+    const [isFullscreen, setIsFullscreen] = React.useState<boolean>(false);
 
     const tenantAgents = status.tenantManifest?.agentes || [];
     const empresaNome = status.tenantManifest?.nome || tenant;
@@ -239,6 +241,14 @@ export function createFloor3DComponent(ctx: Context) {
     }, [adapted]);
     const lookout = React.useMemo(() => lookoutLayout(layout), [layout]);
 
+    // Refs sempre atualizados para evitar closure obsoleta no callback onTap do Three.js
+    const sceneRef = React.useRef(scene);
+    const statusRef = React.useRef(status);
+    const onSelectItemRef = React.useRef(onSelectItem);
+    sceneRef.current = scene;
+    statusRef.current = status;
+    onSelectItemRef.current = onSelectItem;
+
     React.useEffect(() => {
       const el = hostRef.current;
       if (!el) return;
@@ -249,12 +259,14 @@ export function createFloor3DComponent(ctx: Context) {
           onTap: (key) => {
             setSelectedKey(key);
             if (!key) return;
-            const agent = scene.agents.find((a: SceneAgent) => a.key === key);
+            const latestScene = sceneRef.current;
+            const latestStatus = statusRef.current;
+            const agent = latestScene.agents.find((a: SceneAgent) => a.key === key);
             if (agent?.card?.item) {
-              const found = [...status.backlog, ...status.inProgress, ...status.recent].find(
+              const found = [...latestStatus.backlog, ...latestStatus.inProgress, ...latestStatus.recent].find(
                 (i) => i.id === agent.card?.item.id
               );
-              if (found) onSelectItem(found);
+              if (found) onSelectItemRef.current(found);
             }
           },
           onFrame: () => {},
@@ -442,44 +454,181 @@ export function createFloor3DComponent(ctx: Context) {
               `Equipe ${empresaNome} (${tenantAgents.length}) ›`
             ),
 
-        activeHoverAgent &&
-          h(
+        (() => {
+          const focusKey = selectedKey || hoveredKey;
+          if (!focusKey) return null;
+          const sceneAg = scene.agents.find((a: SceneAgent) => a.key === focusKey) || null;
+          const matchedTenantAg =
+            tenantAgents.find((a) => a.agentKey === focusKey || a.name === focusKey) ||
+            (sceneAg?.role === "pm"
+              ? tenantAgents.find((a) => a.papel === "coo" || /bento|coo/i.test(a.name))
+              : sceneAg?.role === "scout"
+              ? tenantAgents.find((a) => a.papel === "oraculo" || /oraculo|oráculo|scout/i.test(a.name))
+              : null) ||
+            null;
+          const matchedLive = matchedTenantAg
+            ? liveCrew.find((c) => c.key === matchedTenantAg.agentKey || (matchedTenantAg.pubkey && c.pubkey?.toLowerCase() === matchedTenantAg.pubkey.toLowerCase()))
+            : liveCrew.find((c) => c.key === focusKey) || null;
+          const liveTurn = matchedTenantAg ? turnOf(matchedTenantAg) : null;
+          const displayTitle =
+            matchedTenantAg?.name ||
+            (sceneAg?.role === "pm"
+              ? `${status.tenantManifest?.coo || "COO"} (${empresaNome})`
+              : sceneAg?.role === "scout"
+              ? "Oráculo · Scout"
+              : sceneAg?.card?.item.title || sceneAg?.area || focusKey);
+          const statusText = liveTurn
+            ? "Respondendo"
+            : matchedTenantAg?.running || sceneAg?.status === "working"
+            ? "Em execução"
+            : matchedTenantAg?.inBuzz
+            ? "Disponível"
+            : "Ocioso";
+          const statusTone = liveTurn
+            ? liveTurn.state === "error"
+              ? "failed"
+              : "running"
+            : matchedTenantAg?.inBuzz
+            ? "done"
+            : "idle";
+          const stepLabel =
+            liveTurn?.stepLabel ||
+            sceneAg?.card?.item.title ||
+            sceneAg?.progress ||
+            matchedTenantAg?.funcao ||
+            "Aguardando tarefa";
+          const modelLabel = `${matchedLive?.provider || matchedTenantAg?.provider || "buzz"} · ${matchedLive?.model || matchedTenantAg?.model || sceneAg?.model || "padrão"}`;
+
+          return h(
             "div",
             {
+              "data-floor3d-agent-popover": "true",
               style: {
                 position: "absolute",
                 top: "10px",
                 right: "10px",
-                zIndex: 20,
-                width: "240px",
+                zIndex: 25,
+                width: "276px",
                 borderRadius: "10px",
                 border: "1px solid var(--border-strong)",
-                background: "rgba(18, 20, 26, 0.92)",
-                padding: "10px 12px",
+                background: "rgba(18, 20, 26, 0.95)",
+                backdropFilter: "blur(10px)",
+                boxShadow: "0 12px 30px rgba(0,0,0,0.45)",
+                padding: "11px 13px",
                 fontSize: "11.5px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "8px",
               },
             },
-            h("div", { style: { fontWeight: 700 } }, activeHoverAgent.role === "pm" ? `${status.tenantManifest?.coo || "COO"} (${empresaNome})` : activeHoverAgent.role === "scout" ? "Oráculo · Scout" : activeHoverAgent.card?.item.title || activeHoverAgent.area || activeHoverAgent.key),
-            h("div", { className: "of-mono of-muted", style: { marginTop: "2px" } }, `${activeHoverAgent.status} · ${activeHoverAgent.model || "padrão"}`),
-            activeHoverAgent.progress && h("div", { className: "of-muted", style: { marginTop: "4px" } }, activeHoverAgent.progress)
-          ),
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", borderBottom: "1px solid var(--border)", paddingBottom: "7px" } },
+              h(
+                "div",
+                { style: { display: "inline-flex", alignItems: "center", gap: "7px", minWidth: 0 } },
+                matchedLive?.picture && h("img", { src: matchedLive.picture, alt: displayTitle, style: { width: "20px", height: "20px", borderRadius: "5px", objectFit: "cover" } }),
+                h("strong", { style: { fontSize: "12.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, displayTitle)
+              ),
+              h(
+                "div",
+                { style: { display: "inline-flex", alignItems: "center", gap: "6px", flexShrink: 0 } },
+                h("span", { className: "of-pill", "data-tone": statusTone, style: { fontSize: "10px", padding: "1px 6px" } }, statusText),
+                selectedKey &&
+                  h(
+                    "button",
+                    {
+                      type: "button",
+                      className: "of-btn",
+                      "data-variant": "ghost",
+                      style: { padding: "1px 5px", fontSize: "12px" },
+                      title: "Fechar",
+                      onClick: () => setSelectedKey(null),
+                    },
+                    "×"
+                  )
+              )
+            ),
+            h(
+              "div",
+              { style: { display: "grid", gridTemplateColumns: "58px 1fr", gap: "4px 8px", fontSize: "11px" } },
+              h("span", { className: "of-muted" }, "Etapa"),
+              h("span", { style: { fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: stepLabel }, stepLabel),
+              h("span", { className: "of-muted" }, "Agente"),
+              h("span", { className: "of-mono of-muted", style: { fontSize: "10.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: modelLabel }, modelLabel)
+            ),
+            h(
+              "div",
+              { style: { display: "flex", gap: "6px", paddingTop: "2px" } },
+              onOpenAgentDm && (matchedTenantAg || matchedLive) &&
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "of-btn",
+                    "data-variant": "primary",
+                    style: { flex: 1, justifyContent: "center", fontSize: "11px", padding: "5px 8px" },
+                    onClick: () =>
+                      onOpenAgentDm({
+                        key: matchedTenantAg?.agentKey || matchedLive?.key,
+                        pubkey: matchedTenantAg?.pubkey || matchedLive?.pubkey,
+                        name: displayTitle,
+                      }),
+                  },
+                  "Abrir chat lateral ↗"
+                ),
+              onOpenAgentProfile && (matchedTenantAg?.agentKey || matchedLive?.key) &&
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "of-btn",
+                    style: { fontSize: "11px", padding: "5px 8px" },
+                    onClick: () => onOpenAgentProfile(matchedTenantAg?.agentKey || matchedLive!.key),
+                  },
+                  "Perfil"
+                )
+            )
+          );
+        })(),
 
         h(
-          "button",
-          {
-            type: "button",
-            className: "of-btn",
-            style: {
-              position: "absolute",
-              right: "12px",
-              bottom: "12px",
-              zIndex: 20,
-              background: "rgba(18, 20, 26, 0.88)",
+          "div",
+          { style: { position: "absolute", right: "12px", bottom: "12px", zIndex: 20, display: "inline-flex", gap: "6px" } },
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              style: { background: "rgba(18, 20, 26, 0.88)" },
+              title: isFullscreen ? "Sair da tela cheia" : "Tela cheia no Andar 3D",
+              onClick: () => {
+                const el = hostRef.current;
+                if (!el) return;
+                try {
+                  if (document.fullscreenElement) {
+                    void document.exitFullscreen?.();
+                    setIsFullscreen(false);
+                  } else {
+                    void el.requestFullscreen?.();
+                    setIsFullscreen(true);
+                  }
+                } catch {}
+              },
             },
-            title: "Enquadrar todo o andar 3D (ou clique duplo)",
-            onClick: () => stageRef.current?.fit(true),
-          },
-          "⤢ Fit"
+            isFullscreen ? "↙ Sair" : "⛶ Tela cheia"
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              style: { background: "rgba(18, 20, 26, 0.88)" },
+              title: "Enquadrar todo o andar 3D (ou clique duplo)",
+              onClick: () => stageRef.current?.fit(true),
+            },
+            "⤢ Fit"
+          )
         )
       ),
       h(

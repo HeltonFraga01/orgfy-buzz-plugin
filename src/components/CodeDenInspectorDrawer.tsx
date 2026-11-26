@@ -166,6 +166,183 @@ function cleanCardMarkdown(raw: string): string {
     .trim();
 }
 
+export interface OrgfyStructuredCard {
+  objetivo: string;
+  estado: {
+    contexto?: string;
+    autoridade?: string;
+    decisao?: string;
+  };
+  papeis: {
+    tipo?: string;
+    executor?: string;
+    revisor?: string;
+    decisor?: string;
+    workspace?: string;
+    effort?: string;
+    spec?: string;
+  };
+  escopo: {
+    leitura: string[];
+    escritaExclusiva: string[];
+    passos: Array<{ id: string; text: string; done: boolean }>;
+  };
+  aceite: {
+    feitoQuando?: string;
+    comandoAceite?: string;
+  };
+}
+
+export function parseOrgfyCardStructure(raw: string): OrgfyStructuredCard | null {
+  const cleaned = cleanCardMarkdown(raw || "");
+  if (!cleaned) return null;
+
+  const pickField = (labelPattern: string): string | undefined => {
+    const rx = new RegExp(`(?:^|\\n)\\s*(?:[-*•]\\s*)?(?:\\*\\*)?(?:${labelPattern})(?:\\*\\*)?\\s*:\\s*(?:\\*\\*)?\\s*(.+)`, "i");
+    const m = rx.exec(cleaned);
+    if (!m) return undefined;
+    return m[1].replace(/\*\*/g, "").replace(/^`|`$/g, "").trim() || undefined;
+  };
+
+  const lines = cleaned.replace(/\r\n/g, "\n").split("\n");
+  let currentSection = "intro";
+  const introLines: string[] = [];
+  const objetivoLines: string[] = [];
+  const leitura: string[] = [];
+  const escritaExclusiva: string[] = [];
+  const passos: Array<{ id: string; text: string; done: boolean }> = [];
+  let subListMode: "none" | "leitura" | "escrita" = "none";
+  let comandoAceite: string | undefined;
+  let feitoQuando: string | undefined;
+  let inCodeBlock = false;
+  const codeBlockLines: string[] = [];
+
+  for (const rawLine of lines) {
+    const trimmed = rawLine.trim();
+    if (trimmed.startsWith("```")) {
+      if (inCodeBlock) {
+        if (currentSection === "aceite" && !comandoAceite && codeBlockLines.length > 0) {
+          comandoAceite = codeBlockLines.join("\n").trim();
+        }
+        codeBlockLines.length = 0;
+        inCodeBlock = false;
+      } else {
+        inCodeBlock = true;
+      }
+      continue;
+    }
+    if (inCodeBlock) {
+      codeBlockLines.push(rawLine);
+      continue;
+    }
+
+    const secMatch = /^#{1,4}\s+(.+)$/.exec(trimmed) || /^\*\*([^*]{2,40})\*\*$/.exec(trimmed);
+    if (secMatch) {
+      const heading = secMatch[1].toLowerCase();
+      subListMode = "none";
+      if (/objetivo/.test(heading)) currentSection = "objetivo";
+      else if (/estado/.test(heading)) currentSection = "estado";
+      else if (/pap[eé]is|ambiente/.test(heading)) currentSection = "papeis";
+      else if (/escopo|plano|checklist|passos/.test(heading)) currentSection = "escopo";
+      else if (/aceite|crit[eé]rio|l-22/.test(heading)) currentSection = "aceite";
+      else currentSection = "other";
+      continue;
+    }
+
+    const checkMatch = /^[-*•]\s*\[([ xX])\]\s*(?:(P\d+)\s*[:\-–]?\s*)?(.+)$/.exec(trimmed);
+    if (checkMatch) {
+      passos.push({
+        id: checkMatch[2] || `P${passos.length + 1}`,
+        done: checkMatch[1].toLowerCase() === "x",
+        text: checkMatch[3].trim(),
+      });
+      continue;
+    }
+
+    if (/^(?:[-*•]\s*)?(?:\*\*)?escrita\s+exclusiva(?:\*\*)?\s*:/i.test(trimmed)) {
+      subListMode = "escrita";
+      const inlineVal = trimmed.replace(/^(?:[-*•]\s*)?(?:\*\*)?escrita\s+exclusiva(?:\*\*)?\s*:\s*(?:\*\*)?\s*/i, "").trim();
+      if (inlineVal) {
+        for (const p of inlineVal.split(/[,;]/)) {
+          const cleanP = p.replace(/`/g, "").replace(/^\*\*\s*|\s*\*\*$/g, "").trim();
+          if (cleanP) escritaExclusiva.push(cleanP);
+        }
+      }
+      continue;
+    }
+    if (/^(?:[-*•]\s*)?(?:\*\*)?(?:leitura|arquivos\s+de\s+refer[eê]ncia)(?:\*\*)?\s*:/i.test(trimmed)) {
+      subListMode = "leitura";
+      const inlineVal = trimmed.replace(/^(?:[-*•]\s*)?(?:\*\*)?(?:leitura|arquivos\s+de\s+refer[eê]ncia)(?:\*\*)?\s*:\s*(?:\*\*)?\s*/i, "").trim();
+      if (inlineVal) {
+        for (const p of inlineVal.split(/[,;]/)) {
+          const cleanP = p.replace(/`/g, "").replace(/^\*\*\s*|\s*\*\*$/g, "").trim();
+          if (cleanP) leitura.push(cleanP);
+        }
+      }
+      continue;
+    }
+    if (subListMode !== "none" && /^[-*•]\s+/.test(trimmed)) {
+      const itemVal = trimmed.replace(/^[-*•]\s+/, "").replace(/`/g, "").trim();
+      if (itemVal) {
+        if (subListMode === "escrita") escritaExclusiva.push(itemVal);
+        else leitura.push(itemVal);
+      }
+      continue;
+    }
+
+    if (currentSection === "objetivo" && trimmed) {
+      objetivoLines.push(trimmed);
+    } else if (currentSection === "intro" && trimmed && !/^\*\*[^*]+\*\*:/.test(trimmed)) {
+      introLines.push(trimmed);
+    }
+  }
+
+  feitoQuando = pickField("feito\\s+quando|crit[eé]rio\\s+de\\s+aceite");
+  if (!comandoAceite) {
+    comandoAceite = pickField("comando\\s+de\\s+aceite|comando\\s+l-22|aceite\\s+l-22|aceite");
+  }
+
+  const result: OrgfyStructuredCard = {
+    objetivo: (objetivoLines.length > 0 ? objetivoLines : introLines).join(" ").trim(),
+    estado: {
+      contexto: pickField("contexto"),
+      autoridade: pickField("autoridade"),
+      decisao: pickField("decis[aã]o"),
+    },
+    papeis: {
+      tipo: pickField("tipo"),
+      executor: pickField("executor"),
+      revisor: pickField("revisor"),
+      decisor: pickField("decisor"),
+      workspace: pickField("workspace"),
+      effort: pickField("effort|esfor[cç]o"),
+      spec: pickField("spec"),
+    },
+    escopo: {
+      leitura,
+      escritaExclusiva,
+      passos,
+    },
+    aceite: {
+      feitoQuando,
+      comandoAceite,
+    },
+  };
+
+  const hasStructuredSignal = Boolean(
+    result.estado.contexto ||
+      result.estado.autoridade ||
+      result.estado.decisao ||
+      result.papeis.executor ||
+      result.papeis.revisor ||
+      result.papeis.tipo ||
+      result.escopo.escritaExclusiva.length > 0 ||
+      result.escopo.passos.length > 0 ||
+      result.aceite.comandoAceite
+  );
+  return hasStructuredSignal ? result : null;
+}
+
 function renderSimpleMarkdown(h: any, raw: string) {
   const cleaned = cleanCardMarkdown(raw);
   if (!cleaned) return null;
@@ -463,9 +640,12 @@ export function createCodeDenInspectorDrawer(React: Context["react"]) {
       }
     }, [repoDetail?.commit, repoDetail?.commitDiff]);
 
-    // Load Buzz Repos Git tree + commits lazily when drawer opens
+    const repoDetailRef = React.useRef(repoDetail);
+    repoDetailRef.current = repoDetail;
+
+    // Load Buzz Repos Git tree + commits lazily when drawer opens (deps estáveis para nunca travar em loading)
     const loadGitOverview = React.useCallback(async () => {
-      if (!item) return;
+      if (!item?.id) return;
       setGitLoading(true);
       try {
         const snap = await readBuzzProjectGit(ctx, {
@@ -473,9 +653,9 @@ export function createCodeDenInspectorDrawer(React: Context["react"]) {
           dtag: repoDtag || tenant,
         });
         setGitSnap(snap);
-        // Se não há commit vinculado à issue ainda, carrega o diff do HEAD para a aba Diff não ficar vazia
-        const targetCommit = repoDetail?.commit || snap?.head || snap?.commits?.[0]?.hash || "";
-        if (targetCommit && !repoDetail?.commitDiff) {
+        const currentDetail = repoDetailRef.current;
+        const targetCommit = currentDetail?.commit || snap?.head || snap?.commits?.[0]?.hash || "";
+        if (targetCommit && !currentDetail?.commitDiff) {
           setSelectedCommit(targetCommit);
           const commitSnap = await readBuzzProjectGit(ctx, {
             owner: repoOwner,
@@ -484,13 +664,15 @@ export function createCodeDenInspectorDrawer(React: Context["react"]) {
           });
           if (commitSnap?.diff) setSelectedCommitDiff(commitSnap.diff);
         }
+      } catch {
+        setGitSnap(null);
       } finally {
         setGitLoading(false);
       }
-    }, [ctx, item?.id, repoOwner, repoDtag, tenant, repoDetail?.commit, repoDetail?.commitDiff]);
+    }, [ctx, item?.id, repoOwner, repoDtag, tenant]);
 
     React.useEffect(() => {
-      if (!item) return;
+      if (!item?.id) return;
       void loadGitOverview();
     }, [item?.id, loadGitOverview]);
 
@@ -1325,27 +1507,169 @@ export function createCodeDenInspectorDrawer(React: Context["react"]) {
                     )
               ),
 
-              // ── DESCRIÇÃO (Markdown limpo) ──
+              // ── DESCRIÇÃO ESTRUTURADA DO CARD ORGFY (campos nativos + Markdown original colapsável) ──
               repoDetail?.content &&
-                h(
-                  "section",
-                  { "data-buzz-repo-detail": "true" },
-                  renderSectionHeader("Descrição"),
-                  h(
-                    "div",
-                    {
-                      style: {
-                        padding: "10px 12px",
-                        borderRadius: "8px",
-                        border: "1px solid var(--border)",
-                        background: "var(--card)",
-                        maxHeight: "260px",
-                        overflowY: "auto",
-                      },
-                    },
-                    renderSimpleMarkdown(h, repoDetail.content)
-                  )
-                )
+                (() => {
+                  const structured = parseOrgfyCardStructure(repoDetail.content);
+                  if (!structured) {
+                    return h(
+                      "section",
+                      { "data-buzz-repo-detail": "true" },
+                      renderSectionHeader("Descrição"),
+                      h(
+                        "div",
+                        {
+                          style: {
+                            padding: "10px 12px",
+                            borderRadius: "8px",
+                            border: "1px solid var(--border)",
+                            background: "var(--card)",
+                            maxHeight: "260px",
+                            overflowY: "auto",
+                          },
+                        },
+                        renderSimpleMarkdown(h, repoDetail.content)
+                      )
+                    );
+                  }
+                  const resolveCrewByName = (name?: string) =>
+                    name ? liveCrew.find((a) => a.name.toLowerCase().includes(name.toLowerCase())) || { name } : null;
+                  const doneCount = structured.escopo.passos.filter((p) => p.done).length;
+                  return h(
+                    "section",
+                    { "data-buzz-repo-detail": "true", "data-orgfy-structured-card": "true", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+                    renderSectionHeader("Contrato do Card OrgFy"),
+                    structured.objetivo &&
+                      h(
+                        "div",
+                        { style: { padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
+                        h("div", { style: { fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted-foreground)", marginBottom: "4px" } }, "Objetivo"),
+                        h("div", { style: { fontSize: "12.5px", lineHeight: 1.5, color: "var(--foreground)" } }, structured.objetivo)
+                      ),
+                    (structured.papeis.tipo || structured.papeis.executor || structured.papeis.revisor || structured.papeis.decisor || structured.papeis.effort) &&
+                      h(
+                        "div",
+                        { style: { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "8px" } },
+                        structured.papeis.executor &&
+                          h(
+                            "div",
+                            { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
+                            h("div", { style: { fontSize: "10px", color: "var(--muted-foreground)", marginBottom: "4px" } }, "Executor"),
+                            h(
+                              "button",
+                              {
+                                type: "button",
+                                className: "of-btn",
+                                style: { padding: "2px 8px", fontSize: "11.5px" },
+                                onClick: () => {
+                                  const ag = resolveCrewByName(structured.papeis.executor);
+                                  if (ag) onOpenAgentDm?.(ag);
+                                },
+                              },
+                              `${structured.papeis.executor} ↗`
+                            )
+                          ),
+                        structured.papeis.revisor &&
+                          h(
+                            "div",
+                            { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
+                            h("div", { style: { fontSize: "10px", color: "var(--muted-foreground)", marginBottom: "4px" } }, "Revisor (L-01)"),
+                            h(
+                              "button",
+                              {
+                                type: "button",
+                                className: "of-btn",
+                                style: { padding: "2px 8px", fontSize: "11.5px" },
+                                onClick: () => {
+                                  const ag = resolveCrewByName(structured.papeis.revisor);
+                                  if (ag) onOpenAgentDm?.(ag);
+                                },
+                              },
+                              `${structured.papeis.revisor} ↗`
+                            )
+                          ),
+                        structured.papeis.decisor &&
+                          h(
+                            "div",
+                            { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
+                            h("div", { style: { fontSize: "10px", color: "var(--muted-foreground)", marginBottom: "2px" } }, "Decisor / Autoridade"),
+                            h("div", { style: { fontSize: "12px", fontWeight: 600 } }, structured.papeis.decisor)
+                          ),
+                        (structured.papeis.tipo || structured.papeis.effort) &&
+                          h(
+                            "div",
+                            { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)", display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" } },
+                            structured.papeis.tipo && h("span", { className: "of-pill" }, structured.papeis.tipo),
+                            structured.papeis.effort && h("span", { className: "of-pill", "data-tone": "waiting" }, `Effort ${structured.papeis.effort}`)
+                          )
+                      ),
+                    (structured.estado.contexto || structured.estado.decisao || structured.estado.autoridade) &&
+                      h(
+                        "div",
+                        { style: { padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)", display: "flex", flexDirection: "column", gap: "6px", fontSize: "12px" } },
+                        h("div", { style: { fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted-foreground)" } }, "Estado & Governança"),
+                        structured.estado.contexto && h("div", null, h("strong", null, "Contexto: "), h("span", { className: "of-muted" }, structured.estado.contexto)),
+                        structured.estado.decisao && h("div", null, h("strong", null, "Decisão: "), h("span", { className: "of-muted" }, structured.estado.decisao)),
+                        structured.estado.autoridade && h("div", null, h("strong", null, "Autoridade: "), h("span", { className: "of-muted" }, structured.estado.autoridade))
+                      ),
+                    structured.escopo.escritaExclusiva.length > 0 &&
+                      h(
+                        "div",
+                        { style: { padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
+                        h("div", { style: { fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted-foreground)", marginBottom: "6px" } }, `Escrita exclusiva (${structured.escopo.escritaExclusiva.length})`),
+                        h(
+                          "div",
+                          { style: { display: "flex", flexWrap: "wrap", gap: "5px" } },
+                          structured.escopo.escritaExclusiva.map((p) =>
+                            h("code", { key: p, className: "of-mono", style: { fontSize: "11px", padding: "2px 6px", borderRadius: "5px", background: "var(--muted)", border: "1px solid var(--border)" } }, p)
+                          )
+                        )
+                      ),
+                    structured.escopo.passos.length > 0 &&
+                      h(
+                        "div",
+                        { style: { padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
+                        h(
+                          "div",
+                          { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" } },
+                          h("span", { style: { fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted-foreground)" } }, "Checklist do Card"),
+                          h("span", { className: "of-pill", "data-tone": doneCount === structured.escopo.passos.length ? "done" : "waiting" }, `${doneCount}/${structured.escopo.passos.length}`)
+                        ),
+                        h(
+                          "div",
+                          { style: { display: "flex", flexDirection: "column", gap: "5px", fontSize: "12px" } },
+                          structured.escopo.passos.map((p) =>
+                            h(
+                              "div",
+                              { key: `${p.id}-${p.text.slice(0, 12)}`, style: { display: "flex", alignItems: "flex-start", gap: "7px" } },
+                              Icon({ h, name: p.done ? "checkCircle" : "clock", size: 13, color: p.done ? "var(--status-done, #3dd68c)" : "var(--muted-foreground)" }),
+                              h("span", { className: "of-mono", style: { fontSize: "11px", color: "var(--primary)", flexShrink: 0 } }, p.id),
+                              h("span", { style: { color: p.done ? "var(--muted-foreground)" : "var(--foreground)", textDecoration: p.done ? "line-through" : "none" } }, p.text)
+                            )
+                          )
+                        )
+                      ),
+                    (structured.aceite.feitoQuando || structured.aceite.comandoAceite) &&
+                      h(
+                        "div",
+                        { style: { padding: "10px 12px", borderRadius: "8px", border: "1px solid rgba(61,214,140,0.3)", background: "rgba(61,214,140,0.06)", display: "flex", flexDirection: "column", gap: "6px" } },
+                        h("div", { style: { fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--status-done, #3dd68c)" } }, "Aceite Congelado (L-22)"),
+                        structured.aceite.feitoQuando && h("div", { style: { fontSize: "12px", color: "var(--foreground)" } }, structured.aceite.feitoQuando),
+                        structured.aceite.comandoAceite &&
+                          h("code", { className: "of-mono", style: { fontSize: "11px", padding: "6px 8px", borderRadius: "6px", background: "rgba(0,0,0,0.28)", display: "block", overflowX: "auto" } }, structured.aceite.comandoAceite)
+                      ),
+                    h(
+                      "details",
+                      { style: { fontSize: "11.5px", color: "var(--muted-foreground)" } },
+                      h("summary", { style: { cursor: "pointer", userSelect: "none", padding: "4px 2px" } }, "Ver Markdown original"),
+                      h(
+                        "div",
+                        { style: { marginTop: "6px", padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)", maxHeight: "220px", overflowY: "auto" } },
+                        renderSimpleMarkdown(h, repoDetail.content)
+                      )
+                    )
+                  );
+                })()
             ),
 
           // ── ABA 4: DETALHES (1:1 CodeDen DetailsPanel) ──

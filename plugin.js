@@ -9880,6 +9880,13 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
   } catch {
     controle = null;
   }
+  if (!controle && typeof localStorage !== "undefined") {
+    try {
+      const cached = localStorage.getItem(`orgfy_controle_cache_${slug}`);
+      if (cached) controle = JSON.parse(cached);
+    } catch {
+    }
+  }
   const snap = ((_b = (_a = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) || {};
   const runningList = Array.isArray(snap.running) ? snap.running : [];
   const allAgents = Array.isArray(snap.agents) ? snap.agents : [];
@@ -10090,6 +10097,8 @@ async function writeTenantControl(ctx, tenant, patch) {
     mode: "software_factory",
     killSwitch: false,
     drain: false,
+    autoMerge: false,
+    mergePolicy: "strict",
     limits: { gastoDiaUsd: 50, mergesDia: 20, agentes: 4, prsAbertos: 6, falhasSeguidas: 3 },
     pausedReason: null
   };
@@ -10102,18 +10111,38 @@ async function writeTenantControl(ctx, tenant, patch) {
     }
   } catch {
   }
+  const mergedLimits = { ...current.limits || {}, ...patch.limits || {} };
+  const sanitizedLimits = {
+    gastoDiaUsd: Math.max(0, Number.isFinite(Number(mergedLimits.gastoDiaUsd)) ? Number(mergedLimits.gastoDiaUsd) : 50),
+    mergesDia: Math.max(0, Math.round(Number.isFinite(Number(mergedLimits.mergesDia)) ? Number(mergedLimits.mergesDia) : 20)),
+    agentes: Math.max(1, Math.round(Number.isFinite(Number(mergedLimits.agentes)) ? Number(mergedLimits.agentes) : 4)),
+    prsAbertos: Math.max(1, Math.round(Number.isFinite(Number(mergedLimits.prsAbertos)) ? Number(mergedLimits.prsAbertos) : 6)),
+    falhasSeguidas: Math.max(1, Math.round(Number.isFinite(Number(mergedLimits.falhasSeguidas)) ? Number(mergedLimits.falhasSeguidas) : 3))
+  };
   const next = {
     ...current,
     ...patch,
-    limits: { ...current.limits || {}, ...patch.limits || {} },
+    mergePolicy: (patch.mergePolicy || current.mergePolicy) === "fast" ? "fast" : "strict",
+    limits: sanitizedLimits,
     tenant: slug,
     updatedAt: (/* @__PURE__ */ new Date()).toISOString()
   };
-  if (host == null ? void 0 : host.writeFile) {
-    await host.writeFile(path, JSON.stringify(next, null, 2) + "\n");
-    return { ok: true, path, control: next };
+  const serialized = JSON.stringify(next, null, 2) + "\n";
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(`orgfy_controle_cache_${slug}`, serialized);
+    }
+  } catch {
   }
-  return { ok: false, path, control: next };
+  if (host == null ? void 0 : host.writeFile) {
+    try {
+      await host.writeFile(path, serialized);
+      return { ok: true, path, control: next };
+    } catch (err) {
+      return { ok: false, path, control: next, error: (err == null ? void 0 : err.message) || String(err) };
+    }
+  }
+  return { ok: false, path, control: next, error: "host.writeFile indisponível" };
 }
 const FACTORY_SHADOW_CSS = `
 :host, [data-orgfy-factory-root="true"] {
@@ -13141,7 +13170,18 @@ function renderFactoryBoardAndFloor(props) {
             "Andar"
           )
         ),
-        h("button", { type: "button", className: "of-btn", onClick: onRefresh, disabled: loading }, loading ? "..." : "Atualizar")
+        props.onOpenGuide && h("button", { type: "button", className: "of-btn", title: "Como funciona o loop da Fábrica OrgFy", onClick: props.onOpenGuide }, "? Como funciona"),
+        props.onToggleKillSwitch && h(
+          "button",
+          {
+            type: "button",
+            className: "of-btn",
+            "data-variant": status.killSwitch ? "primary" : "danger",
+            onClick: () => props.onToggleKillSwitch(!status.killSwitch)
+          },
+          status.killSwitch ? "Retomar" : "Kill switch"
+        ),
+        h("button", { type: "button", className: "of-btn", onClick: onRefresh, disabled: loading }, loading ? "..." : "Verificar agora")
       )
     ),
     // 2. StatsStrip (exibido no Board; oculto no Andar 3D para o 3D preencher 100% da tela, igual ao CodeDen)
@@ -13263,9 +13303,9 @@ function renderFactoryBoardAndFloor(props) {
         onSelectItem,
         onOpenAgentDm: (ag) => {
           var _a2;
-          if (ag == null ? void 0 : ag.key) onSelectAgentKey(ag.key);
-          else (_a2 = props.onOpenAgentDm) == null ? void 0 : _a2.call(props, ag);
-        }
+          return (_a2 = props.onOpenAgentDm) == null ? void 0 : _a2.call(props, ag);
+        },
+        onOpenAgentProfile: (agentKey) => onSelectAgentKey(agentKey)
       }) : h(
         "div",
         { className: "of-card-pad" },
@@ -13429,6 +13469,137 @@ function buildFileTree(files) {
 }
 function cleanCardMarkdown(raw) {
   return raw.replace(/<!--[\s\S]*?-->/g, "").replace(/^\s*\n+/, "").trim();
+}
+function parseOrgfyCardStructure(raw) {
+  const cleaned = cleanCardMarkdown(raw || "");
+  if (!cleaned) return null;
+  const pickField = (labelPattern) => {
+    const rx = new RegExp(`(?:^|\\n)\\s*(?:[-*•]\\s*)?(?:\\*\\*)?(?:${labelPattern})(?:\\*\\*)?\\s*:\\s*(?:\\*\\*)?\\s*(.+)`, "i");
+    const m = rx.exec(cleaned);
+    if (!m) return void 0;
+    return m[1].replace(/\*\*/g, "").replace(/^`|`$/g, "").trim() || void 0;
+  };
+  const lines = cleaned.replace(/\r\n/g, "\n").split("\n");
+  let currentSection = "intro";
+  const introLines = [];
+  const objetivoLines = [];
+  const leitura = [];
+  const escritaExclusiva = [];
+  const passos = [];
+  let subListMode = "none";
+  let comandoAceite;
+  let feitoQuando;
+  let inCodeBlock = false;
+  const codeBlockLines = [];
+  for (const rawLine of lines) {
+    const trimmed = rawLine.trim();
+    if (trimmed.startsWith("```")) {
+      if (inCodeBlock) {
+        if (currentSection === "aceite" && !comandoAceite && codeBlockLines.length > 0) {
+          comandoAceite = codeBlockLines.join("\n").trim();
+        }
+        codeBlockLines.length = 0;
+        inCodeBlock = false;
+      } else {
+        inCodeBlock = true;
+      }
+      continue;
+    }
+    if (inCodeBlock) {
+      codeBlockLines.push(rawLine);
+      continue;
+    }
+    const secMatch = /^#{1,4}\s+(.+)$/.exec(trimmed) || /^\*\*([^*]{2,40})\*\*$/.exec(trimmed);
+    if (secMatch) {
+      const heading = secMatch[1].toLowerCase();
+      subListMode = "none";
+      if (/objetivo/.test(heading)) currentSection = "objetivo";
+      else if (/estado/.test(heading)) currentSection = "estado";
+      else if (/pap[eé]is|ambiente/.test(heading)) currentSection = "papeis";
+      else if (/escopo|plano|checklist|passos/.test(heading)) currentSection = "escopo";
+      else if (/aceite|crit[eé]rio|l-22/.test(heading)) currentSection = "aceite";
+      else currentSection = "other";
+      continue;
+    }
+    const checkMatch = /^[-*•]\s*\[([ xX])\]\s*(?:(P\d+)\s*[:\-–]?\s*)?(.+)$/.exec(trimmed);
+    if (checkMatch) {
+      passos.push({
+        id: checkMatch[2] || `P${passos.length + 1}`,
+        done: checkMatch[1].toLowerCase() === "x",
+        text: checkMatch[3].trim()
+      });
+      continue;
+    }
+    if (/^(?:[-*•]\s*)?(?:\*\*)?escrita\s+exclusiva(?:\*\*)?\s*:/i.test(trimmed)) {
+      subListMode = "escrita";
+      const inlineVal = trimmed.replace(/^(?:[-*•]\s*)?(?:\*\*)?escrita\s+exclusiva(?:\*\*)?\s*:\s*(?:\*\*)?\s*/i, "").trim();
+      if (inlineVal) {
+        for (const p of inlineVal.split(/[,;]/)) {
+          const cleanP = p.replace(/`/g, "").replace(/^\*\*\s*|\s*\*\*$/g, "").trim();
+          if (cleanP) escritaExclusiva.push(cleanP);
+        }
+      }
+      continue;
+    }
+    if (/^(?:[-*•]\s*)?(?:\*\*)?(?:leitura|arquivos\s+de\s+refer[eê]ncia)(?:\*\*)?\s*:/i.test(trimmed)) {
+      subListMode = "leitura";
+      const inlineVal = trimmed.replace(/^(?:[-*•]\s*)?(?:\*\*)?(?:leitura|arquivos\s+de\s+refer[eê]ncia)(?:\*\*)?\s*:\s*(?:\*\*)?\s*/i, "").trim();
+      if (inlineVal) {
+        for (const p of inlineVal.split(/[,;]/)) {
+          const cleanP = p.replace(/`/g, "").replace(/^\*\*\s*|\s*\*\*$/g, "").trim();
+          if (cleanP) leitura.push(cleanP);
+        }
+      }
+      continue;
+    }
+    if (subListMode !== "none" && /^[-*•]\s+/.test(trimmed)) {
+      const itemVal = trimmed.replace(/^[-*•]\s+/, "").replace(/`/g, "").trim();
+      if (itemVal) {
+        if (subListMode === "escrita") escritaExclusiva.push(itemVal);
+        else leitura.push(itemVal);
+      }
+      continue;
+    }
+    if (currentSection === "objetivo" && trimmed) {
+      objetivoLines.push(trimmed);
+    } else if (currentSection === "intro" && trimmed && !/^\*\*[^*]+\*\*:/.test(trimmed)) {
+      introLines.push(trimmed);
+    }
+  }
+  feitoQuando = pickField("feito\\s+quando|crit[eé]rio\\s+de\\s+aceite");
+  if (!comandoAceite) {
+    comandoAceite = pickField("comando\\s+de\\s+aceite|comando\\s+l-22|aceite\\s+l-22|aceite");
+  }
+  const result = {
+    objetivo: (objetivoLines.length > 0 ? objetivoLines : introLines).join(" ").trim(),
+    estado: {
+      contexto: pickField("contexto"),
+      autoridade: pickField("autoridade"),
+      decisao: pickField("decis[aã]o")
+    },
+    papeis: {
+      tipo: pickField("tipo"),
+      executor: pickField("executor"),
+      revisor: pickField("revisor"),
+      decisor: pickField("decisor"),
+      workspace: pickField("workspace"),
+      effort: pickField("effort|esfor[cç]o"),
+      spec: pickField("spec")
+    },
+    escopo: {
+      leitura,
+      escritaExclusiva,
+      passos
+    },
+    aceite: {
+      feitoQuando,
+      comandoAceite
+    }
+  };
+  const hasStructuredSignal = Boolean(
+    result.estado.contexto || result.estado.autoridade || result.estado.decisao || result.papeis.executor || result.papeis.revisor || result.papeis.tipo || result.escopo.escritaExclusiva.length > 0 || result.escopo.passos.length > 0 || result.aceite.comandoAceite
+  );
+  return hasStructuredSignal ? result : null;
 }
 function renderSimpleMarkdown(h, raw) {
   const cleaned = cleanCardMarkdown(raw);
@@ -13696,9 +13867,11 @@ function createCodeDenInspectorDrawer(React) {
         setSelectedCommitDiff(repoDetail.commitDiff);
       }
     }, [repoDetail == null ? void 0 : repoDetail.commit, repoDetail == null ? void 0 : repoDetail.commitDiff]);
+    const repoDetailRef = React.useRef(repoDetail);
+    repoDetailRef.current = repoDetail;
     const loadGitOverview = React.useCallback(async () => {
       var _a2, _b2;
-      if (!item) return;
+      if (!(item == null ? void 0 : item.id)) return;
       setGitLoading(true);
       try {
         const snap = await readBuzzProjectGit(ctx, {
@@ -13706,8 +13879,9 @@ function createCodeDenInspectorDrawer(React) {
           dtag: repoDtag || tenant
         });
         setGitSnap(snap);
-        const targetCommit = (repoDetail == null ? void 0 : repoDetail.commit) || (snap == null ? void 0 : snap.head) || ((_b2 = (_a2 = snap == null ? void 0 : snap.commits) == null ? void 0 : _a2[0]) == null ? void 0 : _b2.hash) || "";
-        if (targetCommit && !(repoDetail == null ? void 0 : repoDetail.commitDiff)) {
+        const currentDetail = repoDetailRef.current;
+        const targetCommit = (currentDetail == null ? void 0 : currentDetail.commit) || (snap == null ? void 0 : snap.head) || ((_b2 = (_a2 = snap == null ? void 0 : snap.commits) == null ? void 0 : _a2[0]) == null ? void 0 : _b2.hash) || "";
+        if (targetCommit && !(currentDetail == null ? void 0 : currentDetail.commitDiff)) {
           setSelectedCommit(targetCommit);
           const commitSnap = await readBuzzProjectGit(ctx, {
             owner: repoOwner,
@@ -13716,12 +13890,14 @@ function createCodeDenInspectorDrawer(React) {
           });
           if (commitSnap == null ? void 0 : commitSnap.diff) setSelectedCommitDiff(commitSnap.diff);
         }
+      } catch {
+        setGitSnap(null);
       } finally {
         setGitLoading(false);
       }
-    }, [ctx, item == null ? void 0 : item.id, repoOwner, repoDtag, tenant, repoDetail == null ? void 0 : repoDetail.commit, repoDetail == null ? void 0 : repoDetail.commitDiff]);
+    }, [ctx, item == null ? void 0 : item.id, repoOwner, repoDtag, tenant]);
     React.useEffect(() => {
-      if (!item) return;
+      if (!(item == null ? void 0 : item.id)) return;
       void loadGitOverview();
     }, [item == null ? void 0 : item.id, loadGitOverview]);
     const handleSelectCommit = async (hash) => {
@@ -14470,26 +14646,156 @@ function createCodeDenInspectorDrawer(React) {
                 )
               )
             ),
-            // ── DESCRIÇÃO (Markdown limpo) ──
-            (repoDetail == null ? void 0 : repoDetail.content) && h(
-              "section",
-              { "data-buzz-repo-detail": "true" },
-              renderSectionHeader("Descrição"),
-              h(
-                "div",
-                {
-                  style: {
-                    padding: "10px 12px",
-                    borderRadius: "8px",
-                    border: "1px solid var(--border)",
-                    background: "var(--card)",
-                    maxHeight: "260px",
-                    overflowY: "auto"
-                  }
-                },
-                renderSimpleMarkdown(h, repoDetail.content)
-              )
-            )
+            // ── DESCRIÇÃO ESTRUTURADA DO CARD ORGFY (campos nativos + Markdown original colapsável) ──
+            (repoDetail == null ? void 0 : repoDetail.content) && (() => {
+              const structured = parseOrgfyCardStructure(repoDetail.content);
+              if (!structured) {
+                return h(
+                  "section",
+                  { "data-buzz-repo-detail": "true" },
+                  renderSectionHeader("Descrição"),
+                  h(
+                    "div",
+                    {
+                      style: {
+                        padding: "10px 12px",
+                        borderRadius: "8px",
+                        border: "1px solid var(--border)",
+                        background: "var(--card)",
+                        maxHeight: "260px",
+                        overflowY: "auto"
+                      }
+                    },
+                    renderSimpleMarkdown(h, repoDetail.content)
+                  )
+                );
+              }
+              const resolveCrewByName = (name) => name ? liveCrew.find((a) => a.name.toLowerCase().includes(name.toLowerCase())) || { name } : null;
+              const doneCount = structured.escopo.passos.filter((p) => p.done).length;
+              return h(
+                "section",
+                { "data-buzz-repo-detail": "true", "data-orgfy-structured-card": "true", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+                renderSectionHeader("Contrato do Card OrgFy"),
+                structured.objetivo && h(
+                  "div",
+                  { style: { padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
+                  h("div", { style: { fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted-foreground)", marginBottom: "4px" } }, "Objetivo"),
+                  h("div", { style: { fontSize: "12.5px", lineHeight: 1.5, color: "var(--foreground)" } }, structured.objetivo)
+                ),
+                (structured.papeis.tipo || structured.papeis.executor || structured.papeis.revisor || structured.papeis.decisor || structured.papeis.effort) && h(
+                  "div",
+                  { style: { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "8px" } },
+                  structured.papeis.executor && h(
+                    "div",
+                    { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
+                    h("div", { style: { fontSize: "10px", color: "var(--muted-foreground)", marginBottom: "4px" } }, "Executor"),
+                    h(
+                      "button",
+                      {
+                        type: "button",
+                        className: "of-btn",
+                        style: { padding: "2px 8px", fontSize: "11.5px" },
+                        onClick: () => {
+                          const ag = resolveCrewByName(structured.papeis.executor);
+                          if (ag) onOpenAgentDm == null ? void 0 : onOpenAgentDm(ag);
+                        }
+                      },
+                      `${structured.papeis.executor} ↗`
+                    )
+                  ),
+                  structured.papeis.revisor && h(
+                    "div",
+                    { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
+                    h("div", { style: { fontSize: "10px", color: "var(--muted-foreground)", marginBottom: "4px" } }, "Revisor (L-01)"),
+                    h(
+                      "button",
+                      {
+                        type: "button",
+                        className: "of-btn",
+                        style: { padding: "2px 8px", fontSize: "11.5px" },
+                        onClick: () => {
+                          const ag = resolveCrewByName(structured.papeis.revisor);
+                          if (ag) onOpenAgentDm == null ? void 0 : onOpenAgentDm(ag);
+                        }
+                      },
+                      `${structured.papeis.revisor} ↗`
+                    )
+                  ),
+                  structured.papeis.decisor && h(
+                    "div",
+                    { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
+                    h("div", { style: { fontSize: "10px", color: "var(--muted-foreground)", marginBottom: "2px" } }, "Decisor / Autoridade"),
+                    h("div", { style: { fontSize: "12px", fontWeight: 600 } }, structured.papeis.decisor)
+                  ),
+                  (structured.papeis.tipo || structured.papeis.effort) && h(
+                    "div",
+                    { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)", display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" } },
+                    structured.papeis.tipo && h("span", { className: "of-pill" }, structured.papeis.tipo),
+                    structured.papeis.effort && h("span", { className: "of-pill", "data-tone": "waiting" }, `Effort ${structured.papeis.effort}`)
+                  )
+                ),
+                (structured.estado.contexto || structured.estado.decisao || structured.estado.autoridade) && h(
+                  "div",
+                  { style: { padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)", display: "flex", flexDirection: "column", gap: "6px", fontSize: "12px" } },
+                  h("div", { style: { fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted-foreground)" } }, "Estado & Governança"),
+                  structured.estado.contexto && h("div", null, h("strong", null, "Contexto: "), h("span", { className: "of-muted" }, structured.estado.contexto)),
+                  structured.estado.decisao && h("div", null, h("strong", null, "Decisão: "), h("span", { className: "of-muted" }, structured.estado.decisao)),
+                  structured.estado.autoridade && h("div", null, h("strong", null, "Autoridade: "), h("span", { className: "of-muted" }, structured.estado.autoridade))
+                ),
+                structured.escopo.escritaExclusiva.length > 0 && h(
+                  "div",
+                  { style: { padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
+                  h("div", { style: { fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted-foreground)", marginBottom: "6px" } }, `Escrita exclusiva (${structured.escopo.escritaExclusiva.length})`),
+                  h(
+                    "div",
+                    { style: { display: "flex", flexWrap: "wrap", gap: "5px" } },
+                    structured.escopo.escritaExclusiva.map(
+                      (p) => h("code", { key: p, className: "of-mono", style: { fontSize: "11px", padding: "2px 6px", borderRadius: "5px", background: "var(--muted)", border: "1px solid var(--border)" } }, p)
+                    )
+                  )
+                ),
+                structured.escopo.passos.length > 0 && h(
+                  "div",
+                  { style: { padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
+                  h(
+                    "div",
+                    { style: { display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" } },
+                    h("span", { style: { fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted-foreground)" } }, "Checklist do Card"),
+                    h("span", { className: "of-pill", "data-tone": doneCount === structured.escopo.passos.length ? "done" : "waiting" }, `${doneCount}/${structured.escopo.passos.length}`)
+                  ),
+                  h(
+                    "div",
+                    { style: { display: "flex", flexDirection: "column", gap: "5px", fontSize: "12px" } },
+                    structured.escopo.passos.map(
+                      (p) => h(
+                        "div",
+                        { key: `${p.id}-${p.text.slice(0, 12)}`, style: { display: "flex", alignItems: "flex-start", gap: "7px" } },
+                        Icon({ h, name: p.done ? "checkCircle" : "clock", size: 13, color: p.done ? "var(--status-done, #3dd68c)" : "var(--muted-foreground)" }),
+                        h("span", { className: "of-mono", style: { fontSize: "11px", color: "var(--primary)", flexShrink: 0 } }, p.id),
+                        h("span", { style: { color: p.done ? "var(--muted-foreground)" : "var(--foreground)", textDecoration: p.done ? "line-through" : "none" } }, p.text)
+                      )
+                    )
+                  )
+                ),
+                (structured.aceite.feitoQuando || structured.aceite.comandoAceite) && h(
+                  "div",
+                  { style: { padding: "10px 12px", borderRadius: "8px", border: "1px solid rgba(61,214,140,0.3)", background: "rgba(61,214,140,0.06)", display: "flex", flexDirection: "column", gap: "6px" } },
+                  h("div", { style: { fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--status-done, #3dd68c)" } }, "Aceite Congelado (L-22)"),
+                  structured.aceite.feitoQuando && h("div", { style: { fontSize: "12px", color: "var(--foreground)" } }, structured.aceite.feitoQuando),
+                  structured.aceite.comandoAceite && h("code", { className: "of-mono", style: { fontSize: "11px", padding: "6px 8px", borderRadius: "6px", background: "rgba(0,0,0,0.28)", display: "block", overflowX: "auto" } }, structured.aceite.comandoAceite)
+                ),
+                h(
+                  "details",
+                  { style: { fontSize: "11.5px", color: "var(--muted-foreground)" } },
+                  h("summary", { style: { cursor: "pointer", userSelect: "none", padding: "4px 2px" } }, "Ver Markdown original"),
+                  h(
+                    "div",
+                    { style: { marginTop: "6px", padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)", maxHeight: "220px", overflowY: "auto" } },
+                    renderSimpleMarkdown(h, repoDetail.content)
+                  )
+                )
+              );
+            })()
           ),
           // ── ABA 4: DETALHES (1:1 CodeDen DetailsPanel) ──
           activeTab === "details" && h(
@@ -46463,8 +46769,8 @@ function adaptStatusFor3D(status, liveCrew) {
 function createFloor3DComponent(ctx) {
   const React = ctx.react;
   const h = React.createElement;
-  return function CodeDenFloor3D({ tenant, status, liveCrew, telemetry, focus, onSelectItem, onOpenAgentDm }) {
-    var _a, _b, _c, _d;
+  return function CodeDenFloor3D({ tenant, status, liveCrew, telemetry, focus, onSelectItem, onOpenAgentDm, onOpenAgentProfile }) {
+    var _a, _b;
     const hostRef = React.useRef(null);
     const stageRef = React.useRef(null);
     const seatingRef = React.useRef(NO_SEATING);
@@ -46473,6 +46779,7 @@ function createFloor3DComponent(ctx) {
     const [rosterOpen, setRosterOpen] = React.useState(true);
     const [hoveredKey, setHoveredKey] = React.useState(null);
     const [selectedKey, setSelectedKey] = React.useState(null);
+    const [isFullscreen, setIsFullscreen] = React.useState(false);
     const tenantAgents = ((_a = status.tenantManifest) == null ? void 0 : _a.agentes) || [];
     const empresaNome = ((_b = status.tenantManifest) == null ? void 0 : _b.nome) || tenant;
     const adapted = React.useMemo(() => adaptStatusFor3D(status, liveCrew), [status, liveCrew]);
@@ -46497,6 +46804,12 @@ function createFloor3DComponent(ctx) {
       return { scene: nextScene, layout: finalLayout };
     }, [adapted]);
     const lookout = React.useMemo(() => lookoutLayout(layout), [layout]);
+    const sceneRef = React.useRef(scene);
+    const statusRef = React.useRef(status);
+    const onSelectItemRef = React.useRef(onSelectItem);
+    sceneRef.current = scene;
+    statusRef.current = status;
+    onSelectItemRef.current = onSelectItem;
     React.useEffect(() => {
       const el = hostRef.current;
       if (!el) return;
@@ -46508,15 +46821,17 @@ function createFloor3DComponent(ctx) {
             var _a2;
             setSelectedKey(key);
             if (!key) return;
-            const agent = scene.agents.find((a) => a.key === key);
+            const latestScene = sceneRef.current;
+            const latestStatus = statusRef.current;
+            const agent = latestScene.agents.find((a) => a.key === key);
             if ((_a2 = agent == null ? void 0 : agent.card) == null ? void 0 : _a2.item) {
-              const found = [...status.backlog, ...status.inProgress, ...status.recent].find(
+              const found = [...latestStatus.backlog, ...latestStatus.inProgress, ...latestStatus.recent].find(
                 (i) => {
                   var _a3;
                   return i.id === ((_a3 = agent.card) == null ? void 0 : _a3.item.id);
                 }
               );
-              if (found) onSelectItem(found);
+              if (found) onSelectItemRef.current(found);
             }
           },
           onFrame: () => {
@@ -46550,7 +46865,7 @@ function createFloor3DComponent(ctx) {
     }, [rosterOpen]);
     const leadershipAndExec = tenantAgents.filter((a) => a.categoria === "lideranca" || a.categoria === "execucao");
     const reviewAndOps = tenantAgents.filter((a) => a.categoria === "revisao" || a.categoria === "operacao");
-    const activeHoverAgent = scene.agents.find((a) => a.key === (hoveredKey || selectedKey)) || null;
+    scene.agents.find((a) => a.key === (hoveredKey || selectedKey)) || null;
     const turnOf = (ag) => ag.pubkey && (telemetry == null ? void 0 : telemetry.byPubkey) ? telemetry.byPubkey[ag.pubkey.toLowerCase()] || null : null;
     const workingNowCount = tenantAgents.filter((a) => Boolean(turnOf(a))).length;
     const inBuzzCount = tenantAgents.filter((a) => a.inBuzz).length;
@@ -46690,45 +47005,152 @@ function createFloor3DComponent(ctx) {
           },
           `Equipe ${empresaNome} (${tenantAgents.length}) ›`
         ),
-        activeHoverAgent && h(
-          "div",
-          {
-            style: {
-              position: "absolute",
-              top: "10px",
-              right: "10px",
-              zIndex: 20,
-              width: "240px",
-              borderRadius: "10px",
-              border: "1px solid var(--border-strong)",
-              background: "rgba(18, 20, 26, 0.92)",
-              padding: "10px 12px",
-              fontSize: "11.5px"
-            }
-          },
-          h("div", { style: { fontWeight: 700 } }, activeHoverAgent.role === "pm" ? `${((_c = status.tenantManifest) == null ? void 0 : _c.coo) || "COO"} (${empresaNome})` : activeHoverAgent.role === "scout" ? "Oráculo · Scout" : ((_d = activeHoverAgent.card) == null ? void 0 : _d.item.title) || activeHoverAgent.area || activeHoverAgent.key),
-          h("div", { className: "of-mono of-muted", style: { marginTop: "2px" } }, `${activeHoverAgent.status} · ${activeHoverAgent.model || "padrão"}`),
-          activeHoverAgent.progress && h("div", { className: "of-muted", style: { marginTop: "4px" } }, activeHoverAgent.progress)
-        ),
-        h(
-          "button",
-          {
-            type: "button",
-            className: "of-btn",
-            style: {
-              position: "absolute",
-              right: "12px",
-              bottom: "12px",
-              zIndex: 20,
-              background: "rgba(18, 20, 26, 0.88)"
+        (() => {
+          var _a2, _b2, _c;
+          const focusKey = selectedKey || hoveredKey;
+          if (!focusKey) return null;
+          const sceneAg = scene.agents.find((a) => a.key === focusKey) || null;
+          const matchedTenantAg = tenantAgents.find((a) => a.agentKey === focusKey || a.name === focusKey) || ((sceneAg == null ? void 0 : sceneAg.role) === "pm" ? tenantAgents.find((a) => a.papel === "coo" || /bento|coo/i.test(a.name)) : (sceneAg == null ? void 0 : sceneAg.role) === "scout" ? tenantAgents.find((a) => a.papel === "oraculo" || /oraculo|oráculo|scout/i.test(a.name)) : null) || null;
+          const matchedLive = matchedTenantAg ? liveCrew.find((c) => {
+            var _a3;
+            return c.key === matchedTenantAg.agentKey || matchedTenantAg.pubkey && ((_a3 = c.pubkey) == null ? void 0 : _a3.toLowerCase()) === matchedTenantAg.pubkey.toLowerCase();
+          }) : liveCrew.find((c) => c.key === focusKey) || null;
+          const liveTurn = matchedTenantAg ? turnOf(matchedTenantAg) : null;
+          const displayTitle = (matchedTenantAg == null ? void 0 : matchedTenantAg.name) || ((sceneAg == null ? void 0 : sceneAg.role) === "pm" ? `${((_a2 = status.tenantManifest) == null ? void 0 : _a2.coo) || "COO"} (${empresaNome})` : (sceneAg == null ? void 0 : sceneAg.role) === "scout" ? "Oráculo · Scout" : ((_b2 = sceneAg == null ? void 0 : sceneAg.card) == null ? void 0 : _b2.item.title) || (sceneAg == null ? void 0 : sceneAg.area) || focusKey);
+          const statusText = liveTurn ? "Respondendo" : (matchedTenantAg == null ? void 0 : matchedTenantAg.running) || (sceneAg == null ? void 0 : sceneAg.status) === "working" ? "Em execução" : (matchedTenantAg == null ? void 0 : matchedTenantAg.inBuzz) ? "Disponível" : "Ocioso";
+          const statusTone = liveTurn ? liveTurn.state === "error" ? "failed" : "running" : (matchedTenantAg == null ? void 0 : matchedTenantAg.inBuzz) ? "done" : "idle";
+          const stepLabel = (liveTurn == null ? void 0 : liveTurn.stepLabel) || ((_c = sceneAg == null ? void 0 : sceneAg.card) == null ? void 0 : _c.item.title) || (sceneAg == null ? void 0 : sceneAg.progress) || (matchedTenantAg == null ? void 0 : matchedTenantAg.funcao) || "Aguardando tarefa";
+          const modelLabel = `${(matchedLive == null ? void 0 : matchedLive.provider) || (matchedTenantAg == null ? void 0 : matchedTenantAg.provider) || "buzz"} · ${(matchedLive == null ? void 0 : matchedLive.model) || (matchedTenantAg == null ? void 0 : matchedTenantAg.model) || (sceneAg == null ? void 0 : sceneAg.model) || "padrão"}`;
+          return h(
+            "div",
+            {
+              "data-floor3d-agent-popover": "true",
+              style: {
+                position: "absolute",
+                top: "10px",
+                right: "10px",
+                zIndex: 25,
+                width: "276px",
+                borderRadius: "10px",
+                border: "1px solid var(--border-strong)",
+                background: "rgba(18, 20, 26, 0.95)",
+                backdropFilter: "blur(10px)",
+                boxShadow: "0 12px 30px rgba(0,0,0,0.45)",
+                padding: "11px 13px",
+                fontSize: "11.5px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "8px"
+              }
             },
-            title: "Enquadrar todo o andar 3D (ou clique duplo)",
-            onClick: () => {
-              var _a2;
-              return (_a2 = stageRef.current) == null ? void 0 : _a2.fit(true);
-            }
-          },
-          "⤢ Fit"
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", borderBottom: "1px solid var(--border)", paddingBottom: "7px" } },
+              h(
+                "div",
+                { style: { display: "inline-flex", alignItems: "center", gap: "7px", minWidth: 0 } },
+                (matchedLive == null ? void 0 : matchedLive.picture) && h("img", { src: matchedLive.picture, alt: displayTitle, style: { width: "20px", height: "20px", borderRadius: "5px", objectFit: "cover" } }),
+                h("strong", { style: { fontSize: "12.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, displayTitle)
+              ),
+              h(
+                "div",
+                { style: { display: "inline-flex", alignItems: "center", gap: "6px", flexShrink: 0 } },
+                h("span", { className: "of-pill", "data-tone": statusTone, style: { fontSize: "10px", padding: "1px 6px" } }, statusText),
+                selectedKey && h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "of-btn",
+                    "data-variant": "ghost",
+                    style: { padding: "1px 5px", fontSize: "12px" },
+                    title: "Fechar",
+                    onClick: () => setSelectedKey(null)
+                  },
+                  "×"
+                )
+              )
+            ),
+            h(
+              "div",
+              { style: { display: "grid", gridTemplateColumns: "58px 1fr", gap: "4px 8px", fontSize: "11px" } },
+              h("span", { className: "of-muted" }, "Etapa"),
+              h("span", { style: { fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: stepLabel }, stepLabel),
+              h("span", { className: "of-muted" }, "Agente"),
+              h("span", { className: "of-mono of-muted", style: { fontSize: "10.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: modelLabel }, modelLabel)
+            ),
+            h(
+              "div",
+              { style: { display: "flex", gap: "6px", paddingTop: "2px" } },
+              onOpenAgentDm && (matchedTenantAg || matchedLive) && h(
+                "button",
+                {
+                  type: "button",
+                  className: "of-btn",
+                  "data-variant": "primary",
+                  style: { flex: 1, justifyContent: "center", fontSize: "11px", padding: "5px 8px" },
+                  onClick: () => onOpenAgentDm({
+                    key: (matchedTenantAg == null ? void 0 : matchedTenantAg.agentKey) || (matchedLive == null ? void 0 : matchedLive.key),
+                    pubkey: (matchedTenantAg == null ? void 0 : matchedTenantAg.pubkey) || (matchedLive == null ? void 0 : matchedLive.pubkey),
+                    name: displayTitle
+                  })
+                },
+                "Abrir chat lateral ↗"
+              ),
+              onOpenAgentProfile && ((matchedTenantAg == null ? void 0 : matchedTenantAg.agentKey) || (matchedLive == null ? void 0 : matchedLive.key)) && h(
+                "button",
+                {
+                  type: "button",
+                  className: "of-btn",
+                  style: { fontSize: "11px", padding: "5px 8px" },
+                  onClick: () => onOpenAgentProfile((matchedTenantAg == null ? void 0 : matchedTenantAg.agentKey) || matchedLive.key)
+                },
+                "Perfil"
+              )
+            )
+          );
+        })(),
+        h(
+          "div",
+          { style: { position: "absolute", right: "12px", bottom: "12px", zIndex: 20, display: "inline-flex", gap: "6px" } },
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              style: { background: "rgba(18, 20, 26, 0.88)" },
+              title: isFullscreen ? "Sair da tela cheia" : "Tela cheia no Andar 3D",
+              onClick: () => {
+                var _a2, _b2;
+                const el = hostRef.current;
+                if (!el) return;
+                try {
+                  if (document.fullscreenElement) {
+                    void ((_a2 = document.exitFullscreen) == null ? void 0 : _a2.call(document));
+                    setIsFullscreen(false);
+                  } else {
+                    void ((_b2 = el.requestFullscreen) == null ? void 0 : _b2.call(el));
+                    setIsFullscreen(true);
+                  }
+                } catch {
+                }
+              }
+            },
+            isFullscreen ? "↙ Sair" : "⛶ Tela cheia"
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              style: { background: "rgba(18, 20, 26, 0.88)" },
+              title: "Enquadrar todo o andar 3D (ou clique duplo)",
+              onClick: () => {
+                var _a2;
+                return (_a2 = stageRef.current) == null ? void 0 : _a2.fit(true);
+              }
+            },
+            "⤢ Fit"
+          )
         )
       ),
       h(
@@ -49624,6 +50046,8 @@ function createFactoryAppComponent(ctx, opts = {}) {
     });
     const [paletteOpen, setPaletteOpen] = React.useState(false);
     const [paletteQuery, setPaletteQuery] = React.useState("");
+    const [guideOpen, setGuideOpen] = React.useState(false);
+    const [guideSection, setGuideSection] = React.useState("loop");
     const [compactDensity, setCompactDensity] = React.useState(false);
     const [expandedProjects, setExpandedProjects] = React.useState({ orgfy: true });
     const [showAllByProject, setShowAllByProject] = React.useState({});
@@ -49647,6 +50071,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
           setPaletteOpen((v2) => !v2);
         } else if (ev.key === "Escape") {
           setPaletteOpen(false);
+          setGuideOpen(false);
         }
       };
       window.addEventListener("keydown", onKey);
@@ -49762,7 +50187,9 @@ function createFactoryAppComponent(ctx, opts = {}) {
       prsAbertos: 6,
       falhasSeguidas: 3
     });
+    const settingsDirtyRef = React.useRef(false);
     const setSettingsForm = React.useCallback((patch) => {
+      settingsDirtyRef.current = true;
       setSettingsFormState((prev) => ({ ...prev, ...patch }));
     }, []);
     const hostRef = React.useRef(null);
@@ -49776,7 +50203,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
       setTimeout(() => setToast(null), 3500);
     }, []);
     const refresh = React.useCallback(
-      async (targetTenant = tenant) => {
+      async (targetTenant = tenant, forceSettingsSync = false) => {
         var _a2, _b2;
         setLoading(true);
         const [res, holdSnap] = await Promise.all([
@@ -49786,26 +50213,29 @@ function createFactoryAppComponent(ctx, opts = {}) {
         setStatus(res.status);
         setError(res.error);
         if (holdSnap) setHolding(holdSnap);
-        setSettingsFormState({
-          mode: res.status.mode,
-          autoMerge: res.status.limits.autoMerge,
-          mergePolicy: res.status.limits.mergePolicy,
-          gastoDiaUsd: ((_a2 = res.status.limits.dailyBudget) == null ? void 0 : _a2.usd) ?? 50,
-          mergesDia: res.status.limits.maxMergesPerDay ?? 20,
-          agentesMax: res.status.limits.maxConcurrentSessions ?? 4,
-          prsAbertos: ((_b2 = res.status.wip) == null ? void 0 : _b2.limit) ?? 6,
-          falhasSeguidas: res.status.limits.pauseAfterConsecutiveFailures ?? 3
-        });
+        if (!settingsDirtyRef.current || forceSettingsSync) {
+          setSettingsFormState({
+            mode: res.status.mode,
+            autoMerge: res.status.limits.autoMerge,
+            mergePolicy: res.status.limits.mergePolicy,
+            gastoDiaUsd: ((_a2 = res.status.limits.dailyBudget) == null ? void 0 : _a2.usd) ?? 50,
+            mergesDia: res.status.limits.maxMergesPerDay ?? 20,
+            agentesMax: res.status.limits.maxConcurrentSessions ?? 4,
+            prsAbertos: ((_b2 = res.status.wip) == null ? void 0 : _b2.limit) ?? 6,
+            falhasSeguidas: res.status.limits.pauseAfterConsecutiveFailures ?? 3
+          });
+        }
         setLoading(false);
       },
       [tenant]
     );
     React.useEffect(() => {
+      settingsDirtyRef.current = false;
       let disposed = false;
       const run = () => {
-        if (!disposed) refresh(tenant);
+        if (!disposed) refresh(tenant, false);
       };
-      run();
+      refresh(tenant, true);
       const timer = setInterval(run, 5e3);
       const unsub = subscribeRelayUpdates(() => run());
       return () => {
@@ -49818,10 +50248,11 @@ function createFactoryAppComponent(ctx, opts = {}) {
       async (patch, message) => {
         const res = await writeTenantControl(ctx, tenant, patch);
         if (res.ok) {
+          settingsDirtyRef.current = false;
           notify2(message);
-          await refresh(tenant);
+          await refresh(tenant, true);
         } else {
-          notify2("Falha ao gravar controle-<tenant>.json (host.writeFile indisponível).");
+          notify2(res.error ? `Falha ao gravar controle-${tenant}.json: ${res.error}` : `Falha ao gravar controle-${tenant}.json.`);
         }
       },
       [tenant, notify2, refresh]
@@ -50554,6 +50985,11 @@ function createFactoryAppComponent(ctx, opts = {}) {
                 onSelectAgentKey: setSelectedAgentKey,
                 onSelectItem: setSelectedItem,
                 onOpenAgentDm: handleOpenAgentDmInBuzz,
+                onOpenGuide: () => setGuideOpen(true),
+                onToggleKillSwitch: (next) => handleControlUpdate(
+                  { killSwitch: next, pausedReason: next ? "Kill Switch acionado pelo operador" : null },
+                  next ? "Kill Switch ativado imediatamente." : "Kill Switch liberado."
+                ),
                 onRefresh: () => refresh(tenant),
                 loading,
                 Floor3D
@@ -50585,6 +51021,8 @@ function createFactoryAppComponent(ctx, opts = {}) {
                 onSaveSettings: () => handleControlUpdate(
                   {
                     mode: settingsForm.mode,
+                    autoMerge: settingsForm.autoMerge,
+                    mergePolicy: settingsForm.mergePolicy,
                     limits: {
                       gastoDiaUsd: settingsForm.gastoDiaUsd,
                       mergesDia: settingsForm.mergesDia,
@@ -50726,6 +51164,200 @@ function createFactoryAppComponent(ctx, opts = {}) {
         },
         paletteQuery,
         setPaletteQuery
+      ),
+      guideOpen && h(
+        "div",
+        {
+          className: "of-sheet-backdrop",
+          "data-orgfy-factory-guide": "true",
+          style: { alignItems: "center", justifyContent: "center", padding: "24px" },
+          onClick: (e) => {
+            if (e.target === e.currentTarget) setGuideOpen(false);
+          }
+        },
+        h(
+          "div",
+          {
+            role: "dialog",
+            "aria-label": "Como funciona o loop da Fábrica OrgFy",
+            style: {
+              width: "min(820px, 96vw)",
+              maxHeight: "min(680px, 88vh)",
+              borderRadius: "12px",
+              border: "1px solid var(--border)",
+              background: "var(--card)",
+              color: "var(--foreground)",
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+              boxShadow: "0 24px 64px rgba(0,0,0,0.55)"
+            }
+          },
+          h(
+            "div",
+            {
+              style: {
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                padding: "14px 18px",
+                borderBottom: "1px solid var(--border)"
+              }
+            },
+            h(
+              "div",
+              null,
+              h("div", { style: { fontSize: "14px", fontWeight: 700 } }, "Como funciona o loop da Fábrica OrgFy"),
+              h("div", { className: "of-muted", style: { fontSize: "11.5px", marginTop: "2px" } }, "Fábrica de Software e Dark Factory passo a passo (L-01, L-22, WIP e Kill Switch)")
+            ),
+            h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                style: { padding: "4px 10px", fontSize: "12px" },
+                onClick: () => setGuideOpen(false)
+              },
+              "×"
+            )
+          ),
+          h(
+            "div",
+            { style: { display: "grid", gridTemplateColumns: "210px 1fr", flex: 1, minHeight: 0, overflow: "hidden" } },
+            h(
+              "nav",
+              {
+                style: {
+                  borderRight: "1px solid var(--border)",
+                  padding: "12px 10px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "4px",
+                  overflowY: "auto",
+                  background: "rgba(0,0,0,0.14)"
+                }
+              },
+              [
+                { id: "loop", label: "1. O loop da fábrica" },
+                { id: "pipelines", label: "2. Raias e L-01 / L-22" },
+                { id: "merge", label: "3. Fila de merge & CI" },
+                { id: "slots", label: "4. Slots de agentes & WIP" },
+                { id: "modes", label: "5. Modos de autonomia" },
+                { id: "controls", label: "6. Kill Switch & Dreno" }
+              ].map(
+                (sec) => h(
+                  "button",
+                  {
+                    key: sec.id,
+                    type: "button",
+                    onClick: () => setGuideSection(sec.id),
+                    style: {
+                      textAlign: "left",
+                      padding: "7px 10px",
+                      borderRadius: "6px",
+                      border: "none",
+                      background: guideSection === sec.id ? "var(--affordance-selected, rgba(255,255,255,0.08))" : "transparent",
+                      color: guideSection === sec.id ? "var(--foreground)" : "var(--muted-foreground)",
+                      fontSize: "12px",
+                      fontWeight: guideSection === sec.id ? 600 : 400,
+                      cursor: "pointer"
+                    }
+                  },
+                  sec.label
+                )
+              )
+            ),
+            h(
+              "div",
+              { style: { padding: "18px 20px", overflowY: "auto", fontSize: "12.5px", lineHeight: 1.6, display: "flex", flexDirection: "column", gap: "12px" } },
+              guideSection === "loop" && h(
+                React.Fragment,
+                null,
+                h(
+                  "p",
+                  { style: { margin: 0, color: "var(--muted-foreground)" } },
+                  "O coordenador (Porteiro) executa ciclos contínuos sobre o relay NIP-34 do Buzz e o repositório Git, respeitando imediatamente os controles em ",
+                  h("code", { className: "of-mono" }, `estado/controle-${tenant}.json`),
+                  "."
+                ),
+                h(
+                  "pre",
+                  {
+                    className: "of-mono",
+                    style: {
+                      margin: 0,
+                      padding: "14px",
+                      borderRadius: "8px",
+                      border: "1px solid var(--border)",
+                      background: "rgba(0,0,0,0.28)",
+                      fontSize: "11px",
+                      lineHeight: 1.5,
+                      overflowX: "auto"
+                    }
+                  },
+                  [
+                    "Issue NIP-34 (você, COO ou Oráculo)",
+                    "   │",
+                    "   ▼",
+                    "Triagem & Card-Lint (L-01 + L-22 + Escrita Exclusiva)",
+                    "   │ aguarda slot livre (WIP / agentes simultâneos)",
+                    "   ▼",
+                    "┌─────────────────────────────────────────────┐",
+                    "│ Executor trabalha em worktree Git isolada   │",
+                    "│ TDD RED → GREEN + atualiza Checklist P1..Pn │",
+                    "└─────────────────────────────────────────────┘",
+                    "   │ abre PR NIP-34",
+                    "   ▼",
+                    "Revisão Cross-Provider (L-01) + CI isolado ◄──┐",
+                    "   │ GATE: recusado → Executor corrige ───────┘",
+                    "   ▼ GATE: aceito + checks verdes",
+                    "Merge na main (Fast ou Strict) + Watchdog CI"
+                  ].join("\n")
+                )
+              ),
+              guideSection === "pipelines" && h(
+                React.Fragment,
+                null,
+                h("h4", { style: { margin: 0, fontSize: "13.5px" } }, "Raias Determinísticas & Invariantes"),
+                h("p", { style: { margin: 0, color: "var(--muted-foreground)" } }, "• L-01 (Cross-Provider): o agente revisor nunca é o executor, garantindo revisão independente."),
+                h("p", { style: { margin: 0, color: "var(--muted-foreground)" } }, "• L-22 (Aceite Congelado): o comando de aceite do card é protegido por SHA-256; o executor não pode afrouxar testes."),
+                h("p", { style: { margin: 0, color: "var(--muted-foreground)" } }, "• Escrita Exclusiva: o despacho impede dois agentes editando o mesmo arquivo simultaneamente (WRITE_SET_CONFLICT).")
+              ),
+              guideSection === "merge" && h(
+                React.Fragment,
+                null,
+                h("h4", { style: { margin: 0, fontSize: "13.5px" } }, "Fila de Merge & Políticas"),
+                h("p", { style: { margin: 0, color: "var(--muted-foreground)" } }, "• Strict (padrão): re-executa o CI já sobre a main antes de concluir o merge, bloqueando regressões."),
+                h("p", { style: { margin: 0, color: "var(--muted-foreground)" } }, "• Fast: confia no CI aprovado do PR quando não há conflito de rebase."),
+                h("p", { style: { margin: 0, color: "var(--muted-foreground)" } }, "• Watchdog pós-merge: se a main quebrar após integração, dispara alerta e pausa a esteira automaticamente.")
+              ),
+              guideSection === "slots" && h(
+                React.Fragment,
+                null,
+                h("h4", { style: { margin: 0, fontSize: "13.5px" } }, "Slots de Agentes, WIP & Orçamento"),
+                h("p", { style: { margin: 0, color: "var(--muted-foreground)" } }, `Limites ativos de ${empresaNome}: WIP máx ${status.wip.limit} PRs abertos · ${status.limits.maxConcurrentSessions} agentes simultâneos · ${status.limits.maxMergesPerDay} merges/dia · orçamento US$ ${status.limits.dailyBudget.usd}/dia.`),
+                h("p", { style: { margin: 0, color: "var(--muted-foreground)" } }, "Você pode ajustar esses valores a qualquer momento na aba Configurações — eles são gravados diretamente em controle-<empresa>.json.")
+              ),
+              guideSection === "modes" && h(
+                React.Fragment,
+                null,
+                h("h4", { style: { margin: 0, fontSize: "13.5px" } }, "Modos de Autonomia"),
+                h("p", { style: { margin: 0, color: "var(--muted-foreground)" } }, "• Manual: você conduz cada despacho e revisão."),
+                h("p", { style: { margin: 0, color: "var(--muted-foreground)" } }, "• Assistido: COO e automações preparam trabalho; você revisa e integra."),
+                h("p", { style: { margin: 0, color: "var(--muted-foreground)" } }, "• Fábrica de Software: issues confiáveis entram nas raias com worktrees isoladas, CI e Revisor L-01."),
+                h("p", { style: { margin: 0, color: "var(--muted-foreground)" } }, "• Dark Factory: adiciona o Oráculo (Scout) auditando continuamente o workspace contra o Canvas/Visão e abrindo novas issues.")
+              ),
+              guideSection === "controls" && h(
+                React.Fragment,
+                null,
+                h("h4", { style: { margin: 0, fontSize: "13.5px" } }, "Kill Switch & Modo Dreno"),
+                h("p", { style: { margin: 0, color: "var(--muted-foreground)" } }, "• Kill Switch: para imediatamente novos despachos e merges no próximo ciclo do coordenador."),
+                h("p", { style: { margin: 0, color: "var(--muted-foreground)" } }, "• Modo Dreno: não inicia novas issues, mas deixa os PRs que já estão em execução/revisão concluírem com segurança."),
+                h("p", { style: { margin: 0, color: "var(--muted-foreground)" } }, "• Clique em qualquer bonequinho no Andar 3D para inspecionar o turno ao vivo e abrir o chat lateral nativo do Buzz com aquele agente.")
+              )
+            )
+          )
+        )
       )
     );
     if (useNativeSideTabs) {
@@ -50981,6 +51613,7 @@ export {
   isUnsupportedAgentModel,
   parseCardProgress,
   parseFactoryStatus,
+  parseOrgfyCardStructure,
   parseOrgfyMessageContext,
   reconcileAgentPresenceAndLocks,
   reconcileAgentsViaBuzzApi,

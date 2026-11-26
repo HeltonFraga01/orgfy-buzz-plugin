@@ -33,6 +33,8 @@ export interface BoardAndFloorProps {
   onSelectAgentKey: (k: string | null) => void;
   onSelectItem: (item: FactoryWorkItem) => void;
   onOpenAgentDm?: (agent: { key?: string; pubkey?: string; name?: string }) => void;
+  onToggleKillSwitch?: (next: boolean) => void;
+  onOpenGuide?: () => void;
   onRefresh: () => void;
   loading: boolean;
   Floor3D?: any;
@@ -234,7 +236,20 @@ export function renderFactoryBoardAndFloor(props: BoardAndFloorProps) {
             "Andar"
           )
         ),
-        h("button", { type: "button", className: "of-btn", onClick: onRefresh, disabled: loading }, loading ? "..." : "Atualizar")
+        props.onOpenGuide &&
+          h("button", { type: "button", className: "of-btn", title: "Como funciona o loop da Fábrica OrgFy", onClick: props.onOpenGuide }, "? Como funciona"),
+        props.onToggleKillSwitch &&
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-variant": status.killSwitch ? "primary" : "danger",
+              onClick: () => props.onToggleKillSwitch!(!status.killSwitch),
+            },
+            status.killSwitch ? "Retomar" : "Kill switch"
+          ),
+        h("button", { type: "button", className: "of-btn", onClick: onRefresh, disabled: loading }, loading ? "..." : "Verificar agora")
       )
     ),
 
@@ -364,10 +379,8 @@ export function renderFactoryBoardAndFloor(props: BoardAndFloorProps) {
             telemetry: props.telemetry,
             focus: storeyFocus,
             onSelectItem,
-            onOpenAgentDm: (ag: any) => {
-              if (ag?.key) onSelectAgentKey(ag.key);
-              else props.onOpenAgentDm?.(ag);
-            },
+            onOpenAgentDm: (ag: any) => props.onOpenAgentDm?.(ag),
+            onOpenAgentProfile: (agentKey: string) => onSelectAgentKey(agentKey),
           })
         : h(
             "div",
