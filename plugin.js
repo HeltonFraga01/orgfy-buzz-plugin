@@ -11530,7 +11530,39 @@ function renderFactoryOverviewPanel(props) {
               )
             ),
             h("span", { className: "of-muted", style: { fontSize: "11px", flexShrink: 0 } }, liveTurn ? "Respondendo" : presence === "online" ? "Online" : "Disponível"),
-            h("span", { className: "of-pill", style: { fontSize: "10px" } }, "Chat lateral ↗")
+            h(
+              "span",
+              {
+                title: `Abrir chat lateral com ${ag.name}`,
+                "aria-label": `Abrir chat lateral com ${ag.name}`,
+                style: {
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: "26px",
+                  height: "26px",
+                  borderRadius: "6px",
+                  border: "1px solid var(--border)",
+                  color: "var(--muted-foreground)",
+                  flexShrink: 0
+                }
+              },
+              h(
+                "svg",
+                {
+                  viewBox: "0 0 24 24",
+                  width: 13,
+                  height: 13,
+                  fill: "none",
+                  stroke: "currentColor",
+                  strokeWidth: 1.85,
+                  strokeLinecap: "round",
+                  strokeLinejoin: "round",
+                  "aria-hidden": "true"
+                },
+                h("path", { d: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" })
+              )
+            )
           );
         })
       )
