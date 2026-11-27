@@ -424,12 +424,8 @@ export async function buildLiveAgentRoster(
     const hasCriticalRadar = Boolean(
       agentRadar && (agentRadar.severidade === "critical" || agentRadar.last_msg_is_provider_error)
     );
-    const badModel = Boolean(model && isUnsupportedAgentModel(model));
-
     let status: LiveRosterAgent["status"] = "FREE";
-    if (badModel) {
-      status = "MODEL_UNSUPPORTED";
-    } else if (hasCriticalRadar) {
+    if (hasCriticalRadar) {
       status = "ALERT_RADAR";
     } else if (isRunningInBuzz || sessionState === "active" || Boolean(activeLockRec)) {
       status = "WORKING_REAL";
