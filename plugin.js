@@ -57171,6 +57171,13 @@ function createBoardroom3DComponent(ctx) {
     const mountRef = React.useRef(null);
     const bubbleNodesRef = React.useRef(/* @__PURE__ */ new Map());
     const prevActiveByPubkeyRef = React.useRef({});
+    const cameraStateRef = React.useRef({
+      initialized: false,
+      theta: 0.62,
+      phi: 0.96,
+      frustum: 9.4,
+      target: [0, 0.72, -0.15]
+    });
     const [fitTick, setFitTick] = React.useState(0);
     const [themeVersion, setThemeVersion] = React.useState(0);
     const [screenSlide, setScreenSlide] = React.useState(0);
@@ -57251,10 +57258,11 @@ function createBoardroom3DComponent(ctx) {
       const scene = new Scene();
       const bgColor = palette.dark ? new Color(855827) : colour(palette.sky);
       scene.background = bgColor;
-      let theta = 0.62;
-      let phi = 0.96;
-      let frustum = 9.4;
-      const target = new Vector3(0, 0.72, -0.15);
+      const savedCam = cameraStateRef.current;
+      let theta = savedCam.initialized ? savedCam.theta : 0.62;
+      let phi = savedCam.initialized ? savedCam.phi : 0.96;
+      let frustum = savedCam.initialized ? savedCam.frustum : 9.4;
+      const target = savedCam.initialized ? new Vector3(savedCam.target[0], savedCam.target[1], savedCam.target[2]) : new Vector3(0, 0.72, -0.15);
       const aspect2 = width / height;
       const camera = new OrthographicCamera(
         -frustum * aspect2 / 2,
@@ -57280,6 +57288,13 @@ function createBoardroom3DComponent(ctx) {
         );
         camera.lookAt(target);
         camera.updateProjectionMatrix();
+        cameraStateRef.current = {
+          initialized: true,
+          theta,
+          phi,
+          frustum,
+          target: [target.x, target.y, target.z]
+        };
       };
       updateCamera();
       let renderer;
@@ -57666,8 +57681,8 @@ function createBoardroom3DComponent(ctx) {
         });
       });
       const defaultTarget = new Vector3(0, 0.72, -0.15);
-      const desiredTarget = defaultTarget.clone();
-      let desiredFrustum = 9.4;
+      const desiredTarget = target.clone();
+      let desiredFrustum = frustum;
       const raycaster = new Raycaster();
       const pointer = new Vector2();
       let dragging = false;
@@ -58406,7 +58421,10 @@ function createBoardroom3DComponent(ctx) {
               className: "of-btn",
               style: { background: "rgba(18, 20, 26, 0.88)" },
               title: "Enquadrar a Sala de Reunião 3D",
-              onClick: () => setFitTick((n) => n + 1)
+              onClick: () => {
+                cameraStateRef.current.initialized = false;
+                setFitTick((n) => n + 1);
+              }
             },
             "⤢ Fit"
           )

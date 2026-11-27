@@ -632,6 +632,19 @@ export function createBoardroom3DComponent(ctx: Context) {
     const mountRef = React.useRef<HTMLDivElement | null>(null);
     const bubbleNodesRef = React.useRef<Map<string, HTMLDivElement>>(new Map());
     const prevActiveByPubkeyRef = React.useRef<Record<string, LiveAgentTurn>>({});
+    const cameraStateRef = React.useRef<{
+      initialized: boolean;
+      theta: number;
+      phi: number;
+      frustum: number;
+      target: [number, number, number];
+    }>({
+      initialized: false,
+      theta: 0.62,
+      phi: 0.96,
+      frustum: 9.4,
+      target: [0, 0.72, -0.15],
+    });
     const [fitTick, setFitTick] = React.useState(0);
     const [themeVersion, setThemeVersion] = React.useState(0);
     const [screenSlide, setScreenSlide] = React.useState(0);
@@ -724,10 +737,14 @@ export function createBoardroom3DComponent(ctx: Context) {
       scene.background = bgColor;
 
       // Câmera ortográfica isométrica 1:1 com a estética arquitetônica do Andar 3D
-      let theta = 0.62;
-      let phi = 0.96;
-      let frustum = 9.4;
-      const target = new THREE.Vector3(0, 0.72, -0.15);
+      // Preserva ângulo, zoom e alvo entre atualizações ao vivo de telemetria/slides (só reseta no Fit).
+      const savedCam = cameraStateRef.current;
+      let theta = savedCam.initialized ? savedCam.theta : 0.62;
+      let phi = savedCam.initialized ? savedCam.phi : 0.96;
+      let frustum = savedCam.initialized ? savedCam.frustum : 9.4;
+      const target = savedCam.initialized
+        ? new THREE.Vector3(savedCam.target[0], savedCam.target[1], savedCam.target[2])
+        : new THREE.Vector3(0, 0.72, -0.15);
 
       const aspect = width / height;
       const camera = new THREE.OrthographicCamera(
@@ -755,6 +772,13 @@ export function createBoardroom3DComponent(ctx: Context) {
         );
         camera.lookAt(target);
         camera.updateProjectionMatrix();
+        cameraStateRef.current = {
+          initialized: true,
+          theta,
+          phi,
+          frustum,
+          target: [target.x, target.y, target.z],
+        };
       };
       updateCamera();
 
@@ -1228,8 +1252,8 @@ export function createBoardroom3DComponent(ctx: Context) {
       });
 
       const defaultTarget = new THREE.Vector3(0, 0.72, -0.15);
-      const desiredTarget = defaultTarget.clone();
-      let desiredFrustum = 9.4;
+      const desiredTarget = target.clone();
+      let desiredFrustum = frustum;
 
       const raycaster = new THREE.Raycaster();
       const pointer = new THREE.Vector2();
@@ -2021,7 +2045,10 @@ export function createBoardroom3DComponent(ctx: Context) {
               className: "of-btn",
               style: { background: "rgba(18, 20, 26, 0.88)" },
               title: "Enquadrar a Sala de Reunião 3D",
-              onClick: () => setFitTick((n) => n + 1),
+              onClick: () => {
+                cameraStateRef.current.initialized = false;
+                setFitTick((n) => n + 1);
+              },
             },
             "⤢ Fit"
           )
