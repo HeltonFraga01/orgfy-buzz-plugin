@@ -532,7 +532,7 @@ export function renderPipelineDiagram(props: PipelineDiagramProps) {
             Arrow(false),
             h(
               "div",
-              { style: { position: "relative", display: "flex", flex: 1, minWidth: 0 } },
+              { style: { position: "relative", display: "flex", flex: "1 0 118px", minWidth: "118px" } },
               Node({
                 keyId: "bug-review",
                 kind: "workspace",
@@ -571,7 +571,7 @@ export function renderPipelineDiagram(props: PipelineDiagramProps) {
             Arrow(false),
             h(
               "div",
-              { style: { position: "relative", display: "flex", flex: 1, minWidth: 0 } },
+              { style: { position: "relative", display: "flex", flex: "1 0 118px", minWidth: "118px" } },
               Node({
                 keyId: "feat-review",
                 kind: "workspace",

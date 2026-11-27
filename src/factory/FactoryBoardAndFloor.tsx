@@ -255,23 +255,6 @@ export function renderFactoryBoardAndFloor(props: BoardAndFloorProps) {
               "Andar"
             )
           ),
-        props.onRunScout &&
-          h(
-            "button",
-            {
-              type: "button",
-              className: "of-btn",
-              "data-run-scout-now": "true",
-              disabled: props.runningScout,
-              title: props.isBoardTenant
-                ? "Acionar Conselho CPO no #Conselho-Canal para auditar o portfólio contra a Visão e abrir pauta com os conselheiros"
-                : "Disparar auditoria imediata do Oráculo (Scout) contra o Canvas/Visão",
-              onClick: props.onRunScout,
-            },
-            props.isBoardTenant
-              ? (props.runningScout ? "Conselho CPO…" : "Pauta CPO")
-              : (props.runningScout ? "Oráculo…" : "Oráculo")
-          ),
         props.onToggleKillSwitch &&
           h(
             "button",
@@ -282,6 +265,40 @@ export function renderFactoryBoardAndFloor(props: BoardAndFloorProps) {
               onClick: () => props.onToggleKillSwitch!(!status.killSwitch),
             },
             status.killSwitch ? "Retomar" : "Kill switch"
+          ),
+        props.onRunScout &&
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-icon-circle-btn",
+              "data-run-scout-now": "true",
+              disabled: props.runningScout,
+              title: props.isBoardTenant
+                ? "Buscar nova pauta de portfólio no Conselho"
+                : "Buscar novas demandas e ativar o time agora (Discovery)",
+              "aria-label": props.isBoardTenant
+                ? "Buscar nova pauta de portfólio no Conselho"
+                : "Buscar novas demandas e ativar o time agora",
+              onClick: props.onRunScout,
+            },
+            h(
+              "svg",
+              {
+                width: 14,
+                height: 14,
+                viewBox: "0 0 24 24",
+                fill: "none",
+                stroke: "currentColor",
+                strokeWidth: 2,
+                strokeLinecap: "round",
+                strokeLinejoin: "round",
+                className: props.runningScout ? "of-spin" : undefined,
+                "aria-hidden": "true",
+              },
+              h("path", { d: "M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z" }),
+              h("path", { d: "M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z" })
+            )
           ),
         props.onOpenGuide &&
           h(

@@ -16772,15 +16772,19 @@ const FACTORY_SHADOW_CSS = `
 /* ── CodeDen Live Pipeline Diagram (pipeline-diagram.tsx) ── */
 .of-pd-scroll {
   overflow-x: auto;
-  padding: 4px 0 8px;
+  overflow-y: visible;
+  padding: 6px 2px 12px;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
 }
 
 .of-pd-canvas {
   display: flex;
   align-items: stretch;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
-  min-width: 960px;
+  min-width: max-content;
+  box-sizing: border-box;
 }
 
 .of-pd-group {
@@ -16837,8 +16841,8 @@ const FACTORY_SHADOW_CSS = `
   display: grid;
   grid-template-rows: repeat(3, auto);
   gap: 12px;
-  flex: 1 1 0;
-  min-width: 0;
+  flex: 1 0 430px;
+  min-width: 430px;
 }
 
 .of-pd-lane {
@@ -16846,6 +16850,7 @@ const FACTORY_SHADOW_CSS = `
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: max-content;
   border-radius: 10px;
   border: 1px solid var(--border);
   background: repeating-linear-gradient(
@@ -16855,7 +16860,8 @@ const FACTORY_SHADOW_CSS = `
     rgba(255, 255, 255, 0.025) 6px,
     rgba(255, 255, 255, 0.025) 7px
   );
-  padding: 28px 10px 12px;
+  padding: 28px 10px 14px;
+  box-sizing: border-box;
 }
 
 .of-pd-lane-tag {
@@ -16881,8 +16887,8 @@ const FACTORY_SHADOW_CSS = `
   justify-content: center;
   gap: 6px;
   min-height: 76px;
-  min-width: 0;
-  flex: 1 1 0;
+  min-width: 118px;
+  flex: 1 0 118px;
   border-radius: 9px;
   border: 1px solid var(--border);
   background: var(--card);
@@ -17812,7 +17818,7 @@ Na fila aguardando agente livre`,
             Arrow(false),
             h(
               "div",
-              { style: { position: "relative", display: "flex", flex: 1, minWidth: 0 } },
+              { style: { position: "relative", display: "flex", flex: "1 0 118px", minWidth: "118px" } },
               Node({
                 keyId: "bug-review",
                 kind: "workspace",
@@ -17850,7 +17856,7 @@ Na fila aguardando agente livre`,
             Arrow(false),
             h(
               "div",
-              { style: { position: "relative", display: "flex", flex: 1, minWidth: 0 } },
+              { style: { position: "relative", display: "flex", flex: "1 0 118px", minWidth: "118px" } },
               Node({
                 keyId: "feat-review",
                 kind: "workspace",
@@ -19695,18 +19701,6 @@ function renderFactoryBoardAndFloor(props) {
             "Andar"
           )
         ),
-        props.onRunScout && h(
-          "button",
-          {
-            type: "button",
-            className: "of-btn",
-            "data-run-scout-now": "true",
-            disabled: props.runningScout,
-            title: props.isBoardTenant ? "Acionar Conselho CPO no #Conselho-Canal para auditar o portfólio contra a Visão e abrir pauta com os conselheiros" : "Disparar auditoria imediata do Oráculo (Scout) contra o Canvas/Visão",
-            onClick: props.onRunScout
-          },
-          props.isBoardTenant ? props.runningScout ? "Conselho CPO…" : "Pauta CPO" : props.runningScout ? "Oráculo…" : "Oráculo"
-        ),
         props.onToggleKillSwitch && h(
           "button",
           {
@@ -19716,6 +19710,35 @@ function renderFactoryBoardAndFloor(props) {
             onClick: () => props.onToggleKillSwitch(!status.killSwitch)
           },
           status.killSwitch ? "Retomar" : "Kill switch"
+        ),
+        props.onRunScout && h(
+          "button",
+          {
+            type: "button",
+            className: "of-icon-circle-btn",
+            "data-run-scout-now": "true",
+            disabled: props.runningScout,
+            title: props.isBoardTenant ? "Buscar nova pauta de portfólio no Conselho" : "Buscar novas demandas e ativar o time agora (Discovery)",
+            "aria-label": props.isBoardTenant ? "Buscar nova pauta de portfólio no Conselho" : "Buscar novas demandas e ativar o time agora",
+            onClick: props.onRunScout
+          },
+          h(
+            "svg",
+            {
+              width: 14,
+              height: 14,
+              viewBox: "0 0 24 24",
+              fill: "none",
+              stroke: "currentColor",
+              strokeWidth: 2,
+              strokeLinecap: "round",
+              strokeLinejoin: "round",
+              className: props.runningScout ? "of-spin" : void 0,
+              "aria-hidden": "true"
+            },
+            h("path", { d: "M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z" }),
+            h("path", { d: "M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z" })
+          )
         ),
         props.onOpenGuide && h(
           "button",

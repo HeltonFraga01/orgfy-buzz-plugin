@@ -1284,15 +1284,19 @@ export const FACTORY_SHADOW_CSS = `
 /* ── CodeDen Live Pipeline Diagram (pipeline-diagram.tsx) ── */
 .of-pd-scroll {
   overflow-x: auto;
-  padding: 4px 0 8px;
+  overflow-y: visible;
+  padding: 6px 2px 12px;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
 }
 
 .of-pd-canvas {
   display: flex;
   align-items: stretch;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
-  min-width: 960px;
+  min-width: max-content;
+  box-sizing: border-box;
 }
 
 .of-pd-group {
@@ -1349,8 +1353,8 @@ export const FACTORY_SHADOW_CSS = `
   display: grid;
   grid-template-rows: repeat(3, auto);
   gap: 12px;
-  flex: 1 1 0;
-  min-width: 0;
+  flex: 1 0 430px;
+  min-width: 430px;
 }
 
 .of-pd-lane {
@@ -1358,6 +1362,7 @@ export const FACTORY_SHADOW_CSS = `
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: max-content;
   border-radius: 10px;
   border: 1px solid var(--border);
   background: repeating-linear-gradient(
@@ -1367,7 +1372,8 @@ export const FACTORY_SHADOW_CSS = `
     rgba(255, 255, 255, 0.025) 6px,
     rgba(255, 255, 255, 0.025) 7px
   );
-  padding: 28px 10px 12px;
+  padding: 28px 10px 14px;
+  box-sizing: border-box;
 }
 
 .of-pd-lane-tag {
@@ -1393,8 +1399,8 @@ export const FACTORY_SHADOW_CSS = `
   justify-content: center;
   gap: 6px;
   min-height: 76px;
-  min-width: 0;
-  flex: 1 1 0;
+  min-width: 118px;
+  flex: 1 0 118px;
   border-radius: 9px;
   border: 1px solid var(--border);
   background: var(--card);
