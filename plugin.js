@@ -8742,8 +8742,20 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
       updatedAt: Date.now()
     };
   };
-  const kanbanBacklog = cards.filter((c) => c.stage === "triagem").map(toWorkItem);
-  const kanbanInProgress = cards.filter((c) => c.stage === "despachado" || c.stage === "execucao" || c.stage === "revisao").map(toWorkItem);
+  const localOverridesMap = (esteiraState == null ? void 0 : esteiraState.local_overrides) && typeof esteiraState.local_overrides === "object" ? esteiraState.local_overrides : {};
+  const isLocallyResolvedOrClosed = (rawId) => {
+    const low = String(rawId || "").trim().toLowerCase();
+    if (!low) return false;
+    for (const [ovKey, ovVal] of Object.entries(localOverridesMap)) {
+      const st = String(typeof ovVal === "object" && ovVal ? ovVal.status : ovVal || "").trim().toLowerCase();
+      if (st !== "resolved" && st !== "closed") continue;
+      const kLow = ovKey.trim().toLowerCase();
+      if (kLow === low || kLow.startsWith(low) || low.startsWith(kLow)) return true;
+    }
+    return false;
+  };
+  const kanbanBacklog = cards.filter((c) => c.stage === "triagem").map(toWorkItem).filter((w) => !isLocallyResolvedOrClosed(w.id));
+  const kanbanInProgress = cards.filter((c) => c.stage === "despachado" || c.stage === "execucao" || c.stage === "revisao").map(toWorkItem).filter((w) => !isLocallyResolvedOrClosed(w.id));
   const recent = cards.filter((c) => c.stage === "feito").slice(0, 20).map(toWorkItem);
   const boardSnap = (esteiraState == null ? void 0 : esteiraState.board_snapshot) && typeof esteiraState.board_snapshot === "object" ? esteiraState.board_snapshot : null;
   const openPrsRaw = Array.isArray(boardSnap == null ? void 0 : boardSnap.open_prs) ? boardSnap.open_prs : [];
