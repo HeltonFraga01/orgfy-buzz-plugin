@@ -3415,9 +3415,9 @@ const RISCO_LABELS = [
   "critico"
 ];
 const TIER_MODEL_HINTS = {
-  tier1_fast: "gemini-3.8-flash-medium (NexusMind Anti-Gravity — rápido e enxuto)",
-  tier2_balanced: "claude-sonnet-4-6 (NexusMind Anthropic — balanceado para código/revisão)",
-  tier3_frontier: "claude-opus-4-6-thinking / grok-4.5 (NexusMind Frontier — arquitetura/risco alto)"
+  tier1_fast: "gemini-2.5-flash / top :free do NexusMind Gateway (rápido e econômico)",
+  tier2_balanced: "claude-sonnet-4-6 (NexusMind Anthropic — balanceado para código/revisão L-01)",
+  tier3_frontier: "gpt-6.1-terra / claude-sonnet-5-5 (NexusMind Frontier — arquitetura/risco alto)"
 };
 function sanitizeSlug$1(raw) {
   return String(raw || "card").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "card";
@@ -13406,7 +13406,7 @@ const PT_BR = {
   },
   loopState: {
     idle: "Rodando (ocioso)",
-    discovering: "Oráculo ativo",
+    discovering: "PO · Discovery ativo",
     building: "Executando",
     verifying: "Verificando",
     paused: "Pausado",
@@ -13421,7 +13421,7 @@ const PT_BR = {
   },
   actions: {
     checkNow: "Verificar agora",
-    runScout: "Rodar Oráculo",
+    runScout: "Rodar Discovery (PO)",
     killSwitchOn: "Ativar Kill Switch",
     killSwitchOff: "Liberar Kill Switch",
     drainOn: "Drenar (terminar atual)",
@@ -13433,44 +13433,44 @@ const PT_BR = {
   },
   pipelines: {
     title: "Pipelines ao vivo",
-    subtitle: "Cada chip #id mostra onde o item está agora; clique para abrir o card ou a sessão do agente.",
-    scoutLabel: "Oráculo · Encontrar melhorias",
-    scoutBadge: "Scout",
-    scoutHelp: "Timer/Watch do Oráculo que analisa o repositório do tenant contra docs/VISION.md e propõe melhorias.",
+    subtitle: "Fluxo real da esteira OrgFy: clique em um #id para abrir o card, CI ou sessão do agente.",
+    scoutLabel: "Sol PO · Discovery",
+    scoutBadge: "PO · Discovery",
+    scoutHelp: "Product Owner (OrgFy Sol PO) audita o workspace contra o Canvas/Visão, cria o card v4 e abre a issue no relay.",
     issueLabel: "Issue (Relay NIP-34)",
-    issueBadge: "Humano ou scout",
+    issueBadge: "Humano ou PO",
     issueHelp: "Issues kind 1621 abertas por autores confiáveis listados em empresas/<tenant>.json.",
-    classifyLabel: "Identificar tipo",
-    classifyBadge: "LLM",
-    classifyHelp: "Classifica a Natureza do card (bug, feature ou docs) via NexusMind/Decisions e encaminha para a raia correta.",
-    mergeLabel: "Merge automático",
+    classifyLabel: "Triagem · Decisions",
+    classifyBadge: "Decisions",
+    classifyHelp: "Valida card v4 (card-lint, L-01/L-22), classifica risco/tier via Decisions e despacha para executor livre.",
+    mergeLabel: "Merge + DLQ",
     mergeBadge: "Auto-merge",
-    mergeHelp: "Integra na main após CI verde no SHA resultante (ferramentas/ci.sh), aceite L-22 íntegro e GATE do revisor designado.",
+    mergeHelp: "Integra na main após CI paralelo verde, aceite L-22 íntegro e GATE L-01. Se travar: L1 COO Bento → L2 Conselho → L3 Bestie Iris.",
     reviseLabel: "Refazer",
-    reviseHelp: "GATE recusado devolve o card ao executor e incrementa o contador de voltas; na 2ª recusa repetida aciona o COO.",
+    reviseHelp: "GATE recusado ou pre-flight L-01 devolve o card ao executor; na 2ª recusa repetida aciona o COO.",
     lanes: {
       bug: {
         title: "BUG",
         steps: [
-          { id: "reproduce", label: "Reproduzir", badge: "Agente", help: "Cria teste que falha reproduzindo o bug (comando de aceite L-22)." },
-          { id: "fix", label: "Corrigir", badge: "Agente", help: "Implementa a correção em worktree isolada dentro da Escrita exclusiva." },
-          { id: "review", label: "Revisar", badge: "Revisor", help: "Revisor independente (L-01) valida diff, aceite congelado e emite GATE." }
+          { id: "fix", label: "Worktree · TDD", badge: "Worktree", help: "Reproduz o bug e corrige em worktree isolada dentro da Escrita exclusiva." },
+          { id: "ci_bug", label: "CI Paralelo + L-22", badge: "CI", help: "Executa ferramentas/ci.sh (CI_PARALELO=1), aceite L-22 e pre-flight Decisions." },
+          { id: "review", label: "Revisar (L-01)", badge: "Revisor L-01", help: "Revisor independente cross-provider valida diff e emite veredito GATE." }
         ]
       },
       feature: {
         title: "FEATURE",
         steps: [
-          { id: "analyze", label: "Analisar", badge: "Agente", help: "Produz spec.md e aguarda aprovação de spec quando exigido pelo Effort." },
-          { id: "implement", label: "Implementar", badge: "Agente", help: "Executa TDD RED->GREEN no worktree isolado e abre PR kind 1618." },
-          { id: "review", label: "Revisar", badge: "Revisor", help: "Revisor independente (L-01) valida critérios, CI verde e emite GATE." }
+          { id: "implement", label: "Worktree · TDD", badge: "Worktree", help: "Executa TDD RED->GREEN na worktree isolada e abre PR kind 1618." },
+          { id: "ci_feat", label: "CI Paralelo + L-22", badge: "CI", help: "Executa ferramentas/ci.sh (CI_PARALELO=1), aceite L-22 e pre-flight Decisions." },
+          { id: "review", label: "Revisar (L-01)", badge: "Revisor L-01", help: "Revisor independente cross-provider valida critérios, CI verde e emite GATE." }
         ]
       },
       docs: {
         title: "DOCUMENTAÇÃO",
         steps: [
-          { id: "implement_docs", label: "Implementar", badge: "Agente", help: "Atualiza documentação e contratos no escopo exclusivo do card." },
-          { id: "checks", label: "Checks (CI)", badge: "CI", help: "Executa ferramentas/ci.sh (segredos, soul-lint, card-lint, L-01 e pytest)." },
-          { id: "review_docs", label: "Revisar", badge: "Revisor", help: "Decisão L-01 mantida para Docs: revisor independente confere e emite GATE." }
+          { id: "implement_docs", label: "Worktree", badge: "Worktree", help: "Atualiza documentação e contratos no escopo exclusivo do card." },
+          { id: "checks", label: "CI Paralelo + L-22", badge: "CI", help: "Executa ferramentas/ci.sh (segredos, soul-lint, card-lint, L-01 e pytest)." },
+          { id: "review_docs", label: "Revisar", badge: "Revisor L-01", help: "Decisão L-01 mantida para Docs: revisor independente confere e emite GATE." }
         ]
       }
     }
@@ -16121,18 +16121,14 @@ function classifyLane(item) {
 function bucketStep(item, lane) {
   const st = String(item.step || item.stage || "").toLowerCase();
   if (item.stage === "merged" || st === "merge") return "merge";
+  if (st.includes("check") || st.includes("ci") || item.stage === "failed") {
+    return lane === "bug" ? "ci_bug" : lane === "docs" ? "checks" : "ci_feat";
+  }
   if (item.stage === "verifying" || item.stage === "watching" || st.includes("revis") || st.includes("gate") || st.includes("review")) {
     return lane === "docs" ? "review_docs" : "review";
   }
-  if (lane === "bug") {
-    if (st.includes("reprod") || item.stage === "backlog") return "reproduce";
-    return "fix";
-  }
-  if (lane === "docs") {
-    if (st.includes("check") || st.includes("ci")) return "checks";
-    return "implement_docs";
-  }
-  if (st.includes("anal") || st.includes("spec") || item.stage === "backlog") return "analyze";
+  if (lane === "bug") return "fix";
+  if (lane === "docs") return "implement_docs";
   return "implement";
 }
 function toneOfItem(item) {
@@ -16144,6 +16140,7 @@ function toneOfItem(item) {
   return "idle";
 }
 function renderPipelineDiagram(props) {
+  var _a, _b;
   const { h, status, activeHelpKey, onToggleHelp, onSelectItem } = props;
   const workingNowCount = typeof props.workingNowCount === "number" ? props.workingNowCount : 0;
   const activePkSet = new Set((props.activeTurnPubkeys || []).map((p) => p.toLowerCase()).filter(Boolean));
@@ -16171,9 +16168,11 @@ function renderPipelineDiagram(props) {
   const laneBuckets = {
     reproduce: [],
     fix: [],
+    ci_bug: [],
     review_bug: [],
     analyze: [],
     implement: [],
+    ci_feat: [],
     review_feature: [],
     implement_docs: [],
     checks: [],
@@ -16503,13 +16502,14 @@ Na fila aguardando agente livre`,
       )
     );
   }
+  const poAgentName = ((_b = (((_a = status.tenantManifest) == null ? void 0 : _a.agentes) || []).find((a) => a.papel === "po")) == null ? void 0 : _b.name) || PT_BR.pipelines.scoutLabel;
   return h(
     "div",
     { className: "of-pd-scroll" },
     h(
       "div",
       { className: "of-pd-canvas" },
-      // Entrada: Oráculo (em Dark Factory ou sempre visível como Scout) ⇢ Issue ⇢ Identificar tipo
+      // Entrada real OrgFy: PO · Discovery (OrgFy Sol PO) ⇢ Issue (Relay NIP-34) ⇢ Triagem · Decisions
       h(
         "div",
         { className: "of-pd-group" },
@@ -16517,10 +16517,10 @@ Na fila aguardando agente livre`,
           keyId: "scout",
           kind: "agent",
           badge: PT_BR.pipelines.scoutBadge,
-          title: PT_BR.pipelines.scoutLabel,
+          title: poAgentName,
           help: PT_BR.pipelines.scoutHelp,
           items: [],
-          width: "112px",
+          width: "116px",
           footer: h(
             "span",
             { className: "of-muted", style: { fontSize: "10px" } },
@@ -16556,35 +16556,35 @@ Na fila aguardando agente livre`,
           title: PT_BR.pipelines.classifyLabel,
           help: PT_BR.pipelines.classifyHelp,
           items: status.backlog.filter((i) => i.step === "intake"),
-          width: "118px"
+          width: "122px"
         })
       ),
       Fan("out"),
-      // 3 Raias Listradas: Bug, Feature, Documentação (Revisor L-01 mantido!)
+      // 3 Raias alinhadas ao fluxo real OrgFy: Worktree TDD → CI Paralelo + L-22 (Decisions pre-flight) → Revisor L-01
       h(
         "div",
         { className: "of-pd-lanes" },
         Lane(
           "bug",
           PT_BR.pipelines.lanes.bug.title,
-          "Bugs são reproduzidos com teste falhando (L-22) antes da correção e revisão independente (L-01).",
+          "Bugs seguem o fluxo real OrgFy: Worktree TDD → CI Paralelo + L-22 + Decisions pre-flight → Revisor L-01.",
           [
-            Node({
-              keyId: "bug-reproduce",
-              kind: "workspace",
-              badge: "Worktree",
-              title: PT_BR.pipelines.lanes.bug.steps[0].label,
-              help: PT_BR.pipelines.lanes.bug.steps[0].help,
-              items: laneBuckets.reproduce
-            }),
-            Arrow(false),
             Node({
               keyId: "bug-fix",
               kind: "workspace",
               badge: "Worktree",
+              title: PT_BR.pipelines.lanes.bug.steps[0].label,
+              help: PT_BR.pipelines.lanes.bug.steps[0].help,
+              items: laneBuckets.fix
+            }),
+            Arrow(false),
+            Node({
+              keyId: "bug-ci",
+              kind: "checks",
+              badge: "CI + Decisions",
               title: PT_BR.pipelines.lanes.bug.steps[1].label,
               help: PT_BR.pipelines.lanes.bug.steps[1].help,
-              items: laneBuckets.fix
+              items: laneBuckets.ci_bug
             }),
             Arrow(false),
             h(
@@ -16605,24 +16605,24 @@ Na fila aguardando agente livre`,
         Lane(
           "feature",
           PT_BR.pipelines.lanes.feature.title,
-          "Features passam por análise/spec, implementação TDD em worktree isolada e revisão independente (L-01).",
+          "Features seguem o fluxo real OrgFy: Worktree TDD → CI Paralelo + L-22 + Decisions pre-flight → Revisor L-01.",
           [
-            Node({
-              keyId: "feat-analyze",
-              kind: "agent",
-              badge: "Agente",
-              title: PT_BR.pipelines.lanes.feature.steps[0].label,
-              help: PT_BR.pipelines.lanes.feature.steps[0].help,
-              items: laneBuckets.analyze
-            }),
-            Arrow(false),
             Node({
               keyId: "feat-implement",
               kind: "workspace",
               badge: "Worktree",
+              title: PT_BR.pipelines.lanes.feature.steps[0].label,
+              help: PT_BR.pipelines.lanes.feature.steps[0].help,
+              items: laneBuckets.implement
+            }),
+            Arrow(false),
+            Node({
+              keyId: "feat-ci",
+              kind: "checks",
+              badge: "CI + Decisions",
               title: PT_BR.pipelines.lanes.feature.steps[1].label,
               help: PT_BR.pipelines.lanes.feature.steps[1].help,
-              items: laneBuckets.implement
+              items: laneBuckets.ci_feat
             }),
             Arrow(false),
             h(
@@ -16643,7 +16643,7 @@ Na fila aguardando agente livre`,
         Lane(
           "docs",
           PT_BR.pipelines.lanes.docs.title,
-          "Documentação roda CI (ci.sh) e mantém revisão independente L-01 (decisão do Helton).",
+          "Documentação roda CI paralelo (ci.sh) e mantém revisão independente L-01 (decisão do Helton).",
           [
             Node({
               keyId: "docs-impl",
@@ -16657,7 +16657,7 @@ Na fila aguardando agente livre`,
             Node({
               keyId: "docs-checks",
               kind: "checks",
-              badge: "CI",
+              badge: "CI + Decisions",
               title: PT_BR.pipelines.lanes.docs.steps[1].label,
               help: PT_BR.pipelines.lanes.docs.steps[1].help,
               items: laneBuckets.checks
@@ -67577,15 +67577,18 @@ function createFactoryAppComponent(ctx, opts = {}) {
     const handleRunScoutNow = React.useCallback(async () => {
       var _a2, _b2;
       const isBoard = tenant === "board";
-      const scoutTenant = isBoard ? tenantAgents.find((a) => a.papel === "cpo" || /conselho\s+cpo/i.test(a.name)) || tenantAgents.find((a) => a.papel === "oraculo" || /or[aá]culo|scout/i.test(a.name)) : tenantAgents.find((a) => a.papel === "oraculo" || /or[aá]culo|scout/i.test(a.name));
+      const scoutTenant = isBoard ? tenantAgents.find((a) => a.papel === "cpo" || /conselho\s+cpo/i.test(a.name)) || tenantAgents.find((a) => a.papel === "po" || a.papel === "oraculo" || /sol\s*po|or[aá]culo|scout/i.test(a.name)) : tenantAgents.find((a) => a.papel === "po" || /\bpo\b/i.test(a.name)) || tenantAgents.find((a) => a.papel === "oraculo" || /or[aá]culo|scout/i.test(a.name));
       const scoutLive = isBoard ? liveCrew.find((a) => {
         var _a3;
         return a.key === (scoutTenant == null ? void 0 : scoutTenant.agentKey) || (scoutTenant == null ? void 0 : scoutTenant.pubkey) && ((_a3 = a.pubkey) == null ? void 0 : _a3.toLowerCase()) === scoutTenant.pubkey.toLowerCase() || /conselho\s+cpo/i.test(a.name);
-      }) : liveCrew.find((a) => a.key === (scoutTenant == null ? void 0 : scoutTenant.agentKey) || /or[aá]culo|scout/i.test(a.name));
+      }) : liveCrew.find((a) => {
+        var _a3;
+        return a.key === (scoutTenant == null ? void 0 : scoutTenant.agentKey) || (scoutTenant == null ? void 0 : scoutTenant.pubkey) && ((_a3 = a.pubkey) == null ? void 0 : _a3.toLowerCase()) === scoutTenant.pubkey.toLowerCase() || /sol\s*po|\bpo\b/i.test(a.name);
+      });
       const agentKey = (scoutTenant == null ? void 0 : scoutTenant.agentKey) || (scoutLive == null ? void 0 : scoutLive.key);
-      const scoutName = (scoutTenant == null ? void 0 : scoutTenant.name) || (scoutLive == null ? void 0 : scoutLive.name) || (isBoard ? "Conselho CPO" : "OrgFy Oráculo");
+      const scoutName = (scoutTenant == null ? void 0 : scoutTenant.name) || (scoutLive == null ? void 0 : scoutLive.name) || (isBoard ? "Conselho CPO" : "OrgFy Sol PO");
       if (!agentKey) {
-        notify2(`Nenhum agente ${isBoard ? "Conselho CPO" : "Oráculo/Scout"} encontrado em ${tenant}.`);
+        notify2(`Nenhum agente ${isBoard ? "Conselho CPO" : "PO / Discovery"} encontrado em ${tenant}.`);
         return;
       }
       const targetChannelId = resolveActiveChannelId(tenant);
@@ -67598,8 +67601,8 @@ function createFactoryAppComponent(ctx, opts = {}) {
       const promptText = isBoard ? `@${scoutName} [CONSELHO CPO · PAUTA DE PORTFÓLIO · board]
 Audite o portfólio da Holding (OrgFy Core, Lumen IPTV, SaaS Tributário) contra o Canvas/Visão atual, identifique os gaps de maior impacto em produto, receita, segurança, testes e governança, e proponha os próximos cards/pautas canônicos.
 
-**Regra de Reunião:** responda **aqui neste canal do Conselho** (não em DM) usando \`buzz__send\` com sua própria assinatura e as pubkeys em \`mentions\` (${councilNames.join(", ") || "OrgFy Iris, Conselho CTO, Conselho CRO, Conselho COO, Conselho CGO"}). Se precisar garantir o disparo de algum conselheiro, chame \`orgfy_mention_wake\` (que apenas acorda sem postar como o Fundador).` : `@${scoutName} [ORGFY SCOUT ONE-SHOT · ${tenant}]
-Audite o workspace atual contra o Canvas/Visão de ${((_b2 = status.tenantManifest) == null ? void 0 : _b2.nome) || tenant}, identifique os gaps de maior impacto (segurança, testes, UX ou dívida técnica) e proponha os próximos cards canônicos.
+**Regra de Reunião:** responda **aqui neste canal do Conselho** (não em DM) usando \`buzz__send\` com sua própria assinatura e as pubkeys em \`mentions\` (${councilNames.join(", ") || "OrgFy Iris, Conselho CTO, Conselho CRO, Conselho COO, Conselho CGO"}). Se precisar garantir o disparo de algum conselheiro, chame \`orgfy_mention_wake\` (que apenas acorda sem postar como o Fundador).` : `@${scoutName} [ORGFY PO DISCOVERY · ${tenant}]
+Audite o workspace atual contra o Canvas/Visão de ${((_b2 = status.tenantManifest) == null ? void 0 : _b2.nome) || tenant}, identifique os gaps de maior impacto (segurança, testes, UX ou dívida técnica) e crie o próximo card canônico (\`<!-- orgfy:card v4 -->\`).
 
 **Regra de Canal:** responda **aqui neste canal da empresa** (não em DM) usando \`buzz__send\` com \`mentions\` para \`${cooName}\` (COO) e especialistas responsáveis (e \`orgfy_mention_wake\` se precisar garantir o wake).`;
       setRunningScout(true);

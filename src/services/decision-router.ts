@@ -122,9 +122,9 @@ const RISCO_LABELS: readonly CardTriageResult["riscoNivel"][] = [
 ];
 
 const TIER_MODEL_HINTS: Record<ModelTierChoice, string> = {
-  tier1_fast: "gemini-3.8-flash-medium (NexusMind Anti-Gravity — rápido e enxuto)",
-  tier2_balanced: "claude-sonnet-4-6 (NexusMind Anthropic — balanceado para código/revisão)",
-  tier3_frontier: "claude-opus-4-6-thinking / grok-4.5 (NexusMind Frontier — arquitetura/risco alto)",
+  tier1_fast: "gemini-2.5-flash / top :free do NexusMind Gateway (rápido e econômico)",
+  tier2_balanced: "claude-sonnet-4-6 (NexusMind Anthropic — balanceado para código/revisão L-01)",
+  tier3_frontier: "gpt-6.1-terra / claude-sonnet-5-5 (NexusMind Frontier — arquitetura/risco alto)",
 };
 
 function sanitizeSlug(raw: string): string {

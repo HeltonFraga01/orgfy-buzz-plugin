@@ -28,18 +28,14 @@ function classifyLane(item: FactoryWorkItem): "bug" | "feature" | "docs" {
 function bucketStep(item: FactoryWorkItem, lane: "bug" | "feature" | "docs"): string {
   const st = String(item.step || item.stage || "").toLowerCase();
   if (item.stage === "merged" || st === "merge") return "merge";
+  if (st.includes("check") || st.includes("ci") || item.stage === "failed") {
+    return lane === "bug" ? "ci_bug" : lane === "docs" ? "checks" : "ci_feat";
+  }
   if (item.stage === "verifying" || item.stage === "watching" || st.includes("revis") || st.includes("gate") || st.includes("review")) {
     return lane === "docs" ? "review_docs" : "review";
   }
-  if (lane === "bug") {
-    if (st.includes("reprod") || item.stage === "backlog") return "reproduce";
-    return "fix";
-  }
-  if (lane === "docs") {
-    if (st.includes("check") || st.includes("ci")) return "checks";
-    return "implement_docs";
-  }
-  if (st.includes("anal") || st.includes("spec") || item.stage === "backlog") return "analyze";
+  if (lane === "bug") return "fix";
+  if (lane === "docs") return "implement_docs";
   return "implement";
 }
 
@@ -81,9 +77,11 @@ export function renderPipelineDiagram(props: PipelineDiagramProps) {
   const laneBuckets: Record<string, FactoryWorkItem[]> = {
     reproduce: [],
     fix: [],
+    ci_bug: [],
     review_bug: [],
     analyze: [],
     implement: [],
+    ci_feat: [],
     review_feature: [],
     implement_docs: [],
     checks: [],
@@ -442,13 +440,17 @@ export function renderPipelineDiagram(props: PipelineDiagramProps) {
     );
   }
 
+  const poAgentName =
+    (status.tenantManifest?.agentes || []).find((a) => a.papel === "po")?.name ||
+    PT_BR.pipelines.scoutLabel;
+
   return h(
     "div",
     { className: "of-pd-scroll" },
     h(
       "div",
       { className: "of-pd-canvas" },
-      // Entrada: Oráculo (em Dark Factory ou sempre visível como Scout) ⇢ Issue ⇢ Identificar tipo
+      // Entrada real OrgFy: PO · Discovery (OrgFy Sol PO) ⇢ Issue (Relay NIP-34) ⇢ Triagem · Decisions
       h(
         "div",
         { className: "of-pd-group" },
@@ -456,10 +458,10 @@ export function renderPipelineDiagram(props: PipelineDiagramProps) {
           keyId: "scout",
           kind: "agent",
           badge: PT_BR.pipelines.scoutBadge,
-          title: PT_BR.pipelines.scoutLabel,
+          title: poAgentName,
           help: PT_BR.pipelines.scoutHelp,
           items: [],
-          width: "112px",
+          width: "116px",
           footer: h(
             "span",
             { className: "of-muted", style: { fontSize: "10px" } },
@@ -495,37 +497,37 @@ export function renderPipelineDiagram(props: PipelineDiagramProps) {
           title: PT_BR.pipelines.classifyLabel,
           help: PT_BR.pipelines.classifyHelp,
           items: status.backlog.filter((i) => i.step === "intake"),
-          width: "118px",
+          width: "122px",
         })
       ),
 
       Fan("out"),
 
-      // 3 Raias Listradas: Bug, Feature, Documentação (Revisor L-01 mantido!)
+      // 3 Raias alinhadas ao fluxo real OrgFy: Worktree TDD → CI Paralelo + L-22 (Decisions pre-flight) → Revisor L-01
       h(
         "div",
         { className: "of-pd-lanes" },
         Lane(
           "bug",
           PT_BR.pipelines.lanes.bug.title,
-          "Bugs são reproduzidos com teste falhando (L-22) antes da correção e revisão independente (L-01).",
+          "Bugs seguem o fluxo real OrgFy: Worktree TDD → CI Paralelo + L-22 + Decisions pre-flight → Revisor L-01.",
           [
-            Node({
-              keyId: "bug-reproduce",
-              kind: "workspace",
-              badge: "Worktree",
-              title: PT_BR.pipelines.lanes.bug.steps[0].label,
-              help: PT_BR.pipelines.lanes.bug.steps[0].help,
-              items: laneBuckets.reproduce,
-            }),
-            Arrow(false),
             Node({
               keyId: "bug-fix",
               kind: "workspace",
               badge: "Worktree",
+              title: PT_BR.pipelines.lanes.bug.steps[0].label,
+              help: PT_BR.pipelines.lanes.bug.steps[0].help,
+              items: laneBuckets.fix,
+            }),
+            Arrow(false),
+            Node({
+              keyId: "bug-ci",
+              kind: "checks",
+              badge: "CI + Decisions",
               title: PT_BR.pipelines.lanes.bug.steps[1].label,
               help: PT_BR.pipelines.lanes.bug.steps[1].help,
-              items: laneBuckets.fix,
+              items: laneBuckets.ci_bug,
             }),
             Arrow(false),
             h(
@@ -547,24 +549,24 @@ export function renderPipelineDiagram(props: PipelineDiagramProps) {
         Lane(
           "feature",
           PT_BR.pipelines.lanes.feature.title,
-          "Features passam por análise/spec, implementação TDD em worktree isolada e revisão independente (L-01).",
+          "Features seguem o fluxo real OrgFy: Worktree TDD → CI Paralelo + L-22 + Decisions pre-flight → Revisor L-01.",
           [
-            Node({
-              keyId: "feat-analyze",
-              kind: "agent",
-              badge: "Agente",
-              title: PT_BR.pipelines.lanes.feature.steps[0].label,
-              help: PT_BR.pipelines.lanes.feature.steps[0].help,
-              items: laneBuckets.analyze,
-            }),
-            Arrow(false),
             Node({
               keyId: "feat-implement",
               kind: "workspace",
               badge: "Worktree",
+              title: PT_BR.pipelines.lanes.feature.steps[0].label,
+              help: PT_BR.pipelines.lanes.feature.steps[0].help,
+              items: laneBuckets.implement,
+            }),
+            Arrow(false),
+            Node({
+              keyId: "feat-ci",
+              kind: "checks",
+              badge: "CI + Decisions",
               title: PT_BR.pipelines.lanes.feature.steps[1].label,
               help: PT_BR.pipelines.lanes.feature.steps[1].help,
-              items: laneBuckets.implement,
+              items: laneBuckets.ci_feat,
             }),
             Arrow(false),
             h(
@@ -586,7 +588,7 @@ export function renderPipelineDiagram(props: PipelineDiagramProps) {
         Lane(
           "docs",
           PT_BR.pipelines.lanes.docs.title,
-          "Documentação roda CI (ci.sh) e mantém revisão independente L-01 (decisão do Helton).",
+          "Documentação roda CI paralelo (ci.sh) e mantém revisão independente L-01 (decisão do Helton).",
           [
             Node({
               keyId: "docs-impl",
@@ -600,7 +602,7 @@ export function renderPipelineDiagram(props: PipelineDiagramProps) {
             Node({
               keyId: "docs-checks",
               kind: "checks",
-              badge: "CI",
+              badge: "CI + Decisions",
               title: PT_BR.pipelines.lanes.docs.steps[1].label,
               help: PT_BR.pipelines.lanes.docs.steps[1].help,
               items: laneBuckets.checks,
