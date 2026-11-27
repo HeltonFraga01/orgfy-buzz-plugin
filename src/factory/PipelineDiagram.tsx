@@ -8,6 +8,8 @@ export interface PipelineDiagramProps {
   h: any;
   status: FactoryStatusPayload;
   isBoardTenant?: boolean;
+  workingNowCount?: number;
+  activeTurnPubkeys?: string[];
   activeHelpKey: string | null;
   onToggleHelp: (key: string | null) => void;
   onSelectItem: (item: FactoryWorkItem) => void;
@@ -52,6 +54,23 @@ function toneOfItem(item: FactoryWorkItem): "running" | "waiting" | "done" | "fa
 
 export function renderPipelineDiagram(props: PipelineDiagramProps) {
   const { h, status, activeHelpKey, onToggleHelp, onSelectItem } = props;
+  const workingNowCount = typeof props.workingNowCount === "number" ? props.workingNowCount : 0;
+  const activePkSet = new Set((props.activeTurnPubkeys || []).map((p) => p.toLowerCase()).filter(Boolean));
+  const isItemActivelyRunning = (w: FactoryWorkItem): boolean => {
+    if (workingNowCount <= 0) return false;
+    if (Array.isArray(w.executorPubkeys) && w.executorPubkeys.length > 0 && activePkSet.size > 0) {
+      return w.executorPubkeys.some((pk) => activePkSet.has(pk.toLowerCase()));
+    }
+    return !w.stalled;
+  };
+  const isItemStalled = (w: FactoryWorkItem): boolean => {
+    if (isItemActivelyRunning(w)) return false;
+    if (w.stalled) return true;
+    if (w.stage === "building" && workingNowCount === 0 && w.updatedAt > 0) {
+      return Date.now() - w.updatedAt >= 20 * 60_000;
+    }
+    return false;
+  };
   const live = [
     ...status.backlog,
     ...status.inProgress,
@@ -125,7 +144,11 @@ export function renderPipelineDiagram(props: PipelineDiagramProps) {
     const queued = opts.queued || [];
     const shown = [...opts.items, ...queued];
     const extra = shown.length - MAX_CHIPS;
-    const isActive = opts.items.length > 0;
+    const stalledCount = opts.items.filter(isItemStalled).length;
+    const runningCount = opts.items.filter(isItemActivelyRunning).length;
+    const isActive = runningCount > 0;
+    const isStalled = !isActive && stalledCount > 0;
+    const isWaiting = !isActive && !isStalled && opts.items.length > 0;
     const isHelpOpen = activeHelpKey === opts.keyId;
 
     return h(
@@ -134,6 +157,8 @@ export function renderPipelineDiagram(props: PipelineDiagramProps) {
         key: opts.keyId,
         className: "of-pd-node",
         "data-active": isActive ? "true" : "false",
+        "data-stalled": isStalled ? "true" : "false",
+        "data-waiting": isWaiting ? "true" : "false",
         style: opts.width ? { width: opts.width, flex: "0 0 auto" } : undefined,
       },
       h("span", { className: "of-pd-badge", "data-kind": opts.kind }, opts.badge),
@@ -158,7 +183,12 @@ export function renderPipelineDiagram(props: PipelineDiagramProps) {
           "div",
           { style: { display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "4px", width: "100%" } },
           opts.items.slice(0, MAX_CHIPS).map((w) => {
-            const alert = w.stage === "escalated" || w.stage === "failed" || w.stage === "reverted";
+            const itemStalled = isItemStalled(w);
+            const itemRunning = isItemActivelyRunning(w);
+            const alert = w.stage === "escalated" || w.stage === "failed" || w.stage === "reverted" || itemStalled;
+            const ageMin = typeof w.stalledMinutes === "number" ? w.stalledMinutes : Math.max(0, Math.floor((Date.now() - w.updatedAt) / 60000));
+            const ageTxt = ageMin >= 60 ? `${Math.floor(ageMin / 60)}h` : `${ageMin}m`;
+            const dotTone = itemRunning ? "running" : w.stage === "building" ? "idle" : toneOfItem(w);
             return h(
               "button",
               {
@@ -166,10 +196,10 @@ export function renderPipelineDiagram(props: PipelineDiagramProps) {
                 type: "button",
                 className: "of-chip",
                 "data-alert": alert ? "true" : "false",
-                title: `${w.title}\nEtapa: ${w.stage}${w.attempts > 1 ? `\nRefazer rodada ${w.attempts}` : ""}\nClique para abrir o card/sessão`,
+                title: `${w.title}\nEtapa: ${itemStalled ? `parado há ${ageTxt} (sem agente ativo e sem PR)` : w.stage}${w.attempts > 1 ? `\nRefazer rodada ${w.attempts}` : ""}\nClique para abrir o card/sessão`,
                 onClick: () => onSelectItem(w),
               },
-              alert ? h("span", null, "⚠") : h("span", { className: "of-dot", "data-tone": toneOfItem(w) }),
+              alert ? h("span", null, "⚠") : h("span", { className: "of-dot", "data-tone": dotTone }),
               h("span", { style: { overflow: "hidden", textOverflow: "ellipsis" } }, `#${w.id.slice(0, 8)}`),
               w.attempts > 1 && h("span", { style: { opacity: 0.75 } }, `↻${w.attempts}`)
             );
@@ -191,7 +221,13 @@ export function renderPipelineDiagram(props: PipelineDiagramProps) {
           ),
           extra > 0 && h("span", { className: "of-muted", style: { fontSize: "10px" } }, `+${extra}`)
         ),
-      opts.footer
+      opts.footer ||
+        (isStalled &&
+          h(
+            "span",
+            { style: { fontSize: "9.5px", color: "var(--status-waiting)", fontWeight: 600 } },
+            `⚠ ${stalledCount} parado${stalledCount > 1 ? "s" : ""}`
+          ))
     );
   };
 

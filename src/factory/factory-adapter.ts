@@ -33,6 +33,9 @@ export interface FactoryWorkItem {
   reason: string | null;
   note: string | null;
   updatedAt: number;
+  stalled?: boolean;
+  stalledMinutes?: number;
+  executorPubkeys?: string[];
 }
 
 export interface AgentModelEvalRow {
@@ -635,11 +638,29 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
         updatedAt: typeof i.created_at === "number" ? (i.created_at < 1e12 ? i.created_at * 1000 : i.created_at) : Date.now(),
       };
     });
+  const despachosMap: Record<string, any> = esteiraState?.despachos && typeof esteiraState.despachos === "object" ? esteiraState.despachos : {};
+  const openPrIssueIds = new Set(
+    openPrsRaw.map((p) => String(p?.issue_id || "").toLowerCase()).filter(Boolean)
+  );
+  const STALL_THRESHOLD_MIN = 20;
+  const nowMs = Date.now();
   const issueActiveItems: FactoryWorkItem[] = openIssuesRaw
     .filter((i) => i?.id && i.assigned && !seenIds.has(String(i.id)))
     .map((i) => {
       const iid = String(i.id);
       const title = String(i.title || `Issue ${iid.slice(0, 8)}`);
+      const desp = despachosMap[iid];
+      const rawTs = typeof i.despachado_em === "number" ? i.despachado_em : typeof desp?.despachado_em === "number" ? desp.despachado_em : typeof i.created_at === "number" ? i.created_at : 0;
+      const updatedAt = rawTs > 0 ? (rawTs < 1e12 ? rawTs * 1000 : rawTs) : nowMs;
+      const hasPr = Boolean(i.has_pr) || openPrIssueIds.has(iid.toLowerCase());
+      const computedMin = Math.max(0, Math.floor((nowMs - updatedAt) / 60000));
+      const stalledMinutes = typeof i.stalled_minutes === "number" ? i.stalled_minutes : computedMin;
+      const stalled = typeof i.stalled === "boolean" ? i.stalled : (!hasPr && stalledMinutes >= STALL_THRESHOLD_MIN);
+      const execPks: string[] = Array.isArray(i.executors)
+        ? i.executors.map((x: any) => String(x || "").toLowerCase()).filter(Boolean)
+        : desp?.dono_operacional
+        ? [String(desp.dono_operacional).toLowerCase()]
+        : [];
       return {
         id: iid,
         title,
@@ -650,16 +671,19 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
         attempts: 1,
         sessionId: null,
         activeSessionId: null,
-        reason: null,
-        note: "Issue atribuída no coordenador",
-        updatedAt: typeof i.created_at === "number" ? (i.created_at < 1e12 ? i.created_at * 1000 : i.created_at) : Date.now(),
+        reason: stalled ? `Sem PR aberto há ${stalledMinutes}m` : null,
+        note: stalled ? `Parada sem PR há ${stalledMinutes >= 60 ? `${Math.floor(stalledMinutes / 60)}h` : `${stalledMinutes}m`}` : "Issue atribuída no coordenador",
+        updatedAt,
+        stalled,
+        stalledMinutes,
+        executorPubkeys: execPks,
       };
     });
 
   const backlog = kanbanBacklog.length > 0 ? kanbanBacklog : issueBacklogItems;
   const inProgress = [...kanbanInProgress, ...prWorkItems, ...(kanbanInProgress.length === 0 ? issueActiveItems.slice(0, 12) : [])];
   const wipLimit = Number(controle?.limits?.prsAbertos ?? 6);
-  const realOpenPrs = openPrsRaw.length > 0 ? openPrsRaw.length : inProgress.length;
+  const realOpenPrs = openPrsRaw.length;
   const wipHolding = realOpenPrs >= wipLimit;
   const wipNote = wipHolding
     ? `WIP bloqueando novos despachos: ${realOpenPrs} PRs abertos (limite configurado: ${wipLimit})`

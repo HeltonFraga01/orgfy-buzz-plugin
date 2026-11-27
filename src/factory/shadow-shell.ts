@@ -1406,6 +1406,15 @@ export const FACTORY_SHADOW_CSS = `
   box-shadow: 0 0 0 3px var(--primary-soft);
 }
 
+.of-pd-node[data-stalled="true"] {
+  border-color: color-mix(in srgb, var(--status-waiting) 58%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-waiting) 14%, transparent);
+}
+
+.of-pd-node[data-waiting="true"] {
+  border-color: var(--border-strong);
+}
+
 .of-pd-badge {
   position: absolute;
   top: -8px;

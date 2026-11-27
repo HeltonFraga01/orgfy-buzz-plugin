@@ -148,7 +148,20 @@ export function renderFactoryOverviewPanel(props: FactoryOverviewProps) {
   const openPrs = status.pullRequests || [];
   const topModelName = porModelo[0]?.modelo ? String(porModelo[0].modelo) : (tenantAgents[0]?.model || PT_BR.labels.unavailable);
 
-  const nowRunningCount = activeTurns.length + status.inProgress.length;
+  const liveActiveTurns = activeTurns.filter((t) => t.state !== "error");
+  const activeTurnPubkeys = liveActiveTurns.map((t) => (t.agentPubkey || "").toLowerCase()).filter(Boolean);
+  const activeTurnPkSet = new Set(activeTurnPubkeys);
+  const workingNow = typeof props.workingNowCount === "number" ? props.workingNowCount : liveActiveTurns.length;
+  const isWorkItemRunningLive = (item: FactoryWorkItem): boolean => {
+    if (workingNow <= 0) return false;
+    if (Array.isArray(item.executorPubkeys) && item.executorPubkeys.length > 0 && activeTurnPkSet.size > 0) {
+      return item.executorPubkeys.some((pk) => activeTurnPkSet.has(pk.toLowerCase()));
+    }
+    return !item.stalled;
+  };
+  const stalledInProgress = status.inProgress.filter((w) => !isWorkItemRunningLive(w) && (w.stalled || (w.stage === "building" && workingNow === 0 && Date.now() - w.updatedAt >= 20 * 60_000)));
+  const nowLiveCount = activeTurns.length;
+  const nowCardsTotal = activeTurns.length + status.inProgress.length;
   const queuedCount = status.backlog.length;
 
   const nextScheduleRows: Array<{ id: string; title: string; when: string; action: () => void }> = [
@@ -226,13 +239,18 @@ export function renderFactoryOverviewPanel(props: FactoryOverviewProps) {
           h("span", null, "AGORA"),
           h(
             "span",
-            { className: "of-pill", "data-tone": nowRunningCount > 0 ? "running" : "idle", style: { padding: "1px 7px", fontSize: "10px" } },
-            String(nowRunningCount)
+            { className: "of-pill", "data-tone": nowLiveCount > 0 ? "running" : "idle", style: { padding: "1px 7px", fontSize: "10px" } },
+            String(nowLiveCount)
           ),
+          stalledInProgress.length > 0
+            ? h("span", { style: { fontWeight: 600, textTransform: "none", letterSpacing: 0, color: "var(--status-waiting)" } }, `· ⚠ ${stalledInProgress.length} parada${stalledInProgress.length > 1 ? "s" : ""}`)
+            : status.inProgress.length > 0 && nowLiveCount === 0
+            ? h("span", { style: { fontWeight: 500, textTransform: "none", letterSpacing: 0 } }, `· ${status.inProgress.length} atribuída${status.inProgress.length > 1 ? "s" : ""}`)
+            : null,
           queuedCount > 0 &&
             h("span", { style: { fontWeight: 500, textTransform: "none", letterSpacing: 0 } }, `· ${queuedCount} na fila`)
         ),
-        nowRunningCount === 0
+        nowCardsTotal === 0
           ? h("div", { className: "of-now-empty" }, "Nada executando agora.")
           : h(
               "div",
@@ -240,7 +258,7 @@ export function renderFactoryOverviewPanel(props: FactoryOverviewProps) {
                 className: "of-now-cards",
                 "data-now-two-rows": "true",
                 style: {
-                  gridTemplateRows: nowRunningCount > 2 ? "repeat(2, 82px)" : "82px",
+                  gridTemplateRows: nowCardsTotal > 2 ? "repeat(2, 82px)" : "82px",
                   gridAutoColumns: "256px",
                 },
               },
@@ -322,31 +340,40 @@ export function renderFactoryOverviewPanel(props: FactoryOverviewProps) {
               }),
               status.inProgress.slice(0, 10).map((item) => {
                 const isErr = item.stage === "failed" || item.stage === "reverted";
-                const stageBadge = isErr ? "quarentena" : item.stage === "verifying" ? "revisão L-01" : item.stage === "building" ? "execução" : item.stage;
+                const isLive = isWorkItemRunningLive(item);
+                const isStalled = !isErr && !isLive && (Boolean(item.stalled) || (item.stage === "building" && workingNow === 0 && Date.now() - item.updatedAt >= 20 * 60_000));
+                const stageBadge = isErr ? "quarentena" : isStalled ? "parado" : item.stage === "verifying" ? "revisão L-01" : item.stage === "building" ? (isLive ? "execução" : "aguardando agente") : item.stage;
+                const subtitle = isStalled ? "⚠ Sem agente ativo e sem PR" : !isLive && item.stage === "building" ? "Atribuída · sem turno ativo agora" : item.note || stageBadge;
                 return h(
                   "button",
                   {
                     key: `wip-${item.id}`,
                     type: "button",
                     className: "of-now-card",
-                    style: isErr ? { borderColor: "rgba(239, 68, 68, 0.35)" } : undefined,
+                    style: isErr
+                      ? { borderColor: "color-mix(in srgb, var(--status-failed) 42%, transparent)" }
+                      : isStalled
+                      ? { borderColor: "color-mix(in srgb, var(--status-waiting) 48%, transparent)", background: "color-mix(in srgb, var(--status-waiting) 6%, transparent)" }
+                      : !isLive
+                      ? { opacity: 0.85 }
+                      : undefined,
                     onClick: () => onSelectItem(item),
                   },
                   h(
                     "div",
                     { style: { display: "flex", alignItems: "center", gap: "7px", minWidth: 0, width: "100%" } },
-                    h("span", { className: "of-dot", "data-tone": isErr ? "failed" : item.stage === "escalated" ? "waiting" : "running" }),
+                    h("span", { className: "of-dot", "data-tone": isErr ? "failed" : isStalled || item.stage === "escalated" ? "waiting" : isLive ? "running" : "idle" }),
                     h("strong", { style: { fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }, title: item.title }, item.title)
                   ),
                   h(
                     "div",
-                    { className: "of-muted", style: { fontSize: "11px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", width: "100%" }, title: item.note || stageBadge },
-                    item.note || stageBadge
+                    { className: "of-muted", style: { fontSize: "11px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", width: "100%", color: isStalled ? "var(--status-waiting)" : undefined }, title: subtitle },
+                    subtitle
                   ),
                   h(
                     "div",
                     { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px", width: "100%", fontSize: "10px", color: "var(--muted-foreground)" } },
-                    h("span", { className: "of-mono", style: { color: isErr ? "var(--status-failed)" : "var(--primary)" } }, `#${item.id.slice(0, 8)} · ${stageBadge}`),
+                    h("span", { className: "of-mono", style: { color: isErr ? "var(--status-failed)" : isStalled ? "var(--status-waiting)" : isLive ? "var(--primary)" : "var(--muted-foreground)" } }, `#${item.id.slice(0, 8)} · ${stageBadge}`),
                     h("span", { className: "of-mono", style: { flexShrink: 0 } }, fmtAge(item.updatedAt))
                   )
                 );
@@ -557,8 +584,8 @@ export function renderFactoryOverviewPanel(props: FactoryOverviewProps) {
       h(
         "div",
         { className: "of-panel-body" },
-        // Alerta de Kill Switch / Pausa / Esteira Parada
-        (status.globalKillSwitch || status.pausedReason || (status.wip?.holding && status.wip?.note)) &&
+        // Alerta de Kill Switch / Pausa / Esteira Parada / Estagnação
+        (status.globalKillSwitch || status.pausedReason || (status.wip?.holding && status.wip?.note) || (!stopped && workingNow === 0 && stalledInProgress.length > 0)) &&
           h(
             "div",
             { className: "of-alert-banner" },
@@ -570,7 +597,9 @@ export function renderFactoryOverviewPanel(props: FactoryOverviewProps) {
                 ? "Kill switch global ativado: nenhuma fábrica da Holding está rodando."
                 : status.pausedReason
                 ? `Pausado: ${status.pausedReason}`
-                : status.wip?.note
+                : status.wip?.holding && status.wip?.note
+                ? status.wip.note
+                : `${stalledInProgress.length} issue${stalledInProgress.length > 1 ? "s" : ""} parada${stalledInProgress.length > 1 ? "s" : ""} sem agente ativo e sem PR há mais de 20m — clique no #id para inspecionar, reatribuir ou fechar.`
             )
           ),
 
@@ -588,10 +617,14 @@ export function renderFactoryOverviewPanel(props: FactoryOverviewProps) {
               { style: { marginLeft: "auto", display: "flex", alignItems: "center", gap: "6px" } },
               status.drain && !stopped
                 ? h("span", { className: "of-pill", "data-tone": "waiting" }, `Drenando: ${status.drain.inFlight} em andamento`)
+                : !stopped && workingNow === 0 && stalledInProgress.length > 0
+                ? h("span", { className: "of-pill", "data-tone": "waiting" }, `⚠ ${stalledInProgress.length} parado${stalledInProgress.length > 1 ? "s" : ""} (0 agentes)`)
+                : !stopped && workingNow === 0 && status.loopState === "building"
+                ? h("span", { className: "of-pill", "data-tone": "idle" }, "Aguardando agente")
                 : h("span", { className: "of-pill", "data-tone": loopTone }, `Loop ${loopLabel.toLowerCase()}`)
             )
           ),
-          renderPipelineDiagram({ h, status, isBoardTenant: props.isBoardTenant, activeHelpKey, onToggleHelp, onSelectItem })
+          renderPipelineDiagram({ h, status, isBoardTenant: props.isBoardTenant, workingNowCount: workingNow, activeTurnPubkeys, activeHelpKey, onToggleHelp, onSelectItem })
         ),
 
         // 5 Meters com barras de progresso

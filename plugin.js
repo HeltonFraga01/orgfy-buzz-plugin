@@ -13599,9 +13599,23 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
       updatedAt: typeof i.created_at === "number" ? i.created_at < 1e12 ? i.created_at * 1e3 : i.created_at : Date.now()
     };
   });
+  const despachosMap = (esteiraState == null ? void 0 : esteiraState.despachos) && typeof esteiraState.despachos === "object" ? esteiraState.despachos : {};
+  const openPrIssueIds = new Set(
+    openPrsRaw.map((p) => String((p == null ? void 0 : p.issue_id) || "").toLowerCase()).filter(Boolean)
+  );
+  const STALL_THRESHOLD_MIN = 20;
+  const nowMs = Date.now();
   const issueActiveItems = openIssuesRaw.filter((i) => (i == null ? void 0 : i.id) && i.assigned && !seenIds.has(String(i.id))).map((i) => {
     const iid = String(i.id);
     const title = String(i.title || `Issue ${iid.slice(0, 8)}`);
+    const desp = despachosMap[iid];
+    const rawTs = typeof i.despachado_em === "number" ? i.despachado_em : typeof (desp == null ? void 0 : desp.despachado_em) === "number" ? desp.despachado_em : typeof i.created_at === "number" ? i.created_at : 0;
+    const updatedAt = rawTs > 0 ? rawTs < 1e12 ? rawTs * 1e3 : rawTs : nowMs;
+    const hasPr = Boolean(i.has_pr) || openPrIssueIds.has(iid.toLowerCase());
+    const computedMin = Math.max(0, Math.floor((nowMs - updatedAt) / 6e4));
+    const stalledMinutes = typeof i.stalled_minutes === "number" ? i.stalled_minutes : computedMin;
+    const stalled = typeof i.stalled === "boolean" ? i.stalled : !hasPr && stalledMinutes >= STALL_THRESHOLD_MIN;
+    const execPks = Array.isArray(i.executors) ? i.executors.map((x) => String(x || "").toLowerCase()).filter(Boolean) : (desp == null ? void 0 : desp.dono_operacional) ? [String(desp.dono_operacional).toLowerCase()] : [];
     return {
       id: iid,
       title,
@@ -13612,15 +13626,18 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
       attempts: 1,
       sessionId: null,
       activeSessionId: null,
-      reason: null,
-      note: "Issue atribuída no coordenador",
-      updatedAt: typeof i.created_at === "number" ? i.created_at < 1e12 ? i.created_at * 1e3 : i.created_at : Date.now()
+      reason: stalled ? `Sem PR aberto há ${stalledMinutes}m` : null,
+      note: stalled ? `Parada sem PR há ${stalledMinutes >= 60 ? `${Math.floor(stalledMinutes / 60)}h` : `${stalledMinutes}m`}` : "Issue atribuída no coordenador",
+      updatedAt,
+      stalled,
+      stalledMinutes,
+      executorPubkeys: execPks
     };
   });
   const backlog = kanbanBacklog.length > 0 ? kanbanBacklog : issueBacklogItems;
   const inProgress = [...kanbanInProgress, ...prWorkItems, ...kanbanInProgress.length === 0 ? issueActiveItems.slice(0, 12) : []];
   const wipLimit = Number(((_s = controle == null ? void 0 : controle.limits) == null ? void 0 : _s.prsAbertos) ?? 6);
-  const realOpenPrs = openPrsRaw.length > 0 ? openPrsRaw.length : inProgress.length;
+  const realOpenPrs = openPrsRaw.length;
   const wipHolding = realOpenPrs >= wipLimit;
   const wipNote = wipHolding ? `WIP bloqueando novos despachos: ${realOpenPrs} PRs abertos (limite configurado: ${wipLimit})` : null;
   const kpis = kpiRes.kpis;
@@ -15259,6 +15276,15 @@ const FACTORY_SHADOW_CSS = `
   box-shadow: 0 0 0 3px var(--primary-soft);
 }
 
+.of-pd-node[data-stalled="true"] {
+  border-color: color-mix(in srgb, var(--status-waiting) 58%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-waiting) 14%, transparent);
+}
+
+.of-pd-node[data-waiting="true"] {
+  border-color: var(--border-strong);
+}
+
 .of-pd-badge {
   position: absolute;
   top: -8px;
@@ -15614,6 +15640,23 @@ function toneOfItem(item) {
 }
 function renderPipelineDiagram(props) {
   const { h, status, activeHelpKey, onToggleHelp, onSelectItem } = props;
+  const workingNowCount = typeof props.workingNowCount === "number" ? props.workingNowCount : 0;
+  const activePkSet = new Set((props.activeTurnPubkeys || []).map((p) => p.toLowerCase()).filter(Boolean));
+  const isItemActivelyRunning = (w) => {
+    if (workingNowCount <= 0) return false;
+    if (Array.isArray(w.executorPubkeys) && w.executorPubkeys.length > 0 && activePkSet.size > 0) {
+      return w.executorPubkeys.some((pk) => activePkSet.has(pk.toLowerCase()));
+    }
+    return !w.stalled;
+  };
+  const isItemStalled = (w) => {
+    if (isItemActivelyRunning(w)) return false;
+    if (w.stalled) return true;
+    if (w.stage === "building" && workingNowCount === 0 && w.updatedAt > 0) {
+      return Date.now() - w.updatedAt >= 20 * 6e4;
+    }
+    return false;
+  };
   const live = [
     ...status.backlog,
     ...status.inProgress,
@@ -15668,7 +15711,11 @@ function renderPipelineDiagram(props) {
     const queued = opts.queued || [];
     const shown = [...opts.items, ...queued];
     const extra = shown.length - MAX_CHIPS;
-    const isActive = opts.items.length > 0;
+    const stalledCount = opts.items.filter(isItemStalled).length;
+    const runningCount = opts.items.filter(isItemActivelyRunning).length;
+    const isActive = runningCount > 0;
+    const isStalled = !isActive && stalledCount > 0;
+    const isWaiting = !isActive && !isStalled && opts.items.length > 0;
     const isHelpOpen = activeHelpKey === opts.keyId;
     return h(
       "div",
@@ -15676,6 +15723,8 @@ function renderPipelineDiagram(props) {
         key: opts.keyId,
         className: "of-pd-node",
         "data-active": isActive ? "true" : "false",
+        "data-stalled": isStalled ? "true" : "false",
+        "data-waiting": isWaiting ? "true" : "false",
         style: opts.width ? { width: opts.width, flex: "0 0 auto" } : void 0
       },
       h("span", { className: "of-pd-badge", "data-kind": opts.kind }, opts.badge),
@@ -15699,7 +15748,12 @@ function renderPipelineDiagram(props) {
         "div",
         { style: { display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "4px", width: "100%" } },
         opts.items.slice(0, MAX_CHIPS).map((w) => {
-          const alert = w.stage === "escalated" || w.stage === "failed" || w.stage === "reverted";
+          const itemStalled = isItemStalled(w);
+          const itemRunning = isItemActivelyRunning(w);
+          const alert = w.stage === "escalated" || w.stage === "failed" || w.stage === "reverted" || itemStalled;
+          const ageMin = typeof w.stalledMinutes === "number" ? w.stalledMinutes : Math.max(0, Math.floor((Date.now() - w.updatedAt) / 6e4));
+          const ageTxt = ageMin >= 60 ? `${Math.floor(ageMin / 60)}h` : `${ageMin}m`;
+          const dotTone = itemRunning ? "running" : w.stage === "building" ? "idle" : toneOfItem(w);
           return h(
             "button",
             {
@@ -15708,12 +15762,12 @@ function renderPipelineDiagram(props) {
               className: "of-chip",
               "data-alert": alert ? "true" : "false",
               title: `${w.title}
-Etapa: ${w.stage}${w.attempts > 1 ? `
+Etapa: ${itemStalled ? `parado há ${ageTxt} (sem agente ativo e sem PR)` : w.stage}${w.attempts > 1 ? `
 Refazer rodada ${w.attempts}` : ""}
 Clique para abrir o card/sessão`,
               onClick: () => onSelectItem(w)
             },
-            alert ? h("span", null, "⚠") : h("span", { className: "of-dot", "data-tone": toneOfItem(w) }),
+            alert ? h("span", null, "⚠") : h("span", { className: "of-dot", "data-tone": dotTone }),
             h("span", { style: { overflow: "hidden", textOverflow: "ellipsis" } }, `#${w.id.slice(0, 8)}`),
             w.attempts > 1 && h("span", { style: { opacity: 0.75 } }, `↻${w.attempts}`)
           );
@@ -15736,7 +15790,11 @@ Na fila aguardando agente livre`,
         ),
         extra > 0 && h("span", { className: "of-muted", style: { fontSize: "10px" } }, `+${extra}`)
       ),
-      opts.footer
+      opts.footer || isStalled && h(
+        "span",
+        { style: { fontSize: "9.5px", color: "var(--status-waiting)", fontWeight: 600 } },
+        `⚠ ${stalledCount} parado${stalledCount > 1 ? "s" : ""}`
+      )
     );
   };
   const Lane = (laneKey, title, help, children) => h(
@@ -16332,7 +16390,7 @@ function Meter(h, props) {
   );
 }
 function renderFactoryOverviewPanel(props) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p;
   const {
     h,
     tenant,
@@ -16384,7 +16442,20 @@ function renderFactoryOverviewPanel(props) {
   });
   const openPrs = status.pullRequests || [];
   const topModelName = ((_f = porModelo[0]) == null ? void 0 : _f.modelo) ? String(porModelo[0].modelo) : ((_g = tenantAgents[0]) == null ? void 0 : _g.model) || PT_BR.labels.unavailable;
-  const nowRunningCount = activeTurns.length + status.inProgress.length;
+  const liveActiveTurns = activeTurns.filter((t) => t.state !== "error");
+  const activeTurnPubkeys = liveActiveTurns.map((t) => (t.agentPubkey || "").toLowerCase()).filter(Boolean);
+  const activeTurnPkSet = new Set(activeTurnPubkeys);
+  const workingNow = typeof props.workingNowCount === "number" ? props.workingNowCount : liveActiveTurns.length;
+  const isWorkItemRunningLive = (item) => {
+    if (workingNow <= 0) return false;
+    if (Array.isArray(item.executorPubkeys) && item.executorPubkeys.length > 0 && activeTurnPkSet.size > 0) {
+      return item.executorPubkeys.some((pk) => activeTurnPkSet.has(pk.toLowerCase()));
+    }
+    return !item.stalled;
+  };
+  const stalledInProgress = status.inProgress.filter((w) => !isWorkItemRunningLive(w) && (w.stalled || w.stage === "building" && workingNow === 0 && Date.now() - w.updatedAt >= 20 * 6e4));
+  const nowLiveCount = activeTurns.length;
+  const nowCardsTotal = activeTurns.length + status.inProgress.length;
   const queuedCount = status.backlog.length;
   const nextScheduleRows = [
     {
@@ -16455,18 +16526,19 @@ function renderFactoryOverviewPanel(props) {
           h("span", null, "AGORA"),
           h(
             "span",
-            { className: "of-pill", "data-tone": nowRunningCount > 0 ? "running" : "idle", style: { padding: "1px 7px", fontSize: "10px" } },
-            String(nowRunningCount)
+            { className: "of-pill", "data-tone": nowLiveCount > 0 ? "running" : "idle", style: { padding: "1px 7px", fontSize: "10px" } },
+            String(nowLiveCount)
           ),
+          stalledInProgress.length > 0 ? h("span", { style: { fontWeight: 600, textTransform: "none", letterSpacing: 0, color: "var(--status-waiting)" } }, `· ⚠ ${stalledInProgress.length} parada${stalledInProgress.length > 1 ? "s" : ""}`) : status.inProgress.length > 0 && nowLiveCount === 0 ? h("span", { style: { fontWeight: 500, textTransform: "none", letterSpacing: 0 } }, `· ${status.inProgress.length} atribuída${status.inProgress.length > 1 ? "s" : ""}`) : null,
           queuedCount > 0 && h("span", { style: { fontWeight: 500, textTransform: "none", letterSpacing: 0 } }, `· ${queuedCount} na fila`)
         ),
-        nowRunningCount === 0 ? h("div", { className: "of-now-empty" }, "Nada executando agora.") : h(
+        nowCardsTotal === 0 ? h("div", { className: "of-now-empty" }, "Nada executando agora.") : h(
           "div",
           {
             className: "of-now-cards",
             "data-now-two-rows": "true",
             style: {
-              gridTemplateRows: nowRunningCount > 2 ? "repeat(2, 82px)" : "82px",
+              gridTemplateRows: nowCardsTotal > 2 ? "repeat(2, 82px)" : "82px",
               gridAutoColumns: "256px"
             }
           },
@@ -16548,31 +16620,34 @@ function renderFactoryOverviewPanel(props) {
           }),
           status.inProgress.slice(0, 10).map((item) => {
             const isErr = item.stage === "failed" || item.stage === "reverted";
-            const stageBadge = isErr ? "quarentena" : item.stage === "verifying" ? "revisão L-01" : item.stage === "building" ? "execução" : item.stage;
+            const isLive = isWorkItemRunningLive(item);
+            const isStalled = !isErr && !isLive && (Boolean(item.stalled) || item.stage === "building" && workingNow === 0 && Date.now() - item.updatedAt >= 20 * 6e4);
+            const stageBadge = isErr ? "quarentena" : isStalled ? "parado" : item.stage === "verifying" ? "revisão L-01" : item.stage === "building" ? isLive ? "execução" : "aguardando agente" : item.stage;
+            const subtitle = isStalled ? "⚠ Sem agente ativo e sem PR" : !isLive && item.stage === "building" ? "Atribuída · sem turno ativo agora" : item.note || stageBadge;
             return h(
               "button",
               {
                 key: `wip-${item.id}`,
                 type: "button",
                 className: "of-now-card",
-                style: isErr ? { borderColor: "rgba(239, 68, 68, 0.35)" } : void 0,
+                style: isErr ? { borderColor: "color-mix(in srgb, var(--status-failed) 42%, transparent)" } : isStalled ? { borderColor: "color-mix(in srgb, var(--status-waiting) 48%, transparent)", background: "color-mix(in srgb, var(--status-waiting) 6%, transparent)" } : !isLive ? { opacity: 0.85 } : void 0,
                 onClick: () => onSelectItem(item)
               },
               h(
                 "div",
                 { style: { display: "flex", alignItems: "center", gap: "7px", minWidth: 0, width: "100%" } },
-                h("span", { className: "of-dot", "data-tone": isErr ? "failed" : item.stage === "escalated" ? "waiting" : "running" }),
+                h("span", { className: "of-dot", "data-tone": isErr ? "failed" : isStalled || item.stage === "escalated" ? "waiting" : isLive ? "running" : "idle" }),
                 h("strong", { style: { fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }, title: item.title }, item.title)
               ),
               h(
                 "div",
-                { className: "of-muted", style: { fontSize: "11px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", width: "100%" }, title: item.note || stageBadge },
-                item.note || stageBadge
+                { className: "of-muted", style: { fontSize: "11px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", width: "100%", color: isStalled ? "var(--status-waiting)" : void 0 }, title: subtitle },
+                subtitle
               ),
               h(
                 "div",
                 { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px", width: "100%", fontSize: "10px", color: "var(--muted-foreground)" } },
-                h("span", { className: "of-mono", style: { color: isErr ? "var(--status-failed)" : "var(--primary)" } }, `#${item.id.slice(0, 8)} · ${stageBadge}`),
+                h("span", { className: "of-mono", style: { color: isErr ? "var(--status-failed)" : isStalled ? "var(--status-waiting)" : isLive ? "var(--primary)" : "var(--muted-foreground)" } }, `#${item.id.slice(0, 8)} · ${stageBadge}`),
                 h("span", { className: "of-mono", style: { flexShrink: 0 } }, fmtAge(item.updatedAt))
               )
             );
@@ -16772,15 +16847,15 @@ function renderFactoryOverviewPanel(props) {
       h(
         "div",
         { className: "of-panel-body" },
-        // Alerta de Kill Switch / Pausa / Esteira Parada
-        (status.globalKillSwitch || status.pausedReason || ((_j = status.wip) == null ? void 0 : _j.holding) && ((_k = status.wip) == null ? void 0 : _k.note)) && h(
+        // Alerta de Kill Switch / Pausa / Esteira Parada / Estagnação
+        (status.globalKillSwitch || status.pausedReason || ((_j = status.wip) == null ? void 0 : _j.holding) && ((_k = status.wip) == null ? void 0 : _k.note) || !stopped && workingNow === 0 && stalledInProgress.length > 0) && h(
           "div",
           { className: "of-alert-banner" },
           h("span", { style: { color: "var(--status-waiting)", fontWeight: 700 } }, "⚠"),
           h(
             "span",
             { style: { flex: 1 } },
-            status.globalKillSwitch ? "Kill switch global ativado: nenhuma fábrica da Holding está rodando." : status.pausedReason ? `Pausado: ${status.pausedReason}` : (_l = status.wip) == null ? void 0 : _l.note
+            status.globalKillSwitch ? "Kill switch global ativado: nenhuma fábrica da Holding está rodando." : status.pausedReason ? `Pausado: ${status.pausedReason}` : ((_l = status.wip) == null ? void 0 : _l.holding) && ((_m2 = status.wip) == null ? void 0 : _m2.note) ? status.wip.note : `${stalledInProgress.length} issue${stalledInProgress.length > 1 ? "s" : ""} parada${stalledInProgress.length > 1 ? "s" : ""} sem agente ativo e sem PR há mais de 20m — clique no #id para inspecionar, reatribuir ou fechar.`
           )
         ),
         // Pipelines ao vivo
@@ -16795,10 +16870,10 @@ function renderFactoryOverviewPanel(props) {
             h(
               "div",
               { style: { marginLeft: "auto", display: "flex", alignItems: "center", gap: "6px" } },
-              status.drain && !stopped ? h("span", { className: "of-pill", "data-tone": "waiting" }, `Drenando: ${status.drain.inFlight} em andamento`) : h("span", { className: "of-pill", "data-tone": loopTone }, `Loop ${loopLabel.toLowerCase()}`)
+              status.drain && !stopped ? h("span", { className: "of-pill", "data-tone": "waiting" }, `Drenando: ${status.drain.inFlight} em andamento`) : !stopped && workingNow === 0 && stalledInProgress.length > 0 ? h("span", { className: "of-pill", "data-tone": "waiting" }, `⚠ ${stalledInProgress.length} parado${stalledInProgress.length > 1 ? "s" : ""} (0 agentes)`) : !stopped && workingNow === 0 && status.loopState === "building" ? h("span", { className: "of-pill", "data-tone": "idle" }, "Aguardando agente") : h("span", { className: "of-pill", "data-tone": loopTone }, `Loop ${loopLabel.toLowerCase()}`)
             )
           ),
-          renderPipelineDiagram({ h, status, isBoardTenant: props.isBoardTenant, activeHelpKey, onToggleHelp, onSelectItem })
+          renderPipelineDiagram({ h, status, isBoardTenant: props.isBoardTenant, workingNowCount: workingNow, activeTurnPubkeys, activeHelpKey, onToggleHelp, onSelectItem })
         ),
         // 5 Meters com barras de progresso
         h(
@@ -17655,10 +17730,10 @@ function renderFactoryOverviewPanel(props) {
           },
           {
             id: "ci-probes",
-            name: `CI Runner & Probes (${((_m2 = status.tenantManifest) == null ? void 0 : _m2.ciModo) || "local"})`,
-            desc: ((_n = status.tenantManifest) == null ? void 0 : _n.ciCmd) || "ferramentas/ci.sh com isolamento de segredos e GATE humano",
+            name: `CI Runner & Probes (${((_n = status.tenantManifest) == null ? void 0 : _n.ciModo) || "local"})`,
+            desc: ((_o = status.tenantManifest) == null ? void 0 : _o.ciCmd) || "ferramentas/ci.sh com isolamento de segredos e GATE humano",
             tone: "done",
-            badge: ((_o = status.tenantManifest) == null ? void 0 : _o.probesObrigatorios) ? `${status.tenantManifest.probesCount} probes` : "Habilitado"
+            badge: ((_p = status.tenantManifest) == null ? void 0 : _p.probesObrigatorios) ? `${status.tenantManifest.probesCount} probes` : "Habilitado"
           }
         ].map(
           (auto) => h(
