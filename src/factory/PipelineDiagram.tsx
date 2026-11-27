@@ -296,7 +296,7 @@ export function renderPipelineDiagram(props: PipelineDiagramProps) {
             title: "Pauta & Escopo",
             help: "Pautas de orçamento, risco, arquitetura, produto ou novas subsidiárias que sobem ao Conselho.",
             items: [],
-            queued: status.backlog.slice(0, 3),
+            queued: status.backlog.filter((i) => i.step !== "intake").slice(0, 3),
             width: "118px",
             footer: h("span", { className: "of-muted", style: { fontSize: "10px" } }, "alçada Holding"),
           }),
@@ -474,7 +474,7 @@ export function renderPipelineDiagram(props: PipelineDiagramProps) {
           title: PT_BR.pipelines.issueLabel,
           help: PT_BR.pipelines.issueHelp,
           items: [],
-          queued: status.backlog.slice(0, 3),
+          queued: status.backlog.filter((i) => i.step !== "intake").slice(0, 3),
           width: "116px",
           footer: h(
             "div",
