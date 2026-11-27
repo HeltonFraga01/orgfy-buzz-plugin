@@ -312,6 +312,15 @@ function adaptStatusFor3D(
     .filter((a) => EXECUTOR_ROLES.has((a.papel || "").toLowerCase()))
     .map((a) => ({ key: a.key, name: a.name, sessionId: a.key }));
 
+  // Conta apenas agentes realmente em turno ativo agora naquele canal (evita inflar o placar AGENTS WORKING com agentes ociosos)
+  let liveWorkingNow = 0;
+  for (const agent of pool) {
+    const rawTurn = agent.pubkey && telemetry?.byPubkey ? telemetry.byPubkey[agent.pubkey.toLowerCase()] || null : null;
+    if (rawTurn && (!tenantCanal || !rawTurn.channelId || rawTurn.channelId.toLowerCase() === tenantCanal)) {
+      liveWorkingNow += 1;
+    }
+  }
+
   const f: FactoryStatus = {
     projectId: status.projectId,
     mode: "dark_factory",
@@ -332,7 +341,7 @@ function adaptStatusFor3D(
       mergedToday: status.stats.mergedToday + demoExtraMerged,
     },
     consecutiveFailures: status.consecutiveFailures,
-    activeSessions: demoPhase ? Math.max(1, status.activeSessions) : status.activeSessions,
+    activeSessions: demoPhase ? Math.max(1, liveWorkingNow) : liveWorkingNow,
     wip: status.wip,
     backlog,
     inProgress,

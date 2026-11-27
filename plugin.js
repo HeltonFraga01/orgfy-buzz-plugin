@@ -14758,7 +14758,7 @@ function describeOrgfyRole(papelRaw) {
   return map[p] || { funcao: p ? `Agente · ${p}` : "Agente da Esteira", categoria: "execucao" };
 }
 async function hydrateFactoryStatusFromFiles(ctx, slug) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x2, _y2, _z2, _A, _B, _C, _D, _E, _F, _G, _H, _I;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x2, _y2, _z2, _A, _B, _C, _D, _E, _F, _G, _H, _I, _J, _K;
   const base = buildEmptyFactoryStatus(slug);
   const host = ctx == null ? void 0 : ctx.host;
   const stateRelPath = slug === "orgfy" ? ".esteira/estado/esteira-minima-state.json" : `.esteira/estado/esteira-minima-${slug}-state.json`;
@@ -14917,20 +14917,23 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
     revisoresPorSuperficie: (empresaJson == null ? void 0 : empresaJson.revisores_por_superficie) && typeof empresaJson.revisores_por_superficie === "object" ? empresaJson.revisores_por_superficie : {},
     agentes: tenantAgents
   };
-  const toWorkItem = (c) => ({
-    id: String(c.fullIssueId || c.issueId || c.id),
-    title: String(c.title || "Card"),
-    workKey: String(c.issueId || c.id),
-    stage: c.stage === "feito" ? "merged" : c.stage === "revisao" ? "verifying" : c.stage === "execucao" || c.stage === "despachado" ? "building" : "backlog",
-    step: c.stage === "feito" ? "done" : c.stage === "revisao" ? "review" : c.stage === "execucao" ? "implement" : "intake",
-    type: /fix|bug|hotfix/i.test(String(c.title || "")) ? "bug" : /doc|readme|prd/i.test(String(c.title || "")) ? "docs" : "feature",
-    attempts: Array.isArray(c.rejectionHistory) ? c.rejectionHistory.length + 1 : 1,
-    sessionId: null,
-    activeSessionId: null,
-    reason: null,
-    note: c.executor ? `Executor: ${c.executor}${c.revisor ? ` · Revisor: ${c.revisor}` : ""}` : null,
-    updatedAt: Date.now()
-  });
+  const toWorkItem = (c) => {
+    const itemType = /fix|bug|hotfix/i.test(String(c.title || "")) ? "bug" : /doc|readme|prd/i.test(String(c.title || "")) ? "docs" : "feature";
+    return {
+      id: String(c.fullIssueId || c.issueId || c.id),
+      title: String(c.title || "Card"),
+      workKey: String(c.issueId || c.id),
+      stage: c.stage === "feito" ? "merged" : c.stage === "revisao" ? "verifying" : c.stage === "execucao" || c.stage === "despachado" ? "building" : "backlog",
+      step: c.stage === "feito" ? "done" : c.stage === "revisao" ? "review" : c.stage === "execucao" ? "implement" : c.stage === "despachado" ? itemType === "bug" ? "reproduce" : "analyze" : "intake",
+      type: itemType,
+      attempts: Array.isArray(c.rejectionHistory) ? c.rejectionHistory.length + 1 : 1,
+      sessionId: null,
+      activeSessionId: null,
+      reason: null,
+      note: c.executor ? `Executor: ${c.executor}${c.revisor ? ` · Revisor: ${c.revisor}` : ""}` : null,
+      updatedAt: Date.now()
+    };
+  };
   const kanbanBacklog = cards.filter((c) => c.stage === "triagem").map(toWorkItem);
   const kanbanInProgress = cards.filter((c) => c.stage === "despachado" || c.stage === "execucao" || c.stage === "revisao").map(toWorkItem);
   const recent = cards.filter((c) => c.stage === "feito").slice(0, 20).map(toWorkItem);
@@ -14940,6 +14943,8 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
   const seenIds = new Set([...kanbanBacklog, ...kanbanInProgress].map((w) => w.id));
   const quarentenaMap = (esteiraState == null ? void 0 : esteiraState.quarentena) && typeof esteiraState.quarentena === "object" ? esteiraState.quarentena : {};
   const ciMap = (esteiraState == null ? void 0 : esteiraState.ci) && typeof esteiraState.ci === "object" ? esteiraState.ci : {};
+  const timingsMap = (esteiraState == null ? void 0 : esteiraState.timings) && typeof esteiraState.timings === "object" ? esteiraState.timings : {};
+  const awaitingMergeMap = (esteiraState == null ? void 0 : esteiraState.awaiting_human_merge_notifications) && typeof esteiraState.awaiting_human_merge_notifications === "object" ? esteiraState.awaiting_human_merge_notifications : {};
   const reviewerAgent = tenantAgents.find((a) => a.papel === "revisor_codigo" || a.papel === "qa") || tenantAgents.find((a) => /qa|revis/i.test(a.name)) || null;
   const defaultExecutorAgent = tenantAgents.find((a) => ["executor", "backend", "frontend", "infra"].includes(a.papel)) || tenantAgents.find((a) => /dev|otto/i.test(a.name)) || null;
   const agentByPubkey = /* @__PURE__ */ new Map();
@@ -14963,7 +14968,11 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
     const isQuarantined = Boolean(p.quarentena || qEntry);
     const tipSha = String(p.tip || "").toLowerCase();
     const ciEntry = tipSha ? ciMap[tipSha] : null;
-    const ciWaiting = !isQuarantined && (!ciEntry || String(ciEntry.status || "") !== "ok");
+    const timingEntry = timingsMap[pid] || timingsMap[pid.slice(0, 8)] || null;
+    const hasGateApproved = Boolean(
+      !isQuarantined && (typeof (timingEntry == null ? void 0 : timingEntry.gate_at) === "number" && timingEntry.gate_at > 0 || awaitingMergeMap[pid])
+    );
+    const ciWaiting = !isQuarantined && !hasGateApproved && (!ciEntry || String(ciEntry.status || "") !== "ok");
     const qReason = typeof (qEntry == null ? void 0 : qEntry.motivo) === "string" && qEntry.motivo.trim() ? `Quarentena (COO): ${qEntry.motivo.trim().slice(0, 180)}` : isQuarantined ? "PR em quarentena no coordenador (requer ação do COO OrgFy Bento)" : ciWaiting ? "Aguardando CI" : null;
     const execPk = Array.isArray(linkedIssue == null ? void 0 : linkedIssue.executors) && linkedIssue.executors[0] ? String(linkedIssue.executors[0]).toLowerCase() : "";
     const execAg = (execPk ? agentByPubkey.get(execPk) : null) || defaultExecutorAgent;
@@ -14971,7 +14980,7 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
     const noteParts = [
       execAg ? `Executor: ${execAg.name}` : null,
       `Revisor: ${revName}`,
-      p.branch ? `PR · ${p.branch}` : "PR aberto"
+      hasGateApproved ? "GATE aprovado · fila de merge" : p.branch ? `PR · ${p.branch}` : "PR aberto"
     ].filter(Boolean);
     return {
       id: canonicalId,
@@ -14979,7 +14988,7 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
       workKey: `pr:${pid.slice(0, 12)}`,
       // Na governança OrgFy (board.json), falhas/quarentena da esteira vão para Problemas (COO Bento -> CEO Empresa -> Iris), nunca direto para "Aguardando você" (Fundador)
       stage: isQuarantined ? "failed" : "verifying",
-      step: isQuarantined ? "quarantine" : "review",
+      step: isQuarantined ? "quarantine" : hasGateApproved ? "merge" : "review",
       type: /fix|bug|hotfix/i.test(title) ? "bug" : /doc|readme|prd/i.test(title) ? "docs" : "feature",
       attempts: 1,
       sessionId: (reviewerAgent == null ? void 0 : reviewerAgent.agentKey) || null,
@@ -15026,13 +15035,15 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
     const stalled = typeof i.stalled === "boolean" ? i.stalled : !hasPr && stalledMinutes >= STALL_THRESHOLD_MIN;
     const execPks = Array.isArray(i.executors) ? i.executors.map((x) => String(x || "").toLowerCase()).filter(Boolean) : (desp == null ? void 0 : desp.dono_operacional) ? [String(desp.dono_operacional).toLowerCase()] : [];
     const execAg = (execPks[0] ? agentByPubkey.get(execPks[0]) : null) || defaultExecutorAgent;
+    const itemType = /fix|bug|hotfix/i.test(title) ? "bug" : /doc|readme|prd/i.test(title) ? "docs" : "feature";
+    const inPrepPhase = !hasPr && !stalled && computedMin < 3;
     return {
       id: iid,
       title,
       workKey: `issue:${iid.slice(0, 12)}`,
       stage: "building",
-      step: "implement",
-      type: /fix|bug|hotfix/i.test(title) ? "bug" : /doc|readme|prd/i.test(title) ? "docs" : "feature",
+      step: inPrepPhase ? itemType === "bug" ? "reproduce" : "analyze" : "implement",
+      type: itemType,
       attempts: 1,
       sessionId: (execAg == null ? void 0 : execAg.agentKey) || null,
       activeSessionId: (execAg == null ? void 0 : execAg.agentKey) || null,
@@ -15054,6 +15065,37 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
   const killSwitch = Boolean(controle == null ? void 0 : controle.killSwitch);
   const drainOn = Boolean(controle == null ? void 0 : controle.drain);
   const mode = VALID_MODES.has(String(controle == null ? void 0 : controle.mode)) ? controle.mode : "software_factory";
+  const nowDate = /* @__PURE__ */ new Date();
+  const todayKey = `${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, "0")}-${String(nowDate.getDate()).padStart(2, "0")}`;
+  const sevenDaysAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1e3;
+  const mergedMap = (esteiraState == null ? void 0 : esteiraState.merged) && typeof esteiraState.merged === "object" ? esteiraState.merged : {};
+  let stateMergedToday = 0;
+  let stateMerged7d = 0;
+  for (const entry of Object.values(mergedMap)) {
+    if (!entry || typeof entry !== "object" || entry.exit !== 0) continue;
+    const rawTs = Number(entry.finished_at ?? entry.merged_at ?? 0);
+    if (!Number.isFinite(rawTs) || rawTs <= 0) continue;
+    const tsMs = rawTs < 1e12 ? rawTs * 1e3 : rawTs;
+    if (tsMs >= sevenDaysAgoMs) stateMerged7d += 1;
+    const d = new Date(tsMs);
+    const dKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    if (dKey === todayKey) stateMergedToday += 1;
+  }
+  const mergeDurationsMs = [];
+  for (const tEntry of Object.values(timingsMap)) {
+    const durS = Number(tEntry == null ? void 0 : tEntry.merge_duration_seconds);
+    if (Number.isFinite(durS) && durS > 0) mergeDurationsMs.push(Math.round(durS * 1e3));
+  }
+  mergeDurationsMs.sort((a, b) => a - b);
+  const medianMergeMs7d = mergeDurationsMs.length > 0 ? mergeDurationsMs[Math.floor(mergeDurationsMs.length / 2)] : null;
+  const kpiMergedToday = Number(((_v = (_u = (_t = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _t.vazao_por_tenant) == null ? void 0 : _u[slug]) == null ? void 0 : _v.hoje) ?? (slug === "orgfy" ? (_w = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _w.vazao_hoje : 0) ?? 0);
+  const realMergesToday = Math.max(stateMergedToday, Number.isFinite(kpiMergedToday) ? kpiMergedToday : 0);
+  const kpiMerged7d = Number(
+    ((_z2 = (_y2 = (_x2 = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _x2.vazao_por_tenant) == null ? void 0 : _y2[slug]) == null ? void 0 : _z2["7d"]) ?? (slug === "orgfy" ? (_A = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _A.vazao_7d : void 0) ?? recent.length
+  );
+  const realMerged7d = Math.max(stateMerged7d, Number.isFinite(kpiMerged7d) ? kpiMerged7d : 0);
+  const mergeFailuresCount = (esteiraState == null ? void 0 : esteiraState.merge_failures) && typeof esteiraState.merge_failures === "object" ? Object.keys(esteiraState.merge_failures).length : 0;
+  const realFailedToday = Object.keys(quarentenaMap).length + mergeFailuresCount;
   return {
     ...base,
     mode,
@@ -15062,26 +15104,24 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
     loopState: killSwitch ? "stopped" : drainOn ? "draining" : inProgress.length > 0 || runningList.length > 0 ? "building" : "idle",
     pausedReason: (controle == null ? void 0 : controle.pausedReason) || null,
     limits: {
-      maxConcurrentSessions: Number(((_t = controle == null ? void 0 : controle.limits) == null ? void 0 : _t.agentes) ?? 4),
-      maxMergesPerDay: Number(((_u = controle == null ? void 0 : controle.limits) == null ? void 0 : _u.mergesDia) ?? 20),
-      dailyBudget: { usd: Number(((_v = controle == null ? void 0 : controle.limits) == null ? void 0 : _v.gastoDiaUsd) ?? 50) },
-      pauseAfterConsecutiveFailures: Number(((_w = controle == null ? void 0 : controle.limits) == null ? void 0 : _w.falhasSeguidas) ?? 3),
+      maxConcurrentSessions: Number(((_B = controle == null ? void 0 : controle.limits) == null ? void 0 : _B.agentes) ?? 4),
+      maxMergesPerDay: Number(((_C = controle == null ? void 0 : controle.limits) == null ? void 0 : _C.mergesDia) ?? 20),
+      dailyBudget: { usd: Number(((_D = controle == null ? void 0 : controle.limits) == null ? void 0 : _D.gastoDiaUsd) ?? 50) },
+      pauseAfterConsecutiveFailures: Number(((_E = controle == null ? void 0 : controle.limits) == null ? void 0 : _E.falhasSeguidas) ?? 3),
       autoMerge: Boolean((controle == null ? void 0 : controle.autoMerge) ?? false),
       mergePolicy: (controle == null ? void 0 : controle.mergePolicy) === "fast" ? "fast" : "strict"
     },
     spendToday: {
-      tokens: Number(((_x2 = kpis == null ? void 0 : kpis.economia) == null ? void 0 : _x2.tokens_hoje) ?? 0),
-      usd: Number(((_y2 = kpis == null ? void 0 : kpis.economia) == null ? void 0 : _y2.custo_hoje_usd) ?? 0)
+      tokens: Number(((_F = kpis == null ? void 0 : kpis.economia) == null ? void 0 : _F.tokens_hoje) ?? 0),
+      usd: Number(((_G = kpis == null ? void 0 : kpis.economia) == null ? void 0 : _G.custo_hoje_usd) ?? 0)
     },
-    mergesToday: Number(((_z2 = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _z2.vazao_hoje) ?? 0),
+    mergesToday: realMergesToday,
     stats: {
-      mergedToday: Number(((_A = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _A.vazao_hoje) ?? 0),
-      failedToday: 0,
+      mergedToday: realMergesToday,
+      failedToday: realFailedToday,
       revertedToday: 0,
-      medianMergeMs7d: null,
-      merged7d: Number(
-        ((_D = (_C = (_B = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _B.vazao_por_tenant) == null ? void 0 : _C[slug]) == null ? void 0 : _D["7d"]) ?? (slug === "orgfy" ? (_E = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _E.vazao_7d : void 0) ?? recent.length
-      )
+      medianMergeMs7d,
+      merged7d: realMerged7d
     },
     activeSessions: tenantAgents.filter((a) => a.running).length,
     wip: {
@@ -15116,8 +15156,8 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
     orgfyVision: {
       projectMd: projectMd ? projectMd.slice(0, 2400) : null,
       agentsMd: agentsMd ? agentsMd.slice(0, 2400) : null,
-      invariantes: Array.isArray((_F = boardJson == null ? void 0 : boardJson.protocolo_governanca) == null ? void 0 : _F.invariantes) ? boardJson.protocolo_governanca.invariantes : [],
-      cadeiaComando: Array.isArray((_G = boardJson == null ? void 0 : boardJson.protocolo_governanca) == null ? void 0 : _G.cadeia_comando) ? boardJson.protocolo_governanca.cadeia_comando : [],
+      invariantes: Array.isArray((_H = boardJson == null ? void 0 : boardJson.protocolo_governanca) == null ? void 0 : _H.invariantes) ? boardJson.protocolo_governanca.invariantes : [],
+      cadeiaComando: Array.isArray((_I = boardJson == null ? void 0 : boardJson.protocolo_governanca) == null ? void 0 : _I.cadeia_comando) ? boardJson.protocolo_governanca.cadeia_comando : [],
       fluxoEscalada: (boardJson == null ? void 0 : boardJson.fluxo_escalada) && typeof boardJson.fluxo_escalada === "object" ? boardJson.fluxo_escalada : {},
       regrasProbatorias: Object.entries((regrasJson == null ? void 0 : regrasJson.regras) || {}).map(([id, r]) => ({
         id,
@@ -15129,8 +15169,8 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
       canalBuzz: typeof (empresaJson == null ? void 0 : empresaJson.canal) === "string" ? empresaJson.canal : null,
       papeis: (empresaJson == null ? void 0 : empresaJson.papeis) && typeof empresaJson.papeis === "object" ? empresaJson.papeis : {}
     },
-    lastTickAt: ((_H = esteiraState == null ? void 0 : esteiraState.ultimo_ciclo) == null ? void 0 : _H.timestamp) ? Number(esteiraState.ultimo_ciclo.timestamp) < 1e12 ? Number(esteiraState.ultimo_ciclo.timestamp) * 1e3 : Number(esteiraState.ultimo_ciclo.timestamp) : Date.now(),
-    coordenador: !killSwitch && (slug === "board" || Boolean((_I = esteiraState == null ? void 0 : esteiraState.ultimo_ciclo) == null ? void 0 : _I.timestamp)) ? "ativo" : "parado",
+    lastTickAt: ((_J = esteiraState == null ? void 0 : esteiraState.ultimo_ciclo) == null ? void 0 : _J.timestamp) ? Number(esteiraState.ultimo_ciclo.timestamp) < 1e12 ? Number(esteiraState.ultimo_ciclo.timestamp) * 1e3 : Number(esteiraState.ultimo_ciclo.timestamp) : Date.now(),
+    coordenador: !killSwitch && (slug === "board" || Boolean((_K = esteiraState == null ? void 0 : esteiraState.ultimo_ciclo) == null ? void 0 : _K.timestamp)) ? "ativo" : "parado",
     kpis: kpis ? {
       disponivel: true,
       gerado_em: kpis.gerado_em || null,
@@ -54528,6 +54568,13 @@ function adaptStatusFor3D(status, liveCrew, telemetry, demoPhase) {
   }
   const EXECUTOR_ROLES = /* @__PURE__ */ new Set(["executor", "backend", "frontend", "infra", "release"]);
   const workshopRoster = pool.filter((a) => EXECUTOR_ROLES.has((a.papel || "").toLowerCase())).map((a) => ({ key: a.key, name: a.name, sessionId: a.key }));
+  let liveWorkingNow = 0;
+  for (const agent of pool) {
+    const rawTurn = agent.pubkey && (telemetry == null ? void 0 : telemetry.byPubkey) ? telemetry.byPubkey[agent.pubkey.toLowerCase()] || null : null;
+    if (rawTurn && (!tenantCanal || !rawTurn.channelId || rawTurn.channelId.toLowerCase() === tenantCanal)) {
+      liveWorkingNow += 1;
+    }
+  }
   const f = {
     projectId: status.projectId,
     mode: "dark_factory",
@@ -54548,7 +54595,7 @@ function adaptStatusFor3D(status, liveCrew, telemetry, demoPhase) {
       mergedToday: status.stats.mergedToday + demoExtraMerged
     },
     consecutiveFailures: status.consecutiveFailures,
-    activeSessions: demoPhase ? Math.max(1, status.activeSessions) : status.activeSessions,
+    activeSessions: demoPhase ? Math.max(1, liveWorkingNow) : liveWorkingNow,
     wip: status.wip,
     backlog,
     inProgress,

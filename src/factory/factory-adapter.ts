@@ -625,34 +625,39 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
     agentes: tenantAgents,
   };
 
-  const toWorkItem = (c: any): FactoryWorkItem => ({
-    id: String(c.fullIssueId || c.issueId || c.id),
-    title: String(c.title || "Card"),
-    workKey: String(c.issueId || c.id),
-    stage:
-      c.stage === "feito"
-        ? "merged"
-        : c.stage === "revisao"
-        ? "verifying"
-        : c.stage === "execucao" || c.stage === "despachado"
-        ? "building"
-        : "backlog",
-    step:
-      c.stage === "feito"
-        ? "done"
-        : c.stage === "revisao"
-        ? "review"
-        : c.stage === "execucao"
-        ? "implement"
-        : "intake",
-    type: /fix|bug|hotfix/i.test(String(c.title || "")) ? "bug" : /doc|readme|prd/i.test(String(c.title || "")) ? "docs" : "feature",
-    attempts: Array.isArray(c.rejectionHistory) ? c.rejectionHistory.length + 1 : 1,
-    sessionId: null,
-    activeSessionId: null,
-    reason: null,
-    note: c.executor ? `Executor: ${c.executor}${c.revisor ? ` · Revisor: ${c.revisor}` : ""}` : null,
-    updatedAt: Date.now(),
-  });
+  const toWorkItem = (c: any): FactoryWorkItem => {
+    const itemType: "bug" | "feature" | "docs" = /fix|bug|hotfix/i.test(String(c.title || "")) ? "bug" : /doc|readme|prd/i.test(String(c.title || "")) ? "docs" : "feature";
+    return {
+      id: String(c.fullIssueId || c.issueId || c.id),
+      title: String(c.title || "Card"),
+      workKey: String(c.issueId || c.id),
+      stage:
+        c.stage === "feito"
+          ? "merged"
+          : c.stage === "revisao"
+          ? "verifying"
+          : c.stage === "execucao" || c.stage === "despachado"
+          ? "building"
+          : "backlog",
+      step:
+        c.stage === "feito"
+          ? "done"
+          : c.stage === "revisao"
+          ? "review"
+          : c.stage === "execucao"
+          ? "implement"
+          : c.stage === "despachado"
+          ? (itemType === "bug" ? "reproduce" : "analyze")
+          : "intake",
+      type: itemType,
+      attempts: Array.isArray(c.rejectionHistory) ? c.rejectionHistory.length + 1 : 1,
+      sessionId: null,
+      activeSessionId: null,
+      reason: null,
+      note: c.executor ? `Executor: ${c.executor}${c.revisor ? ` · Revisor: ${c.revisor}` : ""}` : null,
+      updatedAt: Date.now(),
+    };
+  };
 
   const kanbanBacklog = cards.filter((c) => c.stage === "triagem").map(toWorkItem);
   const kanbanInProgress = cards.filter((c) => c.stage === "despachado" || c.stage === "execucao" || c.stage === "revisao").map(toWorkItem);
@@ -669,6 +674,12 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
       : {};
   const ciMap: Record<string, any> =
     esteiraState?.ci && typeof esteiraState.ci === "object" ? (esteiraState.ci as Record<string, any>) : {};
+  const timingsMap: Record<string, any> =
+    esteiraState?.timings && typeof esteiraState.timings === "object" ? (esteiraState.timings as Record<string, any>) : {};
+  const awaitingMergeMap: Record<string, any> =
+    esteiraState?.awaiting_human_merge_notifications && typeof esteiraState.awaiting_human_merge_notifications === "object"
+      ? (esteiraState.awaiting_human_merge_notifications as Record<string, any>)
+      : {};
   const reviewerAgent =
     tenantAgents.find((a) => a.papel === "revisor_codigo" || a.papel === "qa") ||
     tenantAgents.find((a) => /qa|revis/i.test(a.name)) ||
@@ -702,7 +713,12 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
       const isQuarantined = Boolean(p.quarentena || qEntry);
       const tipSha = String(p.tip || "").toLowerCase();
       const ciEntry = tipSha ? ciMap[tipSha] : null;
-      const ciWaiting = !isQuarantined && (!ciEntry || String(ciEntry.status || "") !== "ok");
+      const timingEntry = timingsMap[pid] || timingsMap[pid.slice(0, 8)] || null;
+      const hasGateApproved = Boolean(
+        !isQuarantined &&
+          ((typeof timingEntry?.gate_at === "number" && timingEntry.gate_at > 0) || awaitingMergeMap[pid])
+      );
+      const ciWaiting = !isQuarantined && !hasGateApproved && (!ciEntry || String(ciEntry.status || "") !== "ok");
       const qReason =
         typeof qEntry?.motivo === "string" && qEntry.motivo.trim()
           ? `Quarentena (COO): ${qEntry.motivo.trim().slice(0, 180)}`
@@ -719,7 +735,7 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
       const noteParts = [
         execAg ? `Executor: ${execAg.name}` : null,
         `Revisor: ${revName}`,
-        p.branch ? `PR · ${p.branch}` : "PR aberto",
+        hasGateApproved ? "GATE aprovado · fila de merge" : p.branch ? `PR · ${p.branch}` : "PR aberto",
       ].filter(Boolean);
       return {
         id: canonicalId,
@@ -727,7 +743,7 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
         workKey: `pr:${pid.slice(0, 12)}`,
         // Na governança OrgFy (board.json), falhas/quarentena da esteira vão para Problemas (COO Bento -> CEO Empresa -> Iris), nunca direto para "Aguardando você" (Fundador)
         stage: isQuarantined ? "failed" : "verifying",
-        step: isQuarantined ? "quarantine" : "review",
+        step: isQuarantined ? "quarantine" : hasGateApproved ? "merge" : "review",
         type: /fix|bug|hotfix/i.test(title) ? "bug" : /doc|readme|prd/i.test(title) ? "docs" : "feature",
         attempts: 1,
         sessionId: reviewerAgent?.agentKey || null,
@@ -783,13 +799,16 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
         ? [String(desp.dono_operacional).toLowerCase()]
         : [];
       const execAg = (execPks[0] ? agentByPubkey.get(execPks[0]) : null) || defaultExecutorAgent;
+      const itemType: "bug" | "feature" | "docs" = /fix|bug|hotfix/i.test(title) ? "bug" : /doc|readme|prd/i.test(title) ? "docs" : "feature";
+      // Issues recém-despachadas (< 3 min) aparecem em PREP antes de avançar para BUILD
+      const inPrepPhase = !hasPr && !stalled && computedMin < 3;
       return {
         id: iid,
         title,
         workKey: `issue:${iid.slice(0, 12)}`,
         stage: "building",
-        step: "implement",
-        type: /fix|bug|hotfix/i.test(title) ? "bug" : /doc|readme|prd/i.test(title) ? "docs" : "feature",
+        step: inPrepPhase ? (itemType === "bug" ? "reproduce" : "analyze") : "implement",
+        type: itemType,
         attempts: 1,
         sessionId: execAg?.agentKey || null,
         activeSessionId: execAg?.agentKey || null,
@@ -820,6 +839,47 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
   const drainOn = Boolean(controle?.drain);
   const mode: AutonomyMode = VALID_MODES.has(String(controle?.mode)) ? controle!.mode : "software_factory";
 
+  // Contagem real por empresa de merges de hoje, 7d, falhas e mediana de merge a partir de esteiraState
+  const nowDate = new Date();
+  const todayKey = `${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, "0")}-${String(nowDate.getDate()).padStart(2, "0")}`;
+  const sevenDaysAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const mergedMap: Record<string, any> =
+    esteiraState?.merged && typeof esteiraState.merged === "object" ? (esteiraState.merged as Record<string, any>) : {};
+  let stateMergedToday = 0;
+  let stateMerged7d = 0;
+  for (const entry of Object.values(mergedMap)) {
+    if (!entry || typeof entry !== "object" || entry.exit !== 0) continue;
+    const rawTs = Number(entry.finished_at ?? entry.merged_at ?? 0);
+    if (!Number.isFinite(rawTs) || rawTs <= 0) continue;
+    const tsMs = rawTs < 1e12 ? rawTs * 1000 : rawTs;
+    if (tsMs >= sevenDaysAgoMs) stateMerged7d += 1;
+    const d = new Date(tsMs);
+    const dKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    if (dKey === todayKey) stateMergedToday += 1;
+  }
+  const mergeDurationsMs: number[] = [];
+  for (const tEntry of Object.values(timingsMap)) {
+    const durS = Number(tEntry?.merge_duration_seconds);
+    if (Number.isFinite(durS) && durS > 0) mergeDurationsMs.push(Math.round(durS * 1000));
+  }
+  mergeDurationsMs.sort((a, b) => a - b);
+  const medianMergeMs7d =
+    mergeDurationsMs.length > 0 ? mergeDurationsMs[Math.floor(mergeDurationsMs.length / 2)] : null;
+
+  const kpiMergedToday = Number((kpis as any)?.fluxo?.vazao_por_tenant?.[slug]?.hoje ?? (slug === "orgfy" ? (kpis as any)?.fluxo?.vazao_hoje : 0) ?? 0);
+  const realMergesToday = Math.max(stateMergedToday, Number.isFinite(kpiMergedToday) ? kpiMergedToday : 0);
+  const kpiMerged7d = Number(
+    (kpis as any)?.fluxo?.vazao_por_tenant?.[slug]?.["7d"] ??
+      (slug === "orgfy" ? (kpis as any)?.fluxo?.vazao_7d : undefined) ??
+      recent.length
+  );
+  const realMerged7d = Math.max(stateMerged7d, Number.isFinite(kpiMerged7d) ? kpiMerged7d : 0);
+  const mergeFailuresCount =
+    esteiraState?.merge_failures && typeof esteiraState.merge_failures === "object"
+      ? Object.keys(esteiraState.merge_failures).length
+      : 0;
+  const realFailedToday = Object.keys(quarentenaMap).length + mergeFailuresCount;
+
   return {
     ...base,
     mode,
@@ -839,17 +899,13 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
       tokens: Number((kpis as any)?.economia?.tokens_hoje ?? 0),
       usd: Number((kpis as any)?.economia?.custo_hoje_usd ?? 0),
     },
-    mergesToday: Number((kpis as any)?.fluxo?.vazao_hoje ?? 0),
+    mergesToday: realMergesToday,
     stats: {
-      mergedToday: Number((kpis as any)?.fluxo?.vazao_hoje ?? 0),
-      failedToday: 0,
+      mergedToday: realMergesToday,
+      failedToday: realFailedToday,
       revertedToday: 0,
-      medianMergeMs7d: null,
-      merged7d: Number(
-        (kpis as any)?.fluxo?.vazao_por_tenant?.[slug]?.["7d"] ??
-          (slug === "orgfy" ? (kpis as any)?.fluxo?.vazao_7d : undefined) ??
-          recent.length
-      ),
+      medianMergeMs7d,
+      merged7d: realMerged7d,
     },
     activeSessions: tenantAgents.filter((a) => a.running).length,
     wip: {
