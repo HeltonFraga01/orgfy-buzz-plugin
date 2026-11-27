@@ -73,8 +73,9 @@ export async function reconcileAgentsViaBuzzApi(
     const needsFix =
       !prov ||
       !model ||
+      isUnsupportedAgentModel(mlow) ||
       isOfflineInGateway ||
-      (!isApprovedInGateway && (isFreeModelId(mlow) || isUnsupportedAgentModel(mlow))) ||
+      (!isApprovedInGateway && isFreeModelId(mlow)) ||
       (prov === "nexusmind_openai" && mlow.startsWith("antigravity/"));
     if (!needsFix) continue;
     let nextModel: string;

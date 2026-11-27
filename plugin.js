@@ -3175,7 +3175,7 @@ async function reconcileAgentsViaBuzzApi(ctx, opts = {}) {
     const isApprovedInGateway = Boolean(
       hasLiveCatalog && ((catalog == null ? void 0 : catalog.approvedModels.has(mlow)) || (catalog == null ? void 0 : catalog.approvedModels.has(shortM)))
     );
-    const needsFix = !prov || !model || isOfflineInGateway || !isApprovedInGateway && (isFreeModelId(mlow) || isUnsupportedAgentModel(mlow)) || prov === "nexusmind_openai" && mlow.startsWith("antigravity/");
+    const needsFix = !prov || !model || isUnsupportedAgentModel(mlow) || isOfflineInGateway || !isApprovedInGateway && isFreeModelId(mlow) || prov === "nexusmind_openai" && mlow.startsWith("antigravity/");
     if (!needsFix) continue;
     let nextModel;
     let nextProv;
