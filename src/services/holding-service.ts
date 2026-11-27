@@ -36,7 +36,10 @@ export interface HoldingAgentNode {
 export interface CompanyReadinessItem {
   slug: string;
   nome: string;
-  nivel: "core" | "subsidiaria";
+  nivel: "core" | "subsidiaria" | "shared_service";
+  tipoUnidade?: "board" | "platform_engineering" | "shared_service" | "subsidiary";
+  pipelineType?: "software" | "content_campaign" | "revops" | "support";
+  clientesInternos?: string[];
   workspaceBuzz: string;
   ceoEmpresa: string;
   reportaA: string;
@@ -328,7 +331,7 @@ export async function fetchHoldingControlPlane(ctx: Context): Promise<HoldingCon
   const buildCompanyItem = async (
     slug: string,
     nome: string,
-    nivel: "core" | "subsidiaria",
+    nivel: "core" | "subsidiaria" | "shared_service",
     estagio: string,
     ceoEmpresa: string,
     reportaA: string,
@@ -383,6 +386,9 @@ export async function fetchHoldingControlPlane(ctx: Context): Promise<HoldingCon
       slug,
       nome,
       nivel,
+      tipoUnidade: (man?.tipo_unidade || (nivel === "core" ? "platform_engineering" : nivel === "shared_service" ? "shared_service" : "subsidiary")) as CompanyReadinessItem["tipoUnidade"],
+      pipelineType: (man?.pipeline_type || (nivel === "shared_service" ? "content_campaign" : "software")) as CompanyReadinessItem["pipelineType"],
+      clientesInternos: Array.isArray(man?.clientes_internos) ? man.clientes_internos.map(String) : undefined,
       workspaceBuzz: String(man?.hierarquia?.workspace_buzz || nome),
       ceoEmpresa,
       reportaA,
@@ -417,6 +423,25 @@ export async function fetchHoldingControlPlane(ctx: Context): Promise<HoldingCon
       orgfyJson
     )
   );
+
+  const sharedUnits = Array.isArray(boardJson?.unidades_compartilhadas) ? boardJson.unidades_compartilhadas : [];
+  const sharedManifests = await Promise.all(
+    sharedUnits.map((u: any) => readOrgfyJson<any>(ctx, u?.manifesto || `empresas/${u?.slug}.json`, null))
+  );
+  const sharedItems = await Promise.all(
+    sharedUnits.map((u: any, idx: number) =>
+      buildCompanyItem(
+        String(u?.slug || `shared-${idx}`),
+        String(u?.nome || u?.workspace_buzz || u?.slug || "Serviço Compartilhado"),
+        "shared_service",
+        String(u?.estagio || "onboarding"),
+        String(u?.ceo_empresa || "OrgFy Iris"),
+        String(u?.reporta_a || "Conselho (Board)"),
+        sharedManifests[idx]
+      )
+    )
+  );
+  empresas.push(...sharedItems);
 
   const subs = Array.isArray(boardJson?.subsidiarias) ? boardJson.subsidiarias : [];
   const subManifests = await Promise.all(

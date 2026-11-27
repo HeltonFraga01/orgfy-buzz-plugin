@@ -15055,6 +15055,9 @@ async function fetchHoldingControlPlane(ctx) {
       slug,
       nome,
       nivel,
+      tipoUnidade: (man == null ? void 0 : man.tipo_unidade) || (nivel === "core" ? "platform_engineering" : nivel === "shared_service" ? "shared_service" : "subsidiary"),
+      pipelineType: (man == null ? void 0 : man.pipeline_type) || (nivel === "shared_service" ? "content_campaign" : "software"),
+      clientesInternos: Array.isArray(man == null ? void 0 : man.clientes_internos) ? man.clientes_internos.map(String) : void 0,
       workspaceBuzz: String(((_b2 = man == null ? void 0 : man.hierarquia) == null ? void 0 : _b2.workspace_buzz) || nome),
       ceoEmpresa,
       reportaA,
@@ -15082,6 +15085,24 @@ async function fetchHoldingControlPlane(ctx) {
       orgfyJson
     )
   );
+  const sharedUnits = Array.isArray(boardJson == null ? void 0 : boardJson.unidades_compartilhadas) ? boardJson.unidades_compartilhadas : [];
+  const sharedManifests = await Promise.all(
+    sharedUnits.map((u) => readOrgfyJson(ctx, (u == null ? void 0 : u.manifesto) || `empresas/${u == null ? void 0 : u.slug}.json`, null))
+  );
+  const sharedItems = await Promise.all(
+    sharedUnits.map(
+      (u, idx) => buildCompanyItem(
+        String((u == null ? void 0 : u.slug) || `shared-${idx}`),
+        String((u == null ? void 0 : u.nome) || (u == null ? void 0 : u.workspace_buzz) || (u == null ? void 0 : u.slug) || "Serviço Compartilhado"),
+        "shared_service",
+        String((u == null ? void 0 : u.estagio) || "onboarding"),
+        String((u == null ? void 0 : u.ceo_empresa) || "OrgFy Iris"),
+        String((u == null ? void 0 : u.reporta_a) || "Conselho (Board)"),
+        sharedManifests[idx]
+      )
+    )
+  );
+  empresas.push(...sharedItems);
   const subs = Array.isArray(boardJson == null ? void 0 : boardJson.subsidiarias) ? boardJson.subsidiarias : [];
   const subManifests = await Promise.all(
     subs.map((s) => readOrgfyJson(ctx, (s == null ? void 0 : s.manifesto) || `empresas/${s == null ? void 0 : s.slug}.json`, null))
@@ -58481,6 +58502,8 @@ function createHoldingTower3DComponent(ctx) {
           slug: emp.slug,
           nome: emp.nome || emp.slug,
           estagio: emp.estagio || "operacional",
+          tipoUnidade: emp.tipoUnidade || (emp.nivel === "shared_service" ? "shared_service" : emp.nivel === "core" ? "platform_engineering" : "subsidiary"),
+          pipelineType: emp.pipelineType,
           agentesCount: agents.length || emp.agentesTotal || 0,
           workingCount,
           errorCount,
@@ -58532,7 +58555,8 @@ function createHoldingTower3DComponent(ctx) {
       };
       const floorPriority = (f) => {
         const s = f.slug.toLowerCase();
-        if (s === "orgfy") return 100;
+        if (s === "orgfy" || f.tipoUnidade === "platform_engineering") return 100;
+        if (f.tipoUnidade === "shared_service" || s === "growth-studio") return 60;
         if (f.estagio === "operacional") return 20;
         return 0;
       };
@@ -58858,7 +58882,7 @@ function createHoldingTower3DComponent(ctx) {
         const floorGroup = new Group();
         floorGroup.position.set(0, y0, 0);
         scene.add(floorGroup);
-        const floorAccent = floor.errorCount > 0 ? [0.95, 0.3, 0.34] : floor.isBoard ? [0.96, 0.78, 0.24] : floor.workingCount > 0 ? palette.accent.reviewer : floor.estagio === "planejado" ? [0.45, 0.5, 0.6] : palette.lane;
+        const floorAccent = floor.errorCount > 0 ? [0.95, 0.3, 0.34] : floor.isBoard ? [0.96, 0.78, 0.24] : floor.tipoUnidade === "shared_service" ? [0.76, 0.42, 0.98] : floor.workingCount > 0 ? palette.accent.reviewer : floor.estagio === "planejado" || floor.estagio === "congelado" ? [0.45, 0.5, 0.6] : palette.lane;
         const matAccent = kit.matte(floorAccent, {
           roughness: 0.28,
           emissive: colour(floorAccent),
@@ -67888,7 +67912,7 @@ const PINNED_HOST_COMMANDS = Object.freeze([
   {
     id: "orgfy-holding-scaffold",
     scriptPath: "ferramentas/esteira/holding_scaffold.py",
-    sha256: "5cd3c69cff582499473e0dbacf2f735e51b6785b377a74614877d55a240e7226"
+    sha256: "44bff725004a838decf978a9a58ba3d4588fdd72f800535b20e416ed3d21e046"
   }
 ]);
 async function computeUtf8Sha256(content) {

@@ -32,6 +32,8 @@ export interface HoldingTowerFloorInfo {
   slug: string;
   nome: string;
   estagio: string;
+  tipoUnidade?: "board" | "platform_engineering" | "shared_service" | "subsidiary";
+  pipelineType?: string;
   isBoard?: boolean;
   agentesCount: number;
   workingCount: number;
@@ -662,6 +664,8 @@ export function createHoldingTower3DComponent(ctx: Context) {
           slug: emp.slug,
           nome: emp.nome || emp.slug,
           estagio: emp.estagio || "operacional",
+          tipoUnidade: emp.tipoUnidade || (emp.nivel === "shared_service" ? "shared_service" : emp.nivel === "core" ? "platform_engineering" : "subsidiary"),
+          pipelineType: emp.pipelineType,
           agentesCount: agents.length || emp.agentesTotal || 0,
           workingCount,
           errorCount,
@@ -722,10 +726,11 @@ export function createHoldingTower3DComponent(ctx: Context) {
         agents: boardAgents,
       };
 
-      // Ordem de importância (de cima para baixo): Conselho (topo) -> OrgFy Core -> subsidiárias operacionais -> planejadas
+      // Ordem de importância (de cima para baixo): Conselho (topo) -> OrgFy Core -> Serviços Compartilhados (Growth Studio) -> subsidiárias operacionais -> congeladas/planejadas
       const floorPriority = (f: HoldingTowerFloorInfo): number => {
         const s = f.slug.toLowerCase();
-        if (s === "orgfy") return 100;
+        if (s === "orgfy" || f.tipoUnidade === "platform_engineering") return 100;
+        if (f.tipoUnidade === "shared_service" || s === "growth-studio") return 60;
         if (f.estagio === "operacional") return 20;
         return 0;
       };
@@ -1125,9 +1130,11 @@ export function createHoldingTower3DComponent(ctx: Context) {
             ? [0.95, 0.3, 0.34]
             : floor.isBoard
             ? [0.96, 0.78, 0.24]
+            : floor.tipoUnidade === "shared_service"
+            ? [0.76, 0.42, 0.98]
             : floor.workingCount > 0
             ? palette.accent.reviewer
-            : floor.estagio === "planejado"
+            : floor.estagio === "planejado" || floor.estagio === "congelado"
             ? [0.45, 0.5, 0.6]
             : palette.lane;
 
