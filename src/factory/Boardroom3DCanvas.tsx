@@ -139,12 +139,14 @@ function makeExecutiveScreenTexture(
 
   g.fillStyle = "#f4f6fb";
   g.font = "700 22px -apple-system, BlinkMacSystemFont, sans-serif";
+  const mode = slideIndex % 4;
   const slideTitles = [
-    "CONSELHO DA HOLDING · PAINEL EXECUTIVO (1/3)",
-    "FINOPS & NEXUSMIND GATEWAY · AUTOPILOTO VIP (2/3)",
-    "PORTFÓLIO DAS SUBSIDIÁRIAS · HOLDING CORTEXX (3/3)",
+    "CONSELHO DA HOLDING · PAINEL EXECUTIVO (1/4)",
+    "FINOPS & NEXUSMIND GATEWAY · AUTOPILOTO VIP (2/4)",
+    "MISSÃO MÔNACO · FOCO 100% LUMEN IPTV (3/4)",
+    "PROTOCOLO NOSTR NIPs & MRR DA HOLDING (4/4)",
   ];
-  g.fillText(slideTitles[slideIndex % 3], 28, 37);
+  g.fillText(slideTitles[mode], 28, 37);
 
   // Pill AO VIVO no topo direito
   g.fillStyle = accentSoft;
@@ -159,27 +161,37 @@ function makeExecutiveScreenTexture(
   g.font = "700 14px ui-monospace, Menlo, monospace";
   g.fillText("L-01 · ATIVO", c.width - 134, 34);
 
-  // Contadores reais dos assentos + FinOps + Portfólio por slide
+  // Contadores reais dos assentos + FinOps + Missão Mônaco + NIPs/MRR por slide
   const activeCnt = seats.filter((s) => s.status === "active").length;
   const workingCnt = seats.filter((s) => s.status === "working").length;
   const plannedCnt = seats.filter((s) => s.status === "planned").length;
   const spendUsd = status?.spendToday?.usd ?? 0;
   const budgetUsd = status?.limits?.dailyBudget?.usd ?? 50;
   const merges7d = status?.stats?.merged7d ?? 0;
-  const empresas = Array.isArray(holding?.empresas) ? holding.empresas : [];
+  const proto = holding?.protocolSummary;
+  const nip99Total = proto?.nip99Total ?? 14;
+  const nip89Total = proto?.nip89Total ?? 5;
+  const icActive = proto?.intercompanyActive ?? 0;
+  const icTotal = proto?.intercompanyTotal ?? 0;
 
   const kpis =
-    slideIndex % 3 === 1
+    mode === 1
       ? [
           { label: "GASTO HOJE", val: `$${spendUsd.toFixed(2)}`, sub: `orçamento $${budgetUsd}/dia`, col: accent },
           { label: "MERGES (7D)", val: String(merges7d), sub: "esteira determinística", col: blue },
           { label: "ESCUDO VIP", val: "ATIVO", sub: "Iris & Conselho isolados", col: "#fbbf24" },
         ]
-      : slideIndex % 3 === 2
+      : mode === 2
       ? [
-          { label: "SUBSIDIÁRIAS", val: String(empresas.length || 3), sub: "no portfólio Cortexx", col: accent },
-          { label: "OPERACIONAIS", val: String(empresas.filter((e: any) => e.estagio === "operacional").length || 2), sub: "rodando no Buzz", col: blue },
-          { label: "WIP ATIVO", val: String(status?.wip?.openPrs ?? 0), sub: `limite ${status?.wip?.limit ?? 6} PRs`, col: "#9ca3af" },
+          { label: "FOCO P0 AGORA", val: "LUMEN", sub: "100% live · PAUTA-0002", col: "#facc15" },
+          { label: "ROTA MÔNACO", val: "ATO 1/3", sub: "Lumen -> Agências", col: accent },
+          { label: "AUTONOMIA", val: "100%", sub: "Inbox só p/ Fundador", col: blue },
+        ]
+      : mode === 3
+      ? [
+          { label: "NIP-99 (30402)", val: String(nip99Total), sub: `${nip89Total} handlers NIP-89`, col: blue },
+          { label: "INTERCOMPANY", val: `${icActive}/${icTotal}`, sub: "Pix/BRL + NWC/Cashu", col: accent },
+          { label: "MRR META", val: "PIX BRL", sub: "Lumen + Agências", col: "#facc15" },
         ]
       : [
           { label: "ASSENTOS ATIVOS", val: String(activeCnt + workingCnt), sub: `${seats.length} no conselho`, col: accent },
@@ -908,35 +920,112 @@ export function createBoardroom3DComponent(ctx: Context) {
       signBoard.castShadow = true;
       scene.add(signBoard);
 
-      // Aparador (credenza) na parede esquerda com fichários e blueprints
-      const credenza = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.75, 0.72, 2.8)), matWood);
-      credenza.position.set(-5.05, 0.36, -0.1);
+      // Mesa baixa expositora "Missão Mônaco" na parede esquerda (Capacete Senna + Mini F1 + Mini Iate)
+      const monacoGroup = new THREE.Group();
+      monacoGroup.position.set(-4.95, 0, -0.05);
+      scene.add(monacoGroup);
+
+      const credenza = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.84, 0.62, 2.7)), matWood);
+      credenza.position.set(0, 0.31, 0);
       credenza.castShadow = true;
       credenza.receiveShadow = true;
-      scene.add(credenza);
+      monacoGroup.add(credenza);
 
-      const credenzaTop = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.8, 0.06, 2.86)), matSteel);
-      credenzaTop.position.set(-5.05, 0.75, -0.1);
+      const credenzaTop = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.88, 0.06, 2.76)), matSteel);
+      credenzaTop.position.set(0, 0.65, 0);
       credenzaTop.receiveShadow = true;
-      scene.add(credenzaTop);
+      monacoGroup.add(credenzaTop);
 
-      // Blueprint enrolado + pastas sobre o aparador
-      const blueprint = new THREE.Mesh(
-        kit.own(new THREE.CylinderGeometry(0.055, 0.055, 0.56, 12)),
-        kit.matte(palette.blueprint, { roughness: 0.6 })
+      const goldStrip = new THREE.Mesh(
+        kit.own(new THREE.BoxGeometry(0.03, 0.035, 2.76)),
+        kit.matte([0.96, 0.78, 0.2], { roughness: 0.28, metalness: 0.55 })
       );
-      blueprint.rotation.x = Math.PI / 2;
-      blueprint.position.set(-5.0, 0.84, 0.45);
-      blueprint.castShadow = true;
-      scene.add(blueprint);
+      goldStrip.position.set(0.445, 0.65, 0);
+      monacoGroup.add(goldStrip);
 
-      const stackPaper = new THREE.Mesh(
-        kit.own(new THREE.BoxGeometry(0.32, 0.09, 0.42)),
-        kit.matte(palette.paper, { roughness: 0.85 })
+      const matDark = kit.matte([0.08, 0.09, 0.12], { roughness: 0.35 });
+      const matWhite = kit.matte([0.96, 0.97, 0.99], { roughness: 0.3 });
+      const matVisor = kit.own(new THREE.MeshPhysicalMaterial({ color: 0x0b1220, roughness: 0.08, metalness: 0.65 }));
+      const topY = 0.68;
+
+      // 1. Capacete inspirado no Ayrton Senna (Príncipe de Mônaco)
+      const sennaPed = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.38, 0.06, 0.38)), matDark);
+      sennaPed.position.set(0.02, topY + 0.03, -0.86);
+      monacoGroup.add(sennaPed);
+      const sennaY = kit.matte([0.98, 0.8, 0.08], { roughness: 0.24 });
+      const sennaG = kit.matte([0.09, 0.64, 0.29], { roughness: 0.3 });
+      const sennaB = kit.matte([0.11, 0.31, 0.85], { roughness: 0.3 });
+      const hShell = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.28, 0.25, 0.28)), sennaY);
+      hShell.position.set(0.02, topY + 0.19, -0.86);
+      hShell.castShadow = true;
+      monacoGroup.add(hShell);
+      const hG = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.292, 0.034, 0.292)), sennaG);
+      hG.position.set(0.02, topY + 0.215, -0.86);
+      monacoGroup.add(hG);
+      const hB = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.292, 0.032, 0.292)), sennaB);
+      hB.position.set(0.02, topY + 0.175, -0.86);
+      monacoGroup.add(hB);
+      const hV = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.05, 0.095, 0.22)), matVisor);
+      hV.position.set(0.15, topY + 0.205, -0.86);
+      monacoGroup.add(hV);
+
+      // 2. Mini F1 clássico de Mônaco
+      const f1 = new THREE.Group();
+      f1.position.set(0.02, topY, 0);
+      f1.rotation.y = 0.24;
+      const f1Red = kit.matte([0.86, 0.15, 0.15], { roughness: 0.26 });
+      const f1Body = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.19, 0.08, 0.48)), f1Red);
+      f1Body.position.set(0, 0.075, 0);
+      f1Body.castShadow = true;
+      f1.add(f1Body);
+      const f1Cover = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.14, 0.065, 0.24)), matWhite);
+      f1Cover.position.set(0, 0.12, -0.05);
+      f1.add(f1Cover);
+      const f1FW = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.35, 0.025, 0.09)), matWhite);
+      f1FW.position.set(0, 0.04, 0.34);
+      f1.add(f1FW);
+      const f1RW = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.32, 0.028, 0.085)), f1Red);
+      f1RW.position.set(0, 0.19, -0.24);
+      f1.add(f1RW);
+      for (const [wx, wz] of [[-0.15, 0.21], [0.15, 0.21], [-0.16, -0.18], [0.16, -0.18]]) {
+        const wh = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.075, 0.1, 0.12)), matDark);
+        wh.position.set(wx, 0.05, wz);
+        f1.add(wh);
+      }
+      monacoGroup.add(f1);
+
+      // 3. Mini Iate de Mônaco sobre base azul Mediterrâneo
+      const yacht = new THREE.Group();
+      yacht.position.set(0.0, topY, 0.88);
+      yacht.rotation.y = -0.14;
+      const seaBase = new THREE.Mesh(
+        kit.own(new THREE.BoxGeometry(0.46, 0.045, 0.78)),
+        kit.own(new THREE.MeshPhysicalMaterial({ color: 0x0284c7, transparent: true, opacity: 0.68, roughness: 0.12 }))
       );
-      stackPaper.position.set(-5.02, 0.82, -0.55);
-      stackPaper.castShadow = true;
-      scene.add(stackPaper);
+      seaBase.position.y = 0.022;
+      yacht.add(seaBase);
+      const hull = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.26, 0.1, 0.58)), matWhite);
+      hull.position.set(0, 0.095, -0.03);
+      hull.castShadow = true;
+      yacht.add(hull);
+      const bow = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.16, 0.09, 0.2)), matWhite);
+      bow.position.set(0, 0.098, 0.29);
+      yacht.add(bow);
+      const cabin = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.2, 0.08, 0.3)), matVisor);
+      cabin.position.set(0, 0.185, -0.03);
+      yacht.add(cabin);
+      const fly = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.22, 0.032, 0.28)), matWhite);
+      fly.position.set(0, 0.24, -0.04);
+      yacht.add(fly);
+      monacoGroup.add(yacht);
+
+      const monacoHit = new THREE.Mesh(
+        kit.own(new THREE.BoxGeometry(1.05, 1.15, 2.85)),
+        kit.own(new THREE.MeshBasicMaterial({ visible: false }))
+      );
+      monacoHit.position.set(0, 0.62, 0);
+      monacoHit.userData.isMonacoTable = true;
+      monacoGroup.add(monacoHit);
 
       // Plantas arquitetônicas nos dois cantos da parede de fundo
       const plantL = buildCornerPlant(kit, palette);
@@ -1065,7 +1154,7 @@ export function createBoardroom3DComponent(ctx: Context) {
       }
 
       const animated: AnimatedDirector[] = [];
-      const hitTargets: THREE.Object3D[] = [screenDisplay];
+      const hitTargets: THREE.Object3D[] = [screenDisplay, monacoHit];
       const seatByObject = new WeakMap<THREE.Object3D, { seat: BoardroomSeat; pos: [number, number, number] }>();
       const crewList = props.liveCrew || [];
 
@@ -1158,6 +1247,7 @@ export function createBoardroom3DComponent(ctx: Context) {
         if (hits.length === 0) return null;
         const obj = hits[0].object;
         if (obj.userData?.isExecutiveScreen) return { kind: "screen" as const };
+        if (obj.userData?.isMonacoTable) return { kind: "monaco" as const };
         const entry = seatByObject.get(obj);
         return entry ? { kind: "seat" as const, ...entry } : null;
       };
@@ -1192,7 +1282,11 @@ export function createBoardroom3DComponent(ctx: Context) {
         if (dragging && !moved) {
           const hit = pickHit(e);
           if (hit?.kind === "screen") {
-            setScreenSlide((s) => (s + 1) % 3);
+            setScreenSlide((s) => (s + 1) % 4);
+          } else if (hit?.kind === "monaco") {
+            setScreenSlide(2);
+            desiredTarget.set(-2.4, 0.9, -0.3);
+            desiredFrustum = 6.8;
           } else if (hit?.kind === "seat") {
             setSelectedSeatId(hit.seat.id);
             desiredTarget.set(hit.pos[0] * 0.65, 0.9, hit.pos[2] * 0.65);

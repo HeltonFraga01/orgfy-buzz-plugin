@@ -51227,7 +51227,8 @@ function crewGeometry() {
   const eyeZ = 0.123;
   const torso = merged([
     placed(new BoxGeometry(0.27, 0.27, 0.175), 0, 0.225, 0),
-    placed(new BoxGeometry(0.28, 0.035, 0.185), 0, 0.105, 0)
+    placed(new BoxGeometry(0.28, 0.035, 0.185), 0, 0.105, 0),
+    placed(new CylinderGeometry(0.048, 0.054, 0.045, 10), 0, 0.365, 0)
   ]);
   return {
     body: torso,
@@ -53133,16 +53134,46 @@ class Crew {
     let mem = this.memory.get(f.key);
     if (!mem) {
       const seed = f.agent.seed;
-      const tone = f.agent.providerId ? providerTone(f.agent.providerId) : NO_PROVIDER;
-      const dl = (seeded(seed, 3) - 0.5) * 0.08;
+      const labelTxt = `${f.agent.seed || ""} ${f.agent.role || ""} ${f.key || ""}`.toLowerCase();
+      const uniformPalette = [
+        [0.24, 0.54, 0.88],
+        // azul engenharia
+        [0.18, 0.68, 0.54],
+        // verde growth/ops
+        [0.86, 0.44, 0.2],
+        // laranja cto/coo
+        [0.54, 0.36, 0.84],
+        // roxo produto/oráculo
+        [0.2, 0.66, 0.78],
+        // ciano arquitetura
+        [0.82, 0.66, 0.2]
+        // dourado auditoria
+      ];
+      let shirtRgb;
+      if (/iris|ceo/.test(labelTxt)) {
+        shirtRgb = [0.86, 0.24, 0.28];
+      } else if (/segur|hugo|cro|risco/.test(labelTxt)) {
+        shirtRgb = [0.2, 0.56, 0.82];
+      } else if (/growth|val|mkt/.test(labelTxt)) {
+        shirtRgb = [0.16, 0.66, 0.56];
+      } else if (/or[aá]culo|scout|pesquisa|prompt/.test(labelTxt)) {
+        shirtRgb = [0.52, 0.36, 0.82];
+      } else if (/arquit|bento/.test(labelTxt)) {
+        shirtRgb = [0.22, 0.48, 0.88];
+      } else if (/qa|revis|teo|vera/.test(labelTxt)) {
+        shirtRgb = [0.84, 0.52, 0.18];
+      } else {
+        const idx = Math.floor(seeded(seed, 7) * uniformPalette.length) % uniformPalette.length;
+        shirtRgb = uniformPalette[idx] || toneRgb(f.agent.providerId ? providerTone(f.agent.providerId) : NO_PROVIDER);
+      }
       mem = {
         status: f.status,
         since: this.primed ? t : Number.NEGATIVE_INFINITY,
         selectedAt: Number.NEGATIVE_INFINITY,
         from: null,
         last: null,
-        tone: toneRgb(tone, dl),
-        feet: toneRgb(tone, dl - 0.12),
+        tone: shirtRgb,
+        feet: [0.14, 0.16, 0.21],
         size: 0.96 + seeded(seed, 1) * 0.08,
         tilt: (seeded(seed, 2) - 0.5) * 8 * Math.PI / 180
       };
@@ -53217,7 +53248,14 @@ class Crew {
       feet.push(atLocal(lower, [i === 0 ? -0.1 : 0.1, 0.035 + lift, 0.04]), mem.feet);
     });
     const legoSkin = [0.95, 0.83, 0.69];
-    const legoHair = seeded(f.agent.seed, 5) > 0.5 ? [0.16, 0.14, 0.17] : [0.3, 0.21, 0.14];
+    const hairOptions = [
+      [0.15, 0.13, 0.16],
+      [0.32, 0.21, 0.13],
+      [0.62, 0.44, 0.22],
+      [0.2, 0.16, 0.12],
+      [0.82, 0.82, 0.86]
+    ];
+    const legoHair = hairOptions[Math.floor(seeded(f.agent.seed, 5) * hairOptions.length) % hairOptions.length];
     this.pool("body", this.m.clay, { colours: true, cast: true }).push(upper, mem.tone);
     this.pool("head", this.m.clay, { colours: true, cast: true }).push(upper, legoSkin);
     this.pool("hair", this.m.clay, { colours: true, cast: true }).push(upper, legoHair);
@@ -53577,6 +53615,57 @@ function buildLookout(l, lit, p, kit, unit) {
   hopper.rotation.x = Math.PI;
   hopper.position.set(l.chute.x, 0.2, l.chute.z);
   add2(hopper);
+  const boardCanvas2 = document.createElement("canvas");
+  boardCanvas2.width = 1024;
+  boardCanvas2.height = 256;
+  const bg = boardCanvas2.getContext("2d");
+  if (bg) {
+    const laneCss = `rgb(${Math.round(p.lane[0] * 255)}, ${Math.round(p.lane[1] * 255)}, ${Math.round(p.lane[2] * 255)})`;
+    bg.fillStyle = "#0e121a";
+    bg.fillRect(0, 0, 1024, 256);
+    bg.fillStyle = laneCss;
+    bg.fillRect(0, 0, 12, 256);
+    bg.fillStyle = "rgba(255,255,255,0.05)";
+    bg.fillRect(12, 0, 1012, 62);
+    bg.fillStyle = laneCss;
+    bg.fillRect(12, 60, 1012, 3);
+    bg.fillStyle = "#f8fafc";
+    bg.font = "700 28px -apple-system, BlinkMacSystemFont, sans-serif";
+    bg.fillText("MIRANTE DA FÁBRICA · HOLDING CORTEXX · PROTOCOLO NIPs", 32, 41);
+    const kpiBoxes = [
+      { k: "FOCO ATUAL", v: "LUMEN 100%", sub: "PAUTA-0002 · P0" },
+      { k: "ESTÁGIOS ATIVOS", v: `${lit.size}/${l.pods.length}`, sub: "revisão L-01 / L-22" },
+      { k: "PROTOCOLO A2A", v: "NIP-99 / 89", sub: "Pix/BRL + NWC/Cashu" }
+    ];
+    kpiBoxes.forEach((box2, idx) => {
+      const bx = 32 + idx * 324;
+      bg.fillStyle = "rgba(255,255,255,0.04)";
+      bg.fillRect(bx, 82, 304, 148);
+      bg.strokeStyle = "rgba(255,255,255,0.12)";
+      bg.lineWidth = 2;
+      bg.strokeRect(bx, 82, 304, 148);
+      bg.fillStyle = "#94a3b8";
+      bg.font = "700 15px ui-monospace, Menlo, monospace";
+      bg.fillText(box2.k, bx + 18, 114);
+      bg.fillStyle = "#f8fafc";
+      bg.font = "700 40px ui-monospace, Menlo, monospace";
+      bg.fillText(box2.v, bx + 18, 172);
+      bg.fillStyle = laneCss;
+      bg.font = "500 16px -apple-system, sans-serif";
+      bg.fillText(box2.sub, bx + 18, 208);
+    });
+  }
+  const wallBoardW = Math.min(4.6, w * 0.42);
+  const wallBoardH = wallBoardW * 0.25;
+  const wallBezel = boxes(kit, unit, kit.matte(p.sign, { roughness: 0.45 }), [
+    { x: cx, y: LOOKOUT_WALL_H * 0.56, z: z0 + 0.03, w: wallBoardW + 0.14, h: wallBoardH + 0.12, d: 0.06 }
+  ]);
+  const wallScreen = new Mesh(
+    kit.own(new PlaneGeometry(wallBoardW, wallBoardH)),
+    kit.matte(null, { map: kit.canvasTexture(boardCanvas2), roughness: 0.45 })
+  );
+  wallScreen.position.set(cx, LOOKOUT_WALL_H * 0.56, z0 + 0.065);
+  add2(wallBezel, wallScreen);
   const glassMat = kit.own(
     new MeshStandardMaterial({
       color: colour(p.glass),
@@ -56742,7 +56831,7 @@ function makeWallSignTexture(kit, text, p) {
   return kit.canvasTexture(c);
 }
 function makeExecutiveScreenTexture(kit, seats, p, slideIndex = 0, status, holding) {
-  var _a, _b, _c, _d, _e, _f;
+  var _a, _b, _c, _d;
   const c = canvasOf(1024, 420);
   const g = c.getContext("2d");
   const accent = rgbToCss$1(p.lane);
@@ -56770,12 +56859,14 @@ function makeExecutiveScreenTexture(kit, seats, p, slideIndex = 0, status, holdi
   g.fillRect(0, 56, c.width, 3);
   g.fillStyle = "#f4f6fb";
   g.font = "700 22px -apple-system, BlinkMacSystemFont, sans-serif";
+  const mode = slideIndex % 4;
   const slideTitles = [
-    "CONSELHO DA HOLDING · PAINEL EXECUTIVO (1/3)",
-    "FINOPS & NEXUSMIND GATEWAY · AUTOPILOTO VIP (2/3)",
-    "PORTFÓLIO DAS SUBSIDIÁRIAS · HOLDING CORTEXX (3/3)"
+    "CONSELHO DA HOLDING · PAINEL EXECUTIVO (1/4)",
+    "FINOPS & NEXUSMIND GATEWAY · AUTOPILOTO VIP (2/4)",
+    "MISSÃO MÔNACO · FOCO 100% LUMEN IPTV (3/4)",
+    "PROTOCOLO NOSTR NIPs & MRR DA HOLDING (4/4)"
   ];
-  g.fillText(slideTitles[slideIndex % 3], 28, 37);
+  g.fillText(slideTitles[mode], 28, 37);
   g.fillStyle = accentSoft;
   g.fillRect(c.width - 170, 14, 142, 30);
   g.strokeStyle = accent;
@@ -56793,15 +56884,23 @@ function makeExecutiveScreenTexture(kit, seats, p, slideIndex = 0, status, holdi
   const spendUsd = ((_a = status == null ? void 0 : status.spendToday) == null ? void 0 : _a.usd) ?? 0;
   const budgetUsd = ((_c = (_b = status == null ? void 0 : status.limits) == null ? void 0 : _b.dailyBudget) == null ? void 0 : _c.usd) ?? 50;
   const merges7d = ((_d = status == null ? void 0 : status.stats) == null ? void 0 : _d.merged7d) ?? 0;
-  const empresas = Array.isArray(holding == null ? void 0 : holding.empresas) ? holding.empresas : [];
-  const kpis = slideIndex % 3 === 1 ? [
+  const proto = holding == null ? void 0 : holding.protocolSummary;
+  const nip99Total = (proto == null ? void 0 : proto.nip99Total) ?? 14;
+  const nip89Total = (proto == null ? void 0 : proto.nip89Total) ?? 5;
+  const icActive = (proto == null ? void 0 : proto.intercompanyActive) ?? 0;
+  const icTotal = (proto == null ? void 0 : proto.intercompanyTotal) ?? 0;
+  const kpis = mode === 1 ? [
     { label: "GASTO HOJE", val: `$${spendUsd.toFixed(2)}`, sub: `orçamento $${budgetUsd}/dia`, col: accent },
     { label: "MERGES (7D)", val: String(merges7d), sub: "esteira determinística", col: blue },
     { label: "ESCUDO VIP", val: "ATIVO", sub: "Iris & Conselho isolados", col: "#fbbf24" }
-  ] : slideIndex % 3 === 2 ? [
-    { label: "SUBSIDIÁRIAS", val: String(empresas.length || 3), sub: "no portfólio Cortexx", col: accent },
-    { label: "OPERACIONAIS", val: String(empresas.filter((e) => e.estagio === "operacional").length || 2), sub: "rodando no Buzz", col: blue },
-    { label: "WIP ATIVO", val: String(((_e = status == null ? void 0 : status.wip) == null ? void 0 : _e.openPrs) ?? 0), sub: `limite ${((_f = status == null ? void 0 : status.wip) == null ? void 0 : _f.limit) ?? 6} PRs`, col: "#9ca3af" }
+  ] : mode === 2 ? [
+    { label: "FOCO P0 AGORA", val: "LUMEN", sub: "100% live · PAUTA-0002", col: "#facc15" },
+    { label: "ROTA MÔNACO", val: "ATO 1/3", sub: "Lumen -> Agências", col: accent },
+    { label: "AUTONOMIA", val: "100%", sub: "Inbox só p/ Fundador", col: blue }
+  ] : mode === 3 ? [
+    { label: "NIP-99 (30402)", val: String(nip99Total), sub: `${nip89Total} handlers NIP-89`, col: blue },
+    { label: "INTERCOMPANY", val: `${icActive}/${icTotal}`, sub: "Pix/BRL + NWC/Cashu", col: accent },
+    { label: "MRR META", val: "PIX BRL", sub: "Lumen + Agências", col: "#facc15" }
   ] : [
     { label: "ASSENTOS ATIVOS", val: String(activeCnt + workingCnt), sub: `${seats.length} no conselho`, col: accent },
     { label: "EM EXECUÇÃO", val: String(workingCnt), sub: "turnos ao vivo", col: blue },
@@ -57286,30 +57385,100 @@ function createBoardroom3DComponent(ctx) {
       signBoard.position.set(0, 2.98, -3.52);
       signBoard.castShadow = true;
       scene.add(signBoard);
-      const credenza = new Mesh(kit.own(new BoxGeometry(0.75, 0.72, 2.8)), matWood);
-      credenza.position.set(-5.05, 0.36, -0.1);
+      const monacoGroup = new Group();
+      monacoGroup.position.set(-4.95, 0, -0.05);
+      scene.add(monacoGroup);
+      const credenza = new Mesh(kit.own(new BoxGeometry(0.84, 0.62, 2.7)), matWood);
+      credenza.position.set(0, 0.31, 0);
       credenza.castShadow = true;
       credenza.receiveShadow = true;
-      scene.add(credenza);
-      const credenzaTop = new Mesh(kit.own(new BoxGeometry(0.8, 0.06, 2.86)), matSteel);
-      credenzaTop.position.set(-5.05, 0.75, -0.1);
+      monacoGroup.add(credenza);
+      const credenzaTop = new Mesh(kit.own(new BoxGeometry(0.88, 0.06, 2.76)), matSteel);
+      credenzaTop.position.set(0, 0.65, 0);
       credenzaTop.receiveShadow = true;
-      scene.add(credenzaTop);
-      const blueprint = new Mesh(
-        kit.own(new CylinderGeometry(0.055, 0.055, 0.56, 12)),
-        kit.matte(palette.blueprint, { roughness: 0.6 })
+      monacoGroup.add(credenzaTop);
+      const goldStrip = new Mesh(
+        kit.own(new BoxGeometry(0.03, 0.035, 2.76)),
+        kit.matte([0.96, 0.78, 0.2], { roughness: 0.28, metalness: 0.55 })
       );
-      blueprint.rotation.x = Math.PI / 2;
-      blueprint.position.set(-5, 0.84, 0.45);
-      blueprint.castShadow = true;
-      scene.add(blueprint);
-      const stackPaper = new Mesh(
-        kit.own(new BoxGeometry(0.32, 0.09, 0.42)),
-        kit.matte(palette.paper, { roughness: 0.85 })
+      goldStrip.position.set(0.445, 0.65, 0);
+      monacoGroup.add(goldStrip);
+      const matDark = kit.matte([0.08, 0.09, 0.12], { roughness: 0.35 });
+      const matWhite = kit.matte([0.96, 0.97, 0.99], { roughness: 0.3 });
+      const matVisor = kit.own(new MeshPhysicalMaterial({ color: 725536, roughness: 0.08, metalness: 0.65 }));
+      const topY = 0.68;
+      const sennaPed = new Mesh(kit.own(new BoxGeometry(0.38, 0.06, 0.38)), matDark);
+      sennaPed.position.set(0.02, topY + 0.03, -0.86);
+      monacoGroup.add(sennaPed);
+      const sennaY = kit.matte([0.98, 0.8, 0.08], { roughness: 0.24 });
+      const sennaG = kit.matte([0.09, 0.64, 0.29], { roughness: 0.3 });
+      const sennaB = kit.matte([0.11, 0.31, 0.85], { roughness: 0.3 });
+      const hShell = new Mesh(kit.own(new BoxGeometry(0.28, 0.25, 0.28)), sennaY);
+      hShell.position.set(0.02, topY + 0.19, -0.86);
+      hShell.castShadow = true;
+      monacoGroup.add(hShell);
+      const hG = new Mesh(kit.own(new BoxGeometry(0.292, 0.034, 0.292)), sennaG);
+      hG.position.set(0.02, topY + 0.215, -0.86);
+      monacoGroup.add(hG);
+      const hB = new Mesh(kit.own(new BoxGeometry(0.292, 0.032, 0.292)), sennaB);
+      hB.position.set(0.02, topY + 0.175, -0.86);
+      monacoGroup.add(hB);
+      const hV = new Mesh(kit.own(new BoxGeometry(0.05, 0.095, 0.22)), matVisor);
+      hV.position.set(0.15, topY + 0.205, -0.86);
+      monacoGroup.add(hV);
+      const f1 = new Group();
+      f1.position.set(0.02, topY, 0);
+      f1.rotation.y = 0.24;
+      const f1Red = kit.matte([0.86, 0.15, 0.15], { roughness: 0.26 });
+      const f1Body = new Mesh(kit.own(new BoxGeometry(0.19, 0.08, 0.48)), f1Red);
+      f1Body.position.set(0, 0.075, 0);
+      f1Body.castShadow = true;
+      f1.add(f1Body);
+      const f1Cover = new Mesh(kit.own(new BoxGeometry(0.14, 0.065, 0.24)), matWhite);
+      f1Cover.position.set(0, 0.12, -0.05);
+      f1.add(f1Cover);
+      const f1FW = new Mesh(kit.own(new BoxGeometry(0.35, 0.025, 0.09)), matWhite);
+      f1FW.position.set(0, 0.04, 0.34);
+      f1.add(f1FW);
+      const f1RW = new Mesh(kit.own(new BoxGeometry(0.32, 0.028, 0.085)), f1Red);
+      f1RW.position.set(0, 0.19, -0.24);
+      f1.add(f1RW);
+      for (const [wx, wz] of [[-0.15, 0.21], [0.15, 0.21], [-0.16, -0.18], [0.16, -0.18]]) {
+        const wh = new Mesh(kit.own(new BoxGeometry(0.075, 0.1, 0.12)), matDark);
+        wh.position.set(wx, 0.05, wz);
+        f1.add(wh);
+      }
+      monacoGroup.add(f1);
+      const yacht = new Group();
+      yacht.position.set(0, topY, 0.88);
+      yacht.rotation.y = -0.14;
+      const seaBase = new Mesh(
+        kit.own(new BoxGeometry(0.46, 0.045, 0.78)),
+        kit.own(new MeshPhysicalMaterial({ color: 165063, transparent: true, opacity: 0.68, roughness: 0.12 }))
       );
-      stackPaper.position.set(-5.02, 0.82, -0.55);
-      stackPaper.castShadow = true;
-      scene.add(stackPaper);
+      seaBase.position.y = 0.022;
+      yacht.add(seaBase);
+      const hull = new Mesh(kit.own(new BoxGeometry(0.26, 0.1, 0.58)), matWhite);
+      hull.position.set(0, 0.095, -0.03);
+      hull.castShadow = true;
+      yacht.add(hull);
+      const bow = new Mesh(kit.own(new BoxGeometry(0.16, 0.09, 0.2)), matWhite);
+      bow.position.set(0, 0.098, 0.29);
+      yacht.add(bow);
+      const cabin = new Mesh(kit.own(new BoxGeometry(0.2, 0.08, 0.3)), matVisor);
+      cabin.position.set(0, 0.185, -0.03);
+      yacht.add(cabin);
+      const fly = new Mesh(kit.own(new BoxGeometry(0.22, 0.032, 0.28)), matWhite);
+      fly.position.set(0, 0.24, -0.04);
+      yacht.add(fly);
+      monacoGroup.add(yacht);
+      const monacoHit = new Mesh(
+        kit.own(new BoxGeometry(1.05, 1.15, 2.85)),
+        kit.own(new MeshBasicMaterial({ visible: false }))
+      );
+      monacoHit.position.set(0, 0.62, 0);
+      monacoHit.userData.isMonacoTable = true;
+      monacoGroup.add(monacoHit);
       const plantL = buildCornerPlant(kit, palette);
       plantL.position.set(-4.65, 0, -2.85);
       scene.add(plantL);
@@ -57402,7 +57571,7 @@ function createBoardroom3DComponent(ctx) {
       holoRing.rotation.x = Math.PI / 2;
       holoGroup.add(holoRing);
       const animated = [];
-      const hitTargets = [screenDisplay];
+      const hitTargets = [screenDisplay, monacoHit];
       const seatByObject = /* @__PURE__ */ new WeakMap();
       const crewList = props.liveCrew || [];
       seats.slice(0, seatSlots.length).forEach((seat, idx) => {
@@ -57479,7 +57648,7 @@ function createBoardroom3DComponent(ctx) {
       let lastX = 0;
       let lastY = 0;
       const pickHit = (e) => {
-        var _a2;
+        var _a2, _b2;
         const rect = renderer.domElement.getBoundingClientRect();
         pointer.x = (e.clientX - rect.left) / rect.width * 2 - 1;
         pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
@@ -57488,6 +57657,7 @@ function createBoardroom3DComponent(ctx) {
         if (hits.length === 0) return null;
         const obj = hits[0].object;
         if ((_a2 = obj.userData) == null ? void 0 : _a2.isExecutiveScreen) return { kind: "screen" };
+        if ((_b2 = obj.userData) == null ? void 0 : _b2.isMonacoTable) return { kind: "monaco" };
         const entry = seatByObject.get(obj);
         return entry ? { kind: "seat", ...entry } : null;
       };
@@ -57519,7 +57689,11 @@ function createBoardroom3DComponent(ctx) {
         if (dragging && !moved) {
           const hit2 = pickHit(e);
           if ((hit2 == null ? void 0 : hit2.kind) === "screen") {
-            setScreenSlide((s) => (s + 1) % 3);
+            setScreenSlide((s) => (s + 1) % 4);
+          } else if ((hit2 == null ? void 0 : hit2.kind) === "monaco") {
+            setScreenSlide(2);
+            desiredTarget.set(-2.4, 0.9, -0.3);
+            desiredFrustum = 6.8;
           } else if ((hit2 == null ? void 0 : hit2.kind) === "seat") {
             setSelectedSeatId(hit2.seat.id);
             desiredTarget.set(hit2.pos[0] * 0.65, 0.9, hit2.pos[2] * 0.65);
@@ -58365,9 +58539,9 @@ function makeFloorWallScreenTexture(kit, floorNum, floor, accent, status, holdin
   const c = canvasOf(logicalW * 2, logicalH * 2);
   const g = c.getContext("2d");
   g.scale(2, 2);
-  const modeAccent = slideMode === 1 ? [0.98, 0.8, 0.2] : slideMode === 2 ? [0.38, 0.72, 0.98] : accent;
+  const modeAccent = slideMode === 1 ? [0.98, 0.8, 0.2] : slideMode === 2 ? [0.38, 0.72, 0.98] : slideMode === 3 ? [0.22, 0.84, 0.56] : accent;
   const accCss = rgbToCss(modeAccent);
-  g.fillStyle = slideMode === 1 ? "#10131d" : slideMode === 2 ? "#0c1320" : "#0e121a";
+  g.fillStyle = slideMode === 1 ? "#10131d" : slideMode === 2 ? "#0c1320" : slideMode === 3 ? "#0b1615" : "#0e121a";
   g.fillRect(0, 0, logicalW, logicalH);
   g.strokeStyle = "rgba(255,255,255,0.045)";
   g.lineWidth = 1;
@@ -58383,29 +58557,29 @@ function makeFloorWallScreenTexture(kit, floorNum, floor, accent, status, holdin
   g.fillRect(10, 0, logicalW - 10, 56);
   g.fillStyle = accCss;
   g.fillRect(10, 54, logicalW - 10, 3);
-  const modeTag = slideMode === 0 ? "1/3 EXECUTIVO ▸" : slideMode === 1 ? "2/3 MÔNACO · ATO 1 ▸" : "3/3 NIPs & A2A ▸";
+  const modeTag = slideMode === 0 ? "1/4 EXECUTIVO ▸" : slideMode === 1 ? "2/4 MÔNACO · P0 ▸" : slideMode === 2 ? "3/4 NIPs & A2A ▸" : "4/4 MRR & ECONOMIA ▸";
   g.fillStyle = "#f8fafc";
   g.font = "700 24px -apple-system, BlinkMacSystemFont, sans-serif";
-  g.fillText(`${floorNum}F · ${floor.nome.toUpperCase().slice(0, 22)}`, 24, 36);
+  g.fillText(`${floorNum}F · ${floor.nome.toUpperCase().slice(0, 21)}`, 24, 36);
   g.fillStyle = rgbToCss(modeAccent, 0.16);
-  g.fillRect(logicalW - 318, 12, 162, 30);
+  g.fillRect(logicalW - 328, 12, 174, 30);
   g.strokeStyle = accCss;
   g.lineWidth = 1.4;
-  g.strokeRect(logicalW - 318, 12, 162, 30);
+  g.strokeRect(logicalW - 328, 12, 174, 30);
   g.fillStyle = accCss;
-  g.font = "700 12.5px ui-monospace, Menlo, monospace";
+  g.font = "700 12px ui-monospace, Menlo, monospace";
   g.textAlign = "center";
-  g.fillText(modeTag, logicalW - 237, 32);
+  g.fillText(modeTag, logicalW - 241, 32);
   const pillText = floor.errorCount > 0 ? `${floor.errorCount} ALERTA` : floor.workingCount > 0 ? `${floor.workingCount} AO VIVO` : floor.estagio.toUpperCase();
   const baseAccCss = rgbToCss(accent);
   g.fillStyle = rgbToCss(accent, 0.18);
-  g.fillRect(logicalW - 146, 12, 128, 30);
+  g.fillRect(logicalW - 144, 12, 126, 30);
   g.strokeStyle = baseAccCss;
   g.lineWidth = 1.4;
-  g.strokeRect(logicalW - 146, 12, 128, 30);
+  g.strokeRect(logicalW - 144, 12, 126, 30);
   g.fillStyle = baseAccCss;
   g.font = "700 13px ui-monospace, Menlo, monospace";
-  g.fillText(pillText.slice(0, 12), logicalW - 82, 32);
+  g.fillText(pillText.slice(0, 12), logicalW - 81, 32);
   g.textAlign = "left";
   const spendUsd = ((_a = status == null ? void 0 : status.spendToday) == null ? void 0 : _a.usd) ?? 0;
   const merged7d = ((_b = status == null ? void 0 : status.stats) == null ? void 0 : _b.merged7d) ?? 0;
@@ -58420,13 +58594,13 @@ function makeFloorWallScreenTexture(kit, floorNum, floor, accent, status, holdin
   if (slideMode === 1) {
     if (floor.isBoard) {
       cards = [
-        { k: "ROTA MÔNACO", v: "ATO 1/3", sub: "NexusMind + Agências" },
-        { k: "FOCO HOLDING", v: "3 PILARES", sub: "Gateway · 3F · Lumen" },
+        { k: "FOCO P0 AGORA", v: "LUMEN", sub: "100% live · PAUTA-0002" },
+        { k: "ROTA MÔNACO", v: "ATO 1/3", sub: "Lumen -> Agências" },
         { k: "FINOPS HOJE", v: `$${spendUsd.toFixed(2)}`, sub: "Pix/BRL · margem alta" }
       ];
     } else if (unitKey === "orgfy") {
       cards = [
-        { k: "PAPEL NO ATO 1", v: "PLATAFORMA", sub: "NexusMind + Fábrica" },
+        { k: "PAPEL P0 AGORA", v: "SUPORTE", sub: "esteira 100% autônoma" },
         { k: "ENTREGAS (7D)", v: String(merged7d), sub: "auditoria L-01 / L-22" },
         { k: "META MÔNACO", v: "AGÊNCIAS", sub: "Service as Software" }
       ];
@@ -58438,15 +58612,15 @@ function makeFloorWallScreenTexture(kit, floorNum, floor, accent, status, holdin
       ];
     } else if (unitKey.includes("lumen")) {
       cards = [
-        { k: "PAPEL NO ATO 1", v: "CAIXA", sub: "piloto automático" },
-        { k: "ESTEIRA ATIVA", v: `${floor.packets.length}/${floor.openPrsCount}`, sub: "cards · PRs abertos" },
-        { k: "META MÔNACO", v: "PIX / BRL", sub: "recorrência & WhatsApp" }
+        { k: "PRIORIDADE #1", v: "100% LIVE", sub: "PAUTA-0002 · Foco Total" },
+        { k: "AUDITORIA & QA", v: `${floor.packets.length}/${floor.openPrsCount}`, sub: "cards · PRs na esteira" },
+        { k: "SERVIDOR SWARM", v: "VERIFICAR", sub: "código + infra autônoma" }
       ];
     } else {
       cards = [
-        { k: "PAPEL NO ATO 1", v: "CONGELADO", sub: "reserva p/ Ato 2" },
+        { k: "PAPEL NO ATO 1", v: "CONGELADO", sub: "aguardando Lumen 100%" },
         { k: "TIME PRONTO", v: String(floor.agentesCount), sub: "manifesto mapeado" },
-        { k: "META MÔNACO", v: "ATO 2/3", sub: "foco 100% no Ato 1" }
+        { k: "META MÔNACO", v: "ATO 2/3", sub: "descongela pós-Ato 1" }
       ];
     }
   } else if (slideMode === 2) {
@@ -58459,6 +58633,38 @@ function makeFloorWallScreenTexture(kit, floorNum, floor, accent, status, holdin
       { k: "CAMADA A2A", v: "DUAL", sub: "Pix/BRL + NWC/Cashu" },
       { k: "INTERCOMPANY", v: `${icActive}/${icTotal}`, sub: "porta PO/COO · Semáforo" }
     ];
+  } else if (slideMode === 3) {
+    if (floor.isBoard) {
+      cards = [
+        { k: "MRR META ATO 1", v: "PIX BRL", sub: "Lumen + Agências" },
+        { k: "CUSTO IA HOJE", v: `$${spendUsd.toFixed(2)}`, sub: "EVM · Escudo VIP" },
+        { k: "MARGEM ALVO", v: ">75%", sub: "Holding autossustentável" }
+      ];
+    } else if (unitKey === "orgfy") {
+      cards = [
+        { k: "QUALIDADE FPY", v: "96%+", sub: "gates L-01 / L-22" },
+        { k: "SLA PLATAFORMA", v: "8H-24H", sub: "Semáforo Verde Core" },
+        { k: "OFERTA AGÊNCIA", v: "R$ 990", sub: "Gateway + Fábrica/mês" }
+      ];
+    } else if (unitKey === "growth-studio") {
+      cards = [
+        { k: "FUNIL ATIVO", v: "WA + ADS", sub: "aquisição p/ Lumen" },
+        { k: "CONVERSÃO ALVO", v: "TRIAL->$", sub: "copy + criativos L-01" },
+        { k: "RELATÓRIO", v: "D+1 / D+7", sub: "CAC & ROI determinístico" }
+      ];
+    } else if (unitKey.includes("lumen")) {
+      cards = [
+        { k: "MOTOR DE CAIXA", v: "MRR PIX", sub: "recorrência BRL" },
+        { k: "FUNIL WHATSAPP", v: "TRIAL->$", sub: "opt-out + anti-fraude" },
+        { k: "SLA PRODUÇÃO", v: "99.9%", sub: "Swarm + webhook HMAC" }
+      ];
+    } else {
+      cards = [
+        { k: "TESE RECEITA", v: "SAAS B2B", sub: "assinatura fiscal mensal" },
+        { k: "STATUS CAIXA", v: "PAUSADO", sub: "zero queima de tokens" },
+        { k: "RETOMADA", v: "BOARD", sub: "após Lumen 100% live" }
+      ];
+    }
   } else {
     cards = floor.isBoard ? [
       { k: "CONSELHEIROS", v: String(floor.agentesCount), sub: `${floor.workingCount} em turno` },
@@ -58477,7 +58683,7 @@ function makeFloorWallScreenTexture(kit, floorNum, floor, accent, status, holdin
     const bh = 122;
     g.fillStyle = "rgba(255,255,255,0.04)";
     g.fillRect(bx, by, bw, bh);
-    g.strokeStyle = slideMode === 1 ? "rgba(250,204,21,0.22)" : slideMode === 2 ? "rgba(56,189,248,0.22)" : "rgba(255,255,255,0.11)";
+    g.strokeStyle = slideMode === 1 ? "rgba(250,204,21,0.22)" : slideMode === 2 ? "rgba(56,189,248,0.22)" : slideMode === 3 ? "rgba(52,211,153,0.24)" : "rgba(255,255,255,0.11)";
     g.lineWidth = 1.5;
     g.strokeRect(bx, by, bw, bh);
     g.fillStyle = "#94a3b8";
@@ -58493,7 +58699,7 @@ function makeFloorWallScreenTexture(kit, floorNum, floor, accent, status, holdin
   });
   g.fillStyle = "rgba(148,163,184,0.65)";
   g.font = "600 10.5px ui-monospace, Menlo, monospace";
-  g.fillText("CLIQUE NO TELÃO PARA TROCAR: EXECUTIVO · MISSÃO MÔNACO · PROTOCOLO NIPs", 26, 212);
+  g.fillText("CLIQUE NO TELÃO: 1 EXECUTIVO · 2 MÔNACO/P0 · 3 PROTOCOLO NIPs · 4 MRR/ECONOMIA", 26, 212);
   return sharpenCanvasTexture(kit.canvasTexture(c), maxAnisotropy);
 }
 function makeFloorBadgeTexture(kit, label, accent, maxAnisotropy = 8) {
@@ -59483,7 +59689,7 @@ function createHoldingTower3DComponent(ctx) {
         floorGroup.add(screenPlane);
         const switchFloorScreen = (forcedMode) => {
           const cur = screenModesRef.current[floor.slug] ?? 0;
-          const next = forcedMode !== void 0 ? forcedMode : (cur + 1) % 3;
+          const next = forcedMode !== void 0 ? forcedMode : (cur + 1) % 4;
           screenModesRef.current[floor.slug] = next;
           const prevTex = screenMat.map;
           screenMat.map = makeFloorWallScreenTexture(
@@ -60435,13 +60641,13 @@ function createHoldingTower3DComponent(ctx) {
                   className: "of-btn",
                   "data-tower-screen-cycle-btn": "true",
                   style: { fontSize: "11px" },
-                  title: "Alternar painel do telão (Executivo · Missão Mônaco · Protocolo NIPs)",
+                  title: "Alternar painel do telão (Executivo · Missão Mônaco · Protocolo NIPs · MRR/Economia)",
                   onClick: () => {
                     var _a2, _b2;
                     return (_b2 = (_a2 = screenSwitchersRef.current)[activeFloorCard.slug]) == null ? void 0 : _b2.call(_a2);
                   }
                 },
-                `Telão ${(screenModesRef.current[activeFloorCard.slug] ?? 0) + 1}/3 ↻`
+                `Telão ${(screenModesRef.current[activeFloorCard.slug] ?? 0) + 1}/4 ↻`
               ),
               props.onOpenChannel && h(
                 "button",

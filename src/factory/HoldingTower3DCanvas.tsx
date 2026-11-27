@@ -76,7 +76,7 @@ const TOWER_FLOOR_H = 4.35;
 const TOWER_EXPLODE_GAP = 1.95;
 const TOWER_DEMO_STEP_MS = [4400, 5000, 4800, 5000, 4600];
 
-type WallScreenSlideMode = 0 | 1 | 2;
+type WallScreenSlideMode = 0 | 1 | 2 | 3;
 
 function towerDemoLabel(phase: number, floorName: string, topFloorNum = 5): string {
   if (phase === 1) return `1/5 · Diretriz descendo do ${topFloorNum}F Conselho pelo elevador para ${floorName}`;
@@ -140,10 +140,12 @@ function makeFloorWallScreenTexture(
       ? [0.98, 0.8, 0.2]
       : slideMode === 2
       ? [0.38, 0.72, 0.98]
+      : slideMode === 3
+      ? [0.22, 0.84, 0.56]
       : accent;
   const accCss = rgbToCss(modeAccent);
 
-  g.fillStyle = slideMode === 1 ? "#10131d" : slideMode === 2 ? "#0c1320" : "#0e121a";
+  g.fillStyle = slideMode === 1 ? "#10131d" : slideMode === 2 ? "#0c1320" : slideMode === 3 ? "#0b1615" : "#0e121a";
   g.fillRect(0, 0, logicalW, logicalH);
 
   g.strokeStyle = "rgba(255,255,255,0.045)";
@@ -164,25 +166,27 @@ function makeFloorWallScreenTexture(
 
   const modeTag =
     slideMode === 0
-      ? "1/3 EXECUTIVO ▸"
+      ? "1/4 EXECUTIVO ▸"
       : slideMode === 1
-      ? "2/3 MÔNACO · ATO 1 ▸"
-      : "3/3 NIPs & A2A ▸";
+      ? "2/4 MÔNACO · P0 ▸"
+      : slideMode === 2
+      ? "3/4 NIPs & A2A ▸"
+      : "4/4 MRR & ECONOMIA ▸";
 
   g.fillStyle = "#f8fafc";
   g.font = "700 24px -apple-system, BlinkMacSystemFont, sans-serif";
-  g.fillText(`${floorNum}F · ${floor.nome.toUpperCase().slice(0, 22)}`, 24, 36);
+  g.fillText(`${floorNum}F · ${floor.nome.toUpperCase().slice(0, 21)}`, 24, 36);
 
-  // Pílula de slide clicável (1/3, 2/3, 3/3)
+  // Pílula de slide clicável (1/4, 2/4, 3/4, 4/4)
   g.fillStyle = rgbToCss(modeAccent, 0.16);
-  g.fillRect(logicalW - 318, 12, 162, 30);
+  g.fillRect(logicalW - 328, 12, 174, 30);
   g.strokeStyle = accCss;
   g.lineWidth = 1.4;
-  g.strokeRect(logicalW - 318, 12, 162, 30);
+  g.strokeRect(logicalW - 328, 12, 174, 30);
   g.fillStyle = accCss;
-  g.font = "700 12.5px ui-monospace, Menlo, monospace";
+  g.font = "700 12px ui-monospace, Menlo, monospace";
   g.textAlign = "center";
-  g.fillText(modeTag, logicalW - 237, 32);
+  g.fillText(modeTag, logicalW - 241, 32);
 
   const pillText =
     floor.errorCount > 0
@@ -192,13 +196,13 @@ function makeFloorWallScreenTexture(
       : floor.estagio.toUpperCase();
   const baseAccCss = rgbToCss(accent);
   g.fillStyle = rgbToCss(accent, 0.18);
-  g.fillRect(logicalW - 146, 12, 128, 30);
+  g.fillRect(logicalW - 144, 12, 126, 30);
   g.strokeStyle = baseAccCss;
   g.lineWidth = 1.4;
-  g.strokeRect(logicalW - 146, 12, 128, 30);
+  g.strokeRect(logicalW - 144, 12, 126, 30);
   g.fillStyle = baseAccCss;
   g.font = "700 13px ui-monospace, Menlo, monospace";
-  g.fillText(pillText.slice(0, 12), logicalW - 82, 32);
+  g.fillText(pillText.slice(0, 12), logicalW - 81, 32);
   g.textAlign = "left";
 
   const spendUsd = status?.spendToday?.usd ?? 0;
@@ -214,16 +218,16 @@ function makeFloorWallScreenTexture(
   let cards: Array<{ k: string; v: string; sub: string }>;
 
   if (slideMode === 1) {
-    // SLIDE 2: MISSÃO MÔNACO · ATO 1
+    // SLIDE 2: MISSÃO MÔNACO · FOCO P0 LUMEN 100%
     if (floor.isBoard) {
       cards = [
-        { k: "ROTA MÔNACO", v: "ATO 1/3", sub: "NexusMind + Agências" },
-        { k: "FOCO HOLDING", v: "3 PILARES", sub: "Gateway · 3F · Lumen" },
+        { k: "FOCO P0 AGORA", v: "LUMEN", sub: "100% live · PAUTA-0002" },
+        { k: "ROTA MÔNACO", v: "ATO 1/3", sub: "Lumen -> Agências" },
         { k: "FINOPS HOJE", v: `$${spendUsd.toFixed(2)}`, sub: "Pix/BRL · margem alta" },
       ];
     } else if (unitKey === "orgfy") {
       cards = [
-        { k: "PAPEL NO ATO 1", v: "PLATAFORMA", sub: "NexusMind + Fábrica" },
+        { k: "PAPEL P0 AGORA", v: "SUPORTE", sub: "esteira 100% autônoma" },
         { k: "ENTREGAS (7D)", v: String(merged7d), sub: "auditoria L-01 / L-22" },
         { k: "META MÔNACO", v: "AGÊNCIAS", sub: "Service as Software" },
       ];
@@ -235,15 +239,15 @@ function makeFloorWallScreenTexture(
       ];
     } else if (unitKey.includes("lumen")) {
       cards = [
-        { k: "PAPEL NO ATO 1", v: "CAIXA", sub: "piloto automático" },
-        { k: "ESTEIRA ATIVA", v: `${floor.packets.length}/${floor.openPrsCount}`, sub: "cards · PRs abertos" },
-        { k: "META MÔNACO", v: "PIX / BRL", sub: "recorrência & WhatsApp" },
+        { k: "PRIORIDADE #1", v: "100% LIVE", sub: "PAUTA-0002 · Foco Total" },
+        { k: "AUDITORIA & QA", v: `${floor.packets.length}/${floor.openPrsCount}`, sub: "cards · PRs na esteira" },
+        { k: "SERVIDOR SWARM", v: "VERIFICAR", sub: "código + infra autônoma" },
       ];
     } else {
       cards = [
-        { k: "PAPEL NO ATO 1", v: "CONGELADO", sub: "reserva p/ Ato 2" },
+        { k: "PAPEL NO ATO 1", v: "CONGELADO", sub: "aguardando Lumen 100%" },
         { k: "TIME PRONTO", v: String(floor.agentesCount), sub: "manifesto mapeado" },
-        { k: "META MÔNACO", v: "ATO 2/3", sub: "foco 100% no Ato 1" },
+        { k: "META MÔNACO", v: "ATO 2/3", sub: "descongela pós-Ato 1" },
       ];
     }
   } else if (slideMode === 2) {
@@ -259,6 +263,39 @@ function makeFloorWallScreenTexture(
           { k: "CAMADA A2A", v: "DUAL", sub: "Pix/BRL + NWC/Cashu" },
           { k: "INTERCOMPANY", v: `${icActive}/${icTotal}`, sub: "porta PO/COO · Semáforo" },
         ];
+  } else if (slideMode === 3) {
+    // SLIDE 4: MRR, CAIXA & ECONOMIA (ESPECÍFICO POR TIPO DE EMPRESA)
+    if (floor.isBoard) {
+      cards = [
+        { k: "MRR META ATO 1", v: "PIX BRL", sub: "Lumen + Agências" },
+        { k: "CUSTO IA HOJE", v: `$${spendUsd.toFixed(2)}`, sub: "EVM · Escudo VIP" },
+        { k: "MARGEM ALVO", v: ">75%", sub: "Holding autossustentável" },
+      ];
+    } else if (unitKey === "orgfy") {
+      cards = [
+        { k: "QUALIDADE FPY", v: "96%+", sub: "gates L-01 / L-22" },
+        { k: "SLA PLATAFORMA", v: "8H-24H", sub: "Semáforo Verde Core" },
+        { k: "OFERTA AGÊNCIA", v: "R$ 990", sub: "Gateway + Fábrica/mês" },
+      ];
+    } else if (unitKey === "growth-studio") {
+      cards = [
+        { k: "FUNIL ATIVO", v: "WA + ADS", sub: "aquisição p/ Lumen" },
+        { k: "CONVERSÃO ALVO", v: "TRIAL->$", sub: "copy + criativos L-01" },
+        { k: "RELATÓRIO", v: "D+1 / D+7", sub: "CAC & ROI determinístico" },
+      ];
+    } else if (unitKey.includes("lumen")) {
+      cards = [
+        { k: "MOTOR DE CAIXA", v: "MRR PIX", sub: "recorrência BRL" },
+        { k: "FUNIL WHATSAPP", v: "TRIAL->$", sub: "opt-out + anti-fraude" },
+        { k: "SLA PRODUÇÃO", v: "99.9%", sub: "Swarm + webhook HMAC" },
+      ];
+    } else {
+      cards = [
+        { k: "TESE RECEITA", v: "SAAS B2B", sub: "assinatura fiscal mensal" },
+        { k: "STATUS CAIXA", v: "PAUSADO", sub: "zero queima de tokens" },
+        { k: "RETOMADA", v: "BOARD", sub: "após Lumen 100% live" },
+      ];
+    }
   } else {
     // SLIDE 1: EXECUTIVO AO VIVO
     cards = floor.isBoard
@@ -281,7 +318,14 @@ function makeFloorWallScreenTexture(
     const bh = 122;
     g.fillStyle = "rgba(255,255,255,0.04)";
     g.fillRect(bx, by, bw, bh);
-    g.strokeStyle = slideMode === 1 ? "rgba(250,204,21,0.22)" : slideMode === 2 ? "rgba(56,189,248,0.22)" : "rgba(255,255,255,0.11)";
+    g.strokeStyle =
+      slideMode === 1
+        ? "rgba(250,204,21,0.22)"
+        : slideMode === 2
+        ? "rgba(56,189,248,0.22)"
+        : slideMode === 3
+        ? "rgba(52,211,153,0.24)"
+        : "rgba(255,255,255,0.11)";
     g.lineWidth = 1.5;
     g.strokeRect(bx, by, bw, bh);
 
@@ -299,10 +343,10 @@ function makeFloorWallScreenTexture(
     g.fillText(card.sub.slice(0, 23), bx + 15, by + 105);
   });
 
-  // Rodapé discreto indicando interatividade do telão
+  // Rodapé discreto indicando interatividade do telão (4 modos por tipo de empresa)
   g.fillStyle = "rgba(148,163,184,0.65)";
   g.font = "600 10.5px ui-monospace, Menlo, monospace";
-  g.fillText("CLIQUE NO TELÃO PARA TROCAR: EXECUTIVO · MISSÃO MÔNACO · PROTOCOLO NIPs", 26, 212);
+  g.fillText("CLIQUE NO TELÃO: 1 EXECUTIVO · 2 MÔNACO/P0 · 3 PROTOCOLO NIPs · 4 MRR/ECONOMIA", 26, 212);
 
   return sharpenCanvasTexture(kit.canvasTexture(c), maxAnisotropy);
 }
@@ -1552,7 +1596,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
         // Troca dinâmica do telão em 1 clique (sem recriar WebGL)
         const switchFloorScreen = (forcedMode?: WallScreenSlideMode): WallScreenSlideMode => {
           const cur: WallScreenSlideMode = screenModesRef.current[floor.slug] ?? 0;
-          const next: WallScreenSlideMode = forcedMode !== undefined ? forcedMode : (((cur + 1) % 3) as WallScreenSlideMode);
+          const next: WallScreenSlideMode = forcedMode !== undefined ? forcedMode : (((cur + 1) % 4) as WallScreenSlideMode);
           screenModesRef.current[floor.slug] = next;
           const prevTex = screenMat.map;
           screenMat.map = makeFloorWallScreenTexture(
@@ -2610,10 +2654,10 @@ export function createHoldingTower3DComponent(ctx: Context) {
                         className: "of-btn",
                         "data-tower-screen-cycle-btn": "true",
                         style: { fontSize: "11px" },
-                        title: "Alternar painel do telão (Executivo · Missão Mônaco · Protocolo NIPs)",
+                        title: "Alternar painel do telão (Executivo · Missão Mônaco · Protocolo NIPs · MRR/Economia)",
                         onClick: () => screenSwitchersRef.current[activeFloorCard.slug]?.(),
                       },
-                      `Telão ${((screenModesRef.current[activeFloorCard.slug] ?? 0) + 1)}/3 ↻`
+                      `Telão ${((screenModesRef.current[activeFloorCard.slug] ?? 0) + 1)}/4 ↻`
                     ),
                     props.onOpenChannel &&
                       h(

@@ -178,6 +178,60 @@ export function buildLookout(
   hopper.position.set(l.chute.x, 0.2, l.chute.z);
   add(hopper);
 
+  // Telão arquitetônico leve na parede traseira do Mirante (1 único CanvasTexture, 60fps)
+  const boardCanvas = document.createElement("canvas");
+  boardCanvas.width = 1024;
+  boardCanvas.height = 256;
+  const bg = boardCanvas.getContext("2d");
+  if (bg) {
+    const laneCss = `rgb(${Math.round(p.lane[0] * 255)}, ${Math.round(p.lane[1] * 255)}, ${Math.round(p.lane[2] * 255)})`;
+    bg.fillStyle = "#0e121a";
+    bg.fillRect(0, 0, 1024, 256);
+    bg.fillStyle = laneCss;
+    bg.fillRect(0, 0, 12, 256);
+    bg.fillStyle = "rgba(255,255,255,0.05)";
+    bg.fillRect(12, 0, 1012, 62);
+    bg.fillStyle = laneCss;
+    bg.fillRect(12, 60, 1012, 3);
+    bg.fillStyle = "#f8fafc";
+    bg.font = "700 28px -apple-system, BlinkMacSystemFont, sans-serif";
+    bg.fillText("MIRANTE DA FÁBRICA · HOLDING CORTEXX · PROTOCOLO NIPs", 32, 41);
+
+    const kpiBoxes = [
+      { k: "FOCO ATUAL", v: "LUMEN 100%", sub: "PAUTA-0002 · P0" },
+      { k: "ESTÁGIOS ATIVOS", v: `${lit.size}/${l.pods.length}`, sub: "revisão L-01 / L-22" },
+      { k: "PROTOCOLO A2A", v: "NIP-99 / 89", sub: "Pix/BRL + NWC/Cashu" },
+    ];
+    kpiBoxes.forEach((box, idx) => {
+      const bx = 32 + idx * 324;
+      bg.fillStyle = "rgba(255,255,255,0.04)";
+      bg.fillRect(bx, 82, 304, 148);
+      bg.strokeStyle = "rgba(255,255,255,0.12)";
+      bg.lineWidth = 2;
+      bg.strokeRect(bx, 82, 304, 148);
+      bg.fillStyle = "#94a3b8";
+      bg.font = "700 15px ui-monospace, Menlo, monospace";
+      bg.fillText(box.k, bx + 18, 114);
+      bg.fillStyle = "#f8fafc";
+      bg.font = "700 40px ui-monospace, Menlo, monospace";
+      bg.fillText(box.v, bx + 18, 172);
+      bg.fillStyle = laneCss;
+      bg.font = "500 16px -apple-system, sans-serif";
+      bg.fillText(box.sub, bx + 18, 208);
+    });
+  }
+  const wallBoardW = Math.min(4.6, w * 0.42);
+  const wallBoardH = wallBoardW * 0.25;
+  const wallBezel = boxes(kit, unit, kit.matte(p.sign, { roughness: 0.45 }), [
+    { x: cx, y: LOOKOUT_WALL_H * 0.56, z: z0 + 0.03, w: wallBoardW + 0.14, h: wallBoardH + 0.12, d: 0.06 },
+  ]);
+  const wallScreen = new Mesh(
+    kit.own(new PlaneGeometry(wallBoardW, wallBoardH)),
+    kit.matte(null, { map: kit.canvasTexture(boardCanvas), roughness: 0.45 }),
+  );
+  wallScreen.position.set(cx, LOOKOUT_WALL_H * 0.56, z0 + 0.065);
+  add(wallBezel, wallScreen);
+
   const glassMat = kit.own(
     new MeshStandardMaterial({
       color: colour(p.glass),

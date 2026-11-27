@@ -130,10 +130,11 @@ function icons(): Record<BlockedIcon, BufferGeometry> {
 /** Peças do bonequinho LEGO / Voxel para o motor instanciado do Andar 3D. */
 export function crewGeometry() {
   const eyeZ = 0.123;
-  // Tronco LEGO com ombros chanfrados + cinto na base
+  // Tronco LEGO com ombros chanfrados, pescoço e cinto na base
   const torso = merged([
     placed(new BoxGeometry(0.27, 0.27, 0.175), 0, 0.225, 0),
     placed(new BoxGeometry(0.28, 0.035, 0.185), 0, 0.105, 0),
+    placed(new CylinderGeometry(0.048, 0.054, 0.045, 10), 0, 0.365, 0),
   ]);
 
   return {

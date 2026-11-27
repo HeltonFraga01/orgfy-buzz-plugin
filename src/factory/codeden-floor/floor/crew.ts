@@ -187,16 +187,40 @@ export class Crew {
     let mem = this.memory.get(f.key);
     if (!mem) {
       const seed = f.agent.seed;
-      const tone = f.agent.providerId ? providerTone(f.agent.providerId) : NO_PROVIDER;
-      const dl = (seeded(seed, 3) - 0.5) * 0.08;
+      const labelTxt = `${f.agent.seed || ""} ${f.agent.role || ""} ${f.key || ""}`.toLowerCase();
+      const uniformPalette: Rgb[] = [
+        [0.24, 0.54, 0.88], // azul engenharia
+        [0.18, 0.68, 0.54], // verde growth/ops
+        [0.86, 0.44, 0.2],  // laranja cto/coo
+        [0.54, 0.36, 0.84], // roxo produto/oráculo
+        [0.2, 0.66, 0.78],  // ciano arquitetura
+        [0.82, 0.66, 0.2],  // dourado auditoria
+      ];
+      let shirtRgb: Rgb;
+      if (/iris|ceo/.test(labelTxt)) {
+        shirtRgb = [0.86, 0.24, 0.28];
+      } else if (/segur|hugo|cro|risco/.test(labelTxt)) {
+        shirtRgb = [0.2, 0.56, 0.82];
+      } else if (/growth|val|mkt/.test(labelTxt)) {
+        shirtRgb = [0.16, 0.66, 0.56];
+      } else if (/or[aá]culo|scout|pesquisa|prompt/.test(labelTxt)) {
+        shirtRgb = [0.52, 0.36, 0.82];
+      } else if (/arquit|bento/.test(labelTxt)) {
+        shirtRgb = [0.22, 0.48, 0.88];
+      } else if (/qa|revis|teo|vera/.test(labelTxt)) {
+        shirtRgb = [0.84, 0.52, 0.18];
+      } else {
+        const idx = Math.floor(seeded(seed, 7) * uniformPalette.length) % uniformPalette.length;
+        shirtRgb = uniformPalette[idx] || toneRgb(f.agent.providerId ? providerTone(f.agent.providerId) : NO_PROVIDER);
+      }
       mem = {
         status: f.status,
         since: this.primed ? t : Number.NEGATIVE_INFINITY,
         selectedAt: Number.NEGATIVE_INFINITY,
         from: null,
         last: null,
-        tone: toneRgb(tone, dl),
-        feet: toneRgb(tone, dl - 0.12),
+        tone: shirtRgb,
+        feet: [0.14, 0.16, 0.21],
         size: 0.96 + seeded(seed, 1) * 0.08,
         tilt: ((seeded(seed, 2) - 0.5) * 8 * Math.PI) / 180,
       };
@@ -286,7 +310,14 @@ export class Crew {
       feet.push(atLocal(lower, [i === 0 ? -0.1 : 0.1, 0.035 + lift, 0.04]), mem.feet);
     });
     const legoSkin: Rgb = [0.95, 0.83, 0.69];
-    const legoHair: Rgb = seeded(f.agent.seed, 5) > 0.5 ? [0.16, 0.14, 0.17] : [0.3, 0.21, 0.14];
+    const hairOptions: Rgb[] = [
+      [0.15, 0.13, 0.16],
+      [0.32, 0.21, 0.13],
+      [0.62, 0.44, 0.22],
+      [0.2, 0.16, 0.12],
+      [0.82, 0.82, 0.86],
+    ];
+    const legoHair: Rgb = hairOptions[Math.floor(seeded(f.agent.seed, 5) * hairOptions.length) % hairOptions.length];
     this.pool("body", this.m.clay, { colours: true, cast: true }).push(upper, mem.tone);
     this.pool("head", this.m.clay, { colours: true, cast: true }).push(upper, legoSkin);
     this.pool("hair", this.m.clay, { colours: true, cast: true }).push(upper, legoHair);
