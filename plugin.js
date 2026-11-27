@@ -15009,15 +15009,17 @@ async function readWorkflowStatuses(ctx) {
   );
 }
 async function fetchHoldingControlPlane(ctx) {
-  var _a, _b, _c, _d, _e, _f, _g, _h;
-  const [boardJson, orgfyJson, activeLocks, approvals, workflows, templatesReais, regrasJson] = await Promise.all([
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k;
+  const [boardJson, orgfyJson, activeLocks, approvals, workflows, templatesReais, regrasJson, catalogoJson, intercompanyJson] = await Promise.all([
     readOrgfyJson(ctx, "empresas/board.json", null),
     readOrgfyJson(ctx, "empresas/orgfy.json", null),
     listActiveLocks(ctx),
     readBoardApprovals(ctx),
     readWorkflowStatuses(ctx),
     readRealTemplates(ctx),
-    readOrgfyJson(ctx, ".esteira/estado/regras-probatorias.json", null)
+    readOrgfyJson(ctx, ".esteira/estado/regras-probatorias.json", null),
+    readOrgfyJson(ctx, "empresas/catalogo-servicos.json", null),
+    readOrgfyJson(ctx, ".esteira/estado/intercompany-requests.json", null)
   ]);
   const locksByAgent = /* @__PURE__ */ new Map();
   for (const lk of activeLocks) {
@@ -15172,30 +15174,72 @@ async function fetchHoldingControlPlane(ctx) {
       fpyObservado: typeof (r == null ? void 0 : r.fpy_observado) === "number" ? r.fpy_observado : null
     })
   );
+  const unidadesCatalogo = (catalogoJson == null ? void 0 : catalogoJson.unidades) && typeof catalogoJson.unidades === "object" ? catalogoJson.unidades : {};
+  const servicesByUnit = {};
+  let nip99Total = 0;
+  let nip89Total = 0;
+  for (const [uSlug, uData] of Object.entries(unidadesCatalogo)) {
+    const list = Array.isArray(uData == null ? void 0 : uData.servicos) ? uData.servicos : [];
+    servicesByUnit[uSlug.toLowerCase()] = list.length;
+    nip99Total += list.length;
+    nip89Total += 1;
+  }
+  const rawIc = Array.isArray(intercompanyJson == null ? void 0 : intercompanyJson.requests) ? intercompanyJson.requests : Array.isArray(intercompanyJson) ? intercompanyJson : (intercompanyJson == null ? void 0 : intercompanyJson.solicitacoes) && typeof intercompanyJson.solicitacoes === "object" ? Object.values(intercompanyJson.solicitacoes) : [];
+  let intercompanyActive = 0;
+  let intercompanyDone = 0;
+  for (const req of rawIc) {
+    const st = String((req == null ? void 0 : req.status) || "").toLowerCase();
+    if (st === "entregue" || st === "concluido" || st === "completed" || st === "done") {
+      intercompanyDone += 1;
+    } else if (st && st !== "recusado" && st !== "cancelado" && st !== "bloqueado") {
+      intercompanyActive += 1;
+    }
+  }
+  const protocolSummary = {
+    nip99Total,
+    nip89Total,
+    servicesByUnit,
+    paymentRails: Array.isArray((_b = catalogoJson == null ? void 0 : catalogoJson.nostr_protocol) == null ? void 0 : _b.dupla_camada_pagamento) ? catalogoJson.nostr_protocol.dupla_camada_pagamento.map(String) : ["pix_brl", "lightning_nwc_nip47", "cashu_nip60_61"],
+    intercompanyTotal: rawIc.length,
+    intercompanyActive,
+    intercompanyDone
+  };
+  const rawVisao = boardJson == null ? void 0 : boardJson.visao_estrategica;
+  const visaoEstrategica = rawVisao ? {
+    atoAtual: String(rawVisao.ato_atual || "ato_1_caixa_e_agencias"),
+    missaoCurta: String(rawVisao.missao_curta || ""),
+    focoPrincipal: Array.isArray(rawVisao.foco_comercial_principal) ? rawVisao.foco_comercial_principal.map(String) : [],
+    cascaExternaBr: String(((_c = rawVisao.arquitetura_economica) == null ? void 0 : _c.casca_externa_br) || "Pix / BRL"),
+    nucleoInternoA2a: String(((_d = rawVisao.arquitetura_economica) == null ? void 0 : _d.nucleo_interno_a2a) || "Nostr NIP-99/89/90 + NWC/Cashu"),
+    projetosCongelados: Array.isArray(rawVisao.projetos_congelados_ate_ato_1) ? rawVisao.projetos_congelados_ate_ato_1.map(String) : [],
+    atualizadoEm: rawVisao.atualizado_em ? String(rawVisao.atualizado_em) : void 0
+  } : void 0;
   return {
     ok: boardJson !== null || orgfyJson !== null,
     loadedAt: (/* @__PURE__ */ new Date()).toISOString(),
     boardNome: String((boardJson == null ? void 0 : boardJson.nome) || "Conselho da Holding OrgFy"),
     boardCanal: String((boardJson == null ? void 0 : boardJson.canal) || "").trim(),
     fundador: {
-      nome: String(((_b = boardJson == null ? void 0 : boardJson.fundador) == null ? void 0 : _b.nome) || "Helton Fraga"),
-      papel: String(((_c = boardJson == null ? void 0 : boardJson.fundador) == null ? void 0 : _c.papel) || "Fundador"),
-      pubkey: String(((_d = boardJson == null ? void 0 : boardJson.fundador) == null ? void 0 : _d.pubkey) || "")
+      nome: String(((_e = boardJson == null ? void 0 : boardJson.fundador) == null ? void 0 : _e.nome) || "Helton Fraga"),
+      papel: String(((_f = boardJson == null ? void 0 : boardJson.fundador) == null ? void 0 : _f.papel) || "Fundador"),
+      pubkey: String(((_g = boardJson == null ? void 0 : boardJson.fundador) == null ? void 0 : _g.pubkey) || "")
     },
     ceoHolding: {
-      nome: String(((_e = boardJson == null ? void 0 : boardJson.ceo_holding) == null ? void 0 : _e.nome) || "OrgFy Iris"),
-      papel: String(((_f = boardJson == null ? void 0 : boardJson.ceo_holding) == null ? void 0 : _f.papel) || "CEO da Holding"),
-      pubkey: String(((_g = boardJson == null ? void 0 : boardJson.ceo_holding) == null ? void 0 : _g.pubkey) || "")
+      nome: String(((_h = boardJson == null ? void 0 : boardJson.ceo_holding) == null ? void 0 : _h.nome) || "OrgFy Iris"),
+      papel: String(((_i = boardJson == null ? void 0 : boardJson.ceo_holding) == null ? void 0 : _i.papel) || "CEO da Holding"),
+      pubkey: String(((_j = boardJson == null ? void 0 : boardJson.ceo_holding) == null ? void 0 : _j.pubkey) || "")
     },
     conselho: Array.isArray(boardJson == null ? void 0 : boardJson.conselho) ? boardJson.conselho : [],
     fluxoEscalada: (boardJson == null ? void 0 : boardJson.fluxo_escalada) && typeof boardJson.fluxo_escalada === "object" ? boardJson.fluxo_escalada : {},
-    cadeiaComando: Array.isArray((_h = boardJson == null ? void 0 : boardJson.protocolo_governanca) == null ? void 0 : _h.cadeia_comando) ? boardJson.protocolo_governanca.cadeia_comando : [],
+    cadeiaComando: Array.isArray((_k = boardJson == null ? void 0 : boardJson.protocolo_governanca) == null ? void 0 : _k.cadeia_comando) ? boardJson.protocolo_governanca.cadeia_comando : [],
     empresas,
     approvals,
     workflows,
     regrasProbatorias,
     templatesReais,
-    activeLocks
+    activeLocks,
+    visaoEstrategica,
+    protocolSummary
   };
 }
 const TENANTS = [
@@ -56279,20 +56323,35 @@ function makeVoxelFaceTexture(kit, style, accentRgb, isPlanned) {
   const g = c.getContext("2d");
   g.fillStyle = isPlanned ? "#64748b" : rgbCss(style.skinRgb);
   g.fillRect(0, 0, 128, 128);
+  g.fillStyle = "rgba(0,0,0,0.06)";
+  g.fillRect(0, 0, 128, 14);
+  g.fillRect(0, 116, 128, 12);
   if (style.faceStyle === "visor" || style.faceStyle === "tactical") {
-    g.fillStyle = "#0f172a";
-    g.fillRect(14, 38, 100, 38);
+    g.fillStyle = "#0b1120";
+    g.fillRect(12, 36, 104, 42);
+    g.strokeStyle = "rgba(255,255,255,0.16)";
+    g.lineWidth = 2;
+    g.strokeRect(13, 37, 102, 40);
+    g.fillStyle = "rgba(255,255,255,0.08)";
+    g.fillRect(16, 40, 96, 8);
     g.fillStyle = rgbCss(accentRgb);
-    g.fillRect(28, 50, 22, 14);
-    g.fillRect(78, 50, 22, 14);
+    g.fillRect(26, 49, 24, 15);
+    g.fillRect(78, 49, 24, 15);
     g.fillStyle = "#ffffff";
-    g.fillRect(32, 52, 6, 6);
-    g.fillRect(82, 52, 6, 6);
+    g.fillRect(30, 51, 7, 6);
+    g.fillRect(82, 51, 7, 6);
     if (style.faceStyle === "visor") {
       g.fillStyle = "#1e293b";
       g.fillRect(48, 92, 32, 7);
+      g.fillRect(44, 88, 6, 6);
+      g.fillRect(78, 88, 6, 6);
     }
   } else {
+    if (!isPlanned) {
+      g.fillStyle = "rgba(239, 108, 108, 0.16)";
+      g.fillRect(16, 70, 16, 10);
+      g.fillRect(96, 70, 16, 10);
+    }
     g.fillStyle = "#ffffff";
     g.fillRect(24, 42, 26, 24);
     g.fillRect(78, 42, 26, 24);
@@ -56302,10 +56361,18 @@ function makeVoxelFaceTexture(kit, style, accentRgb, isPlanned) {
     g.fillStyle = "#ffffff";
     g.fillRect(34, 48, 5, 5);
     g.fillRect(84, 48, 5, 5);
+    g.fillRect(41, 58, 3, 3);
+    g.fillRect(91, 58, 3, 3);
     g.fillStyle = rgbCss(style.hairRgb);
     g.fillRect(24, 32, 26, 6);
     g.fillRect(78, 32, 26, 6);
     if (style.faceStyle === "glasses") {
+      g.fillStyle = "rgba(147, 197, 253, 0.14)";
+      g.fillRect(20, 38, 34, 32);
+      g.fillRect(74, 38, 34, 32);
+      g.fillStyle = "rgba(255,255,255,0.35)";
+      g.fillRect(24, 41, 10, 4);
+      g.fillRect(78, 41, 10, 4);
       g.strokeStyle = "#111827";
       g.lineWidth = 6;
       g.strokeRect(20, 38, 34, 32);
@@ -56325,23 +56392,49 @@ function makeVoxelTorsoTexture(kit, style, accentRgb, isPlanned) {
   const g = c.getContext("2d");
   g.fillStyle = isPlanned ? "#475569" : rgbCss(style.shirtRgb);
   g.fillRect(0, 0, 128, 128);
+  g.fillStyle = "rgba(0,0,0,0.14)";
+  g.fillRect(0, 0, 14, 108);
+  g.fillRect(114, 0, 14, 108);
   g.fillStyle = "#f1f5f9";
   g.beginPath();
-  g.moveTo(40, 0);
-  g.lineTo(88, 0);
-  g.lineTo(64, 34);
+  g.moveTo(38, 0);
+  g.lineTo(90, 0);
+  g.lineTo(64, 38);
   g.closePath();
   g.fill();
+  g.strokeStyle = "rgba(15,23,42,0.45)";
+  g.lineWidth = 4;
+  g.beginPath();
+  g.moveTo(36, 0);
+  g.lineTo(64, 42);
+  g.lineTo(92, 0);
+  g.stroke();
   g.fillStyle = rgbCss(accentRgb);
-  g.fillRect(58, 22, 12, 74);
+  g.fillRect(58, 22, 12, 72);
+  g.fillStyle = "rgba(255,255,255,0.22)";
+  g.fillRect(61, 24, 4, 68);
   g.fillStyle = "#0f172a";
-  g.fillRect(80, 42, 28, 18);
+  g.fillRect(78, 42, 30, 20);
   g.fillStyle = rgbCss(accentRgb);
-  g.fillRect(84, 46, 20, 5);
+  g.fillRect(82, 46, 18, 5);
+  g.fillStyle = "#f8fafc";
+  g.fillRect(82, 54, 14, 3);
+  g.fillStyle = "#34d399";
+  g.fillRect(102, 46, 4, 4);
+  if (!isPlanned && (style.kind === "iris_ceo" || style.kind === "horned_cto" || style.kind === "giraffe_cro" || style.kind === "hat_cpo" || style.kind === "hover_cgo")) {
+    g.fillStyle = "#facc15";
+    g.fillRect(26, 42, 10, 10);
+    g.fillStyle = "#16a34a";
+    g.fillRect(26, 46, 10, 2);
+    g.fillStyle = "#1d4ed8";
+    g.fillRect(26, 48, 10, 2);
+  }
   g.fillStyle = "#0f172a";
-  g.fillRect(0, 108, 128, 20);
-  g.fillStyle = "#cbd5e1";
-  g.fillRect(54, 112, 20, 12);
+  g.fillRect(0, 106, 128, 22);
+  g.fillStyle = "#e2e8f0";
+  g.fillRect(52, 110, 24, 14);
+  g.fillStyle = "#0f172a";
+  g.fillRect(58, 114, 12, 6);
   return kit.canvasTexture(c);
 }
 function buildCustomAvatar3D(kit, p, input, opts) {
@@ -56392,13 +56485,16 @@ function buildCustomAvatar3D(kit, p, input, opts) {
     leg.position.set(lx, isSeated ? 0.06 : 0.11, isSeated ? 0.08 : 0);
     leg.castShadow = !isPlanned;
     bodyGroup.add(leg);
+    const shoe = new Mesh(kit.own(new BoxGeometry(0.112, 0.055, 0.09)), matDark);
+    shoe.position.set(lx, isSeated ? 0.035 : 0.028, isSeated ? 0.21 : 0.03);
+    bodyGroup.add(shoe);
   }
   const torsoY = isSeated ? 0.26 : 0.36;
   const torsoTex = makeVoxelTorsoTexture(kit, style, accentRgb, isPlanned);
   const torsoFrontMat = kit.own(
     new MeshStandardMaterial({
       map: torsoTex,
-      roughness: 0.58,
+      roughness: 0.54,
       transparent: isPlanned,
       opacity: isPlanned ? 0.45 : 1
     })
@@ -56416,16 +56512,23 @@ function buildCustomAvatar3D(kit, p, input, opts) {
   torso.castShadow = !isPlanned;
   torso.receiveShadow = true;
   bodyGroup.add(torso);
+  const neck = new Mesh(kit.own(new CylinderGeometry(0.055, 0.062, 0.06, 10)), matSkin);
+  neck.position.set(0, torsoY + 0.165, 0);
+  bodyGroup.add(neck);
   const makeVoxelArm = (side) => {
     const pivot = new Group();
     pivot.position.set(side * 0.205, torsoY + 0.11, 0);
-    const sleeve = new Mesh(kit.own(new BoxGeometry(0.095, 0.22, 0.1)), matShirt);
-    sleeve.position.set(0, -0.09, 0.04);
-    sleeve.rotation.x = -0.55;
+    const shoulder = new Mesh(kit.own(new BoxGeometry(0.108, 0.09, 0.11)), matShirt);
+    shoulder.position.set(0, -0.01, 0);
+    shoulder.castShadow = !isPlanned;
+    pivot.add(shoulder);
+    const sleeve = new Mesh(kit.own(new BoxGeometry(0.092, 0.2, 0.096)), matShirt);
+    sleeve.position.set(0, -0.095, 0.045);
+    sleeve.rotation.x = -0.58;
     sleeve.castShadow = !isPlanned;
     pivot.add(sleeve);
     const hand = new Mesh(kit.own(new BoxGeometry(0.082, 0.082, 0.082)), matSkin);
-    hand.position.set(0, -0.18, 0.12);
+    hand.position.set(0, -0.18, 0.125);
     hand.castShadow = !isPlanned;
     pivot.add(hand);
     return pivot;
@@ -56434,7 +56537,7 @@ function buildCustomAvatar3D(kit, p, input, opts) {
   const rightHand = makeVoxelArm(1);
   bodyGroup.add(leftHand, rightHand);
   const headGroup = new Group();
-  headGroup.position.set(0, torsoY + 0.29, 0);
+  headGroup.position.set(0, torsoY + 0.305, 0);
   bodyGroup.add(headGroup);
   const faceTex = makeVoxelFaceTexture(kit, style, accentRgb, isPlanned);
   const faceMat = kit.own(
@@ -56540,22 +56643,30 @@ function buildCustomAvatar3D(kit, p, input, opts) {
     const err = (animOpts == null ? void 0 : animOpts.error) ?? isError;
     const celebrating = (animOpts == null ? void 0 : animOpts.celebrating) ?? false;
     if (celebrating) {
-      bodyGroup.position.y = baseY + Math.abs(Math.sin(t * 7.5 + phase)) * 0.16;
-      leftHand.rotation.x = -1.1 + Math.sin(t * 10) * 0.25;
-      rightHand.rotation.x = -1.1 + Math.cos(t * 10) * 0.25;
-      headGroup.rotation.y = Math.sin(t * 5 + phase) * 0.22;
+      bodyGroup.position.y = baseY + Math.abs(Math.sin(t * 7.5 + phase)) * 0.18;
+      bodyGroup.rotation.z = Math.sin(t * 7.5 + phase) * 0.06;
+      leftHand.rotation.x = -1.25 + Math.sin(t * 11 + phase) * 0.28;
+      rightHand.rotation.x = -1.25 + Math.cos(t * 11 + phase) * 0.28;
+      headGroup.rotation.y = Math.sin(t * 5 + phase) * 0.24;
+      headGroup.rotation.x = -0.08;
+      torso.scale.y = 1;
     } else if (working) {
-      bodyGroup.position.y = baseY + Math.sin(t * 3.4 + phase) * 0.012;
-      leftHand.rotation.x = -0.35 + Math.sin(t * 14 + phase) * 0.22;
-      rightHand.rotation.x = -0.35 + Math.cos(t * 14 + phase) * 0.22;
-      headGroup.rotation.y = Math.sin(t * 1.3 + phase) * 0.12;
-      headGroup.rotation.x = 0.07;
+      bodyGroup.position.y = baseY + Math.sin(t * 3.6 + phase) * 0.012;
+      bodyGroup.rotation.z = Math.sin(t * 2.2 + phase) * 0.018;
+      leftHand.rotation.x = -0.38 + Math.sin(t * 15 + phase) * 0.24;
+      rightHand.rotation.x = -0.38 + Math.cos(t * 15 + phase + 0.6) * 0.24;
+      headGroup.rotation.y = Math.sin(t * 1.35 + phase) * 0.14 + Math.sin(t * 0.45 + phase) * 0.05;
+      headGroup.rotation.x = 0.08 + Math.sin(t * 2.8 + phase) * 0.025;
+      torso.scale.y = 1 + Math.sin(t * 3.6 + phase) * 0.015;
     } else {
-      bodyGroup.position.y = baseY + Math.sin(t * 1.5 + phase) * (isPlanned ? 4e-3 : 0.01);
-      leftHand.rotation.x = Math.sin(t * 1.1 + phase) * 0.04;
-      rightHand.rotation.x = Math.cos(t * 1.1 + phase) * 0.04;
-      headGroup.rotation.y = Math.sin(t * 0.65 + phase) * 0.18;
-      headGroup.rotation.x = 0;
+      const breath = Math.sin(t * 1.65 + phase);
+      bodyGroup.position.y = baseY + breath * (isPlanned ? 4e-3 : 0.011);
+      bodyGroup.rotation.z = 0;
+      leftHand.rotation.x = Math.sin(t * 1.15 + phase) * 0.05;
+      rightHand.rotation.x = Math.cos(t * 1.15 + phase) * 0.05;
+      headGroup.rotation.y = Math.sin(t * 0.58 + phase) * 0.19 + Math.sin(t * 0.21 + phase * 1.7) * 0.07;
+      headGroup.rotation.x = Math.sin(t * 0.8 + phase) * 0.03;
+      torso.scale.y = 1 + breath * (isPlanned ? 4e-3 : 0.014);
     }
     if (crownMesh) {
       crownMesh.rotation.y = t * 0.8;
@@ -58210,12 +58321,12 @@ function createAreaLightMaterial(intensity) {
 const TOWER_FLOOR_H = 4.35;
 const TOWER_EXPLODE_GAP = 1.95;
 const TOWER_DEMO_STEP_MS = [4400, 5e3, 4800, 5e3, 4600];
-function towerDemoLabel(phase, floorName) {
-  if (phase === 1) return `1/5 · Diretriz descendo do 4F Conselho pelo elevador para ${floorName}`;
+function towerDemoLabel(phase, floorName, topFloorNum = 5) {
+  if (phase === 1) return `1/5 · Diretriz descendo do ${topFloorNum}F Conselho pelo elevador para ${floorName}`;
   if (phase === 2) return `2/5 · Equipe de ${floorName} recebendo a tarefa e levando para a esteira`;
   if (phase === 3) return `3/5 · CI rodando (semáforo âmbar) e revisão L-01 em andamento`;
   if (phase === 4) return `4/5 · Aprovado! Pacote entregue no portal SHIP com comemoração`;
-  if (phase === 5) return `5/5 · Telemetria de entrega subindo ao 4F Conselho da Holding`;
+  if (phase === 5) return `5/5 · Telemetria de entrega subindo ao ${topFloorNum}F Conselho da Holding`;
   return "";
 }
 function rgbToCss([r, g, b], alpha = 1) {
@@ -58247,15 +58358,16 @@ function sharpenCanvasTexture(tex, maxAnisotropy) {
   tex.needsUpdate = true;
   return tex;
 }
-function makeFloorWallScreenTexture(kit, floorNum, floor, accent, status, maxAnisotropy = 8) {
-  var _a, _b;
+function makeFloorWallScreenTexture(kit, floorNum, floor, accent, status, holding, slideMode = 0, maxAnisotropy = 8) {
+  var _a, _b, _c;
   const logicalW = 768;
   const logicalH = 224;
   const c = canvasOf(logicalW * 2, logicalH * 2);
   const g = c.getContext("2d");
   g.scale(2, 2);
-  const accCss = rgbToCss(accent);
-  g.fillStyle = "#0e121a";
+  const modeAccent = slideMode === 1 ? [0.98, 0.8, 0.2] : slideMode === 2 ? [0.38, 0.72, 0.98] : accent;
+  const accCss = rgbToCss(modeAccent);
+  g.fillStyle = slideMode === 1 ? "#10131d" : slideMode === 2 ? "#0c1320" : "#0e121a";
   g.fillRect(0, 0, logicalW, logicalH);
   g.strokeStyle = "rgba(255,255,255,0.045)";
   g.lineWidth = 1;
@@ -58271,49 +58383,117 @@ function makeFloorWallScreenTexture(kit, floorNum, floor, accent, status, maxAni
   g.fillRect(10, 0, logicalW - 10, 56);
   g.fillStyle = accCss;
   g.fillRect(10, 54, logicalW - 10, 3);
+  const modeTag = slideMode === 0 ? "1/3 EXECUTIVO ▸" : slideMode === 1 ? "2/3 MÔNACO · ATO 1 ▸" : "3/3 NIPs & A2A ▸";
   g.fillStyle = "#f8fafc";
-  g.font = "700 26px -apple-system, BlinkMacSystemFont, sans-serif";
-  g.fillText(`${floorNum}F · ${floor.nome.toUpperCase().slice(0, 26)}`, 26, 37);
-  const pillText = floor.errorCount > 0 ? `${floor.errorCount} ALERTA` : floor.workingCount > 0 ? `${floor.workingCount} AO VIVO` : floor.estagio.toUpperCase();
-  g.fillStyle = rgbToCss(accent, 0.18);
-  g.fillRect(logicalW - 168, 12, 148, 30);
+  g.font = "700 24px -apple-system, BlinkMacSystemFont, sans-serif";
+  g.fillText(`${floorNum}F · ${floor.nome.toUpperCase().slice(0, 22)}`, 24, 36);
+  g.fillStyle = rgbToCss(modeAccent, 0.16);
+  g.fillRect(logicalW - 318, 12, 162, 30);
   g.strokeStyle = accCss;
-  g.lineWidth = 1.5;
-  g.strokeRect(logicalW - 168, 12, 148, 30);
+  g.lineWidth = 1.4;
+  g.strokeRect(logicalW - 318, 12, 162, 30);
   g.fillStyle = accCss;
-  g.font = "700 14px ui-monospace, Menlo, monospace";
+  g.font = "700 12.5px ui-monospace, Menlo, monospace";
   g.textAlign = "center";
-  g.fillText(pillText.slice(0, 14), logicalW - 94, 32);
+  g.fillText(modeTag, logicalW - 237, 32);
+  const pillText = floor.errorCount > 0 ? `${floor.errorCount} ALERTA` : floor.workingCount > 0 ? `${floor.workingCount} AO VIVO` : floor.estagio.toUpperCase();
+  const baseAccCss = rgbToCss(accent);
+  g.fillStyle = rgbToCss(accent, 0.18);
+  g.fillRect(logicalW - 146, 12, 128, 30);
+  g.strokeStyle = baseAccCss;
+  g.lineWidth = 1.4;
+  g.strokeRect(logicalW - 146, 12, 128, 30);
+  g.fillStyle = baseAccCss;
+  g.font = "700 13px ui-monospace, Menlo, monospace";
+  g.fillText(pillText.slice(0, 12), logicalW - 82, 32);
   g.textAlign = "left";
-  const cards = floor.isBoard ? [
-    { k: "CONSELHEIROS", v: String(floor.agentesCount), sub: `${floor.workingCount} em turno` },
-    { k: "MERGES (7D)", v: String(((_a = status == null ? void 0 : status.stats) == null ? void 0 : _a.merged7d) ?? 0), sub: "holding cortexx" },
-    { k: "GASTO HOJE", v: `$${(((_b = status == null ? void 0 : status.spendToday) == null ? void 0 : _b.usd) ?? 0).toFixed(2)}`, sub: "finops ao vivo" }
-  ] : [
-    { k: "AGENTES", v: String(floor.agentesCount), sub: `${floor.workingCount} ativos agora` },
-    { k: "ESTEIRA", v: String(floor.packets.length), sub: floor.packets.length > 0 ? "itens circulando" : "fila livre" },
-    { k: "PRS / ISSUES", v: `${floor.openPrsCount}/${floor.openIssuesCount}`, sub: floor.estagio }
-  ];
+  const spendUsd = ((_a = status == null ? void 0 : status.spendToday) == null ? void 0 : _a.usd) ?? 0;
+  const merged7d = ((_b = status == null ? void 0 : status.stats) == null ? void 0 : _b.merged7d) ?? 0;
+  const proto = holding == null ? void 0 : holding.protocolSummary;
+  const nip99Total = (proto == null ? void 0 : proto.nip99Total) ?? 14;
+  const nip89Total = (proto == null ? void 0 : proto.nip89Total) ?? 5;
+  const unitKey = floor.isBoard ? "board" : floor.slug.toLowerCase();
+  const unitNip99 = ((_c = proto == null ? void 0 : proto.servicesByUnit) == null ? void 0 : _c[unitKey]) ?? (floor.isBoard ? 3 : 2);
+  const icActive = (proto == null ? void 0 : proto.intercompanyActive) ?? 0;
+  const icTotal = (proto == null ? void 0 : proto.intercompanyTotal) ?? 0;
+  let cards;
+  if (slideMode === 1) {
+    if (floor.isBoard) {
+      cards = [
+        { k: "ROTA MÔNACO", v: "ATO 1/3", sub: "NexusMind + Agências" },
+        { k: "FOCO HOLDING", v: "3 PILARES", sub: "Gateway · 3F · Lumen" },
+        { k: "FINOPS HOJE", v: `$${spendUsd.toFixed(2)}`, sub: "Pix/BRL · margem alta" }
+      ];
+    } else if (unitKey === "orgfy") {
+      cards = [
+        { k: "PAPEL NO ATO 1", v: "PLATAFORMA", sub: "NexusMind + Fábrica" },
+        { k: "ENTREGAS (7D)", v: String(merged7d), sub: "auditoria L-01 / L-22" },
+        { k: "META MÔNACO", v: "AGÊNCIAS", sub: "Service as Software" }
+      ];
+    } else if (unitKey === "growth-studio") {
+      cards = [
+        { k: "PAPEL NO ATO 1", v: "AQUISIÇÃO", sub: "Redes · Ads HITL · CRM" },
+        { k: "CATÁLOGO 3F", v: `${unitNip99} SERV.`, sub: "criativos & funil" },
+        { k: "META MÔNACO", v: "D+1 / D+7", sub: "métricas reais de venda" }
+      ];
+    } else if (unitKey.includes("lumen")) {
+      cards = [
+        { k: "PAPEL NO ATO 1", v: "CAIXA", sub: "piloto automático" },
+        { k: "ESTEIRA ATIVA", v: `${floor.packets.length}/${floor.openPrsCount}`, sub: "cards · PRs abertos" },
+        { k: "META MÔNACO", v: "PIX / BRL", sub: "recorrência & WhatsApp" }
+      ];
+    } else {
+      cards = [
+        { k: "PAPEL NO ATO 1", v: "CONGELADO", sub: "reserva p/ Ato 2" },
+        { k: "TIME PRONTO", v: String(floor.agentesCount), sub: "manifesto mapeado" },
+        { k: "META MÔNACO", v: "ATO 2/3", sub: "foco 100% no Ato 1" }
+      ];
+    }
+  } else if (slideMode === 2) {
+    cards = floor.isBoard ? [
+      { k: "NIP-99 (30402)", v: String(nip99Total), sub: "serviços catalogados" },
+      { k: "NIP-89 (31990)", v: String(nip89Total), sub: "unidades / handlers" },
+      { k: "INTERCOMPANY", v: `${icActive}/${icTotal}`, sub: "Pix/BRL + NWC/Cashu" }
+    ] : [
+      { k: "NIP-99 (30402)", v: String(unitNip99), sub: "serviços deste andar" },
+      { k: "CAMADA A2A", v: "DUAL", sub: "Pix/BRL + NWC/Cashu" },
+      { k: "INTERCOMPANY", v: `${icActive}/${icTotal}`, sub: "porta PO/COO · Semáforo" }
+    ];
+  } else {
+    cards = floor.isBoard ? [
+      { k: "CONSELHEIROS", v: String(floor.agentesCount), sub: `${floor.workingCount} em turno` },
+      { k: "MERGES (7D)", v: String(merged7d), sub: "holding cortexx" },
+      { k: "GASTO HOJE", v: `$${spendUsd.toFixed(2)}`, sub: "finops ao vivo" }
+    ] : [
+      { k: "AGENTES", v: String(floor.agentesCount), sub: `${floor.workingCount} ativos agora` },
+      { k: "ESTEIRA", v: String(floor.packets.length), sub: floor.packets.length > 0 ? "itens circulando" : "fila livre" },
+      { k: "PRS / ISSUES", v: `${floor.openPrsCount}/${floor.openIssuesCount}`, sub: floor.estagio }
+    ];
+  }
   cards.forEach((card, idx) => {
     const bx = 26 + idx * 242;
-    const by = 74;
+    const by = 72;
     const bw = 226;
-    const bh = 128;
+    const bh = 122;
     g.fillStyle = "rgba(255,255,255,0.04)";
     g.fillRect(bx, by, bw, bh);
-    g.strokeStyle = "rgba(255,255,255,0.11)";
+    g.strokeStyle = slideMode === 1 ? "rgba(250,204,21,0.22)" : slideMode === 2 ? "rgba(56,189,248,0.22)" : "rgba(255,255,255,0.11)";
     g.lineWidth = 1.5;
     g.strokeRect(bx, by, bw, bh);
     g.fillStyle = "#94a3b8";
-    g.font = "700 13px ui-monospace, Menlo, monospace";
-    g.fillText(card.k, bx + 16, by + 28);
+    g.font = "700 12.5px ui-monospace, Menlo, monospace";
+    g.fillText(card.k, bx + 15, by + 26);
+    const valFontSize = card.v.length > 7 ? 27 : card.v.length > 5 ? 32 : 40;
     g.fillStyle = "#f8fafc";
-    g.font = "700 42px ui-monospace, Menlo, monospace";
-    g.fillText(card.v, bx + 16, by + 80);
+    g.font = `700 ${valFontSize}px ui-monospace, Menlo, monospace`;
+    g.fillText(card.v, bx + 15, by + 76);
     g.fillStyle = accCss;
-    g.font = "500 14px -apple-system, sans-serif";
-    g.fillText(card.sub.slice(0, 22), bx + 16, by + 110);
+    g.font = "500 13.5px -apple-system, sans-serif";
+    g.fillText(card.sub.slice(0, 23), bx + 15, by + 105);
   });
+  g.fillStyle = "rgba(148,163,184,0.65)";
+  g.font = "600 10.5px ui-monospace, Menlo, monospace";
+  g.fillText("CLIQUE NO TELÃO PARA TROCAR: EXECUTIVO · MISSÃO MÔNACO · PROTOCOLO NIPs", 26, 212);
   return sharpenCanvasTexture(kit.canvasTexture(c), maxAnisotropy);
 }
 function makeFloorBadgeTexture(kit, label, accent, maxAnisotropy = 8) {
@@ -58487,6 +58667,156 @@ function buildBoardChair(kit, matLeather, matSteel, matChrome) {
   chair.add(back);
   return chair;
 }
+function buildMonacoDisplayTable(kit, matWood, matSteel, matChrome, matAccent, darkFactoryMode) {
+  const g = new Group();
+  const tableW = 0.86;
+  const tableL = 2.38;
+  const topY = 0.56;
+  const top = new Mesh(kit.own(new BoxGeometry(tableW, 0.065, tableL)), matWood);
+  top.position.set(0, topY, 0);
+  top.castShadow = true;
+  top.receiveShadow = true;
+  g.add(top);
+  const goldBar = new Mesh(kit.own(new BoxGeometry(0.025, 0.032, tableL + 0.01)), matAccent);
+  goldBar.position.set(tableW / 2 + 5e-3, topY, 0);
+  g.add(goldBar);
+  const shelf = new Mesh(kit.own(new BoxGeometry(tableW - 0.14, 0.035, tableL - 0.2)), matSteel);
+  shelf.position.set(0, 0.2, 0);
+  shelf.receiveShadow = true;
+  g.add(shelf);
+  for (const lx of [-tableW / 2 + 0.07, tableW / 2 - 0.07]) {
+    for (const lz of [-tableL / 2 + 0.1, tableL / 2 - 0.1]) {
+      const leg = new Mesh(kit.own(new BoxGeometry(0.06, topY - 0.03, 0.06)), matSteel);
+      leg.position.set(lx, (topY - 0.03) / 2, lz);
+      leg.castShadow = true;
+      g.add(leg);
+    }
+  }
+  const matBlack = kit.matte([0.08, 0.09, 0.12], { roughness: 0.35 });
+  const matWhite = kit.matte([0.96, 0.97, 0.99], { roughness: 0.32 });
+  const matGold = kit.matte([0.96, 0.78, 0.2], { roughness: 0.25, metalness: 0.55 });
+  const sennaPed = new Mesh(kit.own(new BoxGeometry(0.36, 0.055, 0.36)), matBlack);
+  sennaPed.position.set(0.02, topY + 0.06, -0.74);
+  sennaPed.castShadow = true;
+  g.add(sennaPed);
+  const sennaHelmet = new Group();
+  sennaHelmet.position.set(0.02, topY + 0.21, -0.74);
+  const matSennaYellow = kit.matte([0.98, 0.8, 0.08], { roughness: 0.24, metalness: 0.12 });
+  const matSennaGreen = kit.matte([0.09, 0.64, 0.29], { roughness: 0.3 });
+  const matSennaBlue = kit.matte([0.11, 0.31, 0.85], { roughness: 0.3 });
+  const matVisor = kit.own(
+    new MeshPhysicalMaterial({
+      color: 725536,
+      roughness: 0.08,
+      metalness: 0.65,
+      reflectivity: 0.95
+    })
+  );
+  const hShell = new Mesh(kit.own(new BoxGeometry(0.25, 0.23, 0.25)), matSennaYellow);
+  hShell.castShadow = true;
+  sennaHelmet.add(hShell);
+  const hCrown = new Mesh(kit.own(new BoxGeometry(0.21, 0.045, 0.21)), matSennaYellow);
+  hCrown.position.y = 0.135;
+  sennaHelmet.add(hCrown);
+  const hStripeGreen = new Mesh(kit.own(new BoxGeometry(0.262, 0.032, 0.262)), matSennaGreen);
+  hStripeGreen.position.y = 0.025;
+  sennaHelmet.add(hStripeGreen);
+  const hStripeBlue = new Mesh(kit.own(new BoxGeometry(0.262, 0.03, 0.262)), matSennaBlue);
+  hStripeBlue.position.y = -0.015;
+  sennaHelmet.add(hStripeBlue);
+  const hVisor = new Mesh(kit.own(new BoxGeometry(0.045, 0.088, 0.195)), matVisor);
+  hVisor.position.set(0.118, 0.018, 0);
+  sennaHelmet.add(hVisor);
+  const hChin = new Mesh(kit.own(new BoxGeometry(0.05, 0.055, 0.22)), matSennaYellow);
+  hChin.position.set(0.112, -0.072, 0);
+  sennaHelmet.add(hChin);
+  g.add(sennaHelmet);
+  const f1 = new Group();
+  f1.position.set(0.02, topY + 0.035, 0);
+  f1.rotation.y = 0.26;
+  const matF1Red = kit.matte([0.86, 0.15, 0.15], { roughness: 0.26, metalness: 0.18 });
+  const f1Body = new Mesh(kit.own(new BoxGeometry(0.17, 0.075, 0.44)), matF1Red);
+  f1Body.position.set(0, 0.068, 0);
+  f1Body.castShadow = true;
+  f1.add(f1Body);
+  const f1WhiteCover = new Mesh(kit.own(new BoxGeometry(0.13, 0.06, 0.22)), matWhite);
+  f1WhiteCover.position.set(0, 0.11, -0.05);
+  f1.add(f1WhiteCover);
+  const f1Nose = new Mesh(kit.own(new BoxGeometry(0.095, 0.05, 0.2)), matF1Red);
+  f1Nose.position.set(0, 0.058, 0.28);
+  f1.add(f1Nose);
+  const f1FrontWing = new Mesh(kit.own(new BoxGeometry(0.32, 0.022, 0.085)), matWhite);
+  f1FrontWing.position.set(0, 0.038, 0.34);
+  f1.add(f1FrontWing);
+  const f1RearWing = new Mesh(kit.own(new BoxGeometry(0.3, 0.026, 0.08)), matF1Red);
+  f1RearWing.position.set(0, 0.175, -0.22);
+  f1.add(f1RearWing);
+  for (const sx of [-0.145, 0.145]) {
+    const endplate = new Mesh(kit.own(new BoxGeometry(0.02, 0.12, 0.1)), matWhite);
+    endplate.position.set(sx, 0.13, -0.22);
+    f1.add(endplate);
+  }
+  const f1Cockpit = new Mesh(kit.own(new BoxGeometry(0.09, 0.04, 0.11)), matBlack);
+  f1Cockpit.position.set(0, 0.115, 0.05);
+  f1.add(f1Cockpit);
+  for (const [wx, wz] of [
+    [-0.14, 0.2],
+    [0.14, 0.2],
+    [-0.15, -0.17],
+    [0.15, -0.17]
+  ]) {
+    const wheel = new Mesh(kit.own(new BoxGeometry(0.07, 0.095, 0.11)), matBlack);
+    wheel.position.set(wx, 0.048, wz);
+    wheel.castShadow = true;
+    f1.add(wheel);
+  }
+  g.add(f1);
+  const yacht = new Group();
+  yacht.position.set(0, topY + 0.035, 0.77);
+  yacht.rotation.y = -0.14;
+  const matSea = kit.own(
+    new MeshPhysicalMaterial({
+      color: darkFactoryMode ? 165063 : 959977,
+      transparent: true,
+      opacity: 0.65,
+      roughness: 0.12,
+      metalness: 0.05
+    })
+  );
+  const seaBase = new Mesh(kit.own(new BoxGeometry(0.42, 0.04, 0.74)), matSea);
+  seaBase.position.y = 0.02;
+  yacht.add(seaBase);
+  const hullMain = new Mesh(kit.own(new BoxGeometry(0.24, 0.095, 0.54)), matWhite);
+  hullMain.position.set(0, 0.088, -0.04);
+  hullMain.castShadow = true;
+  yacht.add(hullMain);
+  const hullBow = new Mesh(kit.own(new BoxGeometry(0.15, 0.085, 0.18)), matWhite);
+  hullBow.position.set(0, 0.092, 0.27);
+  yacht.add(hullBow);
+  const teakDeck = new Mesh(kit.own(new BoxGeometry(0.21, 0.02, 0.48)), matWood);
+  teakDeck.position.set(0, 0.14, -0.02);
+  yacht.add(teakDeck);
+  const cabinGlass = new Mesh(kit.own(new BoxGeometry(0.18, 0.075, 0.28)), matVisor);
+  cabinGlass.position.set(0, 0.185, -0.03);
+  yacht.add(cabinGlass);
+  const flybridge = new Mesh(kit.own(new BoxGeometry(0.2, 0.03, 0.26)), matWhite);
+  flybridge.position.set(0, 0.235, -0.04);
+  yacht.add(flybridge);
+  const mast = new Mesh(kit.own(new BoxGeometry(0.025, 0.1, 0.025)), matGold);
+  mast.position.set(0, 0.295, -0.06);
+  yacht.add(mast);
+  const radar = new Mesh(kit.own(new BoxGeometry(0.11, 0.018, 0.025)), matChrome);
+  radar.position.set(0, 0.34, -0.06);
+  yacht.add(radar);
+  g.add(yacht);
+  const hitMesh = new Mesh(
+    kit.own(new BoxGeometry(1.05, 1.05, 2.55)),
+    kit.own(new MeshBasicMaterial({ visible: false }))
+  );
+  hitMesh.position.set(0, 0.54, 0);
+  g.add(hitMesh);
+  return { group: g, hitMesh, sennaHelmet };
+}
 function buildCiSignalTower(kit, p, matSteel, state) {
   const g = new Group();
   const pole = new Mesh(kit.own(new CylinderGeometry(0.032, 0.04, 1.02, 10)), matSteel);
@@ -58523,7 +58853,7 @@ function createHoldingTower3DComponent(ctx) {
   const React = ctx.react;
   const h = React.createElement;
   return function HoldingTower3DCanvas(props) {
-    var _a;
+    var _a, _b;
     const hostRef = React.useRef(null);
     const mountRef = React.useRef(null);
     const canvasRef = React.useRef(null);
@@ -58537,6 +58867,9 @@ function createHoldingTower3DComponent(ctx) {
     const [isFullscreen, setIsFullscreen] = React.useState(false);
     const [isPipActive, setIsPipActive] = React.useState(false);
     const [demoPhase, setDemoPhase] = React.useState(null);
+    const [screenSlideTick, setScreenSlideTick] = React.useState(0);
+    const screenModesRef = React.useRef({});
+    const screenSwitchersRef = React.useRef({});
     const desiredTargetRef = React.useRef(new Vector3(0, 6.2, 0));
     const desiredFrustumRef = React.useRef(15.8);
     const desiredPhiRef = React.useRef(null);
@@ -58564,17 +58897,17 @@ function createHoldingTower3DComponent(ctx) {
       return () => window.clearTimeout(timer);
     }, [demoPhase]);
     const floors = React.useMemo(() => {
-      var _a2, _b;
+      var _a2, _b2;
       const byPk = ((_a2 = props.telemetry) == null ? void 0 : _a2.byPubkey) || {};
       const crew = props.liveCrew || [];
       const activeItems = props.status ? [...props.status.inProgress || [], ...props.status.backlog || []] : [];
-      const empresas = ((_b = props.holding) == null ? void 0 : _b.empresas) && props.holding.empresas.length > 0 ? props.holding.empresas : [
+      const empresas = ((_b2 = props.holding) == null ? void 0 : _b2.empresas) && props.holding.empresas.length > 0 ? props.holding.empresas : [
         { slug: "orgfy", nome: "OrgFy Core", estagio: "operacional", agentesTotal: 16, agentesProntos: 16 },
         { slug: "lumen-iptv", nome: "Lumen IPTV", estagio: "operacional", agentesTotal: 6, agentesProntos: 6 },
         { slug: "saas-tributario", nome: "SaaS Tributário", estagio: "planejado", agentesTotal: 0, agentesProntos: 0 }
       ];
       const subsidiaryFloors = empresas.map((emp) => {
-        var _a3, _b2, _c, _d;
+        var _a3, _b3, _c, _d;
         const slugLower = String(emp.slug || "").toLowerCase();
         const empCanal = String(emp.canal || "").trim().toLowerCase();
         const manifestAgents = Array.isArray(emp.agentes) ? emp.agentes : [];
@@ -58664,7 +58997,7 @@ function createHoldingTower3DComponent(ctx) {
             });
           }
         }
-        const openPrsCount = slugLower === String(props.activeTenant || "").toLowerCase() ? ((_b2 = (_a3 = props.status) == null ? void 0 : _a3.wip) == null ? void 0 : _b2.openPrs) ?? 0 : Number(emp.prsAbertos ?? emp.emRevisao ?? 0);
+        const openPrsCount = slugLower === String(props.activeTenant || "").toLowerCase() ? ((_b3 = (_a3 = props.status) == null ? void 0 : _a3.wip) == null ? void 0 : _b3.openPrs) ?? 0 : Number(emp.prsAbertos ?? emp.emRevisao ?? 0);
         const openIssuesCount = slugLower === String(props.activeTenant || "").toLowerCase() ? ((_d = (_c = props.status) == null ? void 0 : _c.backlog) == null ? void 0 : _d.length) ?? 0 : Number(emp.abertas ?? 0);
         return {
           slug: emp.slug,
@@ -58738,7 +59071,8 @@ function createHoldingTower3DComponent(ctx) {
       return byLumen >= 0 ? byLumen : 0;
     }, [floors, props.activeTenant]);
     const demoTargetFloorName = ((_a = floors[demoTargetFloorIdx]) == null ? void 0 : _a.nome) || "Lumen IPTV";
-    const floorsSignature = floors.map((f) => `${f.slug}:${f.workingCount}:${f.errorCount}:${f.agentesCount}:${f.packets.map((p) => `${p.id}:${p.stage}`).join(",")}`).join("|");
+    const protoSig = ((_b = props.holding) == null ? void 0 : _b.protocolSummary) ? `${props.holding.protocolSummary.nip99Total}:${props.holding.protocolSummary.nip89Total}:${props.holding.protocolSummary.intercompanyActive}/${props.holding.protocolSummary.intercompanyTotal}` : "0";
+    const floorsSignature = `${floors.map((f) => `${f.slug}:${f.workingCount}:${f.errorCount}:${f.agentesCount}:${f.packets.map((p) => `${p.id}:${p.stage}`).join(",")}`).join("|")}||${protoSig}`;
     const handleTogglePiP = async () => {
       try {
         if (document.pictureInPictureElement) {
@@ -58785,7 +59119,7 @@ function createHoldingTower3DComponent(ctx) {
       };
     }, []);
     React.useEffect(() => {
-      var _a2, _b;
+      var _a2, _b2;
       const container = mountRef.current;
       if (!container) return;
       const palette = readPalette();
@@ -58856,7 +59190,7 @@ function createHoldingTower3DComponent(ctx) {
       container.innerHTML = "";
       container.appendChild(renderer.domElement);
       canvasRef.current = renderer.domElement;
-      const maxAniso = ((_b = (_a2 = renderer.capabilities).getMaxAnisotropy) == null ? void 0 : _b.call(_a2)) || 8;
+      const maxAniso = ((_b2 = (_a2 = renderer.capabilities).getMaxAnisotropy) == null ? void 0 : _b2.call(_a2)) || 8;
       const pmremGenerator = new PMREMGenerator(renderer);
       const envScene = new RoomEnvironment();
       const envRT = pmremGenerator.fromScene(envScene, 0.04);
@@ -58969,6 +59303,8 @@ function createHoldingTower3DComponent(ctx) {
       const dataCapsules = [];
       const hitTargets = [];
       const selectionByHit = /* @__PURE__ */ new WeakMap();
+      const screenActionByHit = /* @__PURE__ */ new WeakMap();
+      screenSwitchersRef.current = {};
       if (realElevatorEvents.length > 0) {
         realElevatorEvents.slice(0, 6).forEach((ev, i) => {
           const capRgb = stageColorRgb(ev.packet.stage, palette);
@@ -59127,13 +59463,51 @@ function createHoldingTower3DComponent(ctx) {
         screenBezel.position.set(0.95, screenY, -floorD / 2 + 0.22);
         screenBezel.castShadow = true;
         floorGroup.add(screenBezel);
-        const screenTex = makeFloorWallScreenTexture(kit, fIdx + 1, floor, floorAccent, props.status, maxAniso);
-        const screenPlane = new Mesh(
-          kit.own(new PlaneGeometry(4.18, 1.08)),
-          kit.own(new MeshBasicMaterial({ map: screenTex }))
+        const initialMode = screenModesRef.current[floor.slug] ?? 0;
+        const screenMat = kit.own(
+          new MeshBasicMaterial({
+            map: makeFloorWallScreenTexture(
+              kit,
+              fIdx + 1,
+              floor,
+              floorAccent,
+              props.status,
+              props.holding,
+              initialMode,
+              maxAniso
+            )
+          })
         );
+        const screenPlane = new Mesh(kit.own(new PlaneGeometry(4.18, 1.08)), screenMat);
         screenPlane.position.set(0.95, screenY, -floorD / 2 + 0.275);
         floorGroup.add(screenPlane);
+        const switchFloorScreen = (forcedMode) => {
+          const cur = screenModesRef.current[floor.slug] ?? 0;
+          const next = forcedMode !== void 0 ? forcedMode : (cur + 1) % 3;
+          screenModesRef.current[floor.slug] = next;
+          const prevTex = screenMat.map;
+          screenMat.map = makeFloorWallScreenTexture(
+            kit,
+            fIdx + 1,
+            floor,
+            floorAccent,
+            props.status,
+            props.holding,
+            next,
+            maxAniso
+          );
+          screenMat.needsUpdate = true;
+          if (prevTex) prevTex.dispose();
+          setScreenSlideTick((v2) => v2 + 1);
+          return next;
+        };
+        screenSwitchersRef.current[floor.slug] = switchFloorScreen;
+        hitTargets.push(screenPlane);
+        screenActionByHit.set(screenPlane, {
+          kind: "cycle_screen",
+          floor,
+          focusPos: new Vector3(0.95, y0 + 1.45, -1.2)
+        });
         if (floor.errorCount > 0) {
           const beacon = new Mesh(
             kit.own(new BoxGeometry(0.24, 0.26, 0.24)),
@@ -59147,6 +59521,15 @@ function createHoldingTower3DComponent(ctx) {
         cornerPlant.position.set(floorW / 2 - 0.85, 0, -floorD / 2 + 0.85);
         floorGroup.add(cornerPlant);
         if (floor.isBoard) {
+          const monacoDisplay = buildMonacoDisplayTable(kit, matWood, matSteel, matChrome, matAccent, darkFactoryMode);
+          monacoDisplay.group.position.set(-4.72, 0, 0.82);
+          floorGroup.add(monacoDisplay.group);
+          hitTargets.push(monacoDisplay.hitMesh);
+          screenActionByHit.set(monacoDisplay.hitMesh, {
+            kind: "monaco_table",
+            floor,
+            focusPos: new Vector3(-2.6, y0 + 1, 0.55)
+          });
           const rug = new Mesh(
             kit.own(new BoxGeometry(8.2, 0.025, 4.7)),
             kit.matte(darkFactoryMode ? [0.19, 0.21, 0.28] : [0.84, 0.83, 0.8], { roughness: 0.95 })
@@ -59474,8 +59857,10 @@ function createHoldingTower3DComponent(ctx) {
         raycaster.setFromCamera(pointer, camera);
         const hits = raycaster.intersectObjects(hitTargets, false);
         for (const hit2 of hits) {
+          const scr = screenActionByHit.get(hit2.object);
+          if (scr) return { kind: "screen", action: scr };
           const entry = selectionByHit.get(hit2.object);
-          if (entry) return entry;
+          if (entry) return { kind: "selection", entry };
         }
         return null;
       };
@@ -59515,18 +59900,31 @@ function createHoldingTower3DComponent(ctx) {
           return;
         }
         const hit2 = pickTarget(e);
-        setHoveredSlug(hit2 ? hit2.sel.floor.slug : null);
+        setHoveredSlug(hit2 ? hit2.kind === "screen" ? hit2.action.floor.slug : hit2.entry.sel.floor.slug : null);
         renderer.domElement.style.cursor = hit2 ? "pointer" : "grab";
       };
       const onUp = (e) => {
         if (dragMode === "orbit" && !moved) {
           const hit2 = pickTarget(e);
-          if (hit2) {
-            setSelection(hit2.sel);
+          if ((hit2 == null ? void 0 : hit2.kind) === "screen") {
+            const switcher = screenSwitchersRef.current[hit2.action.floor.slug];
+            if (hit2.action.kind === "monaco_table") {
+              switcher == null ? void 0 : switcher(1);
+              setSelection({ kind: "floor", floor: hit2.action.floor });
+              const stepH = FLOOR_H + (explodedRef.current ? 1.95 : 0);
+              const fIdx = Math.max(0, floors.findIndex((fl) => fl.slug === hit2.action.floor.slug));
+              desiredTargetRef.current.set(hit2.action.focusPos.x, fIdx * stepH + 1.05, hit2.action.focusPos.z);
+              desiredFrustumRef.current = 6.2;
+            } else {
+              switcher == null ? void 0 : switcher();
+              setSelection({ kind: "floor", floor: hit2.action.floor });
+            }
+          } else if ((hit2 == null ? void 0 : hit2.kind) === "selection") {
+            setSelection(hit2.entry.sel);
             const stepH = FLOOR_H + (explodedRef.current ? 1.95 : 0);
-            const fIdx = Math.max(0, floors.findIndex((fl) => fl.slug === hit2.sel.floor.slug));
-            desiredTargetRef.current.set(hit2.focusPos.x, fIdx * stepH + 1, hit2.focusPos.z);
-            desiredFrustumRef.current = hit2.sel.kind === "floor" ? 8.2 : 4.6;
+            const fIdx = Math.max(0, floors.findIndex((fl) => fl.slug === hit2.entry.sel.floor.slug));
+            desiredTargetRef.current.set(hit2.entry.focusPos.x, fIdx * stepH + 1, hit2.entry.focusPos.z);
+            desiredFrustumRef.current = hit2.entry.sel.kind === "floor" ? 8.2 : 4.6;
           } else {
             setSelection(null);
             const effH = getEffectiveTotalH();
@@ -59539,7 +59937,8 @@ function createHoldingTower3DComponent(ctx) {
       };
       const onDblClick = (e) => {
         const hit2 = pickTarget(e);
-        if (hit2) props.onEnterFloor(hit2.sel.floor.slug);
+        if (!hit2) return;
+        props.onEnterFloor(hit2.kind === "screen" ? hit2.action.floor.slug : hit2.entry.sel.floor.slug);
       };
       const onWheel = (e) => {
         e.preventDefault();
@@ -59859,7 +60258,7 @@ function createHoldingTower3DComponent(ctx) {
               boxShadow: `0 0 8px ${demoPhase >= 4 ? "#34d399" : "#60a5fa"}`
             }
           }),
-          h("span", null, towerDemoLabel(demoPhase, demoTargetFloorName))
+          h("span", null, towerDemoLabel(demoPhase, demoTargetFloorName, floors.length))
         ),
         // Seletor rápido de andares (Elevador na esquerda)
         h(
@@ -60017,7 +60416,7 @@ function createHoldingTower3DComponent(ctx) {
             ),
             h(
               "div",
-              { key: "a", style: { display: "flex", gap: "6px" } },
+              { key: "a", "data-screen-slide-tick": String(screenSlideTick), style: { display: "flex", gap: "6px", flexWrap: "wrap" } },
               h(
                 "button",
                 {
@@ -60028,6 +60427,21 @@ function createHoldingTower3DComponent(ctx) {
                   onClick: () => props.onEnterFloor(activeFloorCard.slug)
                 },
                 activeFloorCard.isBoard ? "Entrar na Sala 3D ↗" : "Entrar no Andar 3D ↗"
+              ),
+              h(
+                "button",
+                {
+                  type: "button",
+                  className: "of-btn",
+                  "data-tower-screen-cycle-btn": "true",
+                  style: { fontSize: "11px" },
+                  title: "Alternar painel do telão (Executivo · Missão Mônaco · Protocolo NIPs)",
+                  onClick: () => {
+                    var _a2, _b2;
+                    return (_b2 = (_a2 = screenSwitchersRef.current)[activeFloorCard.slug]) == null ? void 0 : _b2.call(_a2);
+                  }
+                },
+                `Telão ${(screenModesRef.current[activeFloorCard.slug] ?? 0) + 1}/3 ↻`
               ),
               props.onOpenChannel && h(
                 "button",
@@ -60211,7 +60625,7 @@ function createHoldingTower3DComponent(ctx) {
               "data-variant": "ghost",
               style: { padding: "4px 7px", fontSize: "12px" },
               onClick: () => {
-                var _a2, _b;
+                var _a2, _b2;
                 const el = hostRef.current;
                 if (!el) return;
                 try {
@@ -60219,7 +60633,7 @@ function createHoldingTower3DComponent(ctx) {
                     void ((_a2 = document.exitFullscreen) == null ? void 0 : _a2.call(document));
                     setIsFullscreen(false);
                   } else {
-                    void ((_b = el.requestFullscreen) == null ? void 0 : _b.call(el));
+                    void ((_b2 = el.requestFullscreen) == null ? void 0 : _b2.call(el));
                     setIsFullscreen(true);
                   }
                 } catch {

@@ -97,6 +97,26 @@ export interface RealProbationaryRule {
   fpyObservado: number | null;
 }
 
+export interface HoldingStrategicVision {
+  atoAtual: string;
+  missaoCurta: string;
+  focoPrincipal: string[];
+  cascaExternaBr: string;
+  nucleoInternoA2a: string;
+  projetosCongelados: string[];
+  atualizadoEm?: string;
+}
+
+export interface HoldingProtocolSummary {
+  nip99Total: number;
+  nip89Total: number;
+  servicesByUnit: Record<string, number>;
+  paymentRails: string[];
+  intercompanyTotal: number;
+  intercompanyActive: number;
+  intercompanyDone: number;
+}
+
 export interface HoldingControlPlaneSnapshot {
   ok: boolean;
   loadedAt: string;
@@ -113,6 +133,8 @@ export interface HoldingControlPlaneSnapshot {
   regrasProbatorias: RealProbationaryRule[];
   templatesReais: RealTemplateFile[];
   activeLocks: CheckoutLockRecord[];
+  visaoEstrategica?: HoldingStrategicVision;
+  protocolSummary?: HoldingProtocolSummary;
 }
 
 function isPlaceholderHex(val: string | undefined): boolean {
@@ -287,7 +309,7 @@ async function readWorkflowStatuses(ctx: Context): Promise<RealWorkflowStatus[]>
 }
 
 export async function fetchHoldingControlPlane(ctx: Context): Promise<HoldingControlPlaneSnapshot> {
-  const [boardJson, orgfyJson, activeLocks, approvals, workflows, templatesReais, regrasJson] = await Promise.all([
+  const [boardJson, orgfyJson, activeLocks, approvals, workflows, templatesReais, regrasJson, catalogoJson, intercompanyJson] = await Promise.all([
     readOrgfyJson<any>(ctx, "empresas/board.json", null),
     readOrgfyJson<any>(ctx, "empresas/orgfy.json", null),
     listActiveLocks(ctx),
@@ -295,6 +317,8 @@ export async function fetchHoldingControlPlane(ctx: Context): Promise<HoldingCon
     readWorkflowStatuses(ctx),
     readRealTemplates(ctx),
     readOrgfyJson<any>(ctx, ".esteira/estado/regras-probatorias.json", null),
+    readOrgfyJson<any>(ctx, "empresas/catalogo-servicos.json", null),
+    readOrgfyJson<any>(ctx, ".esteira/estado/intercompany-requests.json", null),
   ]);
 
   const locksByAgent = new Map<string, CheckoutLockRecord>();
@@ -475,6 +499,63 @@ export async function fetchHoldingControlPlane(ctx: Context): Promise<HoldingCon
     })
   );
 
+  // Resumo real de Protocolo Nostr (NIP-99 / NIP-89) e Contratos Intercompany
+  const unidadesCatalogo = catalogoJson?.unidades && typeof catalogoJson.unidades === "object" ? catalogoJson.unidades : {};
+  const servicesByUnit: Record<string, number> = {};
+  let nip99Total = 0;
+  let nip89Total = 0;
+  for (const [uSlug, uData] of Object.entries(unidadesCatalogo as Record<string, any>)) {
+    const list = Array.isArray(uData?.servicos) ? uData.servicos : [];
+    servicesByUnit[uSlug.toLowerCase()] = list.length;
+    nip99Total += list.length;
+    nip89Total += 1;
+  }
+  const rawIc = Array.isArray(intercompanyJson?.requests)
+    ? intercompanyJson.requests
+    : Array.isArray(intercompanyJson)
+    ? intercompanyJson
+    : intercompanyJson?.solicitacoes && typeof intercompanyJson.solicitacoes === "object"
+    ? Object.values(intercompanyJson.solicitacoes)
+    : [];
+  let intercompanyActive = 0;
+  let intercompanyDone = 0;
+  for (const req of rawIc as any[]) {
+    const st = String(req?.status || "").toLowerCase();
+    if (st === "entregue" || st === "concluido" || st === "completed" || st === "done") {
+      intercompanyDone += 1;
+    } else if (st && st !== "recusado" && st !== "cancelado" && st !== "bloqueado") {
+      intercompanyActive += 1;
+    }
+  }
+  const protocolSummary: HoldingProtocolSummary = {
+    nip99Total,
+    nip89Total,
+    servicesByUnit,
+    paymentRails: Array.isArray(catalogoJson?.nostr_protocol?.dupla_camada_pagamento)
+      ? catalogoJson.nostr_protocol.dupla_camada_pagamento.map(String)
+      : ["pix_brl", "lightning_nwc_nip47", "cashu_nip60_61"],
+    intercompanyTotal: rawIc.length,
+    intercompanyActive,
+    intercompanyDone,
+  };
+
+  const rawVisao = boardJson?.visao_estrategica;
+  const visaoEstrategica: HoldingStrategicVision | undefined = rawVisao
+    ? {
+        atoAtual: String(rawVisao.ato_atual || "ato_1_caixa_e_agencias"),
+        missaoCurta: String(rawVisao.missao_curta || ""),
+        focoPrincipal: Array.isArray(rawVisao.foco_comercial_principal)
+          ? rawVisao.foco_comercial_principal.map(String)
+          : [],
+        cascaExternaBr: String(rawVisao.arquitetura_economica?.casca_externa_br || "Pix / BRL"),
+        nucleoInternoA2a: String(rawVisao.arquitetura_economica?.nucleo_interno_a2a || "Nostr NIP-99/89/90 + NWC/Cashu"),
+        projetosCongelados: Array.isArray(rawVisao.projetos_congelados_ate_ato_1)
+          ? rawVisao.projetos_congelados_ate_ato_1.map(String)
+          : [],
+        atualizadoEm: rawVisao.atualizado_em ? String(rawVisao.atualizado_em) : undefined,
+      }
+    : undefined;
+
   return {
     ok: boardJson !== null || orgfyJson !== null,
     loadedAt: new Date().toISOString(),
@@ -504,6 +585,8 @@ export async function fetchHoldingControlPlane(ctx: Context): Promise<HoldingCon
     regrasProbatorias,
     templatesReais,
     activeLocks,
+    visaoEstrategica,
+    protocolSummary,
   };
 }
 

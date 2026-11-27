@@ -193,23 +193,41 @@ function makeVoxelFaceTexture(
   g.fillStyle = isPlanned ? "#64748b" : rgbCss(style.skinRgb);
   g.fillRect(0, 0, 128, 128);
 
+  // Sombreamento sutil no topo e base do rosto para profundidade voxel
+  g.fillStyle = "rgba(0,0,0,0.06)";
+  g.fillRect(0, 0, 128, 14);
+  g.fillRect(0, 116, 128, 12);
+
   if (style.faceStyle === "visor" || style.faceStyle === "tactical") {
-    // Visor tech estilo LEGO cyberpunk / bot
-    g.fillStyle = "#0f172a";
-    g.fillRect(14, 38, 100, 38);
+    // Visor tech estilo LEGO cyberpunk / bot com reflexo diagonal
+    g.fillStyle = "#0b1120";
+    g.fillRect(12, 36, 104, 42);
+    g.strokeStyle = "rgba(255,255,255,0.16)";
+    g.lineWidth = 2;
+    g.strokeRect(13, 37, 102, 40);
+    g.fillStyle = "rgba(255,255,255,0.08)";
+    g.fillRect(16, 40, 96, 8);
     g.fillStyle = rgbCss(accentRgb);
-    g.fillRect(28, 50, 22, 14);
-    g.fillRect(78, 50, 22, 14);
+    g.fillRect(26, 49, 24, 15);
+    g.fillRect(78, 49, 24, 15);
     g.fillStyle = "#ffffff";
-    g.fillRect(32, 52, 6, 6);
-    g.fillRect(82, 52, 6, 6);
+    g.fillRect(30, 51, 7, 6);
+    g.fillRect(82, 51, 7, 6);
     if (style.faceStyle === "visor") {
-      // Sorriso sutil abaixo do visor
       g.fillStyle = "#1e293b";
       g.fillRect(48, 92, 32, 7);
+      g.fillRect(44, 88, 6, 6);
+      g.fillRect(78, 88, 6, 6);
     }
   } else {
-    // Olhos quadrados expressivos estilo LEGO/Minecraft com brilho
+    // Bochechas sutis para expressão mais viva
+    if (!isPlanned) {
+      g.fillStyle = "rgba(239, 108, 108, 0.16)";
+      g.fillRect(16, 70, 16, 10);
+      g.fillRect(96, 70, 16, 10);
+    }
+
+    // Olhos quadrados expressivos estilo LEGO/Minecraft com brilho duplo
     g.fillStyle = "#ffffff";
     g.fillRect(24, 42, 26, 24);
     g.fillRect(78, 42, 26, 24);
@@ -219,14 +237,22 @@ function makeVoxelFaceTexture(
     g.fillStyle = "#ffffff";
     g.fillRect(34, 48, 5, 5);
     g.fillRect(84, 48, 5, 5);
+    g.fillRect(41, 58, 3, 3);
+    g.fillRect(91, 58, 3, 3);
 
     // Sobrancelhas
     g.fillStyle = rgbCss(style.hairRgb);
     g.fillRect(24, 32, 26, 6);
     g.fillRect(78, 32, 26, 6);
 
-    // Óculos se aplicável
+    // Óculos com reflexo de lente sutil
     if (style.faceStyle === "glasses") {
+      g.fillStyle = "rgba(147, 197, 253, 0.14)";
+      g.fillRect(20, 38, 34, 32);
+      g.fillRect(74, 38, 34, 32);
+      g.fillStyle = "rgba(255,255,255,0.35)";
+      g.fillRect(24, 41, 10, 4);
+      g.fillRect(78, 41, 10, 4);
       g.strokeStyle = "#111827";
       g.lineWidth = 6;
       g.strokeRect(20, 38, 34, 32);
@@ -245,7 +271,7 @@ function makeVoxelFaceTexture(
   return kit.canvasTexture(c);
 }
 
-/** Cria textura de uniforme/jaqueta/gravata/crachá para o tronco LEGO/Voxel. */
+/** Cria textura de uniforme/jaqueta/lapela/gravata/crachá para o tronco LEGO/Voxel. */
 function makeVoxelTorsoTexture(
   kit: Kit,
   style: ArchetypeStyle,
@@ -257,30 +283,69 @@ function makeVoxelTorsoTexture(
   g.fillStyle = isPlanned ? "#475569" : rgbCss(style.shirtRgb);
   g.fillRect(0, 0, 128, 128);
 
-  // Gola em V branca
+  // Lapelas sutis do blazer / jaqueta nas bordas laterais
+  g.fillStyle = "rgba(0,0,0,0.14)";
+  g.fillRect(0, 0, 14, 108);
+  g.fillRect(114, 0, 14, 108);
+
+  // Gola em V branca com contorno
   g.fillStyle = "#f1f5f9";
   g.beginPath();
-  g.moveTo(40, 0);
-  g.lineTo(88, 0);
-  g.lineTo(64, 34);
+  g.moveTo(38, 0);
+  g.lineTo(90, 0);
+  g.lineTo(64, 38);
   g.closePath();
   g.fill();
 
+  // Lapela interna escura
+  g.strokeStyle = "rgba(15,23,42,0.45)";
+  g.lineWidth = 4;
+  g.beginPath();
+  g.moveTo(36, 0);
+  g.lineTo(64, 42);
+  g.lineTo(92, 0);
+  g.stroke();
+
   // Gravata ou zíper central no acento do papel
   g.fillStyle = rgbCss(accentRgb);
-  g.fillRect(58, 22, 12, 74);
+  g.fillRect(58, 22, 12, 72);
+  g.fillStyle = "rgba(255,255,255,0.22)";
+  g.fillRect(61, 24, 4, 68);
 
-  // Crachá no bolso esquerdo
+  // Crachá funcional no bolso esquerdo com LED de status
   g.fillStyle = "#0f172a";
-  g.fillRect(80, 42, 28, 18);
+  g.fillRect(78, 42, 30, 20);
   g.fillStyle = rgbCss(accentRgb);
-  g.fillRect(84, 46, 20, 5);
+  g.fillRect(82, 46, 18, 5);
+  g.fillStyle = "#f8fafc";
+  g.fillRect(82, 54, 14, 3);
+  g.fillStyle = "#34d399";
+  g.fillRect(102, 46, 4, 4);
 
-  // Cinto na base do tronco
+  // Pin dourado "Mônaco" na lapela direita para diretoria / Conselho
+  if (
+    !isPlanned &&
+    (style.kind === "iris_ceo" ||
+      style.kind === "horned_cto" ||
+      style.kind === "giraffe_cro" ||
+      style.kind === "hat_cpo" ||
+      style.kind === "hover_cgo")
+  ) {
+    g.fillStyle = "#facc15";
+    g.fillRect(26, 42, 10, 10);
+    g.fillStyle = "#16a34a";
+    g.fillRect(26, 46, 10, 2);
+    g.fillStyle = "#1d4ed8";
+    g.fillRect(26, 48, 10, 2);
+  }
+
+  // Cinto na base do tronco com fivela metálica
   g.fillStyle = "#0f172a";
-  g.fillRect(0, 108, 128, 20);
-  g.fillStyle = "#cbd5e1";
-  g.fillRect(54, 112, 20, 12);
+  g.fillRect(0, 106, 128, 22);
+  g.fillStyle = "#e2e8f0";
+  g.fillRect(52, 110, 24, 14);
+  g.fillStyle = "#0f172a";
+  g.fillRect(58, 114, 12, 6);
 
   return kit.canvasTexture(c);
 }
@@ -340,7 +405,7 @@ export function buildCustomAvatar3D(
   bodyGroup.scale.setScalar(scale);
   root.add(bodyGroup);
 
-  // ── 1. PERNAS LEGO/VOXEL ──
+  // ── 1. PERNAS & SAPATOS LEGO/VOXEL ──
   const isSeated = seatHeight > 0.2;
   for (const lx of [-0.075, 0.075]) {
     const leg = new THREE.Mesh(
@@ -350,6 +415,10 @@ export function buildCustomAvatar3D(
     leg.position.set(lx, isSeated ? 0.06 : 0.11, isSeated ? 0.08 : 0);
     leg.castShadow = !isPlanned;
     bodyGroup.add(leg);
+
+    const shoe = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.112, 0.055, 0.09)), matDark);
+    shoe.position.set(lx, isSeated ? 0.035 : 0.028, isSeated ? 0.21 : 0.03);
+    bodyGroup.add(shoe);
   }
 
   // ── 2. TRONCO LEGO/VOXEL COM TEXTURA DE UNIFORME + CRACHÁ ──
@@ -358,7 +427,7 @@ export function buildCustomAvatar3D(
   const torsoFrontMat = kit.own(
     new THREE.MeshStandardMaterial({
       map: torsoTex,
-      roughness: 0.58,
+      roughness: 0.54,
       transparent: isPlanned,
       opacity: isPlanned ? 0.45 : 1,
     })
@@ -376,19 +445,29 @@ export function buildCustomAvatar3D(
   torso.receiveShadow = true;
   bodyGroup.add(torso);
 
-  // ── 3. BRAÇOS ARTICULADOS EM BLOCOS LEGO/VOXEL ──
+  // Pescoço cilíndrico sutil estilo LEGO minifig
+  const neck = new THREE.Mesh(kit.own(new THREE.CylinderGeometry(0.055, 0.062, 0.06, 10)), matSkin);
+  neck.position.set(0, torsoY + 0.165, 0);
+  bodyGroup.add(neck);
+
+  // ── 3. BRAÇOS ARTICULADOS EM BLOCOS LEGO/VOXEL COM OMBREIRA E PUNHO ──
   const makeVoxelArm = (side: -1 | 1) => {
     const pivot = new THREE.Group();
     pivot.position.set(side * 0.205, torsoY + 0.11, 0);
 
-    const sleeve = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.095, 0.22, 0.1)), matShirt);
-    sleeve.position.set(0, -0.09, 0.04);
-    sleeve.rotation.x = -0.55;
+    const shoulder = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.108, 0.09, 0.11)), matShirt);
+    shoulder.position.set(0, -0.01, 0);
+    shoulder.castShadow = !isPlanned;
+    pivot.add(shoulder);
+
+    const sleeve = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.092, 0.2, 0.096)), matShirt);
+    sleeve.position.set(0, -0.095, 0.045);
+    sleeve.rotation.x = -0.58;
     sleeve.castShadow = !isPlanned;
     pivot.add(sleeve);
 
     const hand = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.082, 0.082, 0.082)), matSkin);
-    hand.position.set(0, -0.18, 0.12);
+    hand.position.set(0, -0.18, 0.125);
     hand.castShadow = !isPlanned;
     pivot.add(hand);
 
@@ -400,7 +479,7 @@ export function buildCustomAvatar3D(
 
   // ── 4. CABEÇA CÚBICA LEGO / MINECRAFT COM ROSTO EM CANVASTEXTURE ──
   const headGroup = new THREE.Group();
-  headGroup.position.set(0, torsoY + 0.29, 0);
+  headGroup.position.set(0, torsoY + 0.305, 0);
   bodyGroup.add(headGroup);
 
   const faceTex = makeVoxelFaceTexture(kit, style, accentRgb, isPlanned);
@@ -532,22 +611,30 @@ export function buildCustomAvatar3D(
     const celebrating = animOpts?.celebrating ?? false;
 
     if (celebrating) {
-      bodyGroup.position.y = baseY + Math.abs(Math.sin(t * 7.5 + phase)) * 0.16;
-      leftHand.rotation.x = -1.1 + Math.sin(t * 10) * 0.25;
-      rightHand.rotation.x = -1.1 + Math.cos(t * 10) * 0.25;
-      headGroup.rotation.y = Math.sin(t * 5 + phase) * 0.22;
+      bodyGroup.position.y = baseY + Math.abs(Math.sin(t * 7.5 + phase)) * 0.18;
+      bodyGroup.rotation.z = Math.sin(t * 7.5 + phase) * 0.06;
+      leftHand.rotation.x = -1.25 + Math.sin(t * 11 + phase) * 0.28;
+      rightHand.rotation.x = -1.25 + Math.cos(t * 11 + phase) * 0.28;
+      headGroup.rotation.y = Math.sin(t * 5 + phase) * 0.24;
+      headGroup.rotation.x = -0.08;
+      torso.scale.y = 1;
     } else if (working) {
-      bodyGroup.position.y = baseY + Math.sin(t * 3.4 + phase) * 0.012;
-      leftHand.rotation.x = -0.35 + Math.sin(t * 14 + phase) * 0.22;
-      rightHand.rotation.x = -0.35 + Math.cos(t * 14 + phase) * 0.22;
-      headGroup.rotation.y = Math.sin(t * 1.3 + phase) * 0.12;
-      headGroup.rotation.x = 0.07;
+      bodyGroup.position.y = baseY + Math.sin(t * 3.6 + phase) * 0.012;
+      bodyGroup.rotation.z = Math.sin(t * 2.2 + phase) * 0.018;
+      leftHand.rotation.x = -0.38 + Math.sin(t * 15 + phase) * 0.24;
+      rightHand.rotation.x = -0.38 + Math.cos(t * 15 + phase + 0.6) * 0.24;
+      headGroup.rotation.y = Math.sin(t * 1.35 + phase) * 0.14 + Math.sin(t * 0.45 + phase) * 0.05;
+      headGroup.rotation.x = 0.08 + Math.sin(t * 2.8 + phase) * 0.025;
+      torso.scale.y = 1 + Math.sin(t * 3.6 + phase) * 0.015;
     } else {
-      bodyGroup.position.y = baseY + Math.sin(t * 1.5 + phase) * (isPlanned ? 0.004 : 0.01);
-      leftHand.rotation.x = Math.sin(t * 1.1 + phase) * 0.04;
-      rightHand.rotation.x = Math.cos(t * 1.1 + phase) * 0.04;
-      headGroup.rotation.y = Math.sin(t * 0.65 + phase) * 0.18;
-      headGroup.rotation.x = 0;
+      const breath = Math.sin(t * 1.65 + phase);
+      bodyGroup.position.y = baseY + breath * (isPlanned ? 0.004 : 0.011);
+      bodyGroup.rotation.z = 0;
+      leftHand.rotation.x = Math.sin(t * 1.15 + phase) * 0.05;
+      rightHand.rotation.x = Math.cos(t * 1.15 + phase) * 0.05;
+      headGroup.rotation.y = Math.sin(t * 0.58 + phase) * 0.19 + Math.sin(t * 0.21 + phase * 1.7) * 0.07;
+      headGroup.rotation.x = Math.sin(t * 0.8 + phase) * 0.03;
+      torso.scale.y = 1 + breath * (isPlanned ? 0.004 : 0.014);
     }
 
     if (crownMesh) {

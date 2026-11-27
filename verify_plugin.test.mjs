@@ -2447,4 +2447,22 @@ console.log("[MODEL FAILOVER NEXUSMIND + FALLBACK OK]", JSON.stringify({ selecte
     assert.ok(towerSrc.includes("conveyorPackets"), "HoldingTower3DCanvas deve animar pacotes trafegando nas esteiras");
     assert.ok(towerSrc.includes("dataCapsules"), "HoldingTower3DCanvas deve animar elevador de dados entre andares");
   });
+
+  test("v18.9: Mesa Missão Mônaco 5F (Capacete Senna + F1 + Iate), Telões Dinâmicos 3-Slides (Executivo / Mônaco / NIPs) e Refino de Bonequinhos", () => {
+    const bundle = fs.readFileSync(path.resolve(__dirname, "plugin.js"), "utf8");
+    const towerSrc = fs.readFileSync(path.resolve(__dirname, "src", "factory", "HoldingTower3DCanvas.tsx"), "utf8");
+    const avatarSrc = fs.readFileSync(path.resolve(__dirname, "src", "factory", "Avatar3DBuilder.ts"), "utf8");
+    const holdingSrc = fs.readFileSync(path.resolve(__dirname, "src", "services", "holding-service.ts"), "utf8");
+
+    assert.ok(towerSrc.includes("buildMonacoDisplayTable"), "5F Conselho deve construir a mesa expositora Missão Mônaco");
+    assert.ok(towerSrc.includes("sennaHelmet"), "Mesa Mônaco deve incluir o capacete inspirado no Ayrton Senna");
+    assert.ok(towerSrc.includes("monaco_table"), "Clique na Mesa Mônaco deve alternar o telão 5F para Missão Mônaco");
+    assert.ok(bundle.includes("ROTA MÔNACO"), "Telão dinâmico deve renderizar KPIs da Missão Mônaco");
+    assert.ok(bundle.includes("NIP-99 (30402)"), "Telão dinâmico deve exibir KPIs de serviços NIP-99 (Kind 30402)");
+    assert.ok(bundle.includes("NIP-89 (31990)"), "Telão dinâmico deve exibir KPIs de handlers NIP-89 (Kind 31990)");
+    assert.ok(bundle.includes("data-tower-screen-cycle-btn"), "Card inspetor do andar deve oferecer botão de alternância do telão");
+    assert.ok(holdingSrc.includes("catalogo-servicos.json"), "holding-service deve ler empresas/catalogo-servicos.json");
+    assert.ok(holdingSrc.includes("protocolSummary"), "holding-service deve expor protocolSummary (NIP-99/89 + Intercompany)");
+    assert.ok(avatarSrc.includes("Pin dourado") && avatarSrc.includes("const neck"), "Avatar3DBuilder deve incluir refinos de pescoço, sapatos e pin Mônaco");
+  });
 }

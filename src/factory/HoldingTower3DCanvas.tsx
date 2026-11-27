@@ -76,12 +76,14 @@ const TOWER_FLOOR_H = 4.35;
 const TOWER_EXPLODE_GAP = 1.95;
 const TOWER_DEMO_STEP_MS = [4400, 5000, 4800, 5000, 4600];
 
-function towerDemoLabel(phase: number, floorName: string): string {
-  if (phase === 1) return `1/5 · Diretriz descendo do 4F Conselho pelo elevador para ${floorName}`;
+type WallScreenSlideMode = 0 | 1 | 2;
+
+function towerDemoLabel(phase: number, floorName: string, topFloorNum = 5): string {
+  if (phase === 1) return `1/5 · Diretriz descendo do ${topFloorNum}F Conselho pelo elevador para ${floorName}`;
   if (phase === 2) return `2/5 · Equipe de ${floorName} recebendo a tarefa e levando para a esteira`;
   if (phase === 3) return `3/5 · CI rodando (semáforo âmbar) e revisão L-01 em andamento`;
   if (phase === 4) return `4/5 · Aprovado! Pacote entregue no portal SHIP com comemoração`;
-  if (phase === 5) return `5/5 · Telemetria de entrega subindo ao 4F Conselho da Holding`;
+  if (phase === 5) return `5/5 · Telemetria de entrega subindo ao ${topFloorNum}F Conselho da Holding`;
   return "";
 }
 
@@ -123,6 +125,8 @@ function makeFloorWallScreenTexture(
   floor: HoldingTowerFloorInfo,
   accent: Rgb,
   status?: FactoryStatusPayload,
+  holding?: HoldingControlPlaneSnapshot | null,
+  slideMode: WallScreenSlideMode = 0,
   maxAnisotropy = 8
 ): THREE.CanvasTexture {
   const logicalW = 768;
@@ -130,9 +134,16 @@ function makeFloorWallScreenTexture(
   const c = canvasOf(logicalW * 2, logicalH * 2);
   const g = c.getContext("2d")!;
   g.scale(2, 2);
-  const accCss = rgbToCss(accent);
 
-  g.fillStyle = "#0e121a";
+  const modeAccent: Rgb =
+    slideMode === 1
+      ? [0.98, 0.8, 0.2]
+      : slideMode === 2
+      ? [0.38, 0.72, 0.98]
+      : accent;
+  const accCss = rgbToCss(modeAccent);
+
+  g.fillStyle = slideMode === 1 ? "#10131d" : slideMode === 2 ? "#0c1320" : "#0e121a";
   g.fillRect(0, 0, logicalW, logicalH);
 
   g.strokeStyle = "rgba(255,255,255,0.045)";
@@ -151,57 +162,147 @@ function makeFloorWallScreenTexture(
   g.fillStyle = accCss;
   g.fillRect(10, 54, logicalW - 10, 3);
 
-  g.fillStyle = "#f8fafc";
-  g.font = "700 26px -apple-system, BlinkMacSystemFont, sans-serif";
-  g.fillText(`${floorNum}F · ${floor.nome.toUpperCase().slice(0, 26)}`, 26, 37);
+  const modeTag =
+    slideMode === 0
+      ? "1/3 EXECUTIVO ▸"
+      : slideMode === 1
+      ? "2/3 MÔNACO · ATO 1 ▸"
+      : "3/3 NIPs & A2A ▸";
 
-  const pillText = floor.errorCount > 0 ? `${floor.errorCount} ALERTA` : floor.workingCount > 0 ? `${floor.workingCount} AO VIVO` : floor.estagio.toUpperCase();
-  g.fillStyle = rgbToCss(accent, 0.18);
-  g.fillRect(logicalW - 168, 12, 148, 30);
+  g.fillStyle = "#f8fafc";
+  g.font = "700 24px -apple-system, BlinkMacSystemFont, sans-serif";
+  g.fillText(`${floorNum}F · ${floor.nome.toUpperCase().slice(0, 22)}`, 24, 36);
+
+  // Pílula de slide clicável (1/3, 2/3, 3/3)
+  g.fillStyle = rgbToCss(modeAccent, 0.16);
+  g.fillRect(logicalW - 318, 12, 162, 30);
   g.strokeStyle = accCss;
-  g.lineWidth = 1.5;
-  g.strokeRect(logicalW - 168, 12, 148, 30);
+  g.lineWidth = 1.4;
+  g.strokeRect(logicalW - 318, 12, 162, 30);
   g.fillStyle = accCss;
-  g.font = "700 14px ui-monospace, Menlo, monospace";
+  g.font = "700 12.5px ui-monospace, Menlo, monospace";
   g.textAlign = "center";
-  g.fillText(pillText.slice(0, 14), logicalW - 94, 32);
+  g.fillText(modeTag, logicalW - 237, 32);
+
+  const pillText =
+    floor.errorCount > 0
+      ? `${floor.errorCount} ALERTA`
+      : floor.workingCount > 0
+      ? `${floor.workingCount} AO VIVO`
+      : floor.estagio.toUpperCase();
+  const baseAccCss = rgbToCss(accent);
+  g.fillStyle = rgbToCss(accent, 0.18);
+  g.fillRect(logicalW - 146, 12, 128, 30);
+  g.strokeStyle = baseAccCss;
+  g.lineWidth = 1.4;
+  g.strokeRect(logicalW - 146, 12, 128, 30);
+  g.fillStyle = baseAccCss;
+  g.font = "700 13px ui-monospace, Menlo, monospace";
+  g.fillText(pillText.slice(0, 12), logicalW - 82, 32);
   g.textAlign = "left";
 
-  const cards = floor.isBoard
-    ? [
-        { k: "CONSELHEIROS", v: String(floor.agentesCount), sub: `${floor.workingCount} em turno` },
-        { k: "MERGES (7D)", v: String(status?.stats?.merged7d ?? 0), sub: "holding cortexx" },
-        { k: "GASTO HOJE", v: `$${(status?.spendToday?.usd ?? 0).toFixed(2)}`, sub: "finops ao vivo" },
-      ]
-    : [
-        { k: "AGENTES", v: String(floor.agentesCount), sub: `${floor.workingCount} ativos agora` },
-        { k: "ESTEIRA", v: String(floor.packets.length), sub: floor.packets.length > 0 ? "itens circulando" : "fila livre" },
-        { k: "PRS / ISSUES", v: `${floor.openPrsCount}/${floor.openIssuesCount}`, sub: floor.estagio },
+  const spendUsd = status?.spendToday?.usd ?? 0;
+  const merged7d = status?.stats?.merged7d ?? 0;
+  const proto = holding?.protocolSummary;
+  const nip99Total = proto?.nip99Total ?? 14;
+  const nip89Total = proto?.nip89Total ?? 5;
+  const unitKey = floor.isBoard ? "board" : floor.slug.toLowerCase();
+  const unitNip99 = proto?.servicesByUnit?.[unitKey] ?? (floor.isBoard ? 3 : 2);
+  const icActive = proto?.intercompanyActive ?? 0;
+  const icTotal = proto?.intercompanyTotal ?? 0;
+
+  let cards: Array<{ k: string; v: string; sub: string }>;
+
+  if (slideMode === 1) {
+    // SLIDE 2: MISSÃO MÔNACO · ATO 1
+    if (floor.isBoard) {
+      cards = [
+        { k: "ROTA MÔNACO", v: "ATO 1/3", sub: "NexusMind + Agências" },
+        { k: "FOCO HOLDING", v: "3 PILARES", sub: "Gateway · 3F · Lumen" },
+        { k: "FINOPS HOJE", v: `$${spendUsd.toFixed(2)}`, sub: "Pix/BRL · margem alta" },
       ];
+    } else if (unitKey === "orgfy") {
+      cards = [
+        { k: "PAPEL NO ATO 1", v: "PLATAFORMA", sub: "NexusMind + Fábrica" },
+        { k: "ENTREGAS (7D)", v: String(merged7d), sub: "auditoria L-01 / L-22" },
+        { k: "META MÔNACO", v: "AGÊNCIAS", sub: "Service as Software" },
+      ];
+    } else if (unitKey === "growth-studio") {
+      cards = [
+        { k: "PAPEL NO ATO 1", v: "AQUISIÇÃO", sub: "Redes · Ads HITL · CRM" },
+        { k: "CATÁLOGO 3F", v: `${unitNip99} SERV.`, sub: "criativos & funil" },
+        { k: "META MÔNACO", v: "D+1 / D+7", sub: "métricas reais de venda" },
+      ];
+    } else if (unitKey.includes("lumen")) {
+      cards = [
+        { k: "PAPEL NO ATO 1", v: "CAIXA", sub: "piloto automático" },
+        { k: "ESTEIRA ATIVA", v: `${floor.packets.length}/${floor.openPrsCount}`, sub: "cards · PRs abertos" },
+        { k: "META MÔNACO", v: "PIX / BRL", sub: "recorrência & WhatsApp" },
+      ];
+    } else {
+      cards = [
+        { k: "PAPEL NO ATO 1", v: "CONGELADO", sub: "reserva p/ Ato 2" },
+        { k: "TIME PRONTO", v: String(floor.agentesCount), sub: "manifesto mapeado" },
+        { k: "META MÔNACO", v: "ATO 2/3", sub: "foco 100% no Ato 1" },
+      ];
+    }
+  } else if (slideMode === 2) {
+    // SLIDE 3: PROTOCOLO NIPs & INTERCOMPANY
+    cards = floor.isBoard
+      ? [
+          { k: "NIP-99 (30402)", v: String(nip99Total), sub: "serviços catalogados" },
+          { k: "NIP-89 (31990)", v: String(nip89Total), sub: "unidades / handlers" },
+          { k: "INTERCOMPANY", v: `${icActive}/${icTotal}`, sub: "Pix/BRL + NWC/Cashu" },
+        ]
+      : [
+          { k: "NIP-99 (30402)", v: String(unitNip99), sub: "serviços deste andar" },
+          { k: "CAMADA A2A", v: "DUAL", sub: "Pix/BRL + NWC/Cashu" },
+          { k: "INTERCOMPANY", v: `${icActive}/${icTotal}`, sub: "porta PO/COO · Semáforo" },
+        ];
+  } else {
+    // SLIDE 1: EXECUTIVO AO VIVO
+    cards = floor.isBoard
+      ? [
+          { k: "CONSELHEIROS", v: String(floor.agentesCount), sub: `${floor.workingCount} em turno` },
+          { k: "MERGES (7D)", v: String(merged7d), sub: "holding cortexx" },
+          { k: "GASTO HOJE", v: `$${spendUsd.toFixed(2)}`, sub: "finops ao vivo" },
+        ]
+      : [
+          { k: "AGENTES", v: String(floor.agentesCount), sub: `${floor.workingCount} ativos agora` },
+          { k: "ESTEIRA", v: String(floor.packets.length), sub: floor.packets.length > 0 ? "itens circulando" : "fila livre" },
+          { k: "PRS / ISSUES", v: `${floor.openPrsCount}/${floor.openIssuesCount}`, sub: floor.estagio },
+        ];
+  }
 
   cards.forEach((card, idx) => {
     const bx = 26 + idx * 242;
-    const by = 74;
+    const by = 72;
     const bw = 226;
-    const bh = 128;
+    const bh = 122;
     g.fillStyle = "rgba(255,255,255,0.04)";
     g.fillRect(bx, by, bw, bh);
-    g.strokeStyle = "rgba(255,255,255,0.11)";
+    g.strokeStyle = slideMode === 1 ? "rgba(250,204,21,0.22)" : slideMode === 2 ? "rgba(56,189,248,0.22)" : "rgba(255,255,255,0.11)";
     g.lineWidth = 1.5;
     g.strokeRect(bx, by, bw, bh);
 
     g.fillStyle = "#94a3b8";
-    g.font = "700 13px ui-monospace, Menlo, monospace";
-    g.fillText(card.k, bx + 16, by + 28);
+    g.font = "700 12.5px ui-monospace, Menlo, monospace";
+    g.fillText(card.k, bx + 15, by + 26);
 
+    const valFontSize = card.v.length > 7 ? 27 : card.v.length > 5 ? 32 : 40;
     g.fillStyle = "#f8fafc";
-    g.font = "700 42px ui-monospace, Menlo, monospace";
-    g.fillText(card.v, bx + 16, by + 80);
+    g.font = `700 ${valFontSize}px ui-monospace, Menlo, monospace`;
+    g.fillText(card.v, bx + 15, by + 76);
 
     g.fillStyle = accCss;
-    g.font = "500 14px -apple-system, sans-serif";
-    g.fillText(card.sub.slice(0, 22), bx + 16, by + 110);
+    g.font = "500 13.5px -apple-system, sans-serif";
+    g.fillText(card.sub.slice(0, 23), bx + 15, by + 105);
   });
+
+  // Rodapé discreto indicando interatividade do telão
+  g.fillStyle = "rgba(148,163,184,0.65)";
+  g.font = "600 10.5px ui-monospace, Menlo, monospace";
+  g.fillText("CLIQUE NO TELÃO PARA TROCAR: EXECUTIVO · MISSÃO MÔNACO · PROTOCOLO NIPs", 26, 212);
 
   return sharpenCanvasTexture(kit.canvasTexture(c), maxAnisotropy);
 }
@@ -420,6 +521,193 @@ function buildBoardChair(
   return chair;
 }
 
+/**
+ * Mesa baixa expositora "Missão Mônaco" para a Sala da Diretoria (5F Conselho):
+ * - Capacete inspirado no Ayrton Senna ("Príncipe de Mônaco": amarelo, faixas verde/azul e viseira escura)
+ * - Mini F1 clássico de Mônaco (vermelho/branco, asas dianteira/traseira e 4 rodas)
+ * - Mini Iate de Mônaco sobre base acrílica azul Mediterrâneo (casco branco, deck teca e cabine envidraçada)
+ */
+function buildMonacoDisplayTable(
+  kit: Kit,
+  matWood: THREE.Material,
+  matSteel: THREE.Material,
+  matChrome: THREE.Material,
+  matAccent: THREE.Material,
+  darkFactoryMode: boolean
+): { group: THREE.Group; hitMesh: THREE.Mesh; sennaHelmet: THREE.Group } {
+  const g = new THREE.Group();
+
+  // Mesa baixa / credenza minimalista alongada no eixo Z (lateral esquerda da sala 5F)
+  const tableW = 0.86;
+  const tableL = 2.38;
+  const topY = 0.56;
+
+  const top = new THREE.Mesh(kit.own(new THREE.BoxGeometry(tableW, 0.065, tableL)), matWood);
+  top.position.set(0, topY, 0);
+  top.castShadow = true;
+  top.receiveShadow = true;
+  g.add(top);
+
+  // Friso dourado Mônaco na borda frontal (+X, voltada para a mesa do Conselho)
+  const goldBar = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.025, 0.032, tableL + 0.01)), matAccent);
+  goldBar.position.set(tableW / 2 + 0.005, topY, 0);
+  g.add(goldBar);
+
+  // Prateleira inferior + 4 pernas esguias de aço escuro
+  const shelf = new THREE.Mesh(kit.own(new THREE.BoxGeometry(tableW - 0.14, 0.035, tableL - 0.2)), matSteel);
+  shelf.position.set(0, 0.2, 0);
+  shelf.receiveShadow = true;
+  g.add(shelf);
+
+  for (const lx of [-tableW / 2 + 0.07, tableW / 2 - 0.07]) {
+    for (const lz of [-tableL / 2 + 0.1, tableL / 2 - 0.1]) {
+      const leg = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.06, topY - 0.03, 0.06)), matSteel);
+      leg.position.set(lx, (topY - 0.03) / 2, lz);
+      leg.castShadow = true;
+      g.add(leg);
+    }
+  }
+
+  const matBlack = kit.matte([0.08, 0.09, 0.12], { roughness: 0.35 });
+  const matWhite = kit.matte([0.96, 0.97, 0.99], { roughness: 0.32 });
+  const matGold = kit.matte([0.96, 0.78, 0.2], { roughness: 0.25, metalness: 0.55 });
+
+  // ── 1. CAPACETE INSPIRADO NO AYRTON SENNA (PRÍNCIPE DE MÔNACO) ──
+  const sennaPed = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.36, 0.055, 0.36)), matBlack);
+  sennaPed.position.set(0.02, topY + 0.06, -0.74);
+  sennaPed.castShadow = true;
+  g.add(sennaPed);
+
+  const sennaHelmet = new THREE.Group();
+  sennaHelmet.position.set(0.02, topY + 0.21, -0.74);
+  const matSennaYellow = kit.matte([0.98, 0.8, 0.08], { roughness: 0.24, metalness: 0.12 });
+  const matSennaGreen = kit.matte([0.09, 0.64, 0.29], { roughness: 0.3 });
+  const matSennaBlue = kit.matte([0.11, 0.31, 0.85], { roughness: 0.3 });
+  const matVisor = kit.own(
+    new THREE.MeshPhysicalMaterial({
+      color: 0x0b1220,
+      roughness: 0.08,
+      metalness: 0.65,
+      reflectivity: 0.95,
+    })
+  );
+
+  const hShell = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.25, 0.23, 0.25)), matSennaYellow);
+  hShell.castShadow = true;
+  sennaHelmet.add(hShell);
+  const hCrown = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.21, 0.045, 0.21)), matSennaYellow);
+  hCrown.position.y = 0.135;
+  sennaHelmet.add(hCrown);
+  const hStripeGreen = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.262, 0.032, 0.262)), matSennaGreen);
+  hStripeGreen.position.y = 0.025;
+  sennaHelmet.add(hStripeGreen);
+  const hStripeBlue = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.262, 0.03, 0.262)), matSennaBlue);
+  hStripeBlue.position.y = -0.015;
+  sennaHelmet.add(hStripeBlue);
+  const hVisor = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.045, 0.088, 0.195)), matVisor);
+  hVisor.position.set(0.118, 0.018, 0);
+  sennaHelmet.add(hVisor);
+  const hChin = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.05, 0.055, 0.22)), matSennaYellow);
+  hChin.position.set(0.112, -0.072, 0);
+  sennaHelmet.add(hChin);
+  g.add(sennaHelmet);
+
+  // ── 2. MINI CARRO DE F1 CLÁSSICO DE MÔNACO ──
+  const f1 = new THREE.Group();
+  f1.position.set(0.02, topY + 0.035, 0.0);
+  f1.rotation.y = 0.26;
+  const matF1Red = kit.matte([0.86, 0.15, 0.15], { roughness: 0.26, metalness: 0.18 });
+
+  const f1Body = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.17, 0.075, 0.44)), matF1Red);
+  f1Body.position.set(0, 0.068, 0);
+  f1Body.castShadow = true;
+  f1.add(f1Body);
+  const f1WhiteCover = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.13, 0.06, 0.22)), matWhite);
+  f1WhiteCover.position.set(0, 0.11, -0.05);
+  f1.add(f1WhiteCover);
+  const f1Nose = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.095, 0.05, 0.2)), matF1Red);
+  f1Nose.position.set(0, 0.058, 0.28);
+  f1.add(f1Nose);
+  const f1FrontWing = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.32, 0.022, 0.085)), matWhite);
+  f1FrontWing.position.set(0, 0.038, 0.34);
+  f1.add(f1FrontWing);
+  const f1RearWing = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.3, 0.026, 0.08)), matF1Red);
+  f1RearWing.position.set(0, 0.175, -0.22);
+  f1.add(f1RearWing);
+  for (const sx of [-0.145, 0.145]) {
+    const endplate = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.02, 0.12, 0.1)), matWhite);
+    endplate.position.set(sx, 0.13, -0.22);
+    f1.add(endplate);
+  }
+  const f1Cockpit = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.09, 0.04, 0.11)), matBlack);
+  f1Cockpit.position.set(0, 0.115, 0.05);
+  f1.add(f1Cockpit);
+  for (const [wx, wz] of [
+    [-0.14, 0.2],
+    [0.14, 0.2],
+    [-0.15, -0.17],
+    [0.15, -0.17],
+  ]) {
+    const wheel = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.07, 0.095, 0.11)), matBlack);
+    wheel.position.set(wx, 0.048, wz);
+    wheel.castShadow = true;
+    f1.add(wheel);
+  }
+  g.add(f1);
+
+  // ── 3. MINI IATE DE MÔNACO SOBRE BASE AZUL MEDITERRÂNEO ──
+  const yacht = new THREE.Group();
+  yacht.position.set(0.0, topY + 0.035, 0.77);
+  yacht.rotation.y = -0.14;
+
+  const matSea = kit.own(
+    new THREE.MeshPhysicalMaterial({
+      color: darkFactoryMode ? 0x0284c7 : 0x0ea5e9,
+      transparent: true,
+      opacity: 0.65,
+      roughness: 0.12,
+      metalness: 0.05,
+    })
+  );
+  const seaBase = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.42, 0.04, 0.74)), matSea);
+  seaBase.position.y = 0.02;
+  yacht.add(seaBase);
+
+  const hullMain = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.24, 0.095, 0.54)), matWhite);
+  hullMain.position.set(0, 0.088, -0.04);
+  hullMain.castShadow = true;
+  yacht.add(hullMain);
+  const hullBow = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.15, 0.085, 0.18)), matWhite);
+  hullBow.position.set(0, 0.092, 0.27);
+  yacht.add(hullBow);
+  const teakDeck = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.21, 0.02, 0.48)), matWood);
+  teakDeck.position.set(0, 0.14, -0.02);
+  yacht.add(teakDeck);
+  const cabinGlass = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.18, 0.075, 0.28)), matVisor);
+  cabinGlass.position.set(0, 0.185, -0.03);
+  yacht.add(cabinGlass);
+  const flybridge = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.2, 0.03, 0.26)), matWhite);
+  flybridge.position.set(0, 0.235, -0.04);
+  yacht.add(flybridge);
+  const mast = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.025, 0.1, 0.025)), matGold);
+  mast.position.set(0, 0.295, -0.06);
+  yacht.add(mast);
+  const radar = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.11, 0.018, 0.025)), matChrome);
+  radar.position.set(0, 0.34, -0.06);
+  yacht.add(radar);
+  g.add(yacht);
+
+  // Hitbox invisível para clicar na Mesa Mônaco e abrir o painel "Missão Mônaco" no telão 5F
+  const hitMesh = new THREE.Mesh(
+    kit.own(new THREE.BoxGeometry(1.05, 1.05, 2.55)),
+    kit.own(new THREE.MeshBasicMaterial({ visible: false }))
+  );
+  hitMesh.position.set(0, 0.54, 0);
+  g.add(hitMesh);
+
+  return { group: g, hitMesh, sennaHelmet };
+}
+
 /** Semáforo de CI minimalista (vermelho / âmbar / verde) igual ao da Fábrica 3D. */
 function buildCiSignalTower(
   kit: Kit,
@@ -482,6 +770,11 @@ export function createHoldingTower3DComponent(ctx: Context) {
     const [isFullscreen, setIsFullscreen] = React.useState(false);
     const [isPipActive, setIsPipActive] = React.useState(false);
     const [demoPhase, setDemoPhase] = React.useState<number | null>(null);
+    const [screenSlideTick, setScreenSlideTick] = React.useState(0);
+
+    // Controle dos 3 modos de tela do telão por andar (0=Executivo, 1=Missão Mônaco, 2=Protocolo NIPs)
+    const screenModesRef = React.useRef<Record<string, WallScreenSlideMode>>({});
+    const screenSwitchersRef = React.useRef<Record<string, (nextMode?: WallScreenSlideMode) => WallScreenSlideMode>>({});
 
     // Refs de controle de câmera suave, camadas e simulação (60fps sem recriar WebGL)
     const desiredTargetRef = React.useRef<THREE.Vector3>(new THREE.Vector3(0, 6.2, 0));
@@ -747,9 +1040,12 @@ export function createHoldingTower3DComponent(ctx: Context) {
     }, [floors, props.activeTenant]);
     const demoTargetFloorName = floors[demoTargetFloorIdx]?.nome || "Lumen IPTV";
 
-    const floorsSignature = floors
+    const protoSig = props.holding?.protocolSummary
+      ? `${props.holding.protocolSummary.nip99Total}:${props.holding.protocolSummary.nip89Total}:${props.holding.protocolSummary.intercompanyActive}/${props.holding.protocolSummary.intercompanyTotal}`
+      : "0";
+    const floorsSignature = `${floors
       .map((f) => `${f.slug}:${f.workingCount}:${f.errorCount}:${f.agentesCount}:${f.packets.map((p) => `${p.id}:${p.stage}`).join(",")}`)
-      .join("|");
+      .join("|")}||${protoSig}`;
 
     // ── PICTURE-IN-PICTURE (TELINHA FLUTUANTE ESTILO YOUTUBE FORA DO BUZZ) ──
     const handleTogglePiP = async () => {
@@ -1020,6 +1316,11 @@ export function createHoldingTower3DComponent(ctx: Context) {
 
       const hitTargets: THREE.Object3D[] = [];
       const selectionByHit = new WeakMap<THREE.Object3D, { sel: TowerSelection; focusPos: THREE.Vector3 }>();
+      const screenActionByHit = new WeakMap<
+        THREE.Object3D,
+        { kind: "cycle_screen" | "monaco_table"; floor: HoldingTowerFloorInfo; focusPos: THREE.Vector3 }
+      >();
+      screenSwitchersRef.current = {};
 
       if (realElevatorEvents.length > 0) {
         realElevatorEvents.slice(0, 6).forEach((ev, i) => {
@@ -1229,13 +1530,53 @@ export function createHoldingTower3DComponent(ctx: Context) {
         screenBezel.castShadow = true;
         floorGroup.add(screenBezel);
 
-        const screenTex = makeFloorWallScreenTexture(kit, fIdx + 1, floor, floorAccent, props.status, maxAniso);
-        const screenPlane = new THREE.Mesh(
-          kit.own(new THREE.PlaneGeometry(4.18, 1.08)),
-          kit.own(new THREE.MeshBasicMaterial({ map: screenTex }))
+        const initialMode: WallScreenSlideMode = screenModesRef.current[floor.slug] ?? 0;
+        const screenMat = kit.own(
+          new THREE.MeshBasicMaterial({
+            map: makeFloorWallScreenTexture(
+              kit,
+              fIdx + 1,
+              floor,
+              floorAccent,
+              props.status,
+              props.holding,
+              initialMode,
+              maxAniso
+            ),
+          })
         );
+        const screenPlane = new THREE.Mesh(kit.own(new THREE.PlaneGeometry(4.18, 1.08)), screenMat);
         screenPlane.position.set(0.95, screenY, -floorD / 2 + 0.275);
         floorGroup.add(screenPlane);
+
+        // Troca dinâmica do telão em 1 clique (sem recriar WebGL)
+        const switchFloorScreen = (forcedMode?: WallScreenSlideMode): WallScreenSlideMode => {
+          const cur: WallScreenSlideMode = screenModesRef.current[floor.slug] ?? 0;
+          const next: WallScreenSlideMode = forcedMode !== undefined ? forcedMode : (((cur + 1) % 3) as WallScreenSlideMode);
+          screenModesRef.current[floor.slug] = next;
+          const prevTex = screenMat.map;
+          screenMat.map = makeFloorWallScreenTexture(
+            kit,
+            fIdx + 1,
+            floor,
+            floorAccent,
+            props.status,
+            props.holding,
+            next,
+            maxAniso
+          );
+          screenMat.needsUpdate = true;
+          if (prevTex) prevTex.dispose();
+          setScreenSlideTick((v) => v + 1);
+          return next;
+        };
+        screenSwitchersRef.current[floor.slug] = switchFloorScreen;
+        hitTargets.push(screenPlane);
+        screenActionByHit.set(screenPlane, {
+          kind: "cycle_screen",
+          floor,
+          focusPos: new THREE.Vector3(0.95, y0 + 1.45, -1.2),
+        });
 
         if (floor.errorCount > 0) {
           const beacon = new THREE.Mesh(
@@ -1252,6 +1593,17 @@ export function createHoldingTower3DComponent(ctx: Context) {
         floorGroup.add(cornerPlant);
 
         if (floor.isBoard) {
+          // Mesa baixa expositora "Missão Mônaco" na lateral esquerda (zona equivalente ao rack dos demais andares)
+          const monacoDisplay = buildMonacoDisplayTable(kit, matWood, matSteel, matChrome, matAccent, darkFactoryMode);
+          monacoDisplay.group.position.set(-4.72, 0, 0.82);
+          floorGroup.add(monacoDisplay.group);
+          hitTargets.push(monacoDisplay.hitMesh);
+          screenActionByHit.set(monacoDisplay.hitMesh, {
+            kind: "monaco_table",
+            floor,
+            focusPos: new THREE.Vector3(-2.6, y0 + 1.0, 0.55),
+          });
+
           const rug = new THREE.Mesh(
             kit.own(new THREE.BoxGeometry(8.2, 0.025, 4.7)),
             kit.matte(darkFactoryMode ? [0.19, 0.21, 0.28] : [0.84, 0.83, 0.8], { roughness: 0.95 })
@@ -1628,8 +1980,10 @@ export function createHoldingTower3DComponent(ctx: Context) {
         raycaster.setFromCamera(pointer, camera);
         const hits = raycaster.intersectObjects(hitTargets, false);
         for (const hit of hits) {
+          const scr = screenActionByHit.get(hit.object);
+          if (scr) return { kind: "screen" as const, action: scr };
           const entry = selectionByHit.get(hit.object);
-          if (entry) return entry;
+          if (entry) return { kind: "selection" as const, entry };
         }
         return null;
       };
@@ -1675,19 +2029,32 @@ export function createHoldingTower3DComponent(ctx: Context) {
           return;
         }
         const hit = pickTarget(e);
-        setHoveredSlug(hit ? hit.sel.floor.slug : null);
+        setHoveredSlug(hit ? (hit.kind === "screen" ? hit.action.floor.slug : hit.entry.sel.floor.slug) : null);
         renderer.domElement.style.cursor = hit ? "pointer" : "grab";
       };
 
       const onUp = (e: MouseEvent) => {
         if (dragMode === "orbit" && !moved) {
           const hit = pickTarget(e);
-          if (hit) {
-            setSelection(hit.sel);
+          if (hit?.kind === "screen") {
+            const switcher = screenSwitchersRef.current[hit.action.floor.slug];
+            if (hit.action.kind === "monaco_table") {
+              switcher?.(1);
+              setSelection({ kind: "floor", floor: hit.action.floor });
+              const stepH = FLOOR_H + (explodedRef.current ? 1.95 : 0);
+              const fIdx = Math.max(0, floors.findIndex((fl) => fl.slug === hit.action.floor.slug));
+              desiredTargetRef.current.set(hit.action.focusPos.x, fIdx * stepH + 1.05, hit.action.focusPos.z);
+              desiredFrustumRef.current = 6.2;
+            } else {
+              switcher?.();
+              setSelection({ kind: "floor", floor: hit.action.floor });
+            }
+          } else if (hit?.kind === "selection") {
+            setSelection(hit.entry.sel);
             const stepH = FLOOR_H + (explodedRef.current ? 1.95 : 0);
-            const fIdx = Math.max(0, floors.findIndex((fl) => fl.slug === hit.sel.floor.slug));
-            desiredTargetRef.current.set(hit.focusPos.x, fIdx * stepH + 1.0, hit.focusPos.z);
-            desiredFrustumRef.current = hit.sel.kind === "floor" ? 8.2 : 4.6;
+            const fIdx = Math.max(0, floors.findIndex((fl) => fl.slug === hit.entry.sel.floor.slug));
+            desiredTargetRef.current.set(hit.entry.focusPos.x, fIdx * stepH + 1.0, hit.entry.focusPos.z);
+            desiredFrustumRef.current = hit.entry.sel.kind === "floor" ? 8.2 : 4.6;
           } else {
             setSelection(null);
             const effH = getEffectiveTotalH();
@@ -1701,7 +2068,8 @@ export function createHoldingTower3DComponent(ctx: Context) {
 
       const onDblClick = (e: MouseEvent) => {
         const hit = pickTarget(e);
-        if (hit) props.onEnterFloor(hit.sel.floor.slug);
+        if (!hit) return;
+        props.onEnterFloor(hit.kind === "screen" ? hit.action.floor.slug : hit.entry.sel.floor.slug);
       };
 
       const onWheel = (e: WheelEvent) => {
@@ -2055,7 +2423,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
                 boxShadow: `0 0 8px ${demoPhase >= 4 ? "#34d399" : "#60a5fa"}`,
               },
             }),
-            h("span", null, towerDemoLabel(demoPhase, demoTargetFloorName))
+            h("span", null, towerDemoLabel(demoPhase, demoTargetFloorName, floors.length))
           ),
 
         // Seletor rápido de andares (Elevador na esquerda)
@@ -2223,7 +2591,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
                   ),
                   h(
                     "div",
-                    { key: "a", style: { display: "flex", gap: "6px" } },
+                    { key: "a", "data-screen-slide-tick": String(screenSlideTick), style: { display: "flex", gap: "6px", flexWrap: "wrap" } },
                     h(
                       "button",
                       {
@@ -2234,6 +2602,18 @@ export function createHoldingTower3DComponent(ctx: Context) {
                         onClick: () => props.onEnterFloor(activeFloorCard.slug),
                       },
                       activeFloorCard.isBoard ? "Entrar na Sala 3D ↗" : "Entrar no Andar 3D ↗"
+                    ),
+                    h(
+                      "button",
+                      {
+                        type: "button",
+                        className: "of-btn",
+                        "data-tower-screen-cycle-btn": "true",
+                        style: { fontSize: "11px" },
+                        title: "Alternar painel do telão (Executivo · Missão Mônaco · Protocolo NIPs)",
+                        onClick: () => screenSwitchersRef.current[activeFloorCard.slug]?.(),
+                      },
+                      `Telão ${((screenModesRef.current[activeFloorCard.slug] ?? 0) + 1)}/3 ↻`
                     ),
                     props.onOpenChannel &&
                       h(
