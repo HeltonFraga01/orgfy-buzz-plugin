@@ -1012,8 +1012,9 @@ export async function executeSmartModelFailover(
 
 
 /**
- * R4.6 (Failover Único no NexusMind): OrgFy apenas emite o evento `orgfy.failover.requested`
- * sem decidir nem mutar modelos diretamente.
+ * R4.6 + Fallback Direto: emite o evento `orgfy.failover.requested` para o NexusMind Gateway
+ * e, se nenhum listener confirmar a troca em 1.5s (ex.: webviews isoladas ou NexusMind inativo),
+ * executa `executeSmartModelFailover` diretamente com ping real + `ctx.agents.save()`.
  */
 export async function requestModelFailover(
   ctx: Context,
@@ -1052,7 +1053,45 @@ export async function requestModelFailover(
     thread_root: input.thread_root || null,
     ts: Date.now(),
   };
+
+  let completedByNexusMind: any = null;
   let dispatched = false;
+  const targetNorm = String(input.agente || input.agent_pubkey || "").trim().toLowerCase();
+  const canListenWindow =
+    typeof globalThis !== "undefined" &&
+    typeof (globalThis as any).addEventListener === "function" &&
+    typeof (globalThis as any).removeEventListener === "function";
+
+  const waitCompletion = new Promise<any>((resolve) => {
+    if (!canListenWindow) {
+      resolve(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      try {
+        (globalThis as any).removeEventListener("nexusmind.failover.completed", onDone);
+      } catch {}
+      resolve(null);
+    }, 1500);
+    const onDone = (ev: any) => {
+      const d = ev?.detail;
+      const dName = String(d?.agentName || d?.agentKey || "").trim().toLowerCase();
+      if (!targetNorm || !dName || dName.includes(targetNorm) || targetNorm.includes(dName)) {
+        clearTimeout(timer);
+        try {
+          (globalThis as any).removeEventListener("nexusmind.failover.completed", onDone);
+        } catch {}
+        resolve(d || null);
+      }
+    };
+    try {
+      (globalThis as any).addEventListener("nexusmind.failover.completed", onDone);
+    } catch {
+      clearTimeout(timer);
+      resolve(null);
+    }
+  });
+
   try {
     const emitter = (ctx as any)?.events?.emit || (ctx as any)?.bus?.emit;
     if (typeof emitter === "function") {
@@ -1065,6 +1104,52 @@ export async function requestModelFailover(
   } catch {
     // Evento best-effort
   }
+
+  completedByNexusMind = await waitCompletion;
+  if (completedByNexusMind?.applied && completedByNexusMind?.toModel) {
+    return {
+      ok: true,
+      delegated: true,
+      event: ORGFY_FAILOVER_REQUEST_EVENT,
+      agente: completedByNexusMind.agentName || input.agente || "unknown",
+      previousModel: completedByNexusMind.fromModel || input.failed_model || null,
+      selectedModel: completedByNexusMind.toModel,
+      candidatesTested: 1,
+      retriggered: Boolean(completedByNexusMind.wokeAgent),
+      message: `Failover concluído pelo NexusMind Gateway: ${completedByNexusMind.fromModel || "anterior"} → ${completedByNexusMind.toModel}.`,
+    };
+  }
+
+  // Fallback direto quando o NexusMind Gateway não respondeu ao evento (ex.: webview isolada)
+  const agentsApi = (ctx as any)?.agents;
+  if (input.apply !== false && typeof agentsApi?.save === "function") {
+    const directRes = await executeSmartModelFailover(ctx, {
+      agente: input.agente,
+      agent_pubkey: input.agent_pubkey || null,
+      failed_model: input.failed_model || null,
+      prefer_free: Boolean(input.prefer_free),
+      apply: true,
+      retrigger: input.retrigger !== false,
+      channel_id: input.channel_id || null,
+      thread_root: input.thread_root || null,
+      retrigger_text: input.retrigger_text,
+      max_probes: input.max_probes,
+    });
+    if (directRes.ok && directRes.selectedModel) {
+      return {
+        ok: true,
+        delegated: false,
+        event: ORGFY_FAILOVER_REQUEST_EVENT,
+        agente: directRes.agentName || input.agente || "unknown",
+        previousModel: directRes.previousModel,
+        selectedModel: directRes.selectedModel,
+        candidatesTested: directRes.candidatesTested,
+        retriggered: directRes.retriggered,
+        message: directRes.message,
+      };
+    }
+  }
+
   return {
     ok: true,
     delegated: true,
