@@ -820,7 +820,14 @@ export function createHoldingTower3DComponent(ctx: Context) {
     const screenModesRef = React.useRef<Record<string, WallScreenSlideMode>>({});
     const screenSwitchersRef = React.useRef<Record<string, (nextMode?: WallScreenSlideMode) => WallScreenSlideMode>>({});
 
-    // Refs de controle de câmera suave, camadas e simulação (60fps sem recriar WebGL)
+    // Refs de controle de câmera suave, camadas e simulação (preserva câmera entre updates ao vivo)
+    const cameraStateRef = React.useRef<{ initialized: boolean; theta: number; phi: number; frustum: number; target: THREE.Vector3 }>({
+      initialized: false,
+      theta: 0.66,
+      phi: 1.02,
+      frustum: 15.8,
+      target: new THREE.Vector3(0, 6.2, 0),
+    });
     const desiredTargetRef = React.useRef<THREE.Vector3>(new THREE.Vector3(0, 6.2, 0));
     const desiredFrustumRef = React.useRef<number>(15.8);
     const desiredPhiRef = React.useRef<number | null>(null);
@@ -1160,13 +1167,21 @@ export function createHoldingTower3DComponent(ctx: Context) {
       const defaultCenterY = Math.max(2.6, totalH * 0.46);
       const defaultFrustum = Math.max(14.0, totalH * 1.12);
 
-      let theta = 0.66;
-      let phi = 1.02;
-      let frustum = defaultFrustum;
-      const target = new THREE.Vector3(0, defaultCenterY, 0);
-      desiredTargetRef.current.set(0, defaultCenterY, 0);
-      desiredFrustumRef.current = defaultFrustum;
-      desiredPhiRef.current = null;
+      const savedCam = cameraStateRef.current;
+      let theta = savedCam.initialized ? savedCam.theta : 0.66;
+      let phi = savedCam.initialized ? savedCam.phi : 1.02;
+      let frustum = savedCam.initialized ? savedCam.frustum : defaultFrustum;
+      const target = savedCam.initialized ? savedCam.target.clone() : new THREE.Vector3(0, defaultCenterY, 0);
+      if (!savedCam.initialized) {
+        desiredTargetRef.current.set(0, defaultCenterY, 0);
+        desiredFrustumRef.current = defaultFrustum;
+        desiredPhiRef.current = null;
+        savedCam.initialized = true;
+        savedCam.theta = theta;
+        savedCam.phi = phi;
+        savedCam.frustum = frustum;
+        savedCam.target.copy(target);
+      }
 
       const aspect = width / height;
       const camera = new THREE.OrthographicCamera(
@@ -1194,6 +1209,10 @@ export function createHoldingTower3DComponent(ctx: Context) {
         );
         camera.lookAt(target);
         camera.updateProjectionMatrix();
+        cameraStateRef.current.theta = theta;
+        cameraStateRef.current.phi = phi;
+        cameraStateRef.current.frustum = frustum;
+        cameraStateRef.current.target.copy(target);
       };
       updateCamera();
 

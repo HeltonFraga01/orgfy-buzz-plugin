@@ -38,7 +38,7 @@ const MARGIN = 0.4;
 /** The gap between the Workshop's walls and the Lookout's floor, per unit of Workshop depth. */
 export const GAP_PER_DEPTH = 0.6;
 export const SLAB_H = 0.16;
-export const LOOKOUT_WALL_H = 0.9;
+export const LOOKOUT_WALL_H = 2.05;
 
 export interface LookoutPod {
   area: DiscoveryArea;

@@ -152,6 +152,11 @@ export function crewGeometry() {
     foot: placed(new BoxGeometry(0.092, 0.095, 0.14), 0, 0.015, 0.01),
     /** Mãozinha em bloco LEGO na origem. */
     hand: new BoxGeometry(0.074, 0.074, 0.074),
+    /** Braço/manga LEGO unitário (+Y 0..1) escalado dinamicamente do ombro até a mão. */
+    sleeve: placed(new BoxGeometry(0.078, 1, 0.078), 0, 0.5, 0),
+    /** Gola branca e gravata/zíper frontal no tronco LEGO. */
+    shirtCollar: placed(new BoxGeometry(0.115, 0.04, 0.012), 0, 0.335, 0.09),
+    tie: placed(new BoxGeometry(0.032, 0.145, 0.014), 0, 0.25, 0.092),
     /** Olhos quadrados estilo LEGO/Minecraft na face plana. */
     eyes: merged(
       [-0.058, 0.058].map((x) => placed(new BoxGeometry(0.038, 0.044, 0.012), x, EYE_Y, eyeZ)),

@@ -8,6 +8,7 @@ import {
   Matrix4,
   MeshBasicMaterial,
   MeshStandardMaterial,
+  Quaternion,
   Vector3,
 } from "three";
 import { providerHue, providerTone, type Tone } from "../provider-marks";
@@ -319,8 +320,13 @@ export class Crew {
     ];
     const legoHair: Rgb = hairOptions[Math.floor(seeded(f.agent.seed, 5) * hairOptions.length) % hairOptions.length];
     this.pool("body", this.m.clay, { colours: true, cast: true }).push(upper, mem.tone);
+    this.pool("shirtCollar", this.m.white).push(upper);
+    this.pool("tie", this.m.clay, { colours: true }).push(upper, p.accent[f.agent.role]);
     this.pool("head", this.m.clay, { colours: true, cast: true }).push(upper, legoSkin);
     this.pool("hair", this.m.clay, { colours: true, cast: true }).push(upper, legoHair);
+    const sleeves = this.pool("sleeve", this.m.clay, { colours: true, cast: true });
+    sleeves.push(armMatrix(upper, [-0.185, 0.315, 0], pose.handL), mem.tone);
+    sleeves.push(armMatrix(upper, [0.185, 0.315, 0], pose.handR), mem.tone);
     const hands = this.pool("hand", this.m.clay, { colours: true, cast: true });
     hands.push(atLocal(upper, pose.handL), legoSkin);
     hands.push(atLocal(upper, pose.handR), legoSkin);
@@ -481,3 +487,20 @@ export class Crew {
 
 const spinEuler = new Euler();
 const eulerOf = (spin: number) => spinEuler.set(spin, spin * 0.7, spin * 0.3);
+
+const _armUp = new Vector3(0, 1, 0);
+const _armStart = new Vector3();
+const _armEnd = new Vector3();
+const _armDir = new Vector3();
+const _armQuat = new Quaternion();
+const _armScale = new Vector3();
+function armMatrix(parent: Matrix4, shoulder: Vec3, hand: Vec3): Matrix4 {
+  _armStart.set(shoulder[0], shoulder[1], shoulder[2]);
+  _armEnd.set(hand[0], hand[1], hand[2]);
+  _armDir.subVectors(_armEnd, _armStart);
+  const len = Math.max(0.06, _armDir.length());
+  _armDir.multiplyScalar(1 / len);
+  _armQuat.setFromUnitVectors(_armUp, _armDir);
+  _armScale.set(1, len, 1);
+  return parent.clone().multiply(new Matrix4().compose(_armStart, _armQuat, _armScale));
+}

@@ -20359,7 +20359,7 @@ const HOPPER_W = 1.4;
 const MARGIN$1 = 0.4;
 const GAP_PER_DEPTH = 0.6;
 const SLAB_H = 0.16;
-const LOOKOUT_WALL_H = 0.9;
+const LOOKOUT_WALL_H = 2.05;
 function lookoutLayout(w, customPods) {
   const depth = w.bounds.z1 - w.bounds.z0;
   const y = WALL_H + GAP_PER_DEPTH * depth;
@@ -51245,6 +51245,11 @@ function crewGeometry() {
     foot: placed(new BoxGeometry(0.092, 0.095, 0.14), 0, 0.015, 0.01),
     /** Mãozinha em bloco LEGO na origem. */
     hand: new BoxGeometry(0.074, 0.074, 0.074),
+    /** Braço/manga LEGO unitário (+Y 0..1) escalado dinamicamente do ombro até a mão. */
+    sleeve: placed(new BoxGeometry(0.078, 1, 0.078), 0, 0.5, 0),
+    /** Gola branca e gravata/zíper frontal no tronco LEGO. */
+    shirtCollar: placed(new BoxGeometry(0.115, 0.04, 0.012), 0, 0.335, 0.09),
+    tie: placed(new BoxGeometry(0.032, 0.145, 0.014), 0, 0.25, 0.092),
     /** Olhos quadrados estilo LEGO/Minecraft na face plana. */
     eyes: merged(
       [-0.058, 0.058].map((x) => placed(new BoxGeometry(0.038, 0.044, 0.012), x, EYE_Y, eyeZ))
@@ -53257,8 +53262,13 @@ class Crew {
     ];
     const legoHair = hairOptions[Math.floor(seeded(f.agent.seed, 5) * hairOptions.length) % hairOptions.length];
     this.pool("body", this.m.clay, { colours: true, cast: true }).push(upper, mem.tone);
+    this.pool("shirtCollar", this.m.white).push(upper);
+    this.pool("tie", this.m.clay, { colours: true }).push(upper, p.accent[f.agent.role]);
     this.pool("head", this.m.clay, { colours: true, cast: true }).push(upper, legoSkin);
     this.pool("hair", this.m.clay, { colours: true, cast: true }).push(upper, legoHair);
+    const sleeves = this.pool("sleeve", this.m.clay, { colours: true, cast: true });
+    sleeves.push(armMatrix(upper, [-0.185, 0.315, 0], pose.handL), mem.tone);
+    sleeves.push(armMatrix(upper, [0.185, 0.315, 0], pose.handR), mem.tone);
     const hands = this.pool("hand", this.m.clay, { colours: true, cast: true });
     hands.push(atLocal(upper, pose.handL), legoSkin);
     hands.push(atLocal(upper, pose.handR), legoSkin);
@@ -53394,6 +53404,22 @@ class Crew {
 }
 const spinEuler = new Euler();
 const eulerOf = (spin) => spinEuler.set(spin, spin * 0.7, spin * 0.3);
+const _armUp = new Vector3(0, 1, 0);
+const _armStart = new Vector3();
+const _armEnd = new Vector3();
+const _armDir = new Vector3();
+const _armQuat = new Quaternion();
+const _armScale = new Vector3();
+function armMatrix(parent, shoulder, hand) {
+  _armStart.set(shoulder[0], shoulder[1], shoulder[2]);
+  _armEnd.set(hand[0], hand[1], hand[2]);
+  _armDir.subVectors(_armEnd, _armStart);
+  const len = Math.max(0.06, _armDir.length());
+  _armDir.multiplyScalar(1 / len);
+  _armQuat.setFromUnitVectors(_armUp, _armDir);
+  _armScale.set(1, len, 1);
+  return parent.clone().multiply(new Matrix4().compose(_armStart, _armQuat, _armScale));
+}
 const SHADOW_MAP = 1024;
 const SUN = new Vector3(-0.2, 1.5, 1).normalize();
 const STOPPED_LIGHT = 0.4;
@@ -53655,16 +53681,17 @@ function buildLookout(l, lit, p, kit, unit) {
       bg.fillText(box2.sub, bx + 18, 208);
     });
   }
-  const wallBoardW = Math.min(4.6, w * 0.42);
-  const wallBoardH = wallBoardW * 0.25;
+  const wallBoardW = Math.min(4.4, w * 0.4);
+  const wallBoardH = wallBoardW * 0.24;
+  const wallBoardY = LOOKOUT_WALL_H - wallBoardH / 2 - 0.14;
   const wallBezel = boxes(kit, unit, kit.matte(p.sign, { roughness: 0.45 }), [
-    { x: cx, y: LOOKOUT_WALL_H * 0.56, z: z0 + 0.03, w: wallBoardW + 0.14, h: wallBoardH + 0.12, d: 0.06 }
+    { x: cx, y: wallBoardY, z: z0 + 0.03, w: wallBoardW + 0.14, h: wallBoardH + 0.12, d: 0.06 }
   ]);
   const wallScreen = new Mesh(
     kit.own(new PlaneGeometry(wallBoardW, wallBoardH)),
     kit.matte(null, { map: kit.canvasTexture(boardCanvas2), roughness: 0.45 })
   );
-  wallScreen.position.set(cx, LOOKOUT_WALL_H * 0.56, z0 + 0.065);
+  wallScreen.position.set(cx, wallBoardY, z0 + 0.065);
   add2(wallBezel, wallScreen);
   const glassMat = kit.own(
     new MeshStandardMaterial({
@@ -59076,6 +59103,13 @@ function createHoldingTower3DComponent(ctx) {
     const [screenSlideTick, setScreenSlideTick] = React.useState(0);
     const screenModesRef = React.useRef({});
     const screenSwitchersRef = React.useRef({});
+    const cameraStateRef = React.useRef({
+      initialized: false,
+      theta: 0.66,
+      phi: 1.02,
+      frustum: 15.8,
+      target: new Vector3(0, 6.2, 0)
+    });
     const desiredTargetRef = React.useRef(new Vector3(0, 6.2, 0));
     const desiredFrustumRef = React.useRef(15.8);
     const desiredPhiRef = React.useRef(null);
@@ -59340,13 +59374,21 @@ function createHoldingTower3DComponent(ctx) {
       const totalH = floors.length * FLOOR_H;
       const defaultCenterY = Math.max(2.6, totalH * 0.46);
       const defaultFrustum = Math.max(14, totalH * 1.12);
-      let theta = 0.66;
-      let phi = 1.02;
-      let frustum = defaultFrustum;
-      const target = new Vector3(0, defaultCenterY, 0);
-      desiredTargetRef.current.set(0, defaultCenterY, 0);
-      desiredFrustumRef.current = defaultFrustum;
-      desiredPhiRef.current = null;
+      const savedCam = cameraStateRef.current;
+      let theta = savedCam.initialized ? savedCam.theta : 0.66;
+      let phi = savedCam.initialized ? savedCam.phi : 1.02;
+      let frustum = savedCam.initialized ? savedCam.frustum : defaultFrustum;
+      const target = savedCam.initialized ? savedCam.target.clone() : new Vector3(0, defaultCenterY, 0);
+      if (!savedCam.initialized) {
+        desiredTargetRef.current.set(0, defaultCenterY, 0);
+        desiredFrustumRef.current = defaultFrustum;
+        desiredPhiRef.current = null;
+        savedCam.initialized = true;
+        savedCam.theta = theta;
+        savedCam.phi = phi;
+        savedCam.frustum = frustum;
+        savedCam.target.copy(target);
+      }
       const aspect2 = width / height;
       const camera = new OrthographicCamera(
         -frustum * aspect2 / 2,
@@ -59372,6 +59414,10 @@ function createHoldingTower3DComponent(ctx) {
         );
         camera.lookAt(target);
         camera.updateProjectionMatrix();
+        cameraStateRef.current.theta = theta;
+        cameraStateRef.current.phi = phi;
+        cameraStateRef.current.frustum = frustum;
+        cameraStateRef.current.target.copy(target);
       };
       updateCamera();
       let renderer;

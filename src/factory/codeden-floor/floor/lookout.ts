@@ -220,16 +220,17 @@ export function buildLookout(
       bg.fillText(box.sub, bx + 18, 208);
     });
   }
-  const wallBoardW = Math.min(4.6, w * 0.42);
-  const wallBoardH = wallBoardW * 0.25;
+  const wallBoardW = Math.min(4.4, w * 0.4);
+  const wallBoardH = wallBoardW * 0.24;
+  const wallBoardY = LOOKOUT_WALL_H - wallBoardH / 2 - 0.14;
   const wallBezel = boxes(kit, unit, kit.matte(p.sign, { roughness: 0.45 }), [
-    { x: cx, y: LOOKOUT_WALL_H * 0.56, z: z0 + 0.03, w: wallBoardW + 0.14, h: wallBoardH + 0.12, d: 0.06 },
+    { x: cx, y: wallBoardY, z: z0 + 0.03, w: wallBoardW + 0.14, h: wallBoardH + 0.12, d: 0.06 },
   ]);
   const wallScreen = new Mesh(
     kit.own(new PlaneGeometry(wallBoardW, wallBoardH)),
     kit.matte(null, { map: kit.canvasTexture(boardCanvas), roughness: 0.45 }),
   );
-  wallScreen.position.set(cx, LOOKOUT_WALL_H * 0.56, z0 + 0.065);
+  wallScreen.position.set(cx, wallBoardY, z0 + 0.065);
   add(wallBezel, wallScreen);
 
   const glassMat = kit.own(
