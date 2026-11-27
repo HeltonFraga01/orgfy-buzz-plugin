@@ -9879,6 +9879,7 @@ function createCodeDenInspectorDrawer(React) {
       linkedPr,
       liveCrew = [],
       liveTurnsByPubkey = {},
+      ciBySha = {},
       resolveAuthor,
       EmbeddedThread,
       threadChannelId,
@@ -10044,10 +10045,23 @@ function createCodeDenInspectorDrawer(React) {
     const executorTurn = (executorAgent == null ? void 0 : executorAgent.pubkey) ? liveTurnsByPubkey[executorAgent.pubkey.toLowerCase()] || null : null;
     const steps = ["Entrada", "Tipo", "Execução", "Revisão + CI", "Merge"];
     const activeIdx = item.stage === "merged" ? 4 : item.stage === "verifying" || item.stage === "watching" ? 3 : item.stage === "building" ? 2 : item.stage === "candidate" ? 1 : 0;
+    const activeCommitSha = ((repoDetail == null ? void 0 : repoDetail.commit) || selectedCommit || "").trim().toLowerCase();
+    const ciEntry = (() => {
+      if (!ciBySha || !activeCommitSha) return null;
+      if (ciBySha[activeCommitSha]) return ciBySha[activeCommitSha];
+      const matchedKey = Object.keys(ciBySha).find((k) => {
+        const kl = k.toLowerCase();
+        return kl === activeCommitSha || kl.startsWith(activeCommitSha) || activeCommitSha.startsWith(kl);
+      });
+      return matchedKey ? ciBySha[matchedKey] : null;
+    })();
+    const ciCheckState = item.stage === "merged" || (ciEntry == null ? void 0 : ciEntry.status) === "ok" ? "passed" : (ciEntry == null ? void 0 : ciEntry.status) === "falha" ? "failed" : item.stage === "verifying" || item.stage === "watching" ? "running" : "pending";
+    const ciDetailLabel = ciEntry ? ciEntry.status === "falha" ? `Falhou${typeof ciEntry.exitCode === "number" ? ` (exit ${ciEntry.exitCode})` : ""}${typeof ciEntry.durationSeconds === "number" ? ` · ${Math.round(ciEntry.durationSeconds)}s` : ""}` : `Aprovado${typeof ciEntry.durationSeconds === "number" ? ` · ${Math.round(ciEntry.durationSeconds)}s` : ""}` : void 0;
     const checksList = [
       {
         name: "CI / Pytest da Esteira",
-        state: item.stage === "merged" ? "passed" : item.stage === "verifying" || item.stage === "watching" ? "running" : "pending"
+        state: ciCheckState,
+        detail: ciDetailLabel
       },
       {
         name: "Revisão Cross-Provider (L-01)",
@@ -10063,6 +10077,7 @@ function createCodeDenInspectorDrawer(React) {
       }
     ];
     const checksPassed = checksList.filter((c) => c.state === "passed").length;
+    const checksFailed = checksList.filter((c) => c.state === "failed").length;
     const allDiffsOpen = parsedDiffFiles.length > 0 && parsedDiffFiles.every((f) => openDiffFiles[f.path] !== false);
     const toggleAllDiffs = () => {
       const next = {};
@@ -10613,8 +10628,8 @@ function createCodeDenInspectorDrawer(React) {
                 ),
                 h(
                   "span",
-                  { className: "of-pill", "data-tone": checksPassed === checksList.length ? "done" : "waiting" },
-                  `Checks ${checksPassed}/${checksList.length}`
+                  { className: "of-pill", "data-tone": checksFailed > 0 ? "failed" : checksPassed === checksList.length ? "done" : "waiting" },
+                  checksFailed > 0 ? `Checks ${checksPassed}/${checksList.length} · ${checksFailed} falhou` : `Checks ${checksPassed}/${checksList.length}`
                 ),
                 item.type && h("span", { className: "of-pill" }, item.type),
                 parsedDiffFiles.length > 0 && h("span", { className: "of-mono", style: { color: "var(--status-done, #3dd68c)", fontWeight: 600 } }, `+${totalAdditions}`),
@@ -10752,7 +10767,7 @@ function createCodeDenInspectorDrawer(React) {
                 checksList.map((chk, idx) => {
                   const tone = chk.state === "passed" ? "var(--status-done, #3dd68c)" : chk.state === "failed" ? "var(--status-failed, #ff9592)" : "var(--status-waiting, #ffca16)";
                   const iconName = chk.state === "passed" ? "checkCircle" : chk.state === "failed" ? "xCircle" : "clock";
-                  const label = chk.state === "passed" ? "Aprovado" : chk.state === "failed" ? "Falhou" : chk.state === "running" ? "Em andamento" : "Pendente";
+                  const label = chk.detail || (chk.state === "passed" ? "Aprovado" : chk.state === "failed" ? "Falhou" : chk.state === "running" ? "Em andamento" : "Pendente");
                   return h(
                     "div",
                     {
@@ -14202,6 +14217,24 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
           latencyMs: entry.latencyMs,
           costUsd: entry.costUsd
         });
+      }
+      return out;
+    })(),
+    ciBySha: (() => {
+      const rawCi = esteiraState == null ? void 0 : esteiraState.ci;
+      if (!rawCi || typeof rawCi !== "object") return {};
+      const out = {};
+      for (const [sha, entry] of Object.entries(rawCi)) {
+        if (!sha || !entry || typeof entry !== "object") continue;
+        const st = String(entry.status || "").toLowerCase();
+        if (st !== "ok" && st !== "falha") continue;
+        out[sha.toLowerCase()] = {
+          status: st,
+          exitCode: typeof entry.exit_code === "number" ? entry.exit_code : void 0,
+          durationSeconds: typeof entry.duration_seconds === "number" ? entry.duration_seconds : void 0,
+          finishedAt: typeof entry.finished_at === "number" ? entry.finished_at : void 0,
+          log: typeof entry.log === "string" ? entry.log : void 0
+        };
       }
       return out;
     })(),
@@ -68694,6 +68727,7 @@ Nota: ${evidence.note}`
         ) || null : null,
         liveCrew,
         liveTurnsByPubkey: telemetry.byPubkey,
+        ciBySha: status.ciBySha,
         resolveAuthor: (pk) => resolveBuzzIdentityName(ctx, pk, nameByPubkey),
         EmbeddedThread: (_w = (_v = ctx == null ? void 0 : ctx.conversation) == null ? void 0 : _v.ui) == null ? void 0 : _w.Thread,
         threadChannelId: ((_x2 = status.tenantManifest) == null ? void 0 : _x2.canal) || ((_y2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _y2.canal) || null,

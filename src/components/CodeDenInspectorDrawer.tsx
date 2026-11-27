@@ -49,6 +49,7 @@ export interface CodeDenInspectorDrawerProps {
   linkedPr?: LiveRepoItemSummary | null;
   liveCrew?: LiveCrewAgent[];
   liveTurnsByPubkey?: Record<string, LiveAgentTurn>;
+  ciBySha?: Record<string, { status: "ok" | "falha"; exitCode?: number; durationSeconds?: number; finishedAt?: number; log?: string }>;
   resolveAuthor?: (pubkey: string) => string;
   EmbeddedThread?: any;
   threadChannelId?: string | null;
@@ -699,6 +700,7 @@ export function createCodeDenInspectorDrawer(React: Context["react"]) {
       linkedPr,
       liveCrew = [],
       liveTurnsByPubkey = {},
+      ciBySha = {},
       resolveAuthor,
       EmbeddedThread,
       threadChannelId,
@@ -884,11 +886,34 @@ export function createCodeDenInspectorDrawer(React: Context["react"]) {
     const activeIdx =
       item.stage === "merged" ? 4 : item.stage === "verifying" || item.stage === "watching" ? 3 : item.stage === "building" ? 2 : item.stage === "candidate" ? 1 : 0;
 
-    // Checks reais derivados do estágio da esteira OrgFy + estado do PR
-    const checksList = [
+    // Checks reais derivados do esteira-minima-state.json (ci[sha]) + estágio do PR
+    const activeCommitSha = (repoDetail?.commit || selectedCommit || "").trim().toLowerCase();
+    const ciEntry = (() => {
+      if (!ciBySha || !activeCommitSha) return null;
+      if (ciBySha[activeCommitSha]) return ciBySha[activeCommitSha];
+      const matchedKey = Object.keys(ciBySha).find((k) => {
+        const kl = k.toLowerCase();
+        return kl === activeCommitSha || kl.startsWith(activeCommitSha) || activeCommitSha.startsWith(kl);
+      });
+      return matchedKey ? ciBySha[matchedKey] : null;
+    })();
+    const ciCheckState = item.stage === "merged" || ciEntry?.status === "ok"
+      ? "passed"
+      : ciEntry?.status === "falha"
+      ? "failed"
+      : item.stage === "verifying" || item.stage === "watching"
+      ? "running"
+      : "pending";
+    const ciDetailLabel = ciEntry
+      ? ciEntry.status === "falha"
+        ? `Falhou${typeof ciEntry.exitCode === "number" ? ` (exit ${ciEntry.exitCode})` : ""}${typeof ciEntry.durationSeconds === "number" ? ` · ${Math.round(ciEntry.durationSeconds)}s` : ""}`
+        : `Aprovado${typeof ciEntry.durationSeconds === "number" ? ` · ${Math.round(ciEntry.durationSeconds)}s` : ""}`
+      : undefined;
+    const checksList: Array<{ name: string; state: string; detail?: string }> = [
       {
         name: "CI / Pytest da Esteira",
-        state: item.stage === "merged" ? "passed" : item.stage === "verifying" || item.stage === "watching" ? "running" : "pending",
+        state: ciCheckState,
+        detail: ciDetailLabel,
       },
       {
         name: "Revisão Cross-Provider (L-01)",
@@ -904,6 +929,7 @@ export function createCodeDenInspectorDrawer(React: Context["react"]) {
       },
     ];
     const checksPassed = checksList.filter((c) => c.state === "passed").length;
+    const checksFailed = checksList.filter((c) => c.state === "failed").length;
 
     const allDiffsOpen = parsedDiffFiles.length > 0 && parsedDiffFiles.every((f) => openDiffFiles[f.path] !== false);
     const toggleAllDiffs = () => {
@@ -1502,8 +1528,8 @@ export function createCodeDenInspectorDrawer(React: Context["react"]) {
                   ),
                   h(
                     "span",
-                    { className: "of-pill", "data-tone": checksPassed === checksList.length ? "done" : "waiting" },
-                    `Checks ${checksPassed}/${checksList.length}`
+                    { className: "of-pill", "data-tone": checksFailed > 0 ? "failed" : checksPassed === checksList.length ? "done" : "waiting" },
+                    checksFailed > 0 ? `Checks ${checksPassed}/${checksList.length} · ${checksFailed} falhou` : `Checks ${checksPassed}/${checksList.length}`
                   ),
                   item.type && h("span", { className: "of-pill" }, item.type),
                   parsedDiffFiles.length > 0 &&
@@ -1664,7 +1690,7 @@ export function createCodeDenInspectorDrawer(React: Context["react"]) {
                         ? "var(--status-failed, #ff9592)"
                         : "var(--status-waiting, #ffca16)";
                     const iconName = chk.state === "passed" ? "checkCircle" : chk.state === "failed" ? "xCircle" : "clock";
-                    const label = chk.state === "passed" ? "Aprovado" : chk.state === "failed" ? "Falhou" : chk.state === "running" ? "Em andamento" : "Pendente";
+                    const label = chk.detail || (chk.state === "passed" ? "Aprovado" : chk.state === "failed" ? "Falhou" : chk.state === "running" ? "Em andamento" : "Pendente");
                     return h(
                       "div",
                       {

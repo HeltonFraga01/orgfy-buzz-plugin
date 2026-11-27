@@ -2860,6 +2860,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
           : null,
         liveCrew,
         liveTurnsByPubkey: telemetry.byPubkey,
+        ciBySha: status.ciBySha,
         resolveAuthor: (pk: string) => resolveBuzzIdentityName(ctx, pk, nameByPubkey),
         EmbeddedThread: (ctx as any)?.conversation?.ui?.Thread,
         threadChannelId: status.tenantManifest?.canal || holding?.empresas.find((e) => e.slug === tenant)?.canal || null,

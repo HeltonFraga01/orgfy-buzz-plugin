@@ -196,6 +196,7 @@ export interface FactoryStatusPayload {
     canalBuzz: string | null;
     papeis: Record<string, string>;
   };
+  ciBySha?: Record<string, { status: "ok" | "falha"; exitCode?: number; durationSeconds?: number; finishedAt?: number; log?: string }>;
   indisponivel: string[];
 }
 
@@ -822,6 +823,24 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
           latencyMs: entry.latencyMs,
           costUsd: entry.costUsd,
         });
+      }
+      return out;
+    })(),
+    ciBySha: (() => {
+      const rawCi = esteiraState?.ci;
+      if (!rawCi || typeof rawCi !== "object") return {};
+      const out: Record<string, { status: "ok" | "falha"; exitCode?: number; durationSeconds?: number; finishedAt?: number; log?: string }> = {};
+      for (const [sha, entry] of Object.entries<any>(rawCi)) {
+        if (!sha || !entry || typeof entry !== "object") continue;
+        const st = String(entry.status || "").toLowerCase();
+        if (st !== "ok" && st !== "falha") continue;
+        out[sha.toLowerCase()] = {
+          status: st,
+          exitCode: typeof entry.exit_code === "number" ? entry.exit_code : undefined,
+          durationSeconds: typeof entry.duration_seconds === "number" ? entry.duration_seconds : undefined,
+          finishedAt: typeof entry.finished_at === "number" ? entry.finished_at : undefined,
+          log: typeof entry.log === "string" ? entry.log : undefined,
+        };
       }
       return out;
     })(),
