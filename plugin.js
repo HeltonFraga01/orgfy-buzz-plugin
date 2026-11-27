@@ -31891,6 +31891,247 @@ class FrustumArray {
     return new FrustumArray().copy(this);
   }
 }
+class LineBasicMaterial extends Material {
+  /**
+   * Constructs a new line basic material.
+   *
+   * @param {Object} [parameters] - An object with one or more properties
+   * defining the material's appearance. Any property of the material
+   * (including any property from inherited materials) can be passed
+   * in here. Color values can be passed any type of value accepted
+   * by {@link Color#set}.
+   */
+  constructor(parameters) {
+    super();
+    this.isLineBasicMaterial = true;
+    this.type = "LineBasicMaterial";
+    this.color = new Color(16777215);
+    this.map = null;
+    this.linewidth = 1;
+    this.linecap = "round";
+    this.linejoin = "round";
+    this.fog = true;
+    this.setValues(parameters);
+  }
+  copy(source) {
+    super.copy(source);
+    this.color.copy(source.color);
+    this.map = source.map;
+    this.linewidth = source.linewidth;
+    this.linecap = source.linecap;
+    this.linejoin = source.linejoin;
+    this.fog = source.fog;
+    return this;
+  }
+}
+const _vStart = /* @__PURE__ */ new Vector3();
+const _vEnd = /* @__PURE__ */ new Vector3();
+const _inverseMatrix$1 = /* @__PURE__ */ new Matrix4();
+const _ray$1 = /* @__PURE__ */ new Ray();
+const _sphere$1 = /* @__PURE__ */ new Sphere();
+const _intersectPointOnRay = /* @__PURE__ */ new Vector3();
+const _intersectPointOnSegment = /* @__PURE__ */ new Vector3();
+class Line extends Object3D {
+  /**
+   * Constructs a new line.
+   *
+   * @param {BufferGeometry} [geometry] - The line geometry.
+   * @param {Material|Array<Material>} [material] - The line material.
+   */
+  constructor(geometry = new BufferGeometry(), material = new LineBasicMaterial()) {
+    super();
+    this.isLine = true;
+    this.type = "Line";
+    this.geometry = geometry;
+    this.material = material;
+    this.morphTargetDictionary = void 0;
+    this.morphTargetInfluences = void 0;
+    this.updateMorphTargets();
+  }
+  copy(source, recursive) {
+    super.copy(source, recursive);
+    if (source.morphTargetInfluences !== void 0) {
+      this.morphTargetInfluences = source.morphTargetInfluences.slice();
+    } else {
+      this.morphTargetInfluences = void 0;
+    }
+    if (source.morphTargetDictionary !== void 0) {
+      this.morphTargetDictionary = Object.assign({}, source.morphTargetDictionary);
+    } else {
+      this.morphTargetDictionary = void 0;
+    }
+    this.material = Array.isArray(source.material) ? source.material.slice() : source.material;
+    this.geometry = source.geometry;
+    return this;
+  }
+  /**
+   * Computes an array of distance values which are necessary for rendering dashed lines.
+   * For each vertex in the geometry, the method calculates the cumulative length from the
+   * current point to the very beginning of the line.
+   *
+   * @return {Line} A reference to this line.
+   */
+  computeLineDistances() {
+    const geometry = this.geometry;
+    if (geometry.index === null) {
+      const positionAttribute = geometry.attributes.position;
+      const lineDistances = [0];
+      for (let i = 1, l = positionAttribute.count; i < l; i++) {
+        _vStart.fromBufferAttribute(positionAttribute, i - 1);
+        _vEnd.fromBufferAttribute(positionAttribute, i);
+        lineDistances[i] = lineDistances[i - 1];
+        lineDistances[i] += _vStart.distanceTo(_vEnd);
+      }
+      geometry.setAttribute("lineDistance", new Float32BufferAttribute(lineDistances, 1));
+    } else {
+      warn("Line.computeLineDistances(): Computation only possible with non-indexed BufferGeometry.");
+    }
+    return this;
+  }
+  /**
+   * Returns `true` if this line intersects the given frustum.
+   *
+   * @param {Frustum|FrustumArray} frustum - The frustum to test.
+   * @return {boolean} Whether this line intersects the given frustum or not.
+   */
+  intersectsFrustum(frustum) {
+    return frustum.intersectsObject(this);
+  }
+  /**
+   * Computes intersection points between a casted ray and this line.
+   *
+   * @param {Raycaster} raycaster - The raycaster.
+   * @param {Array<Object>} intersects - The target array that holds the intersection points.
+   */
+  raycast(raycaster, intersects) {
+    const geometry = this.geometry;
+    const matrixWorld = this.matrixWorld;
+    const threshold = raycaster.params.Line.threshold;
+    const drawRange = geometry.drawRange;
+    if (geometry.boundingSphere === null) geometry.computeBoundingSphere();
+    _sphere$1.copy(geometry.boundingSphere);
+    _sphere$1.applyMatrix4(matrixWorld);
+    _sphere$1.radius += threshold;
+    if (raycaster.ray.intersectsSphere(_sphere$1) === false) return;
+    _inverseMatrix$1.copy(matrixWorld).invert();
+    _ray$1.copy(raycaster.ray).applyMatrix4(_inverseMatrix$1);
+    const localThreshold = threshold / ((this.scale.x + this.scale.y + this.scale.z) / 3);
+    const localThresholdSq = localThreshold * localThreshold;
+    const step = this.isLineSegments ? 2 : 1;
+    const index = geometry.index;
+    const attributes = geometry.attributes;
+    const positionAttribute = attributes.position;
+    if (index !== null) {
+      const start = Math.max(0, drawRange.start);
+      const end = Math.min(index.count, drawRange.start + drawRange.count);
+      for (let i = start, l = end - 1; i < l; i += step) {
+        const a = index.getX(i);
+        const b = index.getX(i + 1);
+        const intersect2 = checkIntersection(this, raycaster, _ray$1, localThresholdSq, a, b, i);
+        if (intersect2) {
+          intersects.push(intersect2);
+        }
+      }
+      if (this.isLineLoop) {
+        const a = index.getX(end - 1);
+        const b = index.getX(start);
+        const intersect2 = checkIntersection(this, raycaster, _ray$1, localThresholdSq, a, b, end - 1);
+        if (intersect2) {
+          intersects.push(intersect2);
+        }
+      }
+    } else {
+      const start = Math.max(0, drawRange.start);
+      const end = Math.min(positionAttribute.count, drawRange.start + drawRange.count);
+      for (let i = start, l = end - 1; i < l; i += step) {
+        const intersect2 = checkIntersection(this, raycaster, _ray$1, localThresholdSq, i, i + 1, i);
+        if (intersect2) {
+          intersects.push(intersect2);
+        }
+      }
+      if (this.isLineLoop) {
+        const intersect2 = checkIntersection(this, raycaster, _ray$1, localThresholdSq, end - 1, start, end - 1);
+        if (intersect2) {
+          intersects.push(intersect2);
+        }
+      }
+    }
+  }
+  /**
+   * Sets the values of {@link Line#morphTargetDictionary} and {@link Line#morphTargetInfluences}
+   * to make sure existing morph targets can influence this 3D object.
+   */
+  updateMorphTargets() {
+    const geometry = this.geometry;
+    const morphAttributes = geometry.morphAttributes;
+    const keys = Object.keys(morphAttributes);
+    if (keys.length > 0) {
+      const morphAttribute = morphAttributes[keys[0]];
+      if (morphAttribute !== void 0) {
+        this.morphTargetInfluences = [];
+        this.morphTargetDictionary = {};
+        for (let m = 0, ml = morphAttribute.length; m < ml; m++) {
+          const name = morphAttribute[m].name || String(m);
+          this.morphTargetInfluences.push(0);
+          this.morphTargetDictionary[name] = m;
+        }
+      }
+    }
+  }
+}
+function checkIntersection(object, raycaster, ray, thresholdSq, a, b, i) {
+  const positionAttribute = object.geometry.attributes.position;
+  _vStart.fromBufferAttribute(positionAttribute, a);
+  _vEnd.fromBufferAttribute(positionAttribute, b);
+  const distSq = ray.distanceSqToSegment(_vStart, _vEnd, _intersectPointOnRay, _intersectPointOnSegment);
+  if (distSq > thresholdSq) return;
+  _intersectPointOnRay.applyMatrix4(object.matrixWorld);
+  const distance = raycaster.ray.origin.distanceTo(_intersectPointOnRay);
+  if (distance < raycaster.near || distance > raycaster.far) return;
+  return {
+    distance,
+    // What do we want? intersection point on the ray or on the segment??
+    // point: raycaster.ray.at( distance ),
+    point: _intersectPointOnSegment.clone().applyMatrix4(object.matrixWorld),
+    index: i,
+    face: null,
+    faceIndex: null,
+    barycoord: null,
+    object
+  };
+}
+const _start = /* @__PURE__ */ new Vector3();
+const _end = /* @__PURE__ */ new Vector3();
+class LineSegments extends Line {
+  /**
+   * Constructs a new line segments.
+   *
+   * @param {BufferGeometry} [geometry] - The line geometry.
+   * @param {Material|Array<Material>} [material] - The line material.
+   */
+  constructor(geometry, material) {
+    super(geometry, material);
+    this.isLineSegments = true;
+    this.type = "LineSegments";
+  }
+  computeLineDistances() {
+    const geometry = this.geometry;
+    if (geometry.index === null) {
+      const positionAttribute = geometry.attributes.position;
+      const lineDistances = [];
+      for (let i = 0, l = positionAttribute.count; i < l; i += 2) {
+        _start.fromBufferAttribute(positionAttribute, i);
+        _end.fromBufferAttribute(positionAttribute, i + 1);
+        lineDistances[i] = i === 0 ? 0 : lineDistances[i - 1];
+        lineDistances[i + 1] = lineDistances[i] + _start.distanceTo(_end);
+      }
+      geometry.setAttribute("lineDistance", new Float32BufferAttribute(lineDistances, 1));
+    } else {
+      warn("LineSegments.computeLineDistances(): Computation only possible with non-indexed BufferGeometry.");
+    }
+    return this;
+  }
+}
 class CubeTexture extends Texture {
   /**
    * Constructs a new cube texture.
@@ -32881,6 +33122,100 @@ class DodecahedronGeometry extends PolyhedronGeometry {
    */
   static fromJSON(data) {
     return new DodecahedronGeometry(data.radius, data.detail);
+  }
+}
+const _v0$3 = /* @__PURE__ */ new Vector3();
+const _v1$1 = /* @__PURE__ */ new Vector3();
+const _normal = /* @__PURE__ */ new Vector3();
+const _triangle = /* @__PURE__ */ new Triangle();
+class EdgesGeometry extends BufferGeometry {
+  /**
+   * Constructs a new edges geometry.
+   *
+   * @param {?BufferGeometry} [geometry=null] - The geometry.
+   * @param {number} [thresholdAngle=1] - An edge is only rendered if the angle (in degrees)
+   * between the face normals of the adjoining faces exceeds this value.
+   */
+  constructor(geometry = null, thresholdAngle = 1) {
+    super();
+    this.type = "EdgesGeometry";
+    this.parameters = {
+      geometry,
+      thresholdAngle
+    };
+    if (geometry !== null) {
+      const precisionPoints = 4;
+      const precision = Math.pow(10, precisionPoints);
+      const thresholdDot = Math.cos(DEG2RAD * thresholdAngle);
+      const indexAttr = geometry.getIndex();
+      const positionAttr = geometry.getAttribute("position");
+      const indexCount = indexAttr ? indexAttr.count : positionAttr.count;
+      const indexArr = [0, 0, 0];
+      const vertKeys = ["a", "b", "c"];
+      const hashes = new Array(3);
+      const edgeData = /* @__PURE__ */ new Map();
+      const vertices = [];
+      for (let i = 0; i < indexCount; i += 3) {
+        if (indexAttr) {
+          indexArr[0] = indexAttr.getX(i);
+          indexArr[1] = indexAttr.getX(i + 1);
+          indexArr[2] = indexAttr.getX(i + 2);
+        } else {
+          indexArr[0] = i;
+          indexArr[1] = i + 1;
+          indexArr[2] = i + 2;
+        }
+        const { a, b, c } = _triangle;
+        a.fromBufferAttribute(positionAttr, indexArr[0]);
+        b.fromBufferAttribute(positionAttr, indexArr[1]);
+        c.fromBufferAttribute(positionAttr, indexArr[2]);
+        _triangle.getNormal(_normal);
+        hashes[0] = `${Math.round(a.x * precision)},${Math.round(a.y * precision)},${Math.round(a.z * precision)}`;
+        hashes[1] = `${Math.round(b.x * precision)},${Math.round(b.y * precision)},${Math.round(b.z * precision)}`;
+        hashes[2] = `${Math.round(c.x * precision)},${Math.round(c.y * precision)},${Math.round(c.z * precision)}`;
+        if (hashes[0] === hashes[1] || hashes[1] === hashes[2] || hashes[2] === hashes[0]) {
+          continue;
+        }
+        for (let j = 0; j < 3; j++) {
+          const jNext = (j + 1) % 3;
+          const vecHash0 = hashes[j];
+          const vecHash1 = hashes[jNext];
+          const v0 = _triangle[vertKeys[j]];
+          const v1 = _triangle[vertKeys[jNext]];
+          const hash = `${vecHash0}_${vecHash1}`;
+          const reverseHash = `${vecHash1}_${vecHash0}`;
+          const sibling = edgeData.get(reverseHash);
+          if (sibling) {
+            if (_normal.dot(sibling.normal) <= thresholdDot) {
+              vertices.push(v0.x, v0.y, v0.z);
+              vertices.push(v1.x, v1.y, v1.z);
+            }
+            edgeData.set(reverseHash, null);
+          } else if (!edgeData.has(hash)) {
+            edgeData.set(hash, {
+              index0: indexArr[j],
+              index1: indexArr[jNext],
+              normal: _normal.clone()
+            });
+          }
+        }
+      }
+      for (const edge of edgeData.values()) {
+        if (edge) {
+          const { index0, index1 } = edge;
+          _v0$3.fromBufferAttribute(positionAttr, index0);
+          _v1$1.fromBufferAttribute(positionAttr, index1);
+          vertices.push(_v0$3.x, _v0$3.y, _v0$3.z);
+          vertices.push(_v1$1.x, _v1$1.y, _v1$1.z);
+        }
+      }
+      this.setAttribute("position", new Float32BufferAttribute(vertices, 3));
+    }
+  }
+  copy(source) {
+    super.copy(source);
+    this.parameters = Object.assign({}, source.parameters);
+    return this;
   }
 }
 class Curve {
@@ -35112,6 +35447,89 @@ class MeshPhysicalMaterial extends MeshStandardMaterial {
     this.specularIntensityMap = source.specularIntensityMap;
     this.specularColor.copy(source.specularColor);
     this.specularColorMap = source.specularColorMap;
+    return this;
+  }
+}
+class MeshLambertMaterial extends Material {
+  /**
+   * Constructs a new mesh lambert material.
+   *
+   * @param {Object} [parameters] - An object with one or more properties
+   * defining the material's appearance. Any property of the material
+   * (including any property from inherited materials) can be passed
+   * in here. Color values can be passed any type of value accepted
+   * by {@link Color#set}.
+   */
+  constructor(parameters) {
+    super();
+    this.isMeshLambertMaterial = true;
+    this.type = "MeshLambertMaterial";
+    this.color = new Color(16777215);
+    this.map = null;
+    this.lightMap = null;
+    this.lightMapIntensity = 1;
+    this.aoMap = null;
+    this.aoMapIntensity = 1;
+    this.emissive = new Color(0);
+    this.emissiveIntensity = 1;
+    this.emissiveMap = null;
+    this.bumpMap = null;
+    this.bumpScale = 1;
+    this.normalMap = null;
+    this.normalMapType = TangentSpaceNormalMap;
+    this.normalScale = new Vector2(1, 1);
+    this.displacementMap = null;
+    this.displacementScale = 1;
+    this.displacementBias = 0;
+    this.specularMap = null;
+    this.alphaMap = null;
+    this.envMap = null;
+    this.envMapRotation = new Euler();
+    this.combine = MultiplyOperation;
+    this.reflectivity = 1;
+    this.envMapIntensity = 1;
+    this.refractionRatio = 0.98;
+    this.wireframe = false;
+    this.wireframeLinewidth = 1;
+    this.wireframeLinecap = "round";
+    this.wireframeLinejoin = "round";
+    this.flatShading = false;
+    this.fog = true;
+    this.setValues(parameters);
+  }
+  copy(source) {
+    super.copy(source);
+    this.color.copy(source.color);
+    this.map = source.map;
+    this.lightMap = source.lightMap;
+    this.lightMapIntensity = source.lightMapIntensity;
+    this.aoMap = source.aoMap;
+    this.aoMapIntensity = source.aoMapIntensity;
+    this.emissive.copy(source.emissive);
+    this.emissiveMap = source.emissiveMap;
+    this.emissiveIntensity = source.emissiveIntensity;
+    this.bumpMap = source.bumpMap;
+    this.bumpScale = source.bumpScale;
+    this.normalMap = source.normalMap;
+    this.normalMapType = source.normalMapType;
+    this.normalScale.copy(source.normalScale);
+    this.displacementMap = source.displacementMap;
+    this.displacementScale = source.displacementScale;
+    this.displacementBias = source.displacementBias;
+    this.specularMap = source.specularMap;
+    this.alphaMap = source.alphaMap;
+    this.envMap = source.envMap;
+    this.envMapRotation.copy(source.envMapRotation);
+    this.combine = source.combine;
+    this.reflectivity = source.reflectivity;
+    this.envMapIntensity = source.envMapIntensity;
+    this.refractionRatio = source.refractionRatio;
+    this.wireframe = source.wireframe;
+    this.wireframeLinewidth = source.wireframeLinewidth;
+    this.wireframeLinecap = source.wireframeLinecap;
+    this.wireframeLinejoin = source.wireframeLinejoin;
+    this.flatShading = source.flatShading;
+    this.fog = source.fog;
     return this;
   }
 }
@@ -54963,6 +55381,105 @@ function createBoardroom3DComponent(ctx) {
     );
   };
 }
+class RoomEnvironment extends Scene {
+  constructor() {
+    super();
+    this.name = "RoomEnvironment";
+    this.position.y = -3.5;
+    const geometry = new BoxGeometry();
+    geometry.deleteAttribute("uv");
+    const roomMaterial = new MeshStandardMaterial({ side: BackSide });
+    const boxMaterial = new MeshStandardMaterial();
+    const mainLight = new PointLight(16777215, 900, 28, 2);
+    mainLight.position.set(0.418, 16.199, 0.3);
+    this.add(mainLight);
+    const room = new Mesh(geometry, roomMaterial);
+    room.position.set(-0.757, 13.219, 0.717);
+    room.scale.set(31.713, 28.305, 28.591);
+    this.add(room);
+    const boxes2 = new InstancedMesh(geometry, boxMaterial, 6);
+    const transform = new Object3D();
+    transform.position.set(-10.906, 2.009, 1.846);
+    transform.rotation.set(0, -0.195, 0);
+    transform.scale.set(2.328, 7.905, 4.651);
+    transform.updateMatrix();
+    boxes2.setMatrixAt(0, transform.matrix);
+    transform.position.set(-5.607, -0.754, -0.758);
+    transform.rotation.set(0, 0.994, 0);
+    transform.scale.set(1.97, 1.534, 3.955);
+    transform.updateMatrix();
+    boxes2.setMatrixAt(1, transform.matrix);
+    transform.position.set(6.167, 0.857, 7.803);
+    transform.rotation.set(0, 0.561, 0);
+    transform.scale.set(3.927, 6.285, 3.687);
+    transform.updateMatrix();
+    boxes2.setMatrixAt(2, transform.matrix);
+    transform.position.set(-2.017, 0.018, 6.124);
+    transform.rotation.set(0, 0.333, 0);
+    transform.scale.set(2.002, 4.566, 2.064);
+    transform.updateMatrix();
+    boxes2.setMatrixAt(3, transform.matrix);
+    transform.position.set(2.291, -0.756, -2.621);
+    transform.rotation.set(0, -0.286, 0);
+    transform.scale.set(1.546, 1.552, 1.496);
+    transform.updateMatrix();
+    boxes2.setMatrixAt(4, transform.matrix);
+    transform.position.set(-2.193, -0.369, -5.547);
+    transform.rotation.set(0, 0.516, 0);
+    transform.scale.set(3.875, 3.487, 2.986);
+    transform.updateMatrix();
+    boxes2.setMatrixAt(5, transform.matrix);
+    this.add(boxes2);
+    const light1 = new Mesh(geometry, createAreaLightMaterial(50));
+    light1.position.set(-16.116, 14.37, 8.208);
+    light1.scale.set(0.1, 2.428, 2.739);
+    this.add(light1);
+    const light2 = new Mesh(geometry, createAreaLightMaterial(50));
+    light2.position.set(-16.109, 18.021, -8.207);
+    light2.scale.set(0.1, 2.425, 2.751);
+    this.add(light2);
+    const light3 = new Mesh(geometry, createAreaLightMaterial(17));
+    light3.position.set(14.904, 12.198, -1.832);
+    light3.scale.set(0.15, 4.265, 6.331);
+    this.add(light3);
+    const light4 = new Mesh(geometry, createAreaLightMaterial(43));
+    light4.position.set(-0.462, 8.89, 14.52);
+    light4.scale.set(4.38, 5.441, 0.088);
+    this.add(light4);
+    const light5 = new Mesh(geometry, createAreaLightMaterial(20));
+    light5.position.set(3.235, 11.486, -12.541);
+    light5.scale.set(2.5, 2, 0.1);
+    this.add(light5);
+    const light6 = new Mesh(geometry, createAreaLightMaterial(100));
+    light6.position.set(0, 20, 0);
+    light6.scale.set(1, 0.1, 1);
+    this.add(light6);
+  }
+  /**
+   * Frees internal resources. This method should be called
+   * when the environment is no longer required.
+   */
+  dispose() {
+    const resources = /* @__PURE__ */ new Set();
+    this.traverse((object) => {
+      if (object.isMesh) {
+        resources.add(object.geometry);
+        resources.add(object.material);
+      }
+    });
+    for (const resource of resources) {
+      resource.dispose();
+    }
+  }
+}
+function createAreaLightMaterial(intensity) {
+  const material = new MeshLambertMaterial({
+    color: 0,
+    emissive: 16777215,
+    emissiveIntensity: intensity
+  });
+  return material;
+}
 function rgbToCss([r, g, b], alpha = 1) {
   const rr = Math.round(Math.max(0, Math.min(1, r)) * 255);
   const gg = Math.round(Math.max(0, Math.min(1, g)) * 255);
@@ -54984,40 +55501,51 @@ function stageColorRgb(stage, p) {
       return [0.96, 0.72, 0.24];
   }
 }
-function makeFloorWallScreenTexture(kit, floorNum, floor, accent, status) {
+function sharpenCanvasTexture(tex, maxAnisotropy) {
+  tex.colorSpace = SRGBColorSpace;
+  tex.anisotropy = Math.max(1, Math.min(16, maxAnisotropy));
+  tex.minFilter = LinearMipmapLinearFilter;
+  tex.magFilter = LinearFilter;
+  tex.needsUpdate = true;
+  return tex;
+}
+function makeFloorWallScreenTexture(kit, floorNum, floor, accent, status, maxAnisotropy = 8) {
   var _a, _b;
-  const c = canvasOf(768, 224);
+  const logicalW = 768;
+  const logicalH = 224;
+  const c = canvasOf(logicalW * 2, logicalH * 2);
   const g = c.getContext("2d");
+  g.scale(2, 2);
   const accCss = rgbToCss(accent);
   g.fillStyle = "#0e121a";
-  g.fillRect(0, 0, c.width, c.height);
-  g.strokeStyle = "rgba(255,255,255,0.04)";
+  g.fillRect(0, 0, logicalW, logicalH);
+  g.strokeStyle = "rgba(255,255,255,0.045)";
   g.lineWidth = 1;
-  for (let x = 24; x < c.width; x += 48) {
+  for (let x = 24; x < logicalW; x += 48) {
     g.beginPath();
     g.moveTo(x, 0);
-    g.lineTo(x, c.height);
+    g.lineTo(x, logicalH);
     g.stroke();
   }
   g.fillStyle = accCss;
-  g.fillRect(0, 0, 10, c.height);
-  g.fillStyle = "rgba(255,255,255,0.04)";
-  g.fillRect(10, 0, c.width - 10, 56);
+  g.fillRect(0, 0, 10, logicalH);
+  g.fillStyle = "rgba(255,255,255,0.045)";
+  g.fillRect(10, 0, logicalW - 10, 56);
   g.fillStyle = accCss;
-  g.fillRect(10, 54, c.width - 10, 3);
+  g.fillRect(10, 54, logicalW - 10, 3);
   g.fillStyle = "#f8fafc";
   g.font = "700 26px -apple-system, BlinkMacSystemFont, sans-serif";
   g.fillText(`${floorNum}F · ${floor.nome.toUpperCase().slice(0, 26)}`, 26, 37);
   const pillText = floor.errorCount > 0 ? `${floor.errorCount} ALERTA` : floor.workingCount > 0 ? `${floor.workingCount} AO VIVO` : floor.estagio.toUpperCase();
   g.fillStyle = rgbToCss(accent, 0.18);
-  g.fillRect(c.width - 168, 12, 148, 30);
+  g.fillRect(logicalW - 168, 12, 148, 30);
   g.strokeStyle = accCss;
   g.lineWidth = 1.5;
-  g.strokeRect(c.width - 168, 12, 148, 30);
+  g.strokeRect(logicalW - 168, 12, 148, 30);
   g.fillStyle = accCss;
   g.font = "700 14px ui-monospace, Menlo, monospace";
   g.textAlign = "center";
-  g.fillText(pillText.slice(0, 14), c.width - 94, 32);
+  g.fillText(pillText.slice(0, 14), logicalW - 94, 32);
   g.textAlign = "left";
   const cards = floor.isBoard ? [
     { k: "CONSELHEIROS", v: String(floor.agentesCount), sub: `${floor.workingCount} em turno` },
@@ -55033,9 +55561,9 @@ function makeFloorWallScreenTexture(kit, floorNum, floor, accent, status) {
     const by = 74;
     const bw = 226;
     const bh = 128;
-    g.fillStyle = "rgba(255,255,255,0.035)";
+    g.fillStyle = "rgba(255,255,255,0.04)";
     g.fillRect(bx, by, bw, bh);
-    g.strokeStyle = "rgba(255,255,255,0.09)";
+    g.strokeStyle = "rgba(255,255,255,0.11)";
     g.lineWidth = 1.5;
     g.strokeRect(bx, by, bw, bh);
     g.fillStyle = "#94a3b8";
@@ -55048,28 +55576,34 @@ function makeFloorWallScreenTexture(kit, floorNum, floor, accent, status) {
     g.font = "500 14px -apple-system, sans-serif";
     g.fillText(card.sub.slice(0, 22), bx + 16, by + 110);
   });
-  return kit.canvasTexture(c);
+  return sharpenCanvasTexture(kit.canvasTexture(c), maxAnisotropy);
 }
-function makeFloorBadgeTexture(kit, label, accent) {
-  const c = canvasOf(128, 72);
+function makeFloorBadgeTexture(kit, label, accent, maxAnisotropy = 8) {
+  const logicalW = 128;
+  const logicalH = 72;
+  const c = canvasOf(logicalW * 2, logicalH * 2);
   const g = c.getContext("2d");
+  g.scale(2, 2);
   g.fillStyle = "#0f131b";
-  g.fillRect(0, 0, c.width, c.height);
+  g.fillRect(0, 0, logicalW, logicalH);
   g.strokeStyle = rgbToCss(accent);
   g.lineWidth = 6;
-  g.strokeRect(4, 4, c.width - 8, c.height - 8);
+  g.strokeRect(4, 4, logicalW - 8, logicalH - 8);
   g.fillStyle = "#f8fafc";
   g.font = "700 38px ui-monospace, Menlo, monospace";
   g.textAlign = "center";
   g.textBaseline = "middle";
-  g.fillText(label, c.width / 2, c.height / 2 + 2);
-  return kit.canvasTexture(c);
+  g.fillText(label, logicalW / 2, logicalH / 2 + 2);
+  return sharpenCanvasTexture(kit.canvasTexture(c), maxAnisotropy);
 }
-function makeDeskScreenTexture(kit, accent, seed) {
-  const c = canvasOf(128, 80);
+function makeDeskScreenTexture(kit, accent, seed, maxAnisotropy = 8) {
+  const logicalW = 128;
+  const logicalH = 80;
+  const c = canvasOf(logicalW * 2, logicalH * 2);
   const g = c.getContext("2d");
+  g.scale(2, 2);
   g.fillStyle = "#0b1120";
-  g.fillRect(0, 0, c.width, c.height);
+  g.fillRect(0, 0, logicalW, logicalH);
   g.fillStyle = rgbToCss(accent);
   g.fillRect(8, 10, 42, 6);
   g.fillStyle = "rgba(148,163,184,0.55)";
@@ -55077,7 +55611,7 @@ function makeDeskScreenTexture(kit, accent, seed) {
     const w = 34 + (seed * 23 + row * 19) % 72;
     g.fillRect(8, 22 + row * 10, Math.min(110, w), 5);
   }
-  return kit.canvasTexture(c);
+  return sharpenCanvasTexture(kit.canvasTexture(c), maxAnisotropy);
 }
 function buildVoxelPlantProp(kit, p, matSteel) {
   const g = new Group();
@@ -55179,11 +55713,21 @@ function createHoldingTower3DComponent(ctx) {
     const [hoveredSlug, setHoveredSlug] = React.useState(null);
     const [fitTick, setFitTick] = React.useState(0);
     const [darkFactoryMode, setDarkFactoryMode] = React.useState(true);
+    const [explodedView, setExplodedView] = React.useState(false);
+    const [isolateSelected, setIsolateSelected] = React.useState(false);
     const [isFullscreen, setIsFullscreen] = React.useState(false);
     const [isPipActive, setIsPipActive] = React.useState(false);
     const desiredTargetRef = React.useRef(new Vector3(0, 6.2, 0));
     const desiredFrustumRef = React.useRef(15.8);
     const desiredPhiRef = React.useRef(null);
+    const explodedRef = React.useRef(false);
+    const isolateRef = React.useRef(false);
+    const selectedSlugRef = React.useRef(null);
+    const hoveredSlugRef = React.useRef(null);
+    explodedRef.current = explodedView;
+    isolateRef.current = isolateSelected;
+    selectedSlugRef.current = (selection == null ? void 0 : selection.floor.slug) || null;
+    hoveredSlugRef.current = hoveredSlug;
     const floors = React.useMemo(() => {
       var _a, _b;
       const byPk = ((_a = props.telemetry) == null ? void 0 : _a.byPubkey) || {};
@@ -55352,6 +55896,7 @@ function createHoldingTower3DComponent(ctx) {
       };
     }, []);
     React.useEffect(() => {
+      var _a, _b;
       const container = mountRef.current;
       if (!container) return;
       const palette = readPalette();
@@ -55416,11 +55961,18 @@ function createHoldingTower3DComponent(ctx) {
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = PCFSoftShadowMap;
       renderer.toneMapping = ACESFilmicToneMapping;
-      renderer.toneMappingExposure = darkFactoryMode ? 1.22 : 1.04;
+      renderer.toneMappingExposure = darkFactoryMode ? 1.24 : 1.05;
       renderer.outputColorSpace = SRGBColorSpace;
       container.innerHTML = "";
       container.appendChild(renderer.domElement);
       canvasRef.current = renderer.domElement;
+      const maxAniso = ((_b = (_a = renderer.capabilities).getMaxAnisotropy) == null ? void 0 : _b.call(_a)) || 8;
+      const pmremGenerator = new PMREMGenerator(renderer);
+      const envScene = new RoomEnvironment();
+      const envRT = pmremGenerator.fromScene(envScene, 0.04);
+      scene.environment = envRT.texture;
+      scene.environmentIntensity = darkFactoryMode ? 0.48 : 0.78;
+      envScene.dispose();
       const lights = new Lights();
       scene.add(lights.hemi, lights.sun, lights.sun.target);
       lights.set([{ x0: -7.5, x1: 7.5, y0: 0, y1: totalH + 2, z0: -5, z1: 5 }], palette, false);
@@ -55439,8 +55991,8 @@ function createHoldingTower3DComponent(ctx) {
       const matFloorWood = kit.matte(darkFactoryMode ? [0.28, 0.22, 0.17] : [0.68, 0.57, 0.44], { roughness: 0.72 });
       const matFloorSlate = kit.matte(darkFactoryMode ? [0.12, 0.14, 0.19] : [0.46, 0.49, 0.54], { roughness: 0.86 });
       const matWall = kit.matte(darkFactoryMode ? [0.18, 0.2, 0.26] : [0.89, 0.91, 0.94], { roughness: 0.84 });
-      const matSteel = kit.matte(palette.steel, { roughness: 0.42, metalness: 0.45 });
-      const matChrome = kit.matte(palette.chrome, { roughness: 0.22, metalness: 0.75 });
+      const matSteel = kit.matte(palette.steel, { roughness: 0.36, metalness: 0.55 });
+      const matChrome = kit.matte(palette.chrome, { roughness: 0.18, metalness: 0.82 });
       const matWood = kit.matte(palette.wood, { roughness: 0.55 });
       const matLeather = kit.matte(darkFactoryMode ? [0.16, 0.18, 0.24] : [0.28, 0.31, 0.38], { roughness: 0.68 });
       const matPaper = kit.matte(palette.paper, { roughness: 0.42 });
@@ -55448,9 +56000,10 @@ function createHoldingTower3DComponent(ctx) {
         new MeshPhysicalMaterial({
           color: darkFactoryMode ? 8246268 : 3900150,
           transparent: true,
-          opacity: darkFactoryMode ? 0.15 : 0.22,
-          roughness: 0.08,
-          metalness: 0.05
+          opacity: darkFactoryMode ? 0.16 : 0.22,
+          roughness: 0.06,
+          metalness: 0.08,
+          reflectivity: 0.9
         })
       );
       const floorW = 11.8;
@@ -55459,12 +56012,20 @@ function createHoldingTower3DComponent(ctx) {
       podium.position.set(0, -0.54, 0);
       podium.receiveShadow = true;
       scene.add(podium);
-      const studGeo = kit.own(new CylinderGeometry(0.14, 0.14, 0.08, 12));
+      const studPositions = [];
       for (let sx = -floorW / 2 - 0.3; sx <= floorW / 2 + 0.31; sx += 0.62) {
-        const stud = new Mesh(studGeo, matPodium);
-        stud.position.set(sx, -0.23, floorD / 2 + 0.32);
-        scene.add(stud);
+        studPositions.push(sx);
       }
+      const studGeo = kit.own(new CylinderGeometry(0.14, 0.14, 0.08, 12));
+      const studInstanced = new InstancedMesh(studGeo, matPodium, studPositions.length);
+      const dummyStud = new Object3D();
+      studPositions.forEach((sx, i) => {
+        dummyStud.position.set(sx, -0.23, floorD / 2 + 0.32);
+        dummyStud.updateMatrix();
+        studInstanced.setMatrixAt(i, dummyStud.matrix);
+      });
+      studInstanced.instanceMatrix.needsUpdate = true;
+      scene.add(studInstanced);
       const shaftX = -4.9;
       const shaftZ = -2.45;
       const shaft = new Mesh(kit.own(new BoxGeometry(1.1, totalH + 0.5, 1.1)), matGlass);
@@ -55543,11 +56104,14 @@ function createHoldingTower3DComponent(ctx) {
         cabinLight.position.set(shaftX, activeIdx * FLOOR_H + 0.94, shaftZ);
         scene.add(cabinLight);
       }
+      const floorEntries = [];
       const avatars = [];
       const conveyorPackets = [];
       const warningBeacons = [];
       const rackLeds = [];
       const holoCores = [];
+      const sharedSlabGeo = kit.own(new BoxGeometry(floorW, 0.28, floorD));
+      const sharedSlabEdgesGeo = kit.own(new EdgesGeometry(sharedSlabGeo));
       floors.forEach((floor, fIdx) => {
         const y0 = fIdx * FLOOR_H;
         const floorGroup = new Group();
@@ -55564,11 +56128,22 @@ function createHoldingTower3DComponent(ctx) {
           interiorLight.position.set(0.5, FLOOR_H - 0.85, 0.5);
           floorGroup.add(interiorLight);
         }
-        const slab = new Mesh(kit.own(new BoxGeometry(floorW, 0.28, floorD)), matSlab);
+        const slab = new Mesh(sharedSlabGeo, matSlab);
         slab.position.set(0, -0.14, 0);
         slab.receiveShadow = true;
         slab.castShadow = true;
         floorGroup.add(slab);
+        const edgeMat = kit.own(
+          new LineBasicMaterial({
+            color: colour(floorAccent),
+            transparent: true,
+            opacity: darkFactoryMode ? 0.22 : 0.18
+          })
+        );
+        const slabEdges = new LineSegments(sharedSlabEdgesGeo, edgeMat);
+        slabEdges.position.set(0, -0.14, 0);
+        floorGroup.add(slabEdges);
+        floorEntries.push({ slug: floor.slug, index: fIdx, group: floorGroup, edgeMat });
         const trimFront = new Mesh(kit.own(new BoxGeometry(floorW + 0.05, 0.075, 0.08)), matAccent);
         trimFront.position.set(0, -0.02, floorD / 2);
         floorGroup.add(trimFront);
@@ -55601,7 +56176,7 @@ function createHoldingTower3DComponent(ctx) {
           col.castShadow = true;
           floorGroup.add(col);
         }
-        const badgeTex = makeFloorBadgeTexture(kit, `${fIdx + 1}F`, floorAccent);
+        const badgeTex = makeFloorBadgeTexture(kit, `${fIdx + 1}F`, floorAccent, maxAniso);
         const badgeMesh = new Mesh(
           kit.own(new PlaneGeometry(0.58, 0.34)),
           kit.own(new MeshBasicMaterial({ map: badgeTex }))
@@ -55612,7 +56187,7 @@ function createHoldingTower3DComponent(ctx) {
         screenBezel.position.set(0.95, wallH - 1.05, -floorD / 2 + 0.22);
         screenBezel.castShadow = true;
         floorGroup.add(screenBezel);
-        const screenTex = makeFloorWallScreenTexture(kit, fIdx + 1, floor, floorAccent, props.status);
+        const screenTex = makeFloorWallScreenTexture(kit, fIdx + 1, floor, floorAccent, props.status, maxAniso);
         const screenPlane = new Mesh(
           kit.own(new PlaneGeometry(4.42, 1.24)),
           kit.own(new MeshBasicMaterial({ map: screenTex }))
@@ -55798,8 +56373,8 @@ function createHoldingTower3DComponent(ctx) {
             );
             capStripe.position.y = 0.14;
             pktGroup.add(capStripe);
-            pktGroup.position.set(-2.8, y0 + 0.41, 1.9);
-            scene.add(pktGroup);
+            pktGroup.position.set(-2.8, 0.41, 1.9);
+            floorGroup.add(pktGroup);
             hitTargets.push(crate);
             selectionByHit.set(crate, {
               sel: { kind: "packet", packet: pktData, floor },
@@ -55807,14 +56382,14 @@ function createHoldingTower3DComponent(ctx) {
             });
             conveyorPackets.push({
               mesh: pktGroup,
-              y: y0 + 0.41,
+              y: 0.41,
               z: 1.9,
               speed: pktData.stage === "building" || pktData.stage === "turn" ? 1.35 : 0.72,
               offset: pIdx / Math.max(1, pktTotal)
             });
           });
-          const screenMatA = kit.own(new MeshBasicMaterial({ map: makeDeskScreenTexture(kit, floorAccent, fIdx * 7 + 1) }));
-          const screenMatB = kit.own(new MeshBasicMaterial({ map: makeDeskScreenTexture(kit, palette.accent.reviewer, fIdx * 7 + 2) }));
+          const screenMatA = kit.own(new MeshBasicMaterial({ map: makeDeskScreenTexture(kit, floorAccent, fIdx * 7 + 1, maxAniso) }));
+          const screenMatB = kit.own(new MeshBasicMaterial({ map: makeDeskScreenTexture(kit, palette.accent.reviewer, fIdx * 7 + 2, maxAniso) }));
           floor.agents.slice(0, 6).forEach((ag, idx) => {
             const dx = -2.65 + idx * 1.46;
             const dz = -1.05;
@@ -55987,6 +56562,20 @@ function createHoldingTower3DComponent(ctx) {
       const animate = () => {
         rafId = requestAnimationFrame(animate);
         const t = clock.getElapsedTime();
+        const explodeGap = explodedRef.current ? 1.95 : 0;
+        const selSlug = selectedSlugRef.current;
+        const hovSlug = hoveredSlugRef.current;
+        const selIdx = selSlug ? floorEntries.findIndex((fe) => fe.slug === selSlug) : -1;
+        for (const fe of floorEntries) {
+          const targetY = fe.index * (FLOOR_H + explodeGap);
+          if (Math.abs(fe.group.position.y - targetY) > 5e-3) {
+            fe.group.position.y += (targetY - fe.group.position.y) * 0.14;
+          }
+          fe.group.visible = !(isolateRef.current && selIdx >= 0 && fe.index > selIdx);
+          const isSel = fe.slug === selSlug;
+          const isHov = fe.slug === hovSlug;
+          fe.edgeMat.opacity = isSel ? 0.85 : isHov ? 0.55 : darkFactoryMode ? 0.22 : 0.18;
+        }
         let camDirty = false;
         if (target.distanceTo(desiredTargetRef.current) > 0.01) {
           target.lerp(desiredTargetRef.current, 0.12);
@@ -56045,6 +56634,8 @@ function createHoldingTower3DComponent(ctx) {
         window.removeEventListener("mouseup", onUp);
         window.removeEventListener("keydown", onKeyDown);
         dom.removeEventListener("wheel", onWheel);
+        envRT.dispose();
+        pmremGenerator.dispose();
         lights.dispose();
         kit.dispose();
         renderer.dispose();
@@ -56280,6 +56871,63 @@ function createHoldingTower3DComponent(ctx) {
         h(
           "div",
           { style: { position: "absolute", right: "12px", bottom: "12px", zIndex: 20, display: "inline-flex", gap: "6px", flexWrap: "wrap" } },
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-tower-exploded-btn": "true",
+              "data-variant": explodedView ? "primary" : void 0,
+              style: { background: explodedView ? void 0 : "rgba(18, 20, 26, 0.88)" },
+              onClick: () => setExplodedView((v2) => !v2),
+              title: "Separar os andares verticalmente para inspecionar cada camada (Vista Explodida)"
+            },
+            explodedView ? "⊟ Compactar" : "⊞ Explodir"
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-tower-isolate-btn": "true",
+              "data-variant": isolateSelected ? "primary" : void 0,
+              style: { background: isolateSelected ? void 0 : "rgba(18, 20, 26, 0.88)" },
+              onClick: () => {
+                setIsolateSelected((v2) => {
+                  const next = !v2;
+                  if (next && !selection) {
+                    const activeIdx = Math.max(0, floors.findIndex((f) => f.slug === props.activeTenant));
+                    if (floors[activeIdx]) {
+                      setSelection({ kind: "floor", floor: floors[activeIdx] });
+                      desiredTargetRef.current.set(0, activeIdx * (3.65 + (explodedRef.current ? 1.95 : 0)) + 1, 0);
+                      desiredFrustumRef.current = 6.8;
+                    }
+                  }
+                  return next;
+                });
+              },
+              title: "Ocultar os andares acima do andar selecionado para ver por dentro (Cutaway)"
+            },
+            isolateSelected ? "◫ Mostrar Todos" : "◫ Isolar Andar"
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-tower-plan-btn": "true",
+              style: { background: "rgba(18, 20, 26, 0.88)" },
+              onClick: () => {
+                const idx = selectedSlug ? Math.max(0, floors.findIndex((f) => f.slug === selectedSlug)) : 0;
+                const stepH = 3.65 + (explodedRef.current ? 1.95 : 0);
+                desiredTargetRef.current.set(0, idx * stepH + 0.6, 0);
+                desiredFrustumRef.current = 7.4;
+                desiredPhiRef.current = 0.34;
+              },
+              title: "Vista de Planta Baixa (ângulo superior inclinado)"
+            },
+            "⌖ Planta"
+          ),
           h(
             "button",
             {

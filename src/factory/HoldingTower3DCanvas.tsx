@@ -7,6 +7,7 @@
 // - Telemetria 100% real clicável: pacotes na esteira e cápsulas no elevador ligados a PRs/cards/turnos reais
 
 import * as THREE from "three";
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import type { Context } from "@buzz/author";
 import { readPalette, type FloorPalette } from "./codeden-floor/floor/palette";
 import { Lights } from "./codeden-floor/floor/lights";
@@ -93,35 +94,48 @@ function stageColorRgb(stage: TowerLivePacket["stage"], p: FloorPalette): Rgb {
   }
 }
 
+function sharpenCanvasTexture(tex: THREE.CanvasTexture, maxAnisotropy: number): THREE.CanvasTexture {
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = Math.max(1, Math.min(16, maxAnisotropy));
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.needsUpdate = true;
+  return tex;
+}
+
 function makeFloorWallScreenTexture(
   kit: Kit,
   floorNum: number,
   floor: HoldingTowerFloorInfo,
   accent: Rgb,
-  status?: FactoryStatusPayload
+  status?: FactoryStatusPayload,
+  maxAnisotropy = 8
 ): THREE.CanvasTexture {
-  const c = canvasOf(768, 224);
+  const logicalW = 768;
+  const logicalH = 224;
+  const c = canvasOf(logicalW * 2, logicalH * 2);
   const g = c.getContext("2d")!;
+  g.scale(2, 2);
   const accCss = rgbToCss(accent);
 
   g.fillStyle = "#0e121a";
-  g.fillRect(0, 0, c.width, c.height);
+  g.fillRect(0, 0, logicalW, logicalH);
 
-  g.strokeStyle = "rgba(255,255,255,0.04)";
+  g.strokeStyle = "rgba(255,255,255,0.045)";
   g.lineWidth = 1;
-  for (let x = 24; x < c.width; x += 48) {
+  for (let x = 24; x < logicalW; x += 48) {
     g.beginPath();
     g.moveTo(x, 0);
-    g.lineTo(x, c.height);
+    g.lineTo(x, logicalH);
     g.stroke();
   }
 
   g.fillStyle = accCss;
-  g.fillRect(0, 0, 10, c.height);
-  g.fillStyle = "rgba(255,255,255,0.04)";
-  g.fillRect(10, 0, c.width - 10, 56);
+  g.fillRect(0, 0, 10, logicalH);
+  g.fillStyle = "rgba(255,255,255,0.045)";
+  g.fillRect(10, 0, logicalW - 10, 56);
   g.fillStyle = accCss;
-  g.fillRect(10, 54, c.width - 10, 3);
+  g.fillRect(10, 54, logicalW - 10, 3);
 
   g.fillStyle = "#f8fafc";
   g.font = "700 26px -apple-system, BlinkMacSystemFont, sans-serif";
@@ -129,14 +143,14 @@ function makeFloorWallScreenTexture(
 
   const pillText = floor.errorCount > 0 ? `${floor.errorCount} ALERTA` : floor.workingCount > 0 ? `${floor.workingCount} AO VIVO` : floor.estagio.toUpperCase();
   g.fillStyle = rgbToCss(accent, 0.18);
-  g.fillRect(c.width - 168, 12, 148, 30);
+  g.fillRect(logicalW - 168, 12, 148, 30);
   g.strokeStyle = accCss;
   g.lineWidth = 1.5;
-  g.strokeRect(c.width - 168, 12, 148, 30);
+  g.strokeRect(logicalW - 168, 12, 148, 30);
   g.fillStyle = accCss;
   g.font = "700 14px ui-monospace, Menlo, monospace";
   g.textAlign = "center";
-  g.fillText(pillText.slice(0, 14), c.width - 94, 32);
+  g.fillText(pillText.slice(0, 14), logicalW - 94, 32);
   g.textAlign = "left";
 
   const cards = floor.isBoard
@@ -156,9 +170,9 @@ function makeFloorWallScreenTexture(
     const by = 74;
     const bw = 226;
     const bh = 128;
-    g.fillStyle = "rgba(255,255,255,0.035)";
+    g.fillStyle = "rgba(255,255,255,0.04)";
     g.fillRect(bx, by, bw, bh);
-    g.strokeStyle = "rgba(255,255,255,0.09)";
+    g.strokeStyle = "rgba(255,255,255,0.11)";
     g.lineWidth = 1.5;
     g.strokeRect(bx, by, bw, bh);
 
@@ -175,30 +189,36 @@ function makeFloorWallScreenTexture(
     g.fillText(card.sub.slice(0, 22), bx + 16, by + 110);
   });
 
-  return kit.canvasTexture(c);
+  return sharpenCanvasTexture(kit.canvasTexture(c), maxAnisotropy);
 }
 
-function makeFloorBadgeTexture(kit: Kit, label: string, accent: Rgb): THREE.CanvasTexture {
-  const c = canvasOf(128, 72);
+function makeFloorBadgeTexture(kit: Kit, label: string, accent: Rgb, maxAnisotropy = 8): THREE.CanvasTexture {
+  const logicalW = 128;
+  const logicalH = 72;
+  const c = canvasOf(logicalW * 2, logicalH * 2);
   const g = c.getContext("2d")!;
+  g.scale(2, 2);
   g.fillStyle = "#0f131b";
-  g.fillRect(0, 0, c.width, c.height);
+  g.fillRect(0, 0, logicalW, logicalH);
   g.strokeStyle = rgbToCss(accent);
   g.lineWidth = 6;
-  g.strokeRect(4, 4, c.width - 8, c.height - 8);
+  g.strokeRect(4, 4, logicalW - 8, logicalH - 8);
   g.fillStyle = "#f8fafc";
   g.font = "700 38px ui-monospace, Menlo, monospace";
   g.textAlign = "center";
   g.textBaseline = "middle";
-  g.fillText(label, c.width / 2, c.height / 2 + 2);
-  return kit.canvasTexture(c);
+  g.fillText(label, logicalW / 2, logicalH / 2 + 2);
+  return sharpenCanvasTexture(kit.canvasTexture(c), maxAnisotropy);
 }
 
-function makeDeskScreenTexture(kit: Kit, accent: Rgb, seed: number): THREE.CanvasTexture {
-  const c = canvasOf(128, 80);
+function makeDeskScreenTexture(kit: Kit, accent: Rgb, seed: number, maxAnisotropy = 8): THREE.CanvasTexture {
+  const logicalW = 128;
+  const logicalH = 80;
+  const c = canvasOf(logicalW * 2, logicalH * 2);
   const g = c.getContext("2d")!;
+  g.scale(2, 2);
   g.fillStyle = "#0b1120";
-  g.fillRect(0, 0, c.width, c.height);
+  g.fillRect(0, 0, logicalW, logicalH);
   g.fillStyle = rgbToCss(accent);
   g.fillRect(8, 10, 42, 6);
   g.fillStyle = "rgba(148,163,184,0.55)";
@@ -206,7 +226,7 @@ function makeDeskScreenTexture(kit: Kit, accent: Rgb, seed: number): THREE.Canva
     const w = 34 + ((seed * 23 + row * 19) % 72);
     g.fillRect(8, 22 + row * 10, Math.min(110, w), 5);
   }
-  return kit.canvasTexture(c);
+  return sharpenCanvasTexture(kit.canvasTexture(c), maxAnisotropy);
 }
 
 /** Planta estilo LEGO / Voxel em blocos empilhados. */
@@ -341,13 +361,23 @@ export function createHoldingTower3DComponent(ctx: Context) {
     const [hoveredSlug, setHoveredSlug] = React.useState<string | null>(null);
     const [fitTick, setFitTick] = React.useState(0);
     const [darkFactoryMode, setDarkFactoryMode] = React.useState(true);
+    const [explodedView, setExplodedView] = React.useState(false);
+    const [isolateSelected, setIsolateSelected] = React.useState(false);
     const [isFullscreen, setIsFullscreen] = React.useState(false);
     const [isPipActive, setIsPipActive] = React.useState(false);
 
-    // Refs de controle de câmera suave (target 3D completo + ângulo phi + frustum)
+    // Refs de controle de câmera suave e visualização por camadas (60fps sem recriar WebGL)
     const desiredTargetRef = React.useRef<THREE.Vector3>(new THREE.Vector3(0, 6.2, 0));
     const desiredFrustumRef = React.useRef<number>(15.8);
     const desiredPhiRef = React.useRef<number | null>(null);
+    const explodedRef = React.useRef<boolean>(false);
+    const isolateRef = React.useRef<boolean>(false);
+    const selectedSlugRef = React.useRef<string | null>(null);
+    const hoveredSlugRef = React.useRef<string | null>(null);
+    explodedRef.current = explodedView;
+    isolateRef.current = isolateSelected;
+    selectedSlugRef.current = selection?.floor.slug || null;
+    hoveredSlugRef.current = hoveredSlug;
 
     const floors = React.useMemo<HoldingTowerFloorInfo[]>(() => {
       const byPk = props.telemetry?.byPubkey || {};
@@ -630,11 +660,20 @@ export function createHoldingTower3DComponent(ctx: Context) {
       renderer.shadowMap.enabled = true;
       renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = darkFactoryMode ? 1.22 : 1.04;
+      renderer.toneMappingExposure = darkFactoryMode ? 1.24 : 1.05;
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       container.innerHTML = "";
       container.appendChild(renderer.domElement);
       canvasRef.current = renderer.domElement;
+
+      const maxAniso = renderer.capabilities.getMaxAnisotropy?.() || 8;
+      // IBL PBR instantâneo via RoomEnvironment + PMREMGenerator (profundidade real em metais, vidros e lajes)
+      const pmremGenerator = new THREE.PMREMGenerator(renderer);
+      const envScene = new RoomEnvironment();
+      const envRT = pmremGenerator.fromScene(envScene, 0.04);
+      scene.environment = envRT.texture;
+      (scene as any).environmentIntensity = darkFactoryMode ? 0.48 : 0.78;
+      envScene.dispose();
 
       const lights = new Lights();
       scene.add(lights.hemi, lights.sun, lights.sun.target);
@@ -657,8 +696,8 @@ export function createHoldingTower3DComponent(ctx: Context) {
       const matFloorWood = kit.matte(darkFactoryMode ? [0.28, 0.22, 0.17] : [0.68, 0.57, 0.44], { roughness: 0.72 });
       const matFloorSlate = kit.matte(darkFactoryMode ? [0.12, 0.14, 0.19] : [0.46, 0.49, 0.54], { roughness: 0.86 });
       const matWall = kit.matte(darkFactoryMode ? [0.18, 0.2, 0.26] : [0.89, 0.91, 0.94], { roughness: 0.84 });
-      const matSteel = kit.matte(palette.steel, { roughness: 0.42, metalness: 0.45 });
-      const matChrome = kit.matte(palette.chrome, { roughness: 0.22, metalness: 0.75 });
+      const matSteel = kit.matte(palette.steel, { roughness: 0.36, metalness: 0.55 });
+      const matChrome = kit.matte(palette.chrome, { roughness: 0.18, metalness: 0.82 });
       const matWood = kit.matte(palette.wood, { roughness: 0.55 });
       const matLeather = kit.matte(darkFactoryMode ? [0.16, 0.18, 0.24] : [0.28, 0.31, 0.38], { roughness: 0.68 });
       const matPaper = kit.matte(palette.paper, { roughness: 0.42 });
@@ -666,28 +705,36 @@ export function createHoldingTower3DComponent(ctx: Context) {
         new THREE.MeshPhysicalMaterial({
           color: darkFactoryMode ? 0x7dd3fc : 0x3b82f6,
           transparent: true,
-          opacity: darkFactoryMode ? 0.15 : 0.22,
-          roughness: 0.08,
-          metalness: 0.05,
+          opacity: darkFactoryMode ? 0.16 : 0.22,
+          roughness: 0.06,
+          metalness: 0.08,
+          reflectivity: 0.9,
         })
       );
 
       const floorW = 11.8;
       const floorD = 7.0;
 
-      // ── PÓDIO BASEPLATE LEGO ARCHITECTURE SOB O 1F ──
+      // ── PÓDIO BASEPLATE LEGO ARCHITECTURE SOB O 1F (InstancedMesh = 1 draw call!) ──
       const podium = new THREE.Mesh(kit.own(new THREE.BoxGeometry(floorW + 1.2, 0.55, floorD + 1.2)), matPodium);
       podium.position.set(0, -0.54, 0);
       podium.receiveShadow = true;
       scene.add(podium);
 
-      // Pinos (studs) LEGO discretos contornando a borda frontal do pódio
-      const studGeo = kit.own(new THREE.CylinderGeometry(0.14, 0.14, 0.08, 12));
+      const studPositions: number[] = [];
       for (let sx = -floorW / 2 - 0.3; sx <= floorW / 2 + 0.31; sx += 0.62) {
-        const stud = new THREE.Mesh(studGeo, matPodium);
-        stud.position.set(sx, -0.23, floorD / 2 + 0.32);
-        scene.add(stud);
+        studPositions.push(sx);
       }
+      const studGeo = kit.own(new THREE.CylinderGeometry(0.14, 0.14, 0.08, 12));
+      const studInstanced = new THREE.InstancedMesh(studGeo, matPodium, studPositions.length);
+      const dummyStud = new THREE.Object3D();
+      studPositions.forEach((sx, i) => {
+        dummyStud.position.set(sx, -0.23, floorD / 2 + 0.32);
+        dummyStud.updateMatrix();
+        studInstanced.setMatrixAt(i, dummyStud.matrix);
+      });
+      studInstanced.instanceMatrix.needsUpdate = true;
+      scene.add(studInstanced);
 
       // ── ELEVADOR PANORÂMICO DE DADOS ──
       const shaftX = -4.9;
@@ -787,11 +834,20 @@ export function createHoldingTower3DComponent(ctx: Context) {
       }
 
       // ── CONSTRUÇÃO DE CADA ANDAR ──
+      const floorEntries: Array<{
+        slug: string;
+        index: number;
+        group: THREE.Group;
+        edgeMat: THREE.LineBasicMaterial;
+      }> = [];
       const avatars: Array<{ handle: Avatar3DHandle; phase: number; working: boolean; error: boolean }> = [];
       const conveyorPackets: Array<{ mesh: THREE.Group; y: number; z: number; speed: number; offset: number }> = [];
       const warningBeacons: Array<{ mesh: THREE.Mesh; phase: number }> = [];
       const rackLeds: THREE.Mesh[] = [];
       const holoCores: THREE.Object3D[] = [];
+
+      const sharedSlabGeo = kit.own(new THREE.BoxGeometry(floorW, 0.28, floorD));
+      const sharedSlabEdgesGeo = kit.own(new THREE.EdgesGeometry(sharedSlabGeo));
 
       floors.forEach((floor, fIdx) => {
         const y0 = fIdx * FLOOR_H;
@@ -823,11 +879,23 @@ export function createHoldingTower3DComponent(ctx: Context) {
           floorGroup.add(interiorLight);
         }
 
-        const slab = new THREE.Mesh(kit.own(new THREE.BoxGeometry(floorW, 0.28, floorD)), matSlab);
+        const slab = new THREE.Mesh(sharedSlabGeo, matSlab);
         slab.position.set(0, -0.14, 0);
         slab.receiveShadow = true;
         slab.castShadow = true;
         floorGroup.add(slab);
+
+        const edgeMat = kit.own(
+          new THREE.LineBasicMaterial({
+            color: colour(floorAccent),
+            transparent: true,
+            opacity: darkFactoryMode ? 0.22 : 0.18,
+          })
+        );
+        const slabEdges = new THREE.LineSegments(sharedSlabEdgesGeo, edgeMat);
+        slabEdges.position.set(0, -0.14, 0);
+        floorGroup.add(slabEdges);
+        floorEntries.push({ slug: floor.slug, index: fIdx, group: floorGroup, edgeMat });
 
         const trimFront = new THREE.Mesh(kit.own(new THREE.BoxGeometry(floorW + 0.05, 0.075, 0.08)), matAccent);
         trimFront.position.set(0, -0.02, floorD / 2);
@@ -868,7 +936,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
           floorGroup.add(col);
         }
 
-        const badgeTex = makeFloorBadgeTexture(kit, `${fIdx + 1}F`, floorAccent);
+        const badgeTex = makeFloorBadgeTexture(kit, `${fIdx + 1}F`, floorAccent, maxAniso);
         const badgeMesh = new THREE.Mesh(
           kit.own(new THREE.PlaneGeometry(0.58, 0.34)),
           kit.own(new THREE.MeshBasicMaterial({ map: badgeTex }))
@@ -881,7 +949,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
         screenBezel.castShadow = true;
         floorGroup.add(screenBezel);
 
-        const screenTex = makeFloorWallScreenTexture(kit, fIdx + 1, floor, floorAccent, props.status);
+        const screenTex = makeFloorWallScreenTexture(kit, fIdx + 1, floor, floorAccent, props.status, maxAniso);
         const screenPlane = new THREE.Mesh(
           kit.own(new THREE.PlaneGeometry(4.42, 1.24)),
           kit.own(new THREE.MeshBasicMaterial({ map: screenTex }))
@@ -1092,8 +1160,8 @@ export function createHoldingTower3DComponent(ctx: Context) {
             capStripe.position.y = 0.14;
             pktGroup.add(capStripe);
 
-            pktGroup.position.set(-2.8, y0 + 0.41, 1.9);
-            scene.add(pktGroup);
+            pktGroup.position.set(-2.8, 0.41, 1.9);
+            floorGroup.add(pktGroup);
 
             hitTargets.push(crate);
             selectionByHit.set(crate, {
@@ -1103,15 +1171,15 @@ export function createHoldingTower3DComponent(ctx: Context) {
 
             conveyorPackets.push({
               mesh: pktGroup,
-              y: y0 + 0.41,
+              y: 0.41,
               z: 1.9,
               speed: pktData.stage === "building" || pktData.stage === "turn" ? 1.35 : 0.72,
               offset: pIdx / Math.max(1, pktTotal),
             });
           });
 
-          const screenMatA = kit.own(new THREE.MeshBasicMaterial({ map: makeDeskScreenTexture(kit, floorAccent, fIdx * 7 + 1) }));
-          const screenMatB = kit.own(new THREE.MeshBasicMaterial({ map: makeDeskScreenTexture(kit, palette.accent.reviewer, fIdx * 7 + 2) }));
+          const screenMatA = kit.own(new THREE.MeshBasicMaterial({ map: makeDeskScreenTexture(kit, floorAccent, fIdx * 7 + 1, maxAniso) }));
+          const screenMatB = kit.own(new THREE.MeshBasicMaterial({ map: makeDeskScreenTexture(kit, palette.accent.reviewer, fIdx * 7 + 2, maxAniso) }));
 
           floor.agents.slice(0, 6).forEach((ag, idx) => {
             const dx = -2.65 + idx * 1.46;
@@ -1304,6 +1372,22 @@ export function createHoldingTower3DComponent(ctx: Context) {
         rafId = requestAnimationFrame(animate);
         const t = clock.getElapsedTime();
 
+        // Visualização por Camadas (Vista Explodida + Isolamento/Cutaway + Highlight EdgesGeometry a 60fps)
+        const explodeGap = explodedRef.current ? 1.95 : 0;
+        const selSlug = selectedSlugRef.current;
+        const hovSlug = hoveredSlugRef.current;
+        const selIdx = selSlug ? floorEntries.findIndex((fe) => fe.slug === selSlug) : -1;
+        for (const fe of floorEntries) {
+          const targetY = fe.index * (FLOOR_H + explodeGap);
+          if (Math.abs(fe.group.position.y - targetY) > 0.005) {
+            fe.group.position.y += (targetY - fe.group.position.y) * 0.14;
+          }
+          fe.group.visible = !(isolateRef.current && selIdx >= 0 && fe.index > selIdx);
+          const isSel = fe.slug === selSlug;
+          const isHov = fe.slug === hovSlug;
+          fe.edgeMat.opacity = isSel ? 0.85 : isHov ? 0.55 : darkFactoryMode ? 0.22 : 0.18;
+        }
+
         let camDirty = false;
         if (target.distanceTo(desiredTargetRef.current) > 0.01) {
           target.lerp(desiredTargetRef.current, 0.12);
@@ -1374,6 +1458,8 @@ export function createHoldingTower3DComponent(ctx: Context) {
         window.removeEventListener("mouseup", onUp);
         window.removeEventListener("keydown", onKeyDown);
         dom.removeEventListener("wheel", onWheel);
+        envRT.dispose();
+        pmremGenerator.dispose();
         lights.dispose();
         kit.dispose();
         renderer.dispose();
@@ -1626,6 +1712,63 @@ export function createHoldingTower3DComponent(ctx: Context) {
         h(
           "div",
           { style: { position: "absolute", right: "12px", bottom: "12px", zIndex: 20, display: "inline-flex", gap: "6px", flexWrap: "wrap" } },
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-tower-exploded-btn": "true",
+              "data-variant": explodedView ? "primary" : undefined,
+              style: { background: explodedView ? undefined : "rgba(18, 20, 26, 0.88)" },
+              onClick: () => setExplodedView((v) => !v),
+              title: "Separar os andares verticalmente para inspecionar cada camada (Vista Explodida)",
+            },
+            explodedView ? "⊟ Compactar" : "⊞ Explodir"
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-tower-isolate-btn": "true",
+              "data-variant": isolateSelected ? "primary" : undefined,
+              style: { background: isolateSelected ? undefined : "rgba(18, 20, 26, 0.88)" },
+              onClick: () => {
+                setIsolateSelected((v) => {
+                  const next = !v;
+                  if (next && !selection) {
+                    const activeIdx = Math.max(0, floors.findIndex((f) => f.slug === props.activeTenant));
+                    if (floors[activeIdx]) {
+                      setSelection({ kind: "floor", floor: floors[activeIdx] });
+                      desiredTargetRef.current.set(0, activeIdx * (3.65 + (explodedRef.current ? 1.95 : 0)) + 1.0, 0);
+                      desiredFrustumRef.current = 6.8;
+                    }
+                  }
+                  return next;
+                });
+              },
+              title: "Ocultar os andares acima do andar selecionado para ver por dentro (Cutaway)",
+            },
+            isolateSelected ? "◫ Mostrar Todos" : "◫ Isolar Andar"
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-tower-plan-btn": "true",
+              style: { background: "rgba(18, 20, 26, 0.88)" },
+              onClick: () => {
+                const idx = selectedSlug ? Math.max(0, floors.findIndex((f) => f.slug === selectedSlug)) : 0;
+                const stepH = 3.65 + (explodedRef.current ? 1.95 : 0);
+                desiredTargetRef.current.set(0, idx * stepH + 0.6, 0);
+                desiredFrustumRef.current = 7.4;
+                desiredPhiRef.current = 0.34;
+              },
+              title: "Vista de Planta Baixa (ângulo superior inclinado)",
+            },
+            "⌖ Planta"
+          ),
           h(
             "button",
             {
