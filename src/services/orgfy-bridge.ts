@@ -196,7 +196,7 @@ export interface LiveKanbanSnapshot {
  */
 export async function fetchLiveKanbanSnapshot(
   ctx: any,
-  filter?: { stage?: string; empresa?: string }
+  filter?: { stage?: string; empresa?: string; skipWorktreeScan?: boolean }
 ): Promise<LiveKanbanSnapshot> {
   const [live, canvasText] = await Promise.all([
     fetchLiveEsteiraState(ctx, filter?.empresa),
@@ -593,7 +593,7 @@ export async function fetchLiveKanbanSnapshot(
   // 4. Mescla worktrees Git ativas (ex.: .worktrees/e2e-smoke-v12) que ainda não constam no canvas
   //    Fail-closed: só exibe worktree vinculada a uma Issue Nostr real de 64 hex
   try {
-    if (ctx?.host?.spawn) {
+    if (!filter?.skipWorktreeScan && ctx?.host?.spawn) {
       let wtOut = "";
       const proc = await ctx.host.spawn("git", {
         args: ["-C", ORGFY_ABS_PATH, "worktree", "list", "--porcelain"],
@@ -844,7 +844,7 @@ export async function fetchLiveKanbanSnapshot(
  */
 export async function fetchLiveKanbanCards(
   ctx: any,
-  filter?: { stage?: string; empresa?: string }
+  filter?: { stage?: string; empresa?: string; skipWorktreeScan?: boolean }
 ): Promise<PipelineCard[]> {
   const snapshot = await fetchLiveKanbanSnapshot(ctx, filter);
   return snapshot.cards;

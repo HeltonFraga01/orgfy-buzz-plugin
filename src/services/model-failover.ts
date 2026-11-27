@@ -441,6 +441,9 @@ async function loadSharedNexusMindRanking(
       try {
         const raw = await host.readFile(p);
         if (!raw) continue;
+        // Evita travamento/OOM na WebView quando nm_usage.json cresce > 12 MB
+        const byteLen = typeof raw === "string" ? raw.length : (raw as any)?.byteLength ?? 0;
+        if (byteLen > 12_000_000) continue;
         const txt = decodeHostBytes(raw);
         const obj = JSON.parse(txt);
         const items: any[] = Array.isArray(obj?.data?.items)

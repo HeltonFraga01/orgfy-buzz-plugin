@@ -344,6 +344,8 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     }, [linkedWorkspaceId, buzzCatalog.workspaces, tenant, status.tenantManifest?.nome]);
 
     // Lê Canvas ao vivo + histórico (session.canvas.read/history), metadados do canal (session.channels/channelDetails) e Buzz Repos NIP-34
+    // Não depende de relayTick para evitar resetar liveRepo para null e refazer 4 queries no relay a cada mensagem.
+    const lastRepoKeyRef = React.useRef<string>("");
     React.useEffect(() => {
       let cancelled = false;
       const canal =
@@ -352,6 +354,11 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         holding?.empresas.find((e) => e.slug === tenant)?.canal ||
         (tenant === "board" ? findBuzzChannelIdByName(ctx, ["Conselho", "Board", "Conselho da Holding"]) : null);
       const dtag = status.tenantManifest?.repoId || tenant;
+      const repoKey = `${tenant}:${dtag}:${canal || ""}`;
+      if (lastRepoKeyRef.current !== repoKey) {
+        lastRepoKeyRef.current = repoKey;
+        setLiveRepo(null);
+      }
       readBuzzChannelCanvasDetailed(ctx, canal)
         .then((st) => {
           if (!cancelled) {
@@ -372,24 +379,19 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
           if (!cancelled) setChannelInfo(info);
         })
         .catch(() => {});
-      setLiveRepo(null);
       loadLiveRepoSnapshot(ctx, { channelId: canal, dtag })
         .then((snap) => {
           if (cancelled) return;
           // Isolamento estrito por empresa: nunca herda repo NIP-34 de outra empresa (ex.: orgfy vazando em lumen-iptv)
           if (snap.available && String(snap.dtag || "").toLowerCase() === String(dtag || "").toLowerCase()) {
             setLiveRepo(snap);
-          } else {
-            setLiveRepo(null);
           }
         })
-        .catch(() => {
-          if (!cancelled) setLiveRepo(null);
-        });
+        .catch(() => {});
       return () => {
         cancelled = true;
       };
-    }, [tenant, linkedChannelId, status.tenantManifest?.canal, status.tenantManifest?.repoId, relayTick]);
+    }, [tenant, linkedChannelId, status.tenantManifest?.canal, status.tenantManifest?.repoId]);
 
     // Ao abrir um card no ItemSheetDrawer, carrega conteúdo NIP-34 + fallback local em REPOS/<repoId>/cards/*.md
     React.useEffect(() => {
@@ -625,11 +627,11 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         void refresh(tenant, false, true);
       };
       void refresh(tenant, true, false);
-      const timer = setInterval(run, 15000);
+      const timer = setInterval(run, 30000);
       const unsub = subscribeRelayUpdates(() => {
         if (disposed) return;
         if (relayDebounceTimer) clearTimeout(relayDebounceTimer);
-        relayDebounceTimer = setTimeout(run, 2500);
+        relayDebounceTimer = setTimeout(run, 12000);
       });
       return () => {
         disposed = true;
@@ -2868,8 +2870,14 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         relaySession: relaySnap?.session,
         relayScope: typeof relaySnap?.scope === "string" ? relaySnap.scope : null,
         onOpenInBuzz: handleOpenInBuzz,
-        onOpenPrInBuzz: (pr: any) => void openPrInBuzz(ctx, pr),
-        onOpenRepoPrsInBuzz: () => void openRepoTabInBuzz(ctx, { owner: liveRepo?.owner, dtag: liveRepo?.dtag || tenant, tab: "prs" }),
+        onOpenPrInBuzz: (pr: any) =>
+          void openPrInBuzz(ctx, pr).then((ok) => {
+            if (!ok) notify(`PR #${String(pr?.id || "").slice(0, 8)} indisponível no Buzz Repos no momento.`);
+          }),
+        onOpenRepoPrsInBuzz: () =>
+          void openRepoTabInBuzz(ctx, { owner: liveRepo?.owner, dtag: liveRepo?.dtag || status.tenantManifest?.repoId || tenant, tab: "prs" }).then((ok) => {
+            if (!ok) notify(`Repositório ${liveRepo?.dtag || status.tenantManifest?.repoId || tenant} ainda não indexado no Buzz Repos.`);
+          }),
         onOpenCommitInBuzz: handleOpenCommitInBuzz,
         onOpenAgentDm: handleOpenAgentDmInBuzz,
         onSessionAction: handleAgentSessionAction,

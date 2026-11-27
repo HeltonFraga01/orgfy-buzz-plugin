@@ -426,7 +426,7 @@ async function fetchLiveKanbanSnapshot(ctx, filter) {
   } catch {
   }
   try {
-    if ((_h = ctx == null ? void 0 : ctx.host) == null ? void 0 : _h.spawn) {
+    if (!(filter == null ? void 0 : filter.skipWorktreeScan) && ((_h = ctx == null ? void 0 : ctx.host) == null ? void 0 : _h.spawn)) {
       let wtOut = "";
       const proc = await ctx.host.spawn("git", {
         args: ["-C", ORGFY_ABS_PATH, "worktree", "list", "--porcelain"],
@@ -1301,6 +1301,19 @@ async function openBuzzRepoEntity(ctx, route) {
     }
   } else if ("id" in normalizedRoute) {
     return false;
+  } else if ((session == null ? void 0 : session.repositories) && typeof session.repositories.load === "function") {
+    const acRepo = new AbortController();
+    const tRepo = setTimeout(() => acRepo.abort(), 2500);
+    try {
+      const repoDet = await session.repositories.load(normalizedRoute, acRepo.signal);
+      if (!repoDet) return false;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(tRepo);
+    }
+  } else {
+    return false;
   }
   try {
     const res = await ctx.navigation.open({
@@ -1346,16 +1359,22 @@ function tagValue(event, name) {
   const found = tags.find((t) => Array.isArray(t) && t[0] === name && typeof t[1] === "string");
   return found ? String(found[1]) : void 0;
 }
+const _liveRepoSnapshotCache = /* @__PURE__ */ new Map();
 async function loadLiveRepoSnapshot(ctx, opts) {
   var _a, _b, _c, _d;
   const fallbackOwner = /^[0-9a-f]{64}$/i.test(String(opts.owner || "")) ? String(opts.owner).toLowerCase() : DEFAULT_ORGFY_REPO_OWNER;
   const fallbackDtag = String(opts.dtag || "orgfy").trim() || "orgfy";
+  const cacheKey = `${opts.channelId || ""}:${fallbackOwner}:${fallbackDtag}`;
+  const cached = _liveRepoSnapshotCache.get(cacheKey);
+  if (!opts.force && cached && Date.now() - cached.ts < 45e3) {
+    return cached.snap;
+  }
   const session = typeof ((_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) === "function" ? (_b = ctx.relay.snapshot()) == null ? void 0 : _b.session : null;
   if (!(session == null ? void 0 : session.repositories) || typeof session.repositories.load !== "function") {
     return { available: false, owner: fallbackOwner, dtag: fallbackDtag, issues: [], prs: [] };
   }
   const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), 8e3);
+  const timer = setTimeout(() => ac.abort(), 4500);
   try {
     let owner = fallbackOwner;
     let dtag = fallbackDtag;
@@ -1396,7 +1415,7 @@ async function loadLiveRepoSnapshot(ctx, opts) {
         };
       });
     };
-    return {
+    const result = {
       available: Boolean(issuesDetail || prsDetail),
       owner,
       dtag,
@@ -1404,6 +1423,10 @@ async function loadLiveRepoSnapshot(ctx, opts) {
       issues: mapItems(issuesDetail, "issue"),
       prs: mapItems(prsDetail, "pr")
     };
+    if (result.available) {
+      _liveRepoSnapshotCache.set(cacheKey, { snap: result, ts: Date.now() });
+    }
+    return result;
   } catch {
     return { available: false, owner: fallbackOwner, dtag: fallbackDtag, issues: [], prs: [] };
   } finally {
@@ -3334,6 +3357,8 @@ async function loadSharedNexusMindRanking(ctx, excludeSet, preferFree) {
       try {
         const raw = await host.readFile(p);
         if (!raw) continue;
+        const byteLen = typeof raw === "string" ? raw.length : (raw == null ? void 0 : raw.byteLength) ?? 0;
+        if (byteLen > 12e6) continue;
         const txt = decodeHostBytes$2(raw);
         const obj = JSON.parse(txt);
         const items = Array.isArray((_c = obj == null ? void 0 : obj.data) == null ? void 0 : _c.items) ? obj.data.items : Array.isArray(obj == null ? void 0 : obj.items) ? obj.items : [];
@@ -14610,7 +14635,7 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
   const stateRelPath = slug === "orgfy" ? ".esteira/estado/esteira-minima-state.json" : `.esteira/estado/esteira-minima-${slug}-state.json`;
   const [kpiRes, cards, empresaJson, boardJson, evalMd, projectMd, agentsMd, regrasJson, esteiraState, alcadasJson, spotChecksJson, lessonsJson, digestJson] = await Promise.all([
     fetchKpisEsteira(ctx).catch(() => ({ kpis: null, history: [], error: null })),
-    fetchLiveKanbanCards(ctx, { empresa: slug }).catch(() => []),
+    fetchLiveKanbanCards(ctx, { empresa: slug, skipWorktreeScan: true }).catch(() => []),
     readOrgfyJson(ctx, `empresas/${slug}.json`, null).catch(() => null),
     readOrgfyJson(ctx, "empresas/board.json", null).catch(() => null),
     readOrgfyText(ctx, "docs/eval-modelos-onda5.md").catch(() => null),
@@ -14990,6 +15015,13 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
 async function fetchFactoryStatus(ctx, tenant = "orgfy") {
   const slug = (tenant || "orgfy").trim().toLowerCase() || "orgfy";
   const host = ctx == null ? void 0 : ctx.host;
+  if (typeof (host == null ? void 0 : host.readFile) === "function") {
+    try {
+      const hydrated = await hydrateFactoryStatusFromFiles(ctx, slug);
+      return { ok: true, status: hydrated, error: null };
+    } catch {
+    }
+  }
   try {
     if (host == null ? void 0 : host.spawn) {
       const proc = await host.spawn("python", {
@@ -15008,14 +15040,19 @@ async function fetchFactoryStatus(ctx, tenant = "orgfy") {
         out = proc.stdout;
       }
       if (proc == null ? void 0 : proc.exited) {
-        await Promise.race([proc.exited, new Promise((r) => setTimeout(r, 15e3))]);
+        await Promise.race([proc.exited, new Promise((r) => setTimeout(r, 6e3))]);
       }
       if (out.trim()) {
         const parsed = parseFactoryStatus(JSON.parse(out.trim()));
         return { ok: true, status: parsed, error: null };
       }
     }
-  } catch {
+  } catch (err) {
+    return {
+      ok: false,
+      status: buildEmptyFactoryStatus(slug, (err == null ? void 0 : err.message) || "Falha ao ler dados do tenant"),
+      error: (err == null ? void 0 : err.message) || String(err)
+    };
   }
   try {
     const hydrated = await hydrateFactoryStatusFromFiles(ctx, slug);
@@ -67162,11 +67199,17 @@ function createFactoryAppComponent(ctx, opts = {}) {
         cancelled = true;
       };
     }, [linkedWorkspaceId, buzzCatalog.workspaces, tenant, (_c = status.tenantManifest) == null ? void 0 : _c.nome]);
+    const lastRepoKeyRef = React.useRef("");
     React.useEffect(() => {
       var _a2, _b2, _c2;
       let cancelled = false;
       const canal = linkedChannelId || ((_a2 = status.tenantManifest) == null ? void 0 : _a2.canal) || ((_b2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _b2.canal) || (tenant === "board" ? findBuzzChannelIdByName(ctx, ["Conselho", "Board", "Conselho da Holding"]) : null);
       const dtag = ((_c2 = status.tenantManifest) == null ? void 0 : _c2.repoId) || tenant;
+      const repoKey = `${tenant}:${dtag}:${canal || ""}`;
+      if (lastRepoKeyRef.current !== repoKey) {
+        lastRepoKeyRef.current = repoKey;
+        setLiveRepo(null);
+      }
       readBuzzChannelCanvasDetailed(ctx, canal).then((st) => {
         if (!cancelled) {
           setChannelCanvas(st.content);
@@ -67184,21 +67227,17 @@ function createFactoryAppComponent(ctx, opts = {}) {
         if (!cancelled) setChannelInfo(info);
       }).catch(() => {
       });
-      setLiveRepo(null);
       loadLiveRepoSnapshot(ctx, { channelId: canal, dtag }).then((snap) => {
         if (cancelled) return;
         if (snap.available && String(snap.dtag || "").toLowerCase() === String(dtag || "").toLowerCase()) {
           setLiveRepo(snap);
-        } else {
-          setLiveRepo(null);
         }
       }).catch(() => {
-        if (!cancelled) setLiveRepo(null);
       });
       return () => {
         cancelled = true;
       };
-    }, [tenant, linkedChannelId, (_d = status.tenantManifest) == null ? void 0 : _d.canal, (_e = status.tenantManifest) == null ? void 0 : _e.repoId, relayTick]);
+    }, [tenant, linkedChannelId, (_d = status.tenantManifest) == null ? void 0 : _d.canal, (_e = status.tenantManifest) == null ? void 0 : _e.repoId]);
     React.useEffect(() => {
       var _a2;
       let cancelled = false;
@@ -67418,11 +67457,11 @@ function createFactoryAppComponent(ctx, opts = {}) {
         void refresh(tenant, false, true);
       };
       void refresh(tenant, true, false);
-      const timer = setInterval(run, 15e3);
+      const timer = setInterval(run, 3e4);
       const unsub = subscribeRelayUpdates(() => {
         if (disposed) return;
         if (relayDebounceTimer) clearTimeout(relayDebounceTimer);
-        relayDebounceTimer = setTimeout(run, 2500);
+        relayDebounceTimer = setTimeout(run, 12e3);
       });
       return () => {
         disposed = true;
@@ -69479,8 +69518,16 @@ Nota: ${evidence.note}`
         relaySession: relaySnap == null ? void 0 : relaySnap.session,
         relayScope: typeof (relaySnap == null ? void 0 : relaySnap.scope) === "string" ? relaySnap.scope : null,
         onOpenInBuzz: handleOpenInBuzz,
-        onOpenPrInBuzz: (pr) => void openPrInBuzz(ctx, pr),
-        onOpenRepoPrsInBuzz: () => void openRepoTabInBuzz(ctx, { owner: liveRepo == null ? void 0 : liveRepo.owner, dtag: (liveRepo == null ? void 0 : liveRepo.dtag) || tenant, tab: "prs" }),
+        onOpenPrInBuzz: (pr) => void openPrInBuzz(ctx, pr).then((ok2) => {
+          if (!ok2) notify2(`PR #${String((pr == null ? void 0 : pr.id) || "").slice(0, 8)} indisponível no Buzz Repos no momento.`);
+        }),
+        onOpenRepoPrsInBuzz: () => {
+          var _a2;
+          return void openRepoTabInBuzz(ctx, { owner: liveRepo == null ? void 0 : liveRepo.owner, dtag: (liveRepo == null ? void 0 : liveRepo.dtag) || ((_a2 = status.tenantManifest) == null ? void 0 : _a2.repoId) || tenant, tab: "prs" }).then((ok2) => {
+            var _a3;
+            if (!ok2) notify2(`Repositório ${(liveRepo == null ? void 0 : liveRepo.dtag) || ((_a3 = status.tenantManifest) == null ? void 0 : _a3.repoId) || tenant} ainda não indexado no Buzz Repos.`);
+          });
+        },
         onOpenCommitInBuzz: handleOpenCommitInBuzz,
         onOpenAgentDm: handleOpenAgentDmInBuzz,
         onSessionAction: handleAgentSessionAction,

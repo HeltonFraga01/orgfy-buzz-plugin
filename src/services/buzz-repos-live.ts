@@ -186,6 +186,20 @@ export async function openBuzzRepoEntity(
   } else if ("id" in normalizedRoute) {
     // Sem session.repositories.load para confirmar o item no relay, evita navegar às cegas para buzz.repos
     return false;
+  } else if (session?.repositories && typeof session.repositories.load === "function") {
+    // Também valida rota de repositório (ex.: aba PRs) antes de navegar para evitar tela "This page isn't available"
+    const acRepo = new AbortController();
+    const tRepo = setTimeout(() => acRepo.abort(), 2500);
+    try {
+      const repoDet = await session.repositories.load(normalizedRoute, acRepo.signal);
+      if (!repoDet) return false;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(tRepo);
+    }
+  } else {
+    return false;
   }
 
   try {
@@ -250,14 +264,21 @@ function tagValue(event: any, name: string): string | undefined {
  * Descobre o repositório NIP-34 vinculado ao canal da empresa via `session.repositories.home(channelId)`
  * e carrega Issues (`kind 1621`) e PRs (`kind 1618`) ao vivo direto do relay do Buzz.
  */
+const _liveRepoSnapshotCache = new Map<string, { snap: LiveRepoSnapshot; ts: number }>();
+
 export async function loadLiveRepoSnapshot(
   ctx: Context | any,
-  opts: { channelId?: string | null; owner?: string; dtag?: string }
+  opts: { channelId?: string | null; owner?: string; dtag?: string; force?: boolean }
 ): Promise<LiveRepoSnapshot> {
   const fallbackOwner = /^[0-9a-f]{64}$/i.test(String(opts.owner || ""))
     ? String(opts.owner).toLowerCase()
     : DEFAULT_ORGFY_REPO_OWNER;
   const fallbackDtag = String(opts.dtag || "orgfy").trim() || "orgfy";
+  const cacheKey = `${opts.channelId || ""}:${fallbackOwner}:${fallbackDtag}`;
+  const cached = _liveRepoSnapshotCache.get(cacheKey);
+  if (!opts.force && cached && Date.now() - cached.ts < 45_000) {
+    return cached.snap;
+  }
 
   const session = typeof ctx?.relay?.snapshot === "function" ? ctx.relay.snapshot()?.session : null;
   if (!session?.repositories || typeof session.repositories.load !== "function") {
@@ -265,7 +286,7 @@ export async function loadLiveRepoSnapshot(
   }
 
   const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), 8000);
+  const timer = setTimeout(() => ac.abort(), 4500);
   try {
     let owner = fallbackOwner;
     let dtag = fallbackDtag;
@@ -317,7 +338,7 @@ export async function loadLiveRepoSnapshot(
       });
     };
 
-    return {
+    const result: LiveRepoSnapshot = {
       available: Boolean(issuesDetail || prsDetail),
       owner,
       dtag,
@@ -325,6 +346,10 @@ export async function loadLiveRepoSnapshot(
       issues: mapItems(issuesDetail, "issue"),
       prs: mapItems(prsDetail, "pr"),
     };
+    if (result.available) {
+      _liveRepoSnapshotCache.set(cacheKey, { snap: result, ts: Date.now() });
+    }
+    return result;
   } catch {
     return { available: false, owner: fallbackOwner, dtag: fallbackDtag, issues: [], prs: [] };
   } finally {

@@ -387,7 +387,7 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
   const stateRelPath = slug === "orgfy" ? ".esteira/estado/esteira-minima-state.json" : `.esteira/estado/esteira-minima-${slug}-state.json`;
   const [kpiRes, cards, empresaJson, boardJson, evalMd, projectMd, agentsMd, regrasJson, esteiraState, alcadasJson, spotChecksJson, lessonsJson, digestJson] = await Promise.all([
     fetchKpisEsteira(ctx).catch(() => ({ kpis: null, history: [], error: null })),
-    fetchLiveKanbanCards(ctx, { empresa: slug }).catch(() => []),
+    fetchLiveKanbanCards(ctx, { empresa: slug, skipWorktreeScan: true }).catch(() => []),
     readOrgfyJson<any>(ctx, `empresas/${slug}.json`, null).catch(() => null),
     readOrgfyJson<any>(ctx, "empresas/board.json", null).catch(() => null),
     readOrgfyText(ctx, "docs/eval-modelos-onda5.md").catch(() => null),
@@ -860,7 +860,17 @@ export async function fetchFactoryStatus(ctx: Context, tenant = "orgfy"): Promis
   const slug = (tenant || "orgfy").trim().toLowerCase() || "orgfy";
   const host = (ctx as any)?.host;
 
-  // 1) Tenta host.spawn quando disponível (CLI/ambiente com subprocessos)
+  // 1) Hidratação direta nativa via ctx.host.readFile (instantânea dentro do Buzz Desktop, sem overhead de spawn Python)
+  if (typeof host?.readFile === "function") {
+    try {
+      const hydrated = await hydrateFactoryStatusFromFiles(ctx, slug);
+      return { ok: true, status: hydrated, error: null };
+    } catch {
+      // Fallback para host.spawn abaixo se readFile falhar
+    }
+  }
+
+  // 2) Fallback host.spawn quando readFile não está disponível
   try {
     if (host?.spawn) {
       const proc = await host.spawn("python", {
@@ -879,18 +889,21 @@ export async function fetchFactoryStatus(ctx: Context, tenant = "orgfy"): Promis
         out = proc.stdout;
       }
       if (proc?.exited) {
-        await Promise.race([proc.exited, new Promise((r) => setTimeout(r, 15_000))]);
+        await Promise.race([proc.exited, new Promise((r) => setTimeout(r, 6_000))]);
       }
       if (out.trim()) {
         const parsed = parseFactoryStatus(JSON.parse(out.trim()));
         return { ok: true, status: parsed, error: null };
       }
     }
-  } catch {
-    // Cai para leitura direta via host.readFile abaixo (sem mostrar erro ao usuário!)
+  } catch (err: any) {
+    return {
+      ok: false,
+      status: buildEmptyFactoryStatus(slug, err?.message || "Falha ao ler dados do tenant"),
+      error: err?.message || String(err),
+    };
   }
 
-  // 2) Hidratação direta nativa via ctx.host.readFile (100% real dentro do Buzz Desktop)
   try {
     const hydrated = await hydrateFactoryStatusFromFiles(ctx, slug);
     return { ok: true, status: hydrated, error: null };
