@@ -42,7 +42,7 @@ export const PINNED_HOST_COMMANDS: readonly PinnedHostCommandSpec[] = Object.fre
   {
     id: "orgfy-kpis",
     scriptPath: "ferramentas/esteira/gerar_kpis_esteira.py",
-    sha256: "ec21ca0b2835869c9baf5d18f27ddd1bb868be47a86aa6d9fb0884cee5ae534a",
+    sha256: "174ed76e353db11e6aae4c94140234adc5adfa43606141be82f5618ea9867f46",
   },
   {
     id: "orgfy-controle-write",
@@ -62,7 +62,7 @@ export const PINNED_HOST_COMMANDS: readonly PinnedHostCommandSpec[] = Object.fre
   {
     id: "orgfy-holding-scaffold",
     scriptPath: "ferramentas/esteira/holding_scaffold.py",
-    sha256: "95233db4a246b1f6fc7e2ed48c53d360609b25363ca549f047c323c6fd05df16",
+    sha256: "5cd3c69cff582499473e0dbacf2f735e51b6785b377a74614877d55a240e7226",
   },
 ]);
 

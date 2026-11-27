@@ -765,39 +765,58 @@ export function createCodeDenInspectorDrawer(React: Context["react"]) {
 
     const repoDetailRef = React.useRef(repoDetail);
     repoDetailRef.current = repoDetail;
+    const gitCacheRef = React.useRef<Map<string, { snap: BuzzGitSnapshot | null; ts: number }>>(new Map());
 
-    // Load Buzz Repos Git tree + commits lazily when drawer opens (deps estáveis para nunca travar em loading)
-    const loadGitOverview = React.useCallback(async () => {
+    // Carrega árvore Git + commits SOB DEMANDA (apenas nas abas Diff/Arquivos) com cache TTL de 60s
+    // Evita buscar e ordenar 1.600+ arquivos sincronamente toda vez que o drawer abre na aba Issue/PR.
+    const loadGitOverview = React.useCallback(async (forceRefresh = false) => {
       if (!item?.id) return;
-      setGitLoading(true);
-      try {
-        const snap = await readBuzzProjectGit(ctx, {
-          owner: repoOwner,
-          dtag: repoDtag || tenant,
-        });
+      const cacheKey = `${repoOwner || ""}:${repoDtag || tenant}`;
+      const cached = gitCacheRef.current.get(cacheKey);
+      const now = Date.now();
+      let snap: BuzzGitSnapshot | null = null;
+      if (!forceRefresh && cached && now - cached.ts < 60_000) {
+        snap = cached.snap;
         setGitSnap(snap);
-        const currentDetail = repoDetailRef.current;
-        const targetCommit = currentDetail?.commit || snap?.head || snap?.commits?.[0]?.hash || "";
-        if (targetCommit && !currentDetail?.commitDiff) {
-          setSelectedCommit(targetCommit);
+      } else {
+        setGitLoading(true);
+        try {
+          snap = await readBuzzProjectGit(ctx, {
+            owner: repoOwner,
+            dtag: repoDtag || tenant,
+          });
+          gitCacheRef.current.set(cacheKey, { snap, ts: Date.now() });
+          setGitSnap(snap);
+        } catch {
+          setGitSnap(null);
+        } finally {
+          setGitLoading(false);
+        }
+      }
+      const currentDetail = repoDetailRef.current;
+      const targetCommit = currentDetail?.commit || snap?.head || snap?.commits?.[0]?.hash || "";
+      if (targetCommit && !currentDetail?.commitDiff && !selectedCommitDiff) {
+        setSelectedCommit(targetCommit);
+        setGitLoading(true);
+        try {
           const commitSnap = await readBuzzProjectGit(ctx, {
             owner: repoOwner,
             dtag: repoDtag || tenant,
             commit: targetCommit,
           });
           if (commitSnap?.diff) setSelectedCommitDiff(commitSnap.diff);
+        } catch {
+        } finally {
+          setGitLoading(false);
         }
-      } catch {
-        setGitSnap(null);
-      } finally {
-        setGitLoading(false);
       }
-    }, [ctx, item?.id, repoOwner, repoDtag, tenant]);
+    }, [ctx, item?.id, repoOwner, repoDtag, tenant, selectedCommitDiff]);
 
     React.useEffect(() => {
       if (!item?.id) return;
-      void loadGitOverview();
-    }, [item?.id, loadGitOverview]);
+      if (activeTab !== "diff" && activeTab !== "files") return;
+      void loadGitOverview(false);
+    }, [item?.id, activeTab, loadGitOverview]);
 
     const handleSelectCommit = async (hash: string) => {
       setSelectedCommit(hash);
@@ -1209,7 +1228,7 @@ export function createCodeDenInspectorDrawer(React: Context["react"]) {
                       className: "of-btn",
                       title: "Recarregar diff",
                       style: { padding: "4px 6px" },
-                      onClick: () => void loadGitOverview(),
+                      onClick: () => void loadGitOverview(true),
                     },
                     Icon({ h, name: "refresh", size: 12 })
                   ),
@@ -1887,18 +1906,98 @@ export function createCodeDenInspectorDrawer(React: Context["react"]) {
                         h("div", { style: { fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted-foreground)", marginBottom: "4px" } }, "Objetivo"),
                         h("div", { style: { fontSize: "12.5px", lineHeight: 1.5, color: "var(--foreground)" } }, structured.objetivo)
                       ),
-                    (structured.papeis.tipo || structured.papeis.executor || structured.papeis.revisor || structured.papeis.decisor || structured.papeis.effort) &&
-                      h(
-                        "div",
-                        { style: { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "8px" } },
-                        structured.papeis.executor &&
-                          h(
-                            "div",
-                            { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)", display: "flex", flexDirection: "column", gap: "5px" } },
-                            h("div", { style: { fontSize: "10px", color: "var(--muted-foreground)" } }, "Executor"),
+                    (structured.papeis.tipo || structured.papeis.executor || structured.papeis.revisor || structured.papeis.decisor || structured.papeis.effort || props.onManageIssue) &&
+                      (() => {
+                        const isPlaceholderExec = (val?: string) =>
+                          !val || /(a definir|definir no despacho|pendente|tbd|nenhum|n\/a|auto[- ]?despacho)/i.test(val);
+                        let assignedFromRelay = "";
+                        const comments = repoDetail?.comments || [];
+                        for (let ci = comments.length - 1; ci >= 0; ci--) {
+                          const m = /assigned\s+(?:this\s+issue\s+)?to\s+([0-9a-f]{6,64})/i.exec(String(comments[ci]?.content || ""));
+                          if (m) {
+                            const pref = m[1].toLowerCase();
+                            const byTenant = (props.tenantAgents || []).find((a) => a.pubkey && a.pubkey.toLowerCase().startsWith(pref));
+                            const byCrew = liveCrew.find((a) => a.pubkey && a.pubkey.toLowerCase().startsWith(pref));
+                            assignedFromRelay = byTenant?.name || byCrew?.name || `#${pref.slice(0, 8)}`;
+                            break;
+                          }
+                        }
+                        const rawNoteExec = !isPlaceholderExec(executorName) ? executorName : "";
+                        const rawCardExec = !isPlaceholderExec(structured.papeis.executor) ? String(structured.papeis.executor).trim() : "";
+                        const effectiveExecutor = rawNoteExec || assignedFromRelay || rawCardExec;
+                        const matchedTenantAgent = (props.tenantAgents || []).find(
+                          (a) => effectiveExecutor && a.name.toLowerCase() === effectiveExecutor.toLowerCase()
+                        );
+                        const selectValue = matchedTenantAgent?.name || "";
+                        return h(
+                          "div",
+                          { style: { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "8px" } },
+                          (effectiveExecutor || structured.papeis.executor || props.onManageIssue) &&
                             h(
                               "div",
-                              { style: { display: "flex", alignItems: "center", gap: "5px", flexWrap: "wrap" } },
+                              { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)", display: "flex", flexDirection: "column", gap: "6px" } },
+                              h(
+                                "div",
+                                { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px" } },
+                                h("span", { style: { fontSize: "10px", color: "var(--muted-foreground)" } }, "Executor responsável"),
+                                effectiveExecutor &&
+                                  h(
+                                    "button",
+                                    {
+                                      type: "button",
+                                      className: "of-btn",
+                                      title: `Abrir DM com ${effectiveExecutor}`,
+                                      style: { padding: "1px 6px", fontSize: "10.5px" },
+                                      onClick: () => {
+                                        const ag = resolveCrewByName(effectiveExecutor);
+                                        if (ag) onOpenAgentDm?.(ag);
+                                      },
+                                    },
+                                    "DM ↗"
+                                  )
+                              ),
+                              props.onManageIssue && Array.isArray(props.tenantAgents) && props.tenantAgents.length > 0
+                                ? h(
+                                    "select",
+                                    {
+                                      "aria-label": "Executor responsável",
+                                      title: "Responsável atual (selecione outro agente para reatribuir)",
+                                      value: selectValue,
+                                      style: {
+                                        fontSize: "11.5px",
+                                        fontWeight: 600,
+                                        padding: "4px 7px",
+                                        borderRadius: "6px",
+                                        border: "1px solid var(--border)",
+                                        background: "var(--muted)",
+                                        color: "var(--foreground)",
+                                        width: "100%",
+                                      },
+                                      onChange: (e: any) => {
+                                        const pickedName = String(e.target.value || "").trim();
+                                        if (!pickedName || pickedName === selectValue) return;
+                                        const ag = props.tenantAgents!.find((a) => a.name === pickedName);
+                                        void props.onManageIssue!(item, { action: "reassign", executorName: pickedName, executorPubkey: ag?.pubkey });
+                                      },
+                                    },
+                                    h(
+                                      "option",
+                                      { value: "" },
+                                      effectiveExecutor ? `${effectiveExecutor} (trocar...)` : "Não atribuído — escolher..."
+                                    ),
+                                    props.tenantAgents.map((a) => h("option", { key: a.name, value: a.name }, a.name))
+                                  )
+                                : h(
+                                    "div",
+                                    { style: { fontSize: "12px", fontWeight: 600, color: effectiveExecutor ? "var(--foreground)" : "var(--muted-foreground)" } },
+                                    effectiveExecutor || "Não atribuído"
+                                  )
+                            ),
+                          structured.papeis.revisor &&
+                            h(
+                              "div",
+                              { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
+                              h("div", { style: { fontSize: "10px", color: "var(--muted-foreground)", marginBottom: "4px" } }, "Revisor (L-01)"),
                               h(
                                 "button",
                                 {
@@ -1906,75 +2005,29 @@ export function createCodeDenInspectorDrawer(React: Context["react"]) {
                                   className: "of-btn",
                                   style: { padding: "2px 8px", fontSize: "11.5px" },
                                   onClick: () => {
-                                    const ag = resolveCrewByName(structured.papeis.executor);
+                                    const ag = resolveCrewByName(structured.papeis.revisor);
                                     if (ag) onOpenAgentDm?.(ag);
                                   },
                                 },
-                                `${structured.papeis.executor} ↗`
-                              ),
-                              props.onManageIssue && Array.isArray(props.tenantAgents) && props.tenantAgents.length > 0 &&
-                                h(
-                                  "select",
-                                  {
-                                    "aria-label": "Trocar executor",
-                                    title: "Trocar executor desta issue",
-                                    defaultValue: "",
-                                    style: {
-                                      fontSize: "10.5px",
-                                      padding: "2px 5px",
-                                      borderRadius: "5px",
-                                      border: "1px solid var(--border)",
-                                      background: "var(--muted)",
-                                      color: "var(--foreground)",
-                                      maxWidth: "120px",
-                                    },
-                                    onChange: (e: any) => {
-                                      const pickedName = String(e.target.value || "").trim();
-                                      if (!pickedName) return;
-                                      const ag = props.tenantAgents!.find((a) => a.name === pickedName);
-                                      void props.onManageIssue!(item, { action: "reassign", executorName: pickedName, executorPubkey: ag?.pubkey });
-                                      e.target.value = "";
-                                    },
-                                  },
-                                  h("option", { value: "" }, "Trocar..."),
-                                  props.tenantAgents.map((a) => h("option", { key: a.name, value: a.name }, a.name))
-                                )
-                            )
-                          ),
-                        structured.papeis.revisor &&
-                          h(
-                            "div",
-                            { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
-                            h("div", { style: { fontSize: "10px", color: "var(--muted-foreground)", marginBottom: "4px" } }, "Revisor (L-01)"),
+                                `${structured.papeis.revisor} ↗`
+                              )
+                            ),
+                          structured.papeis.decisor &&
                             h(
-                              "button",
-                              {
-                                type: "button",
-                                className: "of-btn",
-                                style: { padding: "2px 8px", fontSize: "11.5px" },
-                                onClick: () => {
-                                  const ag = resolveCrewByName(structured.papeis.revisor);
-                                  if (ag) onOpenAgentDm?.(ag);
-                                },
-                              },
-                              `${structured.papeis.revisor} ↗`
+                              "div",
+                              { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
+                              h("div", { style: { fontSize: "10px", color: "var(--muted-foreground)", marginBottom: "2px" } }, "Decisor / Autoridade"),
+                              h("div", { style: { fontSize: "12px", fontWeight: 600 } }, structured.papeis.decisor)
+                            ),
+                          (structured.papeis.tipo || structured.papeis.effort) &&
+                            h(
+                              "div",
+                              { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)", display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" } },
+                              structured.papeis.tipo && h("span", { className: "of-pill" }, structured.papeis.tipo),
+                              structured.papeis.effort && h("span", { className: "of-pill", "data-tone": "waiting" }, `Effort ${structured.papeis.effort}`)
                             )
-                          ),
-                        structured.papeis.decisor &&
-                          h(
-                            "div",
-                            { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
-                            h("div", { style: { fontSize: "10px", color: "var(--muted-foreground)", marginBottom: "2px" } }, "Decisor / Autoridade"),
-                            h("div", { style: { fontSize: "12px", fontWeight: 600 } }, structured.papeis.decisor)
-                          ),
-                        (structured.papeis.tipo || structured.papeis.effort) &&
-                          h(
-                            "div",
-                            { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)", display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" } },
-                            structured.papeis.tipo && h("span", { className: "of-pill" }, structured.papeis.tipo),
-                            structured.papeis.effort && h("span", { className: "of-pill", "data-tone": "waiting" }, `Effort ${structured.papeis.effort}`)
-                          )
-                      ),
+                        );
+                      })(),
                     (structured.estado.contexto || structured.estado.decisao || structured.estado.autoridade) &&
                       h(
                         "div",

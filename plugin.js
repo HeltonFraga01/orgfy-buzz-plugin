@@ -6519,19 +6519,11 @@ async function openBuzzRepoEntity(ctx, route) {
       if (resolved) {
         normalizedRoute = resolved;
       } else {
-        try {
-          await ctx.navigation.open({
-            version: 1,
-            kind: "page",
-            pluginId: "digital.cortexx.orgfy",
-            pageId: "orgfy-factory",
-            scope
-          });
-          return true;
-        } catch {
-        }
+        return false;
       }
     }
+  } else if ("id" in normalizedRoute) {
+    return false;
   }
   try {
     const res = await ctx.navigation.open({
@@ -6545,7 +6537,10 @@ async function openBuzzRepoEntity(ctx, route) {
         params: normalizedRoute
       }
     });
-    return !res || res.status === "opened";
+    if (res && typeof res === "object" && "status" in res && res.status !== "opened") {
+      return false;
+    }
+    return true;
   } catch (err) {
     console.warn("[OrgFy BuzzRepos] ctx.navigation.open falhou:", err);
     return false;
@@ -9546,37 +9541,55 @@ function createCodeDenInspectorDrawer(React) {
     }, [repoDetail == null ? void 0 : repoDetail.commit, repoDetail == null ? void 0 : repoDetail.commitDiff]);
     const repoDetailRef = React.useRef(repoDetail);
     repoDetailRef.current = repoDetail;
-    const loadGitOverview = React.useCallback(async () => {
+    const gitCacheRef = React.useRef(/* @__PURE__ */ new Map());
+    const loadGitOverview = React.useCallback(async (forceRefresh = false) => {
       var _a2, _b2;
       if (!(item == null ? void 0 : item.id)) return;
-      setGitLoading(true);
-      try {
-        const snap = await readBuzzProjectGit(ctx, {
-          owner: repoOwner,
-          dtag: repoDtag || tenant
-        });
+      const cacheKey = `${repoOwner || ""}:${repoDtag || tenant}`;
+      const cached = gitCacheRef.current.get(cacheKey);
+      const now = Date.now();
+      let snap = null;
+      if (!forceRefresh && cached && now - cached.ts < 6e4) {
+        snap = cached.snap;
         setGitSnap(snap);
-        const currentDetail = repoDetailRef.current;
-        const targetCommit = (currentDetail == null ? void 0 : currentDetail.commit) || (snap == null ? void 0 : snap.head) || ((_b2 = (_a2 = snap == null ? void 0 : snap.commits) == null ? void 0 : _a2[0]) == null ? void 0 : _b2.hash) || "";
-        if (targetCommit && !(currentDetail == null ? void 0 : currentDetail.commitDiff)) {
-          setSelectedCommit(targetCommit);
+      } else {
+        setGitLoading(true);
+        try {
+          snap = await readBuzzProjectGit(ctx, {
+            owner: repoOwner,
+            dtag: repoDtag || tenant
+          });
+          gitCacheRef.current.set(cacheKey, { snap, ts: Date.now() });
+          setGitSnap(snap);
+        } catch {
+          setGitSnap(null);
+        } finally {
+          setGitLoading(false);
+        }
+      }
+      const currentDetail = repoDetailRef.current;
+      const targetCommit = (currentDetail == null ? void 0 : currentDetail.commit) || (snap == null ? void 0 : snap.head) || ((_b2 = (_a2 = snap == null ? void 0 : snap.commits) == null ? void 0 : _a2[0]) == null ? void 0 : _b2.hash) || "";
+      if (targetCommit && !(currentDetail == null ? void 0 : currentDetail.commitDiff) && !selectedCommitDiff) {
+        setSelectedCommit(targetCommit);
+        setGitLoading(true);
+        try {
           const commitSnap = await readBuzzProjectGit(ctx, {
             owner: repoOwner,
             dtag: repoDtag || tenant,
             commit: targetCommit
           });
           if (commitSnap == null ? void 0 : commitSnap.diff) setSelectedCommitDiff(commitSnap.diff);
+        } catch {
+        } finally {
+          setGitLoading(false);
         }
-      } catch {
-        setGitSnap(null);
-      } finally {
-        setGitLoading(false);
       }
-    }, [ctx, item == null ? void 0 : item.id, repoOwner, repoDtag, tenant]);
+    }, [ctx, item == null ? void 0 : item.id, repoOwner, repoDtag, tenant, selectedCommitDiff]);
     React.useEffect(() => {
       if (!(item == null ? void 0 : item.id)) return;
-      void loadGitOverview();
-    }, [item == null ? void 0 : item.id, loadGitOverview]);
+      if (activeTab !== "diff" && activeTab !== "files") return;
+      void loadGitOverview(false);
+    }, [item == null ? void 0 : item.id, activeTab, loadGitOverview]);
     const handleSelectCommit = async (hash) => {
       setSelectedCommit(hash);
       setOpenDiffFiles({});
@@ -9955,7 +9968,7 @@ function createCodeDenInspectorDrawer(React) {
                     className: "of-btn",
                     title: "Recarregar diff",
                     style: { padding: "4px 6px" },
-                    onClick: () => void loadGitOverview()
+                    onClick: () => void loadGitOverview(true)
                   },
                   Icon({ h, name: "refresh", size: 12 })
                 ),
@@ -10546,16 +10559,92 @@ function createCodeDenInspectorDrawer(React) {
                   h("div", { style: { fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em", color: "var(--muted-foreground)", marginBottom: "4px" } }, "Objetivo"),
                   h("div", { style: { fontSize: "12.5px", lineHeight: 1.5, color: "var(--foreground)" } }, structured.objetivo)
                 ),
-                (structured.papeis.tipo || structured.papeis.executor || structured.papeis.revisor || structured.papeis.decisor || structured.papeis.effort) && h(
-                  "div",
-                  { style: { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "8px" } },
-                  structured.papeis.executor && h(
+                (structured.papeis.tipo || structured.papeis.executor || structured.papeis.revisor || structured.papeis.decisor || structured.papeis.effort || props.onManageIssue) && (() => {
+                  var _a2;
+                  const isPlaceholderExec = (val) => !val || /(a definir|definir no despacho|pendente|tbd|nenhum|n\/a|auto[- ]?despacho)/i.test(val);
+                  let assignedFromRelay = "";
+                  const comments = (repoDetail == null ? void 0 : repoDetail.comments) || [];
+                  for (let ci = comments.length - 1; ci >= 0; ci--) {
+                    const m = /assigned\s+(?:this\s+issue\s+)?to\s+([0-9a-f]{6,64})/i.exec(String(((_a2 = comments[ci]) == null ? void 0 : _a2.content) || ""));
+                    if (m) {
+                      const pref = m[1].toLowerCase();
+                      const byTenant = (props.tenantAgents || []).find((a) => a.pubkey && a.pubkey.toLowerCase().startsWith(pref));
+                      const byCrew = liveCrew.find((a) => a.pubkey && a.pubkey.toLowerCase().startsWith(pref));
+                      assignedFromRelay = (byTenant == null ? void 0 : byTenant.name) || (byCrew == null ? void 0 : byCrew.name) || `#${pref.slice(0, 8)}`;
+                      break;
+                    }
+                  }
+                  const rawNoteExec = !isPlaceholderExec(executorName) ? executorName : "";
+                  const rawCardExec = !isPlaceholderExec(structured.papeis.executor) ? String(structured.papeis.executor).trim() : "";
+                  const effectiveExecutor = rawNoteExec || assignedFromRelay || rawCardExec;
+                  const matchedTenantAgent = (props.tenantAgents || []).find(
+                    (a) => effectiveExecutor && a.name.toLowerCase() === effectiveExecutor.toLowerCase()
+                  );
+                  const selectValue = (matchedTenantAgent == null ? void 0 : matchedTenantAgent.name) || "";
+                  return h(
                     "div",
-                    { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)", display: "flex", flexDirection: "column", gap: "5px" } },
-                    h("div", { style: { fontSize: "10px", color: "var(--muted-foreground)" } }, "Executor"),
-                    h(
+                    { style: { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "8px" } },
+                    (effectiveExecutor || structured.papeis.executor || props.onManageIssue) && h(
                       "div",
-                      { style: { display: "flex", alignItems: "center", gap: "5px", flexWrap: "wrap" } },
+                      { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)", display: "flex", flexDirection: "column", gap: "6px" } },
+                      h(
+                        "div",
+                        { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px" } },
+                        h("span", { style: { fontSize: "10px", color: "var(--muted-foreground)" } }, "Executor responsável"),
+                        effectiveExecutor && h(
+                          "button",
+                          {
+                            type: "button",
+                            className: "of-btn",
+                            title: `Abrir DM com ${effectiveExecutor}`,
+                            style: { padding: "1px 6px", fontSize: "10.5px" },
+                            onClick: () => {
+                              const ag = resolveCrewByName(effectiveExecutor);
+                              if (ag) onOpenAgentDm == null ? void 0 : onOpenAgentDm(ag);
+                            }
+                          },
+                          "DM ↗"
+                        )
+                      ),
+                      props.onManageIssue && Array.isArray(props.tenantAgents) && props.tenantAgents.length > 0 ? h(
+                        "select",
+                        {
+                          "aria-label": "Executor responsável",
+                          title: "Responsável atual (selecione outro agente para reatribuir)",
+                          value: selectValue,
+                          style: {
+                            fontSize: "11.5px",
+                            fontWeight: 600,
+                            padding: "4px 7px",
+                            borderRadius: "6px",
+                            border: "1px solid var(--border)",
+                            background: "var(--muted)",
+                            color: "var(--foreground)",
+                            width: "100%"
+                          },
+                          onChange: (e) => {
+                            const pickedName = String(e.target.value || "").trim();
+                            if (!pickedName || pickedName === selectValue) return;
+                            const ag = props.tenantAgents.find((a) => a.name === pickedName);
+                            void props.onManageIssue(item, { action: "reassign", executorName: pickedName, executorPubkey: ag == null ? void 0 : ag.pubkey });
+                          }
+                        },
+                        h(
+                          "option",
+                          { value: "" },
+                          effectiveExecutor ? `${effectiveExecutor} (trocar...)` : "Não atribuído — escolher..."
+                        ),
+                        props.tenantAgents.map((a) => h("option", { key: a.name, value: a.name }, a.name))
+                      ) : h(
+                        "div",
+                        { style: { fontSize: "12px", fontWeight: 600, color: effectiveExecutor ? "var(--foreground)" : "var(--muted-foreground)" } },
+                        effectiveExecutor || "Não atribuído"
+                      )
+                    ),
+                    structured.papeis.revisor && h(
+                      "div",
+                      { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
+                      h("div", { style: { fontSize: "10px", color: "var(--muted-foreground)", marginBottom: "4px" } }, "Revisor (L-01)"),
                       h(
                         "button",
                         {
@@ -10563,71 +10652,27 @@ function createCodeDenInspectorDrawer(React) {
                           className: "of-btn",
                           style: { padding: "2px 8px", fontSize: "11.5px" },
                           onClick: () => {
-                            const ag = resolveCrewByName(structured.papeis.executor);
+                            const ag = resolveCrewByName(structured.papeis.revisor);
                             if (ag) onOpenAgentDm == null ? void 0 : onOpenAgentDm(ag);
                           }
                         },
-                        `${structured.papeis.executor} ↗`
-                      ),
-                      props.onManageIssue && Array.isArray(props.tenantAgents) && props.tenantAgents.length > 0 && h(
-                        "select",
-                        {
-                          "aria-label": "Trocar executor",
-                          title: "Trocar executor desta issue",
-                          defaultValue: "",
-                          style: {
-                            fontSize: "10.5px",
-                            padding: "2px 5px",
-                            borderRadius: "5px",
-                            border: "1px solid var(--border)",
-                            background: "var(--muted)",
-                            color: "var(--foreground)",
-                            maxWidth: "120px"
-                          },
-                          onChange: (e) => {
-                            const pickedName = String(e.target.value || "").trim();
-                            if (!pickedName) return;
-                            const ag = props.tenantAgents.find((a) => a.name === pickedName);
-                            void props.onManageIssue(item, { action: "reassign", executorName: pickedName, executorPubkey: ag == null ? void 0 : ag.pubkey });
-                            e.target.value = "";
-                          }
-                        },
-                        h("option", { value: "" }, "Trocar..."),
-                        props.tenantAgents.map((a) => h("option", { key: a.name, value: a.name }, a.name))
+                        `${structured.papeis.revisor} ↗`
                       )
+                    ),
+                    structured.papeis.decisor && h(
+                      "div",
+                      { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
+                      h("div", { style: { fontSize: "10px", color: "var(--muted-foreground)", marginBottom: "2px" } }, "Decisor / Autoridade"),
+                      h("div", { style: { fontSize: "12px", fontWeight: 600 } }, structured.papeis.decisor)
+                    ),
+                    (structured.papeis.tipo || structured.papeis.effort) && h(
+                      "div",
+                      { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)", display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" } },
+                      structured.papeis.tipo && h("span", { className: "of-pill" }, structured.papeis.tipo),
+                      structured.papeis.effort && h("span", { className: "of-pill", "data-tone": "waiting" }, `Effort ${structured.papeis.effort}`)
                     )
-                  ),
-                  structured.papeis.revisor && h(
-                    "div",
-                    { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
-                    h("div", { style: { fontSize: "10px", color: "var(--muted-foreground)", marginBottom: "4px" } }, "Revisor (L-01)"),
-                    h(
-                      "button",
-                      {
-                        type: "button",
-                        className: "of-btn",
-                        style: { padding: "2px 8px", fontSize: "11.5px" },
-                        onClick: () => {
-                          const ag = resolveCrewByName(structured.papeis.revisor);
-                          if (ag) onOpenAgentDm == null ? void 0 : onOpenAgentDm(ag);
-                        }
-                      },
-                      `${structured.papeis.revisor} ↗`
-                    )
-                  ),
-                  structured.papeis.decisor && h(
-                    "div",
-                    { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
-                    h("div", { style: { fontSize: "10px", color: "var(--muted-foreground)", marginBottom: "2px" } }, "Decisor / Autoridade"),
-                    h("div", { style: { fontSize: "12px", fontWeight: 600 } }, structured.papeis.decisor)
-                  ),
-                  (structured.papeis.tipo || structured.papeis.effort) && h(
-                    "div",
-                    { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)", display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" } },
-                    structured.papeis.tipo && h("span", { className: "of-pill" }, structured.papeis.tipo),
-                    structured.papeis.effort && h("span", { className: "of-pill", "data-tone": "waiting" }, `Effort ${structured.papeis.effort}`)
-                  )
-                ),
+                  );
+                })(),
                 (structured.estado.contexto || structured.estado.decisao || structured.estado.autoridade) && h(
                   "div",
                   { style: { padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)", display: "flex", flexDirection: "column", gap: "6px", fontSize: "12px" } },
@@ -65576,7 +65621,7 @@ const PINNED_HOST_COMMANDS = Object.freeze([
   {
     id: "orgfy-kpis",
     scriptPath: "ferramentas/esteira/gerar_kpis_esteira.py",
-    sha256: "ec21ca0b2835869c9baf5d18f27ddd1bb868be47a86aa6d9fb0884cee5ae534a"
+    sha256: "174ed76e353db11e6aae4c94140234adc5adfa43606141be82f5618ea9867f46"
   },
   {
     id: "orgfy-controle-write",
@@ -65596,7 +65641,7 @@ const PINNED_HOST_COMMANDS = Object.freeze([
   {
     id: "orgfy-holding-scaffold",
     scriptPath: "ferramentas/esteira/holding_scaffold.py",
-    sha256: "95233db4a246b1f6fc7e2ed48c53d360609b25363ca549f047c323c6fd05df16"
+    sha256: "5cd3c69cff582499473e0dbacf2f735e51b6785b377a74614877d55a240e7226"
   }
 ]);
 async function computeUtf8Sha256(content) {
@@ -65857,7 +65902,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
       return () => {
         cancelled = true;
       };
-    }, [relayTick, activityTick]);
+    }, [relayTick]);
     React.useEffect(() => {
       var _a2, _b2, _c2, _d2;
       let savedWs = "";
@@ -65938,7 +65983,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
       return () => {
         cancelled = true;
       };
-    }, [tenant, linkedChannelId, (_d = status.tenantManifest) == null ? void 0 : _d.canal, (_e = status.tenantManifest) == null ? void 0 : _e.repoId, holding, relayTick, activityTick]);
+    }, [tenant, linkedChannelId, (_d = status.tenantManifest) == null ? void 0 : _d.canal, (_e = status.tenantManifest) == null ? void 0 : _e.repoId, relayTick]);
     React.useEffect(() => {
       var _a2;
       let cancelled = false;
@@ -66108,45 +66153,66 @@ function createFactoryAppComponent(ctx, opts = {}) {
       setToast(msg);
       setTimeout(() => setToast(null), 3500);
     }, []);
+    const refreshInFlightRef = React.useRef(false);
+    const lastHoldingFetchRef = React.useRef(0);
     const refresh = React.useCallback(
       async (targetTenant = tenant, forceSettingsSync = false, silent = false) => {
         var _a2, _b2;
+        if (silent && refreshInFlightRef.current) return;
+        refreshInFlightRef.current = true;
         if (!silent) setLoading(true);
-        const [res, holdSnap] = await Promise.all([
-          fetchFactoryStatus(ctx, targetTenant),
-          fetchHoldingControlPlane(ctx).catch(() => null)
-        ]);
-        setStatus(res.status);
-        setError(res.error);
-        if (holdSnap) setHolding(holdSnap);
-        if (!settingsDirtyRef.current || forceSettingsSync) {
-          setSettingsFormState({
-            mode: res.status.mode,
-            autoMerge: res.status.limits.autoMerge,
-            mergePolicy: res.status.limits.mergePolicy,
-            gastoDiaUsd: ((_a2 = res.status.limits.dailyBudget) == null ? void 0 : _a2.usd) ?? 50,
-            mergesDia: res.status.limits.maxMergesPerDay ?? 20,
-            agentesMax: res.status.limits.maxConcurrentSessions ?? 4,
-            prsAbertos: ((_b2 = res.status.wip) == null ? void 0 : _b2.limit) ?? 6,
-            falhasSeguidas: res.status.limits.pauseAfterConsecutiveFailures ?? 3
-          });
+        try {
+          const now = Date.now();
+          const shouldFetchHolding = !silent || now - lastHoldingFetchRef.current > 3e4;
+          const [res, holdSnap] = await Promise.all([
+            fetchFactoryStatus(ctx, targetTenant),
+            shouldFetchHolding ? fetchHoldingControlPlane(ctx).catch(() => null) : Promise.resolve(null)
+          ]);
+          setStatus(res.status);
+          setError(res.error);
+          if (holdSnap) {
+            lastHoldingFetchRef.current = Date.now();
+            setHolding(holdSnap);
+          }
+          if (!settingsDirtyRef.current || forceSettingsSync) {
+            setSettingsFormState({
+              mode: res.status.mode,
+              autoMerge: res.status.limits.autoMerge,
+              mergePolicy: res.status.limits.mergePolicy,
+              gastoDiaUsd: ((_a2 = res.status.limits.dailyBudget) == null ? void 0 : _a2.usd) ?? 50,
+              mergesDia: res.status.limits.maxMergesPerDay ?? 20,
+              agentesMax: res.status.limits.maxConcurrentSessions ?? 4,
+              prsAbertos: ((_b2 = res.status.wip) == null ? void 0 : _b2.limit) ?? 6,
+              falhasSeguidas: res.status.limits.pauseAfterConsecutiveFailures ?? 3
+            });
+          }
+        } finally {
+          refreshInFlightRef.current = false;
+          if (!silent) setLoading(false);
         }
-        if (!silent) setLoading(false);
       },
       [tenant]
     );
     React.useEffect(() => {
       settingsDirtyRef.current = false;
       let disposed = false;
+      let relayDebounceTimer = null;
       const run = () => {
-        if (!disposed) refresh(tenant, false, true);
+        if (disposed) return;
+        if (typeof document !== "undefined" && document.hidden) return;
+        void refresh(tenant, false, true);
       };
-      refresh(tenant, true, false);
-      const timer = setInterval(run, 5e3);
-      const unsub = subscribeRelayUpdates(() => run());
+      void refresh(tenant, true, false);
+      const timer = setInterval(run, 15e3);
+      const unsub = subscribeRelayUpdates(() => {
+        if (disposed) return;
+        if (relayDebounceTimer) clearTimeout(relayDebounceTimer);
+        relayDebounceTimer = setTimeout(run, 2500);
+      });
       return () => {
         disposed = true;
         clearInterval(timer);
+        if (relayDebounceTimer) clearTimeout(relayDebounceTimer);
         unsub();
       };
     }, [tenant, refresh]);
@@ -66178,9 +66244,10 @@ function createFactoryAppComponent(ctx, opts = {}) {
           const isPr = String(item.workKey || "").startsWith("pr:");
           const owner = (liveRepo == null ? void 0 : liveRepo.owner) || DEFAULT_ORGFY_REPO_OWNER;
           const dtag = (liveRepo == null ? void 0 : liveRepo.dtag) || ((_a2 = status.tenantManifest) == null ? void 0 : _a2.repoId) || tenant;
-          const okDirect = await openBuzzRepoEntity(ctx, { type: isPr ? "pr" : "issue", owner, dtag, id: item.id }).catch(() => false);
-          const ok2 = okDirect || await openIssueInBuzz(ctx, { id: item.id, owner, dtag }).catch(() => false);
-          notify2(ok2 ? `${isPr ? "PR" : "Issue"} #${item.id.slice(0, 8)} aberto direto no Buzz Repos.` : `Deep link preparado para #${item.id.slice(0, 8)}.`);
+          const ok2 = await openBuzzRepoEntity(ctx, { type: isPr ? "pr" : "issue", owner, dtag, id: item.id }).catch(() => false);
+          notify2(
+            ok2 ? `${isPr ? "PR" : "Issue"} #${item.id.slice(0, 8)} aberto direto no Buzz Repos.` : `${isPr ? "PR" : "Issue"} #${item.id.slice(0, 8)} não está indexado no Buzz Repos — detalhes completos disponíveis aqui no Inspector.`
+          );
         } else {
           notify2(`Item local #${item.id.slice(0, 8)} (sem ID Nostr de 64 chars).`);
         }
@@ -66365,7 +66432,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
       return () => {
         cancelled = true;
       };
-    }, [linkedChannelId, (_g = status.tenantManifest) == null ? void 0 : _g.canal, liveCrew, relayTick, activityTick]);
+    }, [linkedChannelId, (_g = status.tenantManifest) == null ? void 0 : _g.canal, liveCrew, relayTick]);
     const { agents: tenantAgents, source: tenantAgentsSource } = React.useMemo(
       () => {
         var _a2;

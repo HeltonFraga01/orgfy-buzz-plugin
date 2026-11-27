@@ -283,7 +283,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       return () => {
         cancelled = true;
       };
-    }, [relayTick, activityTick]);
+    }, [relayTick]);
 
     // Resolve vínculo ativo Workspace + Canal Principal para a empresa selecionada (localStorage -> manifesto -> auto-match)
     React.useEffect(() => {
@@ -388,7 +388,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       return () => {
         cancelled = true;
       };
-    }, [tenant, linkedChannelId, status.tenantManifest?.canal, status.tenantManifest?.repoId, holding, relayTick, activityTick]);
+    }, [tenant, linkedChannelId, status.tenantManifest?.canal, status.tenantManifest?.repoId, relayTick]);
 
     // Ao abrir um card no ItemSheetDrawer, carrega conteúdo NIP-34 + fallback local em REPOS/<repoId>/cards/*.md
     React.useEffect(() => {
@@ -571,29 +571,45 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       setTimeout(() => setToast(null), 3500);
     }, []);
 
+    const refreshInFlightRef = React.useRef<boolean>(false);
+    const lastHoldingFetchRef = React.useRef<number>(0);
+
     const refresh = React.useCallback(
       async (targetTenant = tenant, forceSettingsSync = false, silent = false) => {
+        if (silent && refreshInFlightRef.current) return;
+        refreshInFlightRef.current = true;
         if (!silent) setLoading(true);
-        const [res, holdSnap] = await Promise.all([
-          fetchFactoryStatus(ctx, targetTenant),
-          fetchHoldingControlPlane(ctx).catch(() => null),
-        ]);
-        setStatus(res.status);
-        setError(res.error);
-        if (holdSnap) setHolding(holdSnap);
-        if (!settingsDirtyRef.current || forceSettingsSync) {
-          setSettingsFormState({
-            mode: res.status.mode,
-            autoMerge: res.status.limits.autoMerge,
-            mergePolicy: res.status.limits.mergePolicy,
-            gastoDiaUsd: res.status.limits.dailyBudget?.usd ?? 50,
-            mergesDia: res.status.limits.maxMergesPerDay ?? 20,
-            agentesMax: res.status.limits.maxConcurrentSessions ?? 4,
-            prsAbertos: res.status.wip?.limit ?? 6,
-            falhasSeguidas: res.status.limits.pauseAfterConsecutiveFailures ?? 3,
-          });
+        try {
+          const now = Date.now();
+          const shouldFetchHolding = !silent || now - lastHoldingFetchRef.current > 30000;
+          const [res, holdSnap] = await Promise.all([
+            fetchFactoryStatus(ctx, targetTenant),
+            shouldFetchHolding
+              ? fetchHoldingControlPlane(ctx).catch(() => null)
+              : Promise.resolve(null),
+          ]);
+          setStatus(res.status);
+          setError(res.error);
+          if (holdSnap) {
+            lastHoldingFetchRef.current = Date.now();
+            setHolding(holdSnap);
+          }
+          if (!settingsDirtyRef.current || forceSettingsSync) {
+            setSettingsFormState({
+              mode: res.status.mode,
+              autoMerge: res.status.limits.autoMerge,
+              mergePolicy: res.status.limits.mergePolicy,
+              gastoDiaUsd: res.status.limits.dailyBudget?.usd ?? 50,
+              mergesDia: res.status.limits.maxMergesPerDay ?? 20,
+              agentesMax: res.status.limits.maxConcurrentSessions ?? 4,
+              prsAbertos: res.status.wip?.limit ?? 6,
+              falhasSeguidas: res.status.limits.pauseAfterConsecutiveFailures ?? 3,
+            });
+          }
+        } finally {
+          refreshInFlightRef.current = false;
+          if (!silent) setLoading(false);
         }
-        if (!silent) setLoading(false);
       },
       [tenant]
     );
@@ -601,15 +617,23 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     React.useEffect(() => {
       settingsDirtyRef.current = false;
       let disposed = false;
+      let relayDebounceTimer: ReturnType<typeof setTimeout> | null = null;
       const run = () => {
-        if (!disposed) refresh(tenant, false, true);
+        if (disposed) return;
+        if (typeof document !== "undefined" && document.hidden) return;
+        void refresh(tenant, false, true);
       };
-      refresh(tenant, true, false);
-      const timer = setInterval(run, 5000);
-      const unsub = subscribeRelayUpdates(() => run());
+      void refresh(tenant, true, false);
+      const timer = setInterval(run, 15000);
+      const unsub = subscribeRelayUpdates(() => {
+        if (disposed) return;
+        if (relayDebounceTimer) clearTimeout(relayDebounceTimer);
+        relayDebounceTimer = setTimeout(run, 2500);
+      });
       return () => {
         disposed = true;
         clearInterval(timer);
+        if (relayDebounceTimer) clearTimeout(relayDebounceTimer);
         unsub();
       };
     }, [tenant, refresh]);
@@ -639,9 +663,12 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
           const isPr = String(item.workKey || "").startsWith("pr:");
           const owner = liveRepo?.owner || DEFAULT_ORGFY_REPO_OWNER;
           const dtag = liveRepo?.dtag || status.tenantManifest?.repoId || tenant;
-          const okDirect = await openBuzzRepoEntity(ctx, { type: isPr ? "pr" : "issue", owner, dtag, id: item.id }).catch(() => false);
-          const ok = okDirect || (await openIssueInBuzz(ctx, { id: item.id, owner, dtag }).catch(() => false));
-          notify(ok ? `${isPr ? "PR" : "Issue"} #${item.id.slice(0, 8)} aberto direto no Buzz Repos.` : `Deep link preparado para #${item.id.slice(0, 8)}.`);
+          const ok = await openBuzzRepoEntity(ctx, { type: isPr ? "pr" : "issue", owner, dtag, id: item.id }).catch(() => false);
+          notify(
+            ok
+              ? `${isPr ? "PR" : "Issue"} #${item.id.slice(0, 8)} aberto direto no Buzz Repos.`
+              : `${isPr ? "PR" : "Issue"} #${item.id.slice(0, 8)} não está indexado no Buzz Repos — detalhes completos disponíveis aqui no Inspector.`
+          );
         } else {
           notify(`Item local #${item.id.slice(0, 8)} (sem ID Nostr de 64 chars).`);
         }
@@ -835,7 +862,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       return () => {
         cancelled = true;
       };
-    }, [linkedChannelId, status.tenantManifest?.canal, liveCrew, relayTick, activityTick]);
+    }, [linkedChannelId, status.tenantManifest?.canal, liveCrew, relayTick]);
 
     const { agents: tenantAgents, source: tenantAgentsSource } = React.useMemo(
       () => buildEffectiveTenantAgents(status.tenantManifest?.agentes || [], liveChannelAgents),

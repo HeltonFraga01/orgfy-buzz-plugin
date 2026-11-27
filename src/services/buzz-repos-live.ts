@@ -179,18 +179,13 @@ export async function openBuzzRepoEntity(
       if (resolved) {
         normalizedRoute = resolved;
       } else {
-        try {
-          await ctx.navigation.open({
-            version: 1,
-            kind: "page",
-            pluginId: "digital.cortexx.orgfy",
-            pageId: "orgfy-factory",
-            scope,
-          });
-          return true;
-        } catch {}
+        // Não navega para buzz.repos nem para pageId inexistente (evita tela "This page isn't available")
+        return false;
       }
     }
+  } else if ("id" in normalizedRoute) {
+    // Sem session.repositories.load para confirmar o item no relay, evita navegar às cegas para buzz.repos
+    return false;
   }
 
   try {
@@ -205,7 +200,10 @@ export async function openBuzzRepoEntity(
         params: normalizedRoute,
       },
     });
-    return !res || res.status === "opened";
+    if (res && typeof res === "object" && "status" in res && res.status !== "opened") {
+      return false;
+    }
+    return true;
   } catch (err) {
     console.warn("[OrgFy BuzzRepos] ctx.navigation.open falhou:", err);
     return false;
