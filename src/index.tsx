@@ -166,8 +166,9 @@ import {
   isUnsupportedAgentModel,
   ORGFY_FAILOVER_REQUEST_EVENT,
   reconcileAgentsViaBuzzApi,
+  startAutoAgentModelReconciler,
 } from "./services/model-failover";
-export { VERIFIED_TOOLCALL_FAILOVER_CHAIN, isUnsupportedAgentModel, ORGFY_FAILOVER_REQUEST_EVENT, reconcileAgentsViaBuzzApi, requestModelFailover };
+export { VERIFIED_TOOLCALL_FAILOVER_CHAIN, isUnsupportedAgentModel, ORGFY_FAILOVER_REQUEST_EVENT, reconcileAgentsViaBuzzApi, requestModelFailover, startAutoAgentModelReconciler };
 import {
   fetchResolvedArchive,
   searchResolvedArchive,
@@ -2279,13 +2280,16 @@ REGRAS POR PAPEL (APLIQUE APENAS O SEU):
 - [Executor]: use 'orgfy_handoff_pack' ao retomar; mantenha 'orgfy_card_progress' atualizado; edite apenas Escrita exclusiva; se 'git push relay' der exit 128, pegue o header via 'buzz__repo' com GIT_CONFIG_COUNT=1.
 - [Revisor]: máx 15 shells; use 'orgfy_handoff_pack', rode o comando L-22 e faça triagem de obsolescência ANTES de pedir rebase: cheque 'git diff origin/main <branch>' nos arquivos úteis — se o código útil já estiver idêntico na 'main' (diff vazio) ou o único conflito ('modificar/excluir') for em módulo legado removido (ex.: 'porteiro.py', 'pr_processor.py'), NÃO peça rebase nem CI; emita 'GATE: OBSOLETO — FECHAR PR' recomendando fechar o PR e a issue vinculada imediatamente. Caso contrário, confira diff/escopo e emita 'GATE: aceito' ou 'GATE: recusado' (nunca debugue porteiro.py em revisão).
 - [COO]: antes de delegar chame 'orgfy_roster_live' e 'orgfy_smart_dispatch'; limite exploração a 10 shells; escale Agente -> COO -> CEO Empresa -> Iris (só último caso). Todo wake '[ORGFY RADAR AUTO-CURA]' exige 1 desfecho fechado: (A) erro API -> stop + 'orgfy_model_failover'; (B) aberto -> 'orgfy_session_stop(relaunch=true, reset_session_before_relaunch=true)'; (C) já na main -> stop sem relançar. Use 'python3 ferramentas/assign_issue.py' (nunca 'buzz issues assign' direto) e 'python3 ferramentas/issue_status.py --resumo' para placar.
-- [CEO / Board]: delegue sempre com alvo fechado (1-3 arquivos + critério L-22 + o que não refazer).`,
+- [CEO / Board]: delegue sempre com alvo fechado (1-3 arquivos + critério L-22 + o que não refazer). Você tem autonomia via 'orgfy_ajustar_limites' para recalibrar teto diário (gastoDiaUsd), mergesDia, agentes e prsAbertos de cada empresa conforme a demanda real, e 'orgfy_reconciliar_agentes(dry_run=false)' para corrigir modelos reprovados no Eval.`,
       });
       console.log("[ORGFY] ctx.agents.addInstructions registrado com sucesso.");
     } catch (err) {
       console.warn("[ORGFY] Falha ao registrar addInstructions:", err);
     }
   }
+
+  // ── AUTO-RECONCILIADOR EVAL-FIRST DE MODELOS NO BOOT + PERIÓDICO (ctx.agents.save) ──
+  const stopAutoReconciler = startAutoAgentModelReconciler(ctx);
 
   // ── REGISTRO UNIFICADO DAS AGENT TOOLS (v13 SINGLE SOURCE OF TRUTH + OTEL TRACING) ──
   if ((ctx.agents as any)?.addTool) {
@@ -2320,6 +2324,7 @@ REGRAS POR PAPEL (APLIQUE APENAS O SEU):
 
   if ((ctx as any).on) {
     (ctx as any).on("dispose", () => {
+      try { stopAutoReconciler(); } catch (_e) {}
       if (mcpServerInstance?.close) {
         try {
           mcpServerInstance.close();

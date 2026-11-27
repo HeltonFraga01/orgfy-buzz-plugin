@@ -96,6 +96,45 @@ export async function reconcileAgentsViaBuzzApi(
   return { total: list.length, updated };
 }
 
+/**
+ * Auto-Reconciliador Eval-First (100% autônomo via ctx.agents.save):
+ * Executa 8s após o boot do plugin e a cada 10 min, corrigindo automaticamente qualquer agente
+ * preso em modelos banidos/0-10/offline (ex.: gemini-3.8-flash-medium, mistral-large-4-1t-a52b)
+ * com assinatura Nostr nativa do Buzz Desktop — zero ação manual do operador.
+ */
+export function startAutoAgentModelReconciler(ctx: Context): () => void {
+  const agentsApi = (ctx as any)?.agents;
+  if (typeof agentsApi?.save !== "function" || typeof agentsApi?.snapshot !== "function") {
+    return () => {};
+  }
+  let running = false;
+  const runOnce = async () => {
+    if (running) return;
+    running = true;
+    try {
+      const res = await reconcileAgentsViaBuzzApi(ctx, { dryRun: false });
+      if (res.updated.length > 0) {
+        console.log(
+          `[ORGFY AUTO-RECONCILE] ${res.updated.length} agente(s) reconciliado(s) via ctx.agents.save(): ` +
+            res.updated.map((u) => `${u.key}: ${u.from} -> ${u.to}`).join(", ")
+        );
+      }
+    } catch (err) {
+      console.warn("[ORGFY AUTO-RECONCILE] erro isolado:", err);
+    } finally {
+      running = false;
+    }
+  };
+  const bootTimer = setTimeout(() => { void runOnce(); }, 8_000);
+  const intervalTimer = setInterval(() => { void runOnce(); }, 10 * 60_000);
+  (bootTimer as any)?.unref?.();
+  (intervalTimer as any)?.unref?.();
+  return () => {
+    clearTimeout(bootTimer);
+    clearInterval(intervalTimer);
+  };
+}
+
 interface ProviderGroupConfig {
   id: string;
   apiKey: string;
@@ -277,6 +316,8 @@ export function isUnsupportedAgentModel(modelId: string): boolean {
   return (
     m === "haiku" ||
     m === "grok-4.5" ||
+    m.includes("gemini-3.8-flash-medium") ||
+    m.includes("gemini-4-hydrogen-sonar") ||
     m.includes("mistral-large-4-1t-a52b") ||
     m.includes("claude-opus-5-5") ||
     m.includes("minimax-m3.1-flash") ||

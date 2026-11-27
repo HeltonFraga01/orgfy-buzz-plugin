@@ -108,7 +108,8 @@ function makeHarness(failReads = false) {
 
 // 1. Testes Originais (Kanban & Status Positivo/Negativo + MCP)
 const h1 = makeHarness(false);
-assert.equal(h1.tools.size, 23, "devem existir exatamente 23 agentTools registradas");
+assert.equal(h1.tools.size, 24, "devem existir exatamente 24 agentTools registradas");
+assert.ok(h1.tools.has("orgfy_ajustar_limites"), "agentTool orgfy_ajustar_limites deve estar registrada");
 assert.ok(h1.panels.has("orgfy-channel-pulse"), "sidebar panel orgfy-channel-pulse deve ser registrado");
 assert.ok(h1.hooks.length >= 1, "hooks de governança devem ser registrados");
 

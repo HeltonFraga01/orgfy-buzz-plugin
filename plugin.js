@@ -3195,6 +3195,43 @@ async function reconcileAgentsViaBuzzApi(ctx, opts = {}) {
   }
   return { total: list.length, updated };
 }
+function startAutoAgentModelReconciler(ctx) {
+  var _a, _b;
+  const agentsApi = ctx == null ? void 0 : ctx.agents;
+  if (typeof (agentsApi == null ? void 0 : agentsApi.save) !== "function" || typeof (agentsApi == null ? void 0 : agentsApi.snapshot) !== "function") {
+    return () => {
+    };
+  }
+  let running = false;
+  const runOnce = async () => {
+    if (running) return;
+    running = true;
+    try {
+      const res = await reconcileAgentsViaBuzzApi(ctx, { dryRun: false });
+      if (res.updated.length > 0) {
+        console.log(
+          `[ORGFY AUTO-RECONCILE] ${res.updated.length} agente(s) reconciliado(s) via ctx.agents.save(): ` + res.updated.map((u) => `${u.key}: ${u.from} -> ${u.to}`).join(", ")
+        );
+      }
+    } catch (err) {
+      console.warn("[ORGFY AUTO-RECONCILE] erro isolado:", err);
+    } finally {
+      running = false;
+    }
+  };
+  const bootTimer = setTimeout(() => {
+    void runOnce();
+  }, 8e3);
+  const intervalTimer = setInterval(() => {
+    void runOnce();
+  }, 10 * 6e4);
+  (_a = bootTimer == null ? void 0 : bootTimer.unref) == null ? void 0 : _a.call(bootTimer);
+  (_b = intervalTimer == null ? void 0 : intervalTimer.unref) == null ? void 0 : _b.call(intervalTimer);
+  return () => {
+    clearTimeout(bootTimer);
+    clearInterval(intervalTimer);
+  };
+}
 const VERIFIED_TOOLCALL_FAILOVER_CHAIN = [
   { model: "gemini-2.5-flash", provider: "nexusmind_antigravity", measuredLatencyMs: 1945, toolCallRate: "10/10", cost10CardsUsd: 22e-4, role: "fast_cost_effective" },
   { model: "claude-sonnet-4-6", provider: "nexusmind_anthropic", measuredLatencyMs: 4314, toolCallRate: "10/10", cost10CardsUsd: 0.0815, role: "primary_quality" }
@@ -3319,7 +3356,7 @@ function isFreeModelId(modelId) {
 function isUnsupportedAgentModel(modelId) {
   const m = String(modelId || "").trim().toLowerCase();
   if (!m) return true;
-  return m === "haiku" || m === "grok-4.5" || m.includes("mistral-large-4-1t-a52b") || m.includes("claude-opus-5-5") || m.includes("minimax-m3.1-flash") || m.startsWith("auto/") || m.includes("tab_jump") || m.includes("autocomplete") || m.includes("fim-") || m.includes("embedding") || m.includes("rerank") || m.includes("whisper") || m.includes("tts") || m.includes("imagen") || m.includes("dall-e") || m.includes("moderation");
+  return m === "haiku" || m === "grok-4.5" || m.includes("gemini-3.8-flash-medium") || m.includes("gemini-4-hydrogen-sonar") || m.includes("mistral-large-4-1t-a52b") || m.includes("claude-opus-5-5") || m.includes("minimax-m3.1-flash") || m.startsWith("auto/") || m.includes("tab_jump") || m.includes("autocomplete") || m.includes("fim-") || m.includes("embedding") || m.includes("rerank") || m.includes("whisper") || m.includes("tts") || m.includes("imagen") || m.includes("dall-e") || m.includes("moderation");
 }
 function estimateModelIntelligence(modelId) {
   const m = String(modelId || "").toLowerCase();
@@ -8131,6 +8168,990 @@ async function sendBuzzChatMessageOrWake(ctx, opts) {
     error: chatError || "session.messages.send e ctx.agents.wake indisponíveis"
   };
 }
+function resolveBuzzNavigationScope(ctx) {
+  var _a, _b, _c, _d, _e, _f;
+  try {
+    const navSnap = typeof ((_a = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a.snapshot) === "function" ? ctx.navigation.snapshot() : null;
+    const navScope = (_c = (_b = navSnap == null ? void 0 : navSnap.entry) == null ? void 0 : _b.target) == null ? void 0 : _c.scope;
+    if ((navScope == null ? void 0 : navScope.viewer) && (navScope == null ? void 0 : navScope.communityOrigin)) {
+      return { viewer: String(navScope.viewer), communityOrigin: String(navScope.communityOrigin) };
+    }
+  } catch {
+  }
+  try {
+    const relaySnap = typeof ((_d = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _d.snapshot) === "function" ? ctx.relay.snapshot() : null;
+    const viewer = (relaySnap == null ? void 0 : relaySnap.viewer) ? String(relaySnap.viewer) : ((_e = relaySnap == null ? void 0 : relaySnap.session) == null ? void 0 : _e.viewer) ? String(relaySnap.session.viewer) : "";
+    let communityOrigin = (relaySnap == null ? void 0 : relaySnap.origin) ? String(relaySnap.origin) : "";
+    if (!communityOrigin && viewer && typeof (relaySnap == null ? void 0 : relaySnap.scope) === "string" && relaySnap.scope.endsWith(`:${viewer}`)) {
+      communityOrigin = relaySnap.scope.slice(0, -(viewer.length + 1));
+    }
+    if (!communityOrigin && viewer && typeof ((_f = relaySnap == null ? void 0 : relaySnap.session) == null ? void 0 : _f.scope) === "string" && relaySnap.session.scope.endsWith(`:${viewer}`)) {
+      communityOrigin = relaySnap.session.scope.slice(0, -(viewer.length + 1));
+    }
+    if (viewer && communityOrigin) {
+      return { viewer, communityOrigin };
+    }
+  } catch {
+  }
+  return null;
+}
+function findBuzzChannelIdByName(ctx, candidateNames) {
+  var _a, _b, _c, _d;
+  try {
+    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+    const listSnap = typeof ((_d = session == null ? void 0 : session.channels) == null ? void 0 : _d.list) === "function" ? session.channels.list() : null;
+    const allChannels = Array.isArray(listSnap == null ? void 0 : listSnap.channels) ? listSnap.channels : [];
+    const normalizedTargets = candidateNames.map((n) => n.trim().toLowerCase()).filter(Boolean);
+    if (normalizedTargets.length === 0) return null;
+    for (const target of normalizedTargets) {
+      const exact = allChannels.find(
+        (ch) => (ch == null ? void 0 : ch.id) && (ch == null ? void 0 : ch.channelType) !== "dm" && (ch == null ? void 0 : ch.channelType) !== "solo" && String((ch == null ? void 0 : ch.name) || "").trim().toLowerCase() === target
+      );
+      if (exact == null ? void 0 : exact.id) return String(exact.id);
+    }
+    for (const target of normalizedTargets) {
+      const partial = allChannels.find(
+        (ch) => (ch == null ? void 0 : ch.id) && (ch == null ? void 0 : ch.channelType) !== "dm" && (ch == null ? void 0 : ch.channelType) !== "solo" && String((ch == null ? void 0 : ch.name) || "").trim().toLowerCase().includes(target)
+      );
+      if (partial == null ? void 0 : partial.id) return String(partial.id);
+    }
+  } catch {
+  }
+  return null;
+}
+async function loadBuzzChannelLiveInfo(ctx, channelId) {
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
+  if (!channelId) return null;
+  try {
+    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+    if (!session) return null;
+    const listSnap = typeof ((_d = session.channels) == null ? void 0 : _d.list) === "function" ? session.channels.list() : null;
+    const allChannels = Array.isArray(listSnap == null ? void 0 : listSnap.channels) ? listSnap.channels : [];
+    const summary = (typeof ((_e = session.channels) == null ? void 0 : _e.get) === "function" ? session.channels.get(channelId) : void 0) || allChannels.find((ch) => String((ch == null ? void 0 : ch.id) || "") === channelId) || null;
+    let details = null;
+    if (((_f = session.channelDetails) == null ? void 0 : _f.available) && typeof session.channelDetails.load === "function") {
+      try {
+        details = await session.channelDetails.load(channelId);
+      } catch {
+      }
+    }
+    const rawMembers = Array.isArray(summary == null ? void 0 : summary.members) ? summary.members : Array.isArray(summary == null ? void 0 : summary.participants) ? summary.participants : [];
+    const uniqueMembers = Array.from(new Set(rawMembers.map((m) => String(m || "").toLowerCase()).filter(Boolean)));
+    let unreadCount = null;
+    let attentionCount = null;
+    try {
+      if (typeof ((_g = session.unread) == null ? void 0 : _g.snapshot) === "function") {
+        const uSnap = session.unread.snapshot({ kind: "channel", channelId });
+        if (uSnap && typeof uSnap === "object") {
+          if (typeof uSnap.observedCount === "number") unreadCount = uSnap.observedCount;
+          if (typeof uSnap.attentionCount === "number") attentionCount = uSnap.attentionCount;
+        }
+      }
+    } catch {
+    }
+    let liveStatus2 = "unknown";
+    try {
+      const lSnap = (_i = (_h = session.live) == null ? void 0 : _h.snapshot) == null ? void 0 : _i.call(_h);
+      if (lSnap == null ? void 0 : lSnap.status) liveStatus2 = String(lSnap.status);
+    } catch {
+    }
+    const visibility = (details == null ? void 0 : details.visibility) === "private" || (summary == null ? void 0 : summary.visibility) === "private" || (summary == null ? void 0 : summary.private) === true ? "private" : (details == null ? void 0 : details.visibility) === "public" || (summary == null ? void 0 : summary.visibility) === "public" ? "public" : "unknown";
+    return {
+      available: Boolean(summary || details),
+      channelId,
+      name: String((details == null ? void 0 : details.name) || (summary == null ? void 0 : summary.name) || "Canal"),
+      description: String((details == null ? void 0 : details.description) ?? (summary == null ? void 0 : summary.description) ?? ""),
+      visibility,
+      channelType: String((summary == null ? void 0 : summary.channelType) || "stream"),
+      viewerRole: (summary == null ? void 0 : summary.viewerRole) ? String(summary.viewerRole) : void 0,
+      archived: Boolean(summary == null ? void 0 : summary.archived),
+      memberPubkeys: uniqueMembers,
+      memberCount: uniqueMembers.length,
+      labels: Array.isArray(details == null ? void 0 : details.labels) ? details.labels.map(String) : Array.isArray(summary == null ? void 0 : summary.labels) ? summary.labels.map(String) : [],
+      canEdit: Boolean((details == null ? void 0 : details.canEdit) && ((_j = session.channelDetails) == null ? void 0 : _j.available) && typeof session.channelDetails.save === "function"),
+      detailsBase: details || void 0,
+      unreadCount,
+      attentionCount,
+      liveStatus: liveStatus2,
+      rosterTotalChannels: allChannels.length,
+      lastActivityAt: typeof (summary == null ? void 0 : summary.lastActivityAt) === "number" ? summary.lastActivityAt : void 0
+    };
+  } catch {
+    return null;
+  }
+}
+async function saveBuzzChannelDetailsLive(ctx, detailsBase, patch) {
+  var _a, _b, _c, _d;
+  try {
+    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+    if (!((_d = session == null ? void 0 : session.channelDetails) == null ? void 0 : _d.available) || typeof session.channelDetails.save !== "function") {
+      return { ok: false, error: "API session.channelDetails.save indisponível nesta versão do Buzz." };
+    }
+    if (!detailsBase) {
+      return { ok: false, error: "Metadados base do canal ainda não carregados." };
+    }
+    const draft = {
+      name: patch.name !== void 0 ? patch.name.trim() : String(detailsBase.name || ""),
+      description: patch.description !== void 0 ? patch.description.trim() : String(detailsBase.description || ""),
+      visibility: patch.visibility || (detailsBase.visibility === "public" ? "public" : "private"),
+      ...detailsBase.joinRole ? { joinRole: detailsBase.joinRole } : {},
+      ...typeof detailsBase.ttlSeconds === "number" ? { ttlSeconds: detailsBase.ttlSeconds } : {},
+      ...Array.isArray(detailsBase.labels) ? { labels: detailsBase.labels } : {}
+    };
+    await session.channelDetails.save(detailsBase, draft);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: (err == null ? void 0 : err.message) || String(err) };
+  }
+}
+async function runBuzzChannelDiagnosticAction(ctx, channelId, action) {
+  var _a, _b, _c, _d, _e, _f, _g, _h;
+  try {
+    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+    if (!session) return { ok: false, message: "Sessão do relay Buzz indisponível." };
+    if (action === "markRead") {
+      if (typeof ((_d = session.unread) == null ? void 0 : _d.markChannelRead) === "function") {
+        await session.unread.markChannelRead(channelId);
+        return { ok: true, message: "Canal marcado como lido no Buzz." };
+      }
+      return { ok: false, message: "markChannelRead indisponível." };
+    }
+    if (action === "markUnread") {
+      if (typeof ((_e = session.unread) == null ? void 0 : _e.markUnreadLocal) === "function") {
+        await session.unread.markUnreadLocal({ kind: "channel", channelId });
+        return { ok: true, message: "Canal marcado como não lido." };
+      }
+      return { ok: false, message: "markUnreadLocal indisponível." };
+    }
+    if (typeof ((_f = session.channels) == null ? void 0 : _f.refreshList) === "function") {
+      session.channels.refreshList();
+    }
+    if (typeof ((_g = session.channels) == null ? void 0 : _g.refreshRoster) === "function") {
+      await session.channels.refreshRoster(channelId).catch(() => {
+      });
+    }
+    if (typeof ((_h = session.channels) == null ? void 0 : _h.refresh) === "function") {
+      session.channels.refresh(channelId);
+    }
+    return { ok: true, message: "Lista de canais e roster atualizados via Buzz relay." };
+  } catch (err) {
+    return { ok: false, message: (err == null ? void 0 : err.message) || String(err) };
+  }
+}
+async function navigateToBuzzChannel(ctx, channelId, options) {
+  var _a, _b;
+  if (!channelId) return { ok: false, mode: "none" };
+  const scope = resolveBuzzNavigationScope(ctx);
+  if ((options == null ? void 0 : options.preferFullPage) && scope && typeof ((_a = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a.open) === "function") {
+    try {
+      const target = {
+        version: 1,
+        kind: "conversation",
+        scope,
+        channelId
+      };
+      if (options.panel) target.panel = options.panel;
+      const res = await ctx.navigation.open(target);
+      if (!res || res.status === "opened") {
+        return { ok: true, mode: "navigation" };
+      }
+    } catch {
+    }
+  }
+  if (options == null ? void 0 : options.sideTabOpener) {
+    try {
+      const opened = options.sideTabOpener({ channelId }, { keep: true });
+      if (opened) return { ok: true, mode: "sidetab" };
+    } catch {
+    }
+  }
+  if (scope && typeof ((_b = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _b.open) === "function") {
+    try {
+      const target = {
+        version: 1,
+        kind: "conversation",
+        scope,
+        channelId
+      };
+      if (options == null ? void 0 : options.panel) target.panel = options.panel;
+      const res = await ctx.navigation.open(target);
+      if (!res || res.status === "opened") {
+        return { ok: true, mode: "navigation" };
+      }
+    } catch {
+    }
+  }
+  return { ok: false, mode: "none" };
+}
+const VALID_MODES = /* @__PURE__ */ new Set(["manual", "assisted", "software_factory", "dark_factory"]);
+const VALID_LOOP_STATES = /* @__PURE__ */ new Set(["idle", "discovering", "building", "verifying", "paused", "stopped", "draining"]);
+function parseFactoryStatus(raw) {
+  if (!raw || typeof raw !== "object") {
+    throw new Error("FactoryStatus inválido: objeto esperado");
+  }
+  const obj = raw;
+  if (typeof obj.projectId !== "string" || !obj.projectId) {
+    throw new Error("FactoryStatus inválido: projectId obrigatório");
+  }
+  if (!VALID_MODES.has(String(obj.mode))) {
+    throw new Error(`FactoryStatus inválido: mode=${obj.mode}`);
+  }
+  if (!VALID_LOOP_STATES.has(String(obj.loopState))) {
+    throw new Error(`FactoryStatus inválido: loopState=${obj.loopState}`);
+  }
+  if (typeof obj.killSwitch !== "boolean" || typeof obj.globalKillSwitch !== "boolean") {
+    throw new Error("FactoryStatus inválido: killSwitch/globalKillSwitch boolean obrigatórios");
+  }
+  if (!obj.spendToday || typeof obj.spendToday.tokens !== "number" || typeof obj.spendToday.usd !== "number") {
+    throw new Error("FactoryStatus inválido: spendToday.tokens/usd obrigatórios");
+  }
+  if (!Array.isArray(obj.backlog) || !Array.isArray(obj.inProgress) || !Array.isArray(obj.recent)) {
+    throw new Error("FactoryStatus inválido: backlog/inProgress/recent devem ser arrays");
+  }
+  return obj;
+}
+function buildEmptyFactoryStatus(tenant, reason) {
+  return {
+    projectId: tenant,
+    mode: "software_factory",
+    experimental: true,
+    loopState: "stopped",
+    pausedReason: reason || null,
+    killSwitch: false,
+    globalKillSwitch: false,
+    drain: null,
+    limits: {
+      maxConcurrentSessions: 4,
+      maxMergesPerDay: 20,
+      dailyBudget: { usd: 50 },
+      pauseAfterConsecutiveFailures: 3,
+      autoMerge: false,
+      mergePolicy: "strict"
+    },
+    spendToday: { tokens: 0, usd: 0 },
+    mergesToday: 0,
+    stats: { mergedToday: 0, failedToday: 0, revertedToday: 0, medianMergeMs7d: null, merged7d: 0 },
+    consecutiveFailures: 0,
+    activeSessions: 0,
+    wip: { openPrs: 0, limit: 6, holding: false, waitingOnProvider: 0, note: null },
+    backlog: [],
+    inProgress: [],
+    mergeChecks: [],
+    pullRequests: [],
+    recent: [],
+    viewRecent: [],
+    ignored: [],
+    held: [],
+    visionExists: false,
+    lessons: [],
+    lastDigest: null,
+    lastTickAt: null,
+    tenant,
+    coordenador: "parado",
+    modelos: [],
+    indisponivel: ["lastDigest", "lessons", "mergeChecks", "pullRequests", "scout", "spotChecks"]
+  };
+}
+const VERIFIED_R51_BASELINE = {
+  "claude-sonnet-4-6": { score: "10/10", scoreNum: 10, abaixo: false, latencyMs: 4064, costUsd: "$0.0815", provider: "nexusmind_anthropic", model: "claude-sonnet-4-6" },
+  "gemini-2.5-flash": { score: "10/10", scoreNum: 10, abaixo: false, latencyMs: 2045, costUsd: "$0.0022", provider: "nexusmind_antigravity", model: "gemini-2.5-flash" },
+  "claude-sonnet-5-5": { score: "9/10", scoreNum: 9, abaixo: false, latencyMs: 5143, costUsd: "$0.0715", provider: "nexusmind_anthropic", model: "claude-sonnet-5-5" },
+  "claude-haiku-5-5": { score: "3/10", scoreNum: 3, abaixo: true, latencyMs: 3738, costUsd: "$0.0219", provider: "nexusmind_anthropic", model: "claude-haiku-5-5" },
+  "gemini-3.8-flash-medium": { score: "0/10", scoreNum: 0, abaixo: true, latencyMs: 4956, costUsd: "$0.0046", provider: "nexusmind_antigravity", model: "gemini-3.8-flash-medium" }
+};
+function parseEvalTable(md) {
+  const liveMap = /* @__PURE__ */ new Map();
+  if (md) {
+    let modelColIdx = 0;
+    let providerColIdx = -1;
+    for (const line of md.split("\n")) {
+      if (!line.trim().startsWith("|")) continue;
+      const cols = line.split("|").map((c) => c.trim()).filter(Boolean);
+      if (cols.length < 3) continue;
+      if (cols.every((c) => /^:?-+:?$/.test(c))) continue;
+      const lowerCols = cols.map((c) => c.toLowerCase());
+      const headerModelIdx = lowerCols.findIndex((c) => c === "model" || c === "modelo");
+      if (headerModelIdx >= 0) {
+        modelColIdx = headerModelIdx;
+        providerColIdx = lowerCols.findIndex((c) => c === "provider" || c === "provedor");
+        continue;
+      }
+      const model = (cols[modelColIdx] || cols[0] || "").replace(/`/g, "").trim();
+      const provider = providerColIdx >= 0 ? (cols[providerColIdx] || "").replace(/`/g, "").trim() : null;
+      const m = line.match(/(\d+)\s*\/\s*10(?!\d)/g);
+      if (model && m && m.length >= 1) {
+        const toolStr = m.length >= 2 ? m[1] : m[0];
+        const num = parseInt(toolStr.split("/")[0], 10);
+        if (!Number.isNaN(num)) {
+          const latCol = cols.find((c) => /^\d{2,6}$/.test(c));
+          const costCol = cols.find((c) => /^\$\d/.test(c));
+          const entry = {
+            score: `${num}/10`,
+            scoreNum: num,
+            abaixo: num < 8,
+            latencyMs: latCol ? parseInt(latCol, 10) : null,
+            costUsd: costCol || null,
+            provider: provider || null,
+            model
+          };
+          const shortName = model.includes("/") ? model.split("/").pop() : model;
+          liveMap.set(model.toLowerCase(), entry);
+          if (!liveMap.has(shortName.toLowerCase())) {
+            liveMap.set(shortName.toLowerCase(), entry);
+          }
+        }
+      }
+    }
+  }
+  if (liveMap.size > 0) return liveMap;
+  const fallbackMap = /* @__PURE__ */ new Map();
+  for (const [k, v2] of Object.entries(VERIFIED_R51_BASELINE)) {
+    fallbackMap.set(k.toLowerCase(), v2);
+  }
+  return fallbackMap;
+}
+function describeOrgfyRole(papelRaw) {
+  const p = String(papelRaw || "").trim().toLowerCase();
+  const map = {
+    ceo: { funcao: "CEO Master · Orquestrador da Holding", categoria: "lideranca" },
+    ceo_holding: { funcao: "CEO Master · Orquestrador da Holding", categoria: "lideranca" },
+    ceo_empresa: { funcao: "CEO da Empresa · Direção & Decisão", categoria: "lideranca" },
+    coo: { funcao: "COO · Operações, Despacho & Auto-cura", categoria: "lideranca" },
+    arquiteto: { funcao: "Arquiteto · Design Técnico & Revisão Estrutural", categoria: "lideranca" },
+    backend: { funcao: "Executor Backend · APIs & Serviços", categoria: "execucao" },
+    frontend: { funcao: "Executor Frontend · Interface & UX", categoria: "execucao" },
+    infra: { funcao: "Executor Infra · CI/CD, Deploy & Runtime", categoria: "execucao" },
+    executor: { funcao: "Executor · Implementação em Worktree", categoria: "execucao" },
+    release: { funcao: "Release · Empacotamento & Entrega", categoria: "execucao" },
+    prompts: { funcao: "Engenharia de Prompts & Regras", categoria: "execucao" },
+    growth: { funcao: "Growth & Aquisição", categoria: "execucao" },
+    pesquisa: { funcao: "Pesquisa Técnica & Descoberta", categoria: "execucao" },
+    qa: { funcao: "Revisor de Código & QA (Gate L-01)", categoria: "revisao" },
+    revisor_codigo: { funcao: "Revisor de Código & QA (Gate L-01)", categoria: "revisao" },
+    revisor_metodo: { funcao: "Revisor de Método & Specsfy (L-01)", categoria: "revisao" },
+    revisor_seguranca: { funcao: "Revisor de Segurança & Auditoria", categoria: "revisao" },
+    seguranca: { funcao: "Revisor de Segurança & Auditoria", categoria: "revisao" },
+    revisor_ui: { funcao: "Revisor de UI & Acessibilidade", categoria: "revisao" },
+    oraculo: { funcao: "Oráculo · Scout & Inteligência", categoria: "operacao" },
+    po: { funcao: "Product Owner · Escopo & Critérios L-22", categoria: "operacao" },
+    cron: { funcao: "Cron · Rotinas Agendadas da Esteira", categoria: "operacao" }
+  };
+  return map[p] || { funcao: p ? `Agente · ${p}` : "Agente da Esteira", categoria: "execucao" };
+}
+async function hydrateFactoryStatusFromFiles(ctx, slug) {
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x2, _y2, _z2, _A, _B, _C, _D, _E, _F, _G, _H, _I, _J, _K;
+  const base = buildEmptyFactoryStatus(slug);
+  const host = ctx == null ? void 0 : ctx.host;
+  const stateRelPath = slug === "orgfy" ? ".esteira/estado/esteira-minima-state.json" : `.esteira/estado/esteira-minima-${slug}-state.json`;
+  const [kpiRes, cards, empresaJson, boardJson, evalMd, projectMd, agentsMd, regrasJson, esteiraState, alcadasJson, spotChecksJson, lessonsJson, digestJson] = await Promise.all([
+    fetchKpisEsteira(ctx).catch(() => ({ kpis: null, history: [], error: null })),
+    fetchLiveKanbanCards(ctx, { empresa: slug, skipWorktreeScan: true }).catch(() => []),
+    readOrgfyJson(ctx, `empresas/${slug}.json`, null).catch(() => null),
+    readOrgfyJson(ctx, "empresas/board.json", null).catch(() => null),
+    readOrgfyText(ctx, "docs/eval-modelos-onda5.md").catch(() => null),
+    readOrgfyText(ctx, "PROJECT.md").catch(() => null),
+    readOrgfyText(ctx, "AGENTS.md").catch(() => null),
+    readOrgfyJson(ctx, ".esteira/estado/regras-probatorias.json", null).catch(() => null),
+    readOrgfyJson(ctx, stateRelPath, null).catch(() => null),
+    readOrgfyJson(ctx, "contratos/alcadas_politica.json", null).catch(() => null),
+    readOrgfyJson(ctx, `.esteira/estado/spot-checks-${slug}.json`, null).catch(() => null),
+    readOrgfyJson(ctx, `.esteira/estado/licoes-dinamicas-${slug}.json`, null).catch(() => null),
+    readOrgfyJson(ctx, `.esteira/estado/digest-${slug}.json`, null).catch(() => null)
+  ]);
+  let modelControlPlane = null;
+  if (typeof (host == null ? void 0 : host.readFile) === "function") {
+    for (const cpPath of ["~/.buzz/.scratch/model-control-plane.json", "/Users/heltonfraga/.buzz/.scratch/model-control-plane.json"]) {
+      try {
+        const rawCp = await host.readFile(cpPath);
+        if (!rawCp) continue;
+        const txtCp = rawCp instanceof Uint8Array ? new TextDecoder().decode(rawCp) : String(rawCp || "");
+        const parsedCp = JSON.parse(txtCp);
+        if (parsedCp && Array.isArray(parsedCp.models)) {
+          modelControlPlane = parsedCp;
+          break;
+        }
+      } catch {
+      }
+    }
+  }
+  let controle = null;
+  try {
+    if (host == null ? void 0 : host.readFile) {
+      const raw = await host.readFile(getControlePath(slug));
+      const txt = raw instanceof Uint8Array ? new TextDecoder().decode(raw) : String(raw || "");
+      controle = JSON.parse(txt);
+    }
+  } catch {
+    controle = null;
+  }
+  if (!controle && typeof localStorage !== "undefined") {
+    try {
+      const cached = localStorage.getItem(`orgfy_controle_cache_${slug}`);
+      if (cached) controle = JSON.parse(cached);
+    } catch {
+    }
+  }
+  const snap = ((_b = (_a = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) || {};
+  const runningList = Array.isArray(snap.running) ? snap.running : [];
+  const allAgents = Array.isArray(snap.agents) ? snap.agents : [];
+  const runningKeys = new Set(runningList.map((a) => String((a == null ? void 0 : a.key) || (a == null ? void 0 : a.name) || "").toLowerCase()));
+  const runningPubkeys = new Set(runningList.map((a) => String((a == null ? void 0 : a.pubkey) || "").toLowerCase()).filter(Boolean));
+  const liveByName = /* @__PURE__ */ new Map();
+  const liveByPubkey = /* @__PURE__ */ new Map();
+  for (const a of allAgents) {
+    if (a == null ? void 0 : a.name) liveByName.set(String(a.name).toLowerCase(), a);
+    if (a == null ? void 0 : a.pubkey) liveByPubkey.set(String(a.pubkey).toLowerCase(), a);
+  }
+  const evalMap = parseEvalTable(evalMd);
+  const modelos = [];
+  const tenantAgents = [];
+  const isBoardSlug = slug === "board";
+  const agentesObj = isBoardSlug && boardJson ? (() => {
+    var _a2, _b2;
+    const out = {};
+    const ceoNome = String(((_a2 = boardJson == null ? void 0 : boardJson.ceo_holding) == null ? void 0 : _a2.nome) || "OrgFy Iris");
+    out[ceoNome] = {
+      papel: "ceo_holding",
+      pubkey: ((_b2 = boardJson == null ? void 0 : boardJson.ceo_holding) == null ? void 0 : _b2.pubkey) || "",
+      model: "claude-sonnet-5-5",
+      provider: "nexusmind_anthropic",
+      parallelism: 1
+    };
+    const conselhoList = Array.isArray(boardJson == null ? void 0 : boardJson.conselho) ? boardJson.conselho : [];
+    for (const c of conselhoList) {
+      const resp = String((c == null ? void 0 : c.responsavel) || "").trim();
+      if (!resp || out[resp]) continue;
+      const roleKey = String((c == null ? void 0 : c.sigla) || (c == null ? void 0 : c.id) || "conselheiro").toLowerCase();
+      out[resp] = {
+        papel: roleKey,
+        funcaoCustom: `${(c == null ? void 0 : c.sigla) || "Board"} · ${(c == null ? void 0 : c.area) || "Conselho"}`,
+        pubkey: typeof (c == null ? void 0 : c.pubkey) === "string" ? c.pubkey : "",
+        model: (c == null ? void 0 : c.status) === "ativo" ? "claude-sonnet-5-5" : "planejado",
+        provider: "nexusmind_anthropic",
+        parallelism: 1
+      };
+    }
+    return out;
+  })() : (empresaJson == null ? void 0 : empresaJson.agentes) && typeof empresaJson.agentes === "object" ? empresaJson.agentes : {};
+  for (const [agName, info] of Object.entries(agentesObj)) {
+    const manifestPk = typeof (info == null ? void 0 : info.pubkey) === "string" ? info.pubkey.trim() : "";
+    const live = manifestPk && liveByPubkey.get(manifestPk.toLowerCase()) || liveByName.get(agName.toLowerCase()) || null;
+    const modelo = String(((_c = live == null ? void 0 : live.config) == null ? void 0 : _c.model) || (info == null ? void 0 : info.model) || "").trim() || null;
+    const provider = String(((_d = live == null ? void 0 : live.config) == null ? void 0 : _d.provider) || (info == null ? void 0 : info.provider) || "").trim() || null;
+    const ev = modelo ? evalMap.get(modelo.toLowerCase()) || evalMap.get((modelo.split("/").pop() || "").toLowerCase()) : void 0;
+    const roleMeta = (info == null ? void 0 : info.funcaoCustom) ? { funcao: String(info.funcaoCustom), categoria: "lideranca" } : describeOrgfyRole(info == null ? void 0 : info.papel);
+    const liveKey = String((live == null ? void 0 : live.key) || "");
+    const livePk = String((live == null ? void 0 : live.pubkey) || manifestPk || "");
+    const isRunning = Boolean(
+      liveKey && runningKeys.has(liveKey.toLowerCase()) || livePk && runningPubkeys.has(livePk.toLowerCase()) || runningKeys.has(agName.toLowerCase())
+    );
+    const modelLower = String(modelo || "").toLowerCase();
+    const isUnsupported = Boolean(
+      modelLower.includes("mistral-large-4-1t-a52b") || modelLower.includes("grok-4.5") || modelLower.includes("minimax-m3.1-flash")
+    );
+    const evalStatus = ev ? ev.abaixo ? "below_min" : "approved" : isUnsupported ? "unsupported" : "untested";
+    modelos.push({
+      agente: agName,
+      papel: (info == null ? void 0 : info.papel) || null,
+      modelo,
+      provider,
+      toolcall_eval: (ev == null ? void 0 : ev.score) || null,
+      abaixo_minimo: ev ? ev.abaixo : isUnsupported,
+      scoreNum: ev ? ev.scoreNum : null,
+      latencyMs: ev ? ev.latencyMs : null,
+      costUsd: ev ? ev.costUsd : null,
+      evalStatus,
+      agentKey: liveKey || `manifest:${slug}:${agName}`,
+      inBuzz: Boolean(live)
+    });
+    tenantAgents.push({
+      name: agName,
+      papel: String((info == null ? void 0 : info.papel) || "executor"),
+      funcao: roleMeta.funcao,
+      categoria: roleMeta.categoria,
+      pubkey: livePk,
+      model: modelo || "indisponível",
+      provider: provider || "buzz",
+      parallelism: Number((info == null ? void 0 : info.parallelism) ?? 1),
+      running: isRunning,
+      inBuzz: Boolean(live),
+      agentKey: liveKey || `manifest:${slug}:${agName}`
+    });
+  }
+  const resolvedBoardChannel = isBoardSlug ? typeof (boardJson == null ? void 0 : boardJson.canal) === "string" && boardJson.canal.trim() ? boardJson.canal.trim() : findBuzzChannelIdByName(ctx, [String((boardJson == null ? void 0 : boardJson.canal_nome) || "Conselho"), "Conselho", "Board", "Conselho da Holding"]) : null;
+  const tenantManifest = {
+    slug,
+    nome: isBoardSlug ? "Conselho da Holding" : String(((_e = empresaJson == null ? void 0 : empresaJson.hierarquia) == null ? void 0 : _e.workspace_buzz) || (empresaJson == null ? void 0 : empresaJson.empresa) || slug),
+    repoId: isBoardSlug ? "board" : String((empresaJson == null ? void 0 : empresaJson.repo_id) || slug),
+    nivel: isBoardSlug ? "holding" : String(((_f = empresaJson == null ? void 0 : empresaJson.hierarquia) == null ? void 0 : _f.nivel) || "subsidiaria"),
+    canal: isBoardSlug ? resolvedBoardChannel : typeof (empresaJson == null ? void 0 : empresaJson.canal) === "string" ? empresaJson.canal : null,
+    ceoEmpresa: isBoardSlug ? String(((_g = boardJson == null ? void 0 : boardJson.ceo_holding) == null ? void 0 : _g.nome) || "OrgFy Iris") : String(((_h = empresaJson == null ? void 0 : empresaJson.hierarquia) == null ? void 0 : _h.ceo_empresa) || ((_i = empresaJson == null ? void 0 : empresaJson.papeis) == null ? void 0 : _i.ceo_empresa) || "OrgFy Iris"),
+    coo: isBoardSlug ? String(((_j = boardJson == null ? void 0 : boardJson.ceo_holding) == null ? void 0 : _j.nome) || "OrgFy Iris") : String(((_k = empresaJson == null ? void 0 : empresaJson.papeis) == null ? void 0 : _k.coo) || "OrgFy Bento"),
+    modoExecucao: String((empresaJson == null ? void 0 : empresaJson.modo_execucao_workers) || "efemero_headless"),
+    ciModo: String(((_l = empresaJson == null ? void 0 : empresaJson.ci_runner) == null ? void 0 : _l.modo_padrao) || "local"),
+    ciCmd: Array.isArray((_m2 = empresaJson == null ? void 0 : empresaJson.ci_runner) == null ? void 0 : _m2.cmd) ? empresaJson.ci_runner.cmd.join(" ") : "—",
+    probesObrigatorios: Boolean((_n = empresaJson == null ? void 0 : empresaJson.probes_caixa_preta) == null ? void 0 : _n.obrigatorio_no_gate),
+    probesCount: Array.isArray((_o = empresaJson == null ? void 0 : empresaJson.probes_caixa_preta) == null ? void 0 : _o.probes_padrao) ? empresaJson.probes_caixa_preta.probes_padrao.length : 0,
+    budgetTokensDiario: typeof ((_p = empresaJson == null ? void 0 : empresaJson.governanca_orcamento) == null ? void 0 : _p.budget_tokens_diario) === "number" ? empresaJson.governanca_orcamento.budget_tokens_diario : null,
+    tokensPorCard: typeof ((_q = empresaJson == null ? void 0 : empresaJson.governanca_orcamento) == null ? void 0 : _q.tokens_planejados_por_card) === "number" ? empresaJson.governanca_orcamento.tokens_planejados_por_card : null,
+    cpiMinimo: typeof ((_r = empresaJson == null ? void 0 : empresaJson.governanca_orcamento) == null ? void 0 : _r.cpi_minimo) === "number" ? empresaJson.governanca_orcamento.cpi_minimo : null,
+    revisoresPorSuperficie: (empresaJson == null ? void 0 : empresaJson.revisores_por_superficie) && typeof empresaJson.revisores_por_superficie === "object" ? empresaJson.revisores_por_superficie : {},
+    agentes: tenantAgents
+  };
+  const toWorkItem = (c) => {
+    const itemType = /fix|bug|hotfix/i.test(String(c.title || "")) ? "bug" : /doc|readme|prd/i.test(String(c.title || "")) ? "docs" : "feature";
+    return {
+      id: String(c.fullIssueId || c.issueId || c.id),
+      title: String(c.title || "Card"),
+      workKey: String(c.issueId || c.id),
+      stage: c.stage === "feito" ? "merged" : c.stage === "revisao" ? "verifying" : c.stage === "execucao" || c.stage === "despachado" ? "building" : "backlog",
+      step: c.stage === "feito" ? "done" : c.stage === "revisao" ? "review" : c.stage === "execucao" ? "implement" : c.stage === "despachado" ? itemType === "bug" ? "reproduce" : "analyze" : "intake",
+      type: itemType,
+      attempts: Array.isArray(c.rejectionHistory) ? c.rejectionHistory.length + 1 : 1,
+      sessionId: null,
+      activeSessionId: null,
+      reason: null,
+      note: c.executor ? `Executor: ${c.executor}${c.revisor ? ` · Revisor: ${c.revisor}` : ""}` : null,
+      updatedAt: Date.now()
+    };
+  };
+  const kanbanBacklog = cards.filter((c) => c.stage === "triagem").map(toWorkItem);
+  const kanbanInProgress = cards.filter((c) => c.stage === "despachado" || c.stage === "execucao" || c.stage === "revisao").map(toWorkItem);
+  const recent = cards.filter((c) => c.stage === "feito").slice(0, 20).map(toWorkItem);
+  const boardSnap = (esteiraState == null ? void 0 : esteiraState.board_snapshot) && typeof esteiraState.board_snapshot === "object" ? esteiraState.board_snapshot : null;
+  const openPrsRaw = Array.isArray(boardSnap == null ? void 0 : boardSnap.open_prs) ? boardSnap.open_prs : [];
+  const openIssuesRaw = Array.isArray(boardSnap == null ? void 0 : boardSnap.open_issues) ? boardSnap.open_issues : [];
+  const seenIds = new Set([...kanbanBacklog, ...kanbanInProgress].map((w) => w.id));
+  const quarentenaMap = (esteiraState == null ? void 0 : esteiraState.quarentena) && typeof esteiraState.quarentena === "object" ? esteiraState.quarentena : {};
+  const ciMap = (esteiraState == null ? void 0 : esteiraState.ci) && typeof esteiraState.ci === "object" ? esteiraState.ci : {};
+  const timingsMap = (esteiraState == null ? void 0 : esteiraState.timings) && typeof esteiraState.timings === "object" ? esteiraState.timings : {};
+  const awaitingMergeMap = (esteiraState == null ? void 0 : esteiraState.awaiting_human_merge_notifications) && typeof esteiraState.awaiting_human_merge_notifications === "object" ? esteiraState.awaiting_human_merge_notifications : {};
+  const reviewerAgent = tenantAgents.find((a) => a.papel === "revisor_codigo" || a.papel === "qa") || tenantAgents.find((a) => /qa|revis/i.test(a.name)) || null;
+  const defaultExecutorAgent = tenantAgents.find((a) => ["executor", "backend", "frontend", "infra"].includes(a.papel)) || tenantAgents.find((a) => /dev|otto/i.test(a.name)) || null;
+  const agentByPubkey = /* @__PURE__ */ new Map();
+  for (const ag of tenantAgents) {
+    if (ag.pubkey) agentByPubkey.set(ag.pubkey.toLowerCase(), ag);
+  }
+  const openIssuesById = /* @__PURE__ */ new Map();
+  for (const iss of openIssuesRaw) {
+    if (iss == null ? void 0 : iss.id) openIssuesById.set(String(iss.id).toLowerCase(), iss);
+  }
+  const prWorkItems = openPrsRaw.filter((p) => {
+    if (!(p == null ? void 0 : p.id)) return false;
+    const canonicalId = p.issue_id ? String(p.issue_id) : String(p.id);
+    return !seenIds.has(String(p.id)) && !seenIds.has(canonicalId);
+  }).map((p) => {
+    const pid = String(p.id);
+    const canonicalId = p.issue_id ? String(p.issue_id) : pid;
+    const linkedIssue = p.issue_id ? openIssuesById.get(String(p.issue_id).toLowerCase()) : null;
+    const title = String(p.title || (linkedIssue == null ? void 0 : linkedIssue.title) || `PR ${pid.slice(0, 8)}`);
+    const qEntry = quarentenaMap[pid];
+    const isQuarantined = Boolean(p.quarentena || qEntry);
+    const tipSha = String(p.tip || "").toLowerCase();
+    const ciEntry = tipSha ? ciMap[tipSha] : null;
+    const timingEntry = timingsMap[pid] || timingsMap[pid.slice(0, 8)] || null;
+    const hasGateApproved = Boolean(
+      !isQuarantined && (typeof (timingEntry == null ? void 0 : timingEntry.gate_at) === "number" && timingEntry.gate_at > 0 || awaitingMergeMap[pid])
+    );
+    const ciWaiting = !isQuarantined && !hasGateApproved && (!ciEntry || String(ciEntry.status || "") !== "ok");
+    const qReason = typeof (qEntry == null ? void 0 : qEntry.motivo) === "string" && qEntry.motivo.trim() ? `Quarentena (COO): ${qEntry.motivo.trim().slice(0, 180)}` : isQuarantined ? "PR em quarentena no coordenador (requer ação do COO OrgFy Bento)" : ciWaiting ? "Aguardando CI" : null;
+    const execPk = Array.isArray(linkedIssue == null ? void 0 : linkedIssue.executors) && linkedIssue.executors[0] ? String(linkedIssue.executors[0]).toLowerCase() : "";
+    const execAg = (execPk ? agentByPubkey.get(execPk) : null) || defaultExecutorAgent;
+    const revName = (reviewerAgent == null ? void 0 : reviewerAgent.name) || "QA";
+    const noteParts = [
+      execAg ? `Executor: ${execAg.name}` : null,
+      `Revisor: ${revName}`,
+      hasGateApproved ? "GATE aprovado · fila de merge" : p.branch ? `PR · ${p.branch}` : "PR aberto"
+    ].filter(Boolean);
+    return {
+      id: canonicalId,
+      title,
+      workKey: `pr:${pid.slice(0, 12)}`,
+      // Na governança OrgFy (board.json), falhas/quarentena da esteira vão para Problemas (COO Bento -> CEO Empresa -> Iris), nunca direto para "Aguardando você" (Fundador)
+      stage: isQuarantined ? "failed" : "verifying",
+      step: isQuarantined ? "quarantine" : hasGateApproved ? "merge" : "review",
+      type: /fix|bug|hotfix/i.test(title) ? "bug" : /doc|readme|prd/i.test(title) ? "docs" : "feature",
+      attempts: 1,
+      sessionId: (reviewerAgent == null ? void 0 : reviewerAgent.agentKey) || null,
+      activeSessionId: (reviewerAgent == null ? void 0 : reviewerAgent.agentKey) || null,
+      reason: qReason,
+      note: noteParts.join(" · "),
+      updatedAt: typeof p.created_at === "number" ? p.created_at < 1e12 ? p.created_at * 1e3 : p.created_at : Date.now(),
+      executorPubkeys: execPk ? [execPk] : (execAg == null ? void 0 : execAg.pubkey) ? [execAg.pubkey.toLowerCase()] : []
+    };
+  });
+  const issueBacklogItems = openIssuesRaw.filter((i) => (i == null ? void 0 : i.id) && !i.assigned && !seenIds.has(String(i.id))).map((i) => {
+    const iid = String(i.id);
+    const title = String(i.title || `Issue ${iid.slice(0, 8)}`);
+    return {
+      id: iid,
+      title,
+      workKey: `issue:${iid.slice(0, 12)}`,
+      stage: "backlog",
+      step: "intake",
+      type: /fix|bug|hotfix/i.test(title) ? "bug" : /doc|readme|prd/i.test(title) ? "docs" : "feature",
+      attempts: 0,
+      sessionId: null,
+      activeSessionId: null,
+      reason: null,
+      note: null,
+      updatedAt: typeof i.created_at === "number" ? i.created_at < 1e12 ? i.created_at * 1e3 : i.created_at : Date.now()
+    };
+  });
+  const despachosMap = (esteiraState == null ? void 0 : esteiraState.despachos) && typeof esteiraState.despachos === "object" ? esteiraState.despachos : {};
+  const openPrIssueIds = new Set(
+    openPrsRaw.map((p) => String((p == null ? void 0 : p.issue_id) || "").toLowerCase()).filter(Boolean)
+  );
+  const STALL_THRESHOLD_MIN = 20;
+  const nowMs = Date.now();
+  const issueActiveItems = openIssuesRaw.filter((i) => (i == null ? void 0 : i.id) && i.assigned && !seenIds.has(String(i.id)) && !openPrIssueIds.has(String(i.id).toLowerCase())).map((i) => {
+    const iid = String(i.id);
+    const title = String(i.title || `Issue ${iid.slice(0, 8)}`);
+    const desp = despachosMap[iid];
+    const rawTs = typeof i.despachado_em === "number" ? i.despachado_em : typeof (desp == null ? void 0 : desp.despachado_em) === "number" ? desp.despachado_em : typeof i.created_at === "number" ? i.created_at : 0;
+    const updatedAt = rawTs > 0 ? rawTs < 1e12 ? rawTs * 1e3 : rawTs : nowMs;
+    const hasPr = Boolean(i.has_pr) || openPrIssueIds.has(iid.toLowerCase());
+    const computedMin = Math.max(0, Math.floor((nowMs - updatedAt) / 6e4));
+    const stalledMinutes = typeof i.stalled_minutes === "number" ? i.stalled_minutes : computedMin;
+    const stalled = typeof i.stalled === "boolean" ? i.stalled : !hasPr && stalledMinutes >= STALL_THRESHOLD_MIN;
+    const execPks = Array.isArray(i.executors) ? i.executors.map((x) => String(x || "").toLowerCase()).filter(Boolean) : (desp == null ? void 0 : desp.dono_operacional) ? [String(desp.dono_operacional).toLowerCase()] : [];
+    const execAg = (execPks[0] ? agentByPubkey.get(execPks[0]) : null) || defaultExecutorAgent;
+    const itemType = /fix|bug|hotfix/i.test(title) ? "bug" : /doc|readme|prd/i.test(title) ? "docs" : "feature";
+    const inPrepPhase = !hasPr && !stalled && computedMin < 3;
+    return {
+      id: iid,
+      title,
+      workKey: `issue:${iid.slice(0, 12)}`,
+      stage: "building",
+      step: inPrepPhase ? itemType === "bug" ? "reproduce" : "analyze" : "implement",
+      type: itemType,
+      attempts: 1,
+      sessionId: (execAg == null ? void 0 : execAg.agentKey) || null,
+      activeSessionId: (execAg == null ? void 0 : execAg.agentKey) || null,
+      reason: stalled ? `Sem PR aberto há ${stalledMinutes}m` : null,
+      note: stalled ? `${execAg ? `Executor: ${execAg.name} · ` : ""}Parada sem PR há ${stalledMinutes >= 60 ? `${Math.floor(stalledMinutes / 60)}h` : `${stalledMinutes}m`}` : execAg ? `Executor: ${execAg.name} · Em implementação` : "Issue atribuída no coordenador",
+      updatedAt,
+      stalled,
+      stalledMinutes,
+      executorPubkeys: execPks
+    };
+  });
+  const backlog = kanbanBacklog.length > 0 ? kanbanBacklog : issueBacklogItems;
+  const inProgress = [...kanbanInProgress, ...prWorkItems, ...kanbanInProgress.length === 0 ? issueActiveItems.slice(0, 12) : []];
+  const wipLimit = Number(((_s = controle == null ? void 0 : controle.limits) == null ? void 0 : _s.prsAbertos) ?? 6);
+  const realOpenPrs = openPrsRaw.length;
+  const wipHolding = realOpenPrs >= wipLimit;
+  const wipNote = wipHolding ? `WIP bloqueando novos despachos: ${realOpenPrs} PRs abertos (limite configurado: ${wipLimit})` : null;
+  const kpis = kpiRes.kpis;
+  const killSwitch = Boolean(controle == null ? void 0 : controle.killSwitch);
+  const drainOn = Boolean(controle == null ? void 0 : controle.drain);
+  const mode = VALID_MODES.has(String(controle == null ? void 0 : controle.mode)) ? controle.mode : "software_factory";
+  const nowDate = /* @__PURE__ */ new Date();
+  const todayKey = `${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, "0")}-${String(nowDate.getDate()).padStart(2, "0")}`;
+  const sevenDaysAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1e3;
+  const mergedMap = (esteiraState == null ? void 0 : esteiraState.merged) && typeof esteiraState.merged === "object" ? esteiraState.merged : {};
+  let stateMergedToday = 0;
+  let stateMerged7d = 0;
+  for (const entry of Object.values(mergedMap)) {
+    if (!entry || typeof entry !== "object" || entry.exit !== 0) continue;
+    const rawTs = Number(entry.finished_at ?? entry.merged_at ?? 0);
+    if (!Number.isFinite(rawTs) || rawTs <= 0) continue;
+    const tsMs = rawTs < 1e12 ? rawTs * 1e3 : rawTs;
+    if (tsMs >= sevenDaysAgoMs) stateMerged7d += 1;
+    const d = new Date(tsMs);
+    const dKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    if (dKey === todayKey) stateMergedToday += 1;
+  }
+  const mergeDurationsMs = [];
+  for (const tEntry of Object.values(timingsMap)) {
+    const durS = Number(tEntry == null ? void 0 : tEntry.merge_duration_seconds);
+    if (Number.isFinite(durS) && durS > 0) mergeDurationsMs.push(Math.round(durS * 1e3));
+  }
+  mergeDurationsMs.sort((a, b) => a - b);
+  const medianMergeMs7d = mergeDurationsMs.length > 0 ? mergeDurationsMs[Math.floor(mergeDurationsMs.length / 2)] : null;
+  const kpiMergedToday = Number(((_v = (_u = (_t = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _t.vazao_por_tenant) == null ? void 0 : _u[slug]) == null ? void 0 : _v.hoje) ?? (slug === "orgfy" ? (_w = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _w.vazao_hoje : 0) ?? 0);
+  const realMergesToday = Math.max(stateMergedToday, Number.isFinite(kpiMergedToday) ? kpiMergedToday : 0);
+  const kpiMerged7d = Number(
+    ((_z2 = (_y2 = (_x2 = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _x2.vazao_por_tenant) == null ? void 0 : _y2[slug]) == null ? void 0 : _z2["7d"]) ?? (slug === "orgfy" ? (_A = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _A.vazao_7d : void 0) ?? recent.length
+  );
+  const realMerged7d = Math.max(stateMerged7d, Number.isFinite(kpiMerged7d) ? kpiMerged7d : 0);
+  const mergeFailuresCount = (esteiraState == null ? void 0 : esteiraState.merge_failures) && typeof esteiraState.merge_failures === "object" ? Object.keys(esteiraState.merge_failures).length : 0;
+  const realFailedToday = Object.keys(quarentenaMap).length + mergeFailuresCount;
+  return {
+    ...base,
+    mode,
+    killSwitch,
+    drain: drainOn ? { since: Date.now(), inFlight: inProgress.length, total: inProgress.length, deadline: null } : null,
+    loopState: killSwitch ? "stopped" : drainOn ? "draining" : inProgress.length > 0 || runningList.length > 0 ? "building" : "idle",
+    pausedReason: (controle == null ? void 0 : controle.pausedReason) || null,
+    limits: {
+      maxConcurrentSessions: Number(((_B = controle == null ? void 0 : controle.limits) == null ? void 0 : _B.agentes) ?? 4),
+      maxMergesPerDay: Number(((_C = controle == null ? void 0 : controle.limits) == null ? void 0 : _C.mergesDia) ?? 20),
+      dailyBudget: { usd: Number(((_D = controle == null ? void 0 : controle.limits) == null ? void 0 : _D.gastoDiaUsd) ?? 50) },
+      pauseAfterConsecutiveFailures: Number(((_E = controle == null ? void 0 : controle.limits) == null ? void 0 : _E.falhasSeguidas) ?? 3),
+      autoMerge: Boolean((controle == null ? void 0 : controle.autoMerge) ?? false),
+      mergePolicy: (controle == null ? void 0 : controle.mergePolicy) === "fast" ? "fast" : "strict"
+    },
+    spendToday: {
+      tokens: Number(((_F = kpis == null ? void 0 : kpis.economia) == null ? void 0 : _F.tokens_hoje) ?? 0),
+      usd: Number(((_G = kpis == null ? void 0 : kpis.economia) == null ? void 0 : _G.custo_hoje_usd) ?? 0)
+    },
+    mergesToday: realMergesToday,
+    stats: {
+      mergedToday: realMergesToday,
+      failedToday: realFailedToday,
+      revertedToday: 0,
+      medianMergeMs7d,
+      merged7d: realMerged7d
+    },
+    activeSessions: tenantAgents.filter((a) => a.running).length,
+    wip: {
+      openPrs: realOpenPrs,
+      limit: wipLimit,
+      holding: wipHolding,
+      waitingOnProvider: 0,
+      note: wipNote
+    },
+    pullRequests: openPrsRaw,
+    quarentenaCount: (esteiraState == null ? void 0 : esteiraState.quarentena) && typeof esteiraState.quarentena === "object" ? Object.keys(esteiraState.quarentena).length : 0,
+    backlog,
+    inProgress,
+    recent,
+    viewRecent: recent,
+    visionExists: Boolean(projectMd || boardJson || empresaJson),
+    tenantManifest,
+    alcadasPolitica: alcadasJson ? {
+      modo: String(alcadasJson.modo || "observe"),
+      materiasReservadas: Object.entries(alcadasJson.materias_reservadas || {}).map(([id, m]) => ({
+        id,
+        nome: String((m == null ? void 0 : m.nome) || id),
+        alcada: String((m == null ? void 0 : m.alcada_minima) || "fundador"),
+        padroes: Array.isArray(m == null ? void 0 : m.padroes) ? m.padroes.map(String) : []
+      })),
+      regrasPath: Array.isArray(alcadasJson.regras_path) ? alcadasJson.regras_path.map((r) => ({
+        padrao: String((r == null ? void 0 : r.padrao) || ""),
+        alcada: String((r == null ? void 0 : r.alcada_minima) || "executor"),
+        descricao: String((r == null ? void 0 : r.descricao) || "")
+      })) : []
+    } : null,
+    orgfyVision: {
+      projectMd: projectMd ? projectMd.slice(0, 2400) : null,
+      agentsMd: agentsMd ? agentsMd.slice(0, 2400) : null,
+      invariantes: Array.isArray((_H = boardJson == null ? void 0 : boardJson.protocolo_governanca) == null ? void 0 : _H.invariantes) ? boardJson.protocolo_governanca.invariantes : [],
+      cadeiaComando: Array.isArray((_I = boardJson == null ? void 0 : boardJson.protocolo_governanca) == null ? void 0 : _I.cadeia_comando) ? boardJson.protocolo_governanca.cadeia_comando : [],
+      fluxoEscalada: (boardJson == null ? void 0 : boardJson.fluxo_escalada) && typeof boardJson.fluxo_escalada === "object" ? boardJson.fluxo_escalada : {},
+      regrasProbatorias: Object.entries((regrasJson == null ? void 0 : regrasJson.regras) || {}).map(([id, r]) => ({
+        id,
+        descricao: String((r == null ? void 0 : r.descricao) || id),
+        status: String((r == null ? void 0 : r.status) || "ATIVA"),
+        cardsAvaliados: Number((r == null ? void 0 : r.cards_avaliados) || 0),
+        janelaAlvo: Number((r == null ? void 0 : r.janela_alvo) || 10)
+      })),
+      canalBuzz: typeof (empresaJson == null ? void 0 : empresaJson.canal) === "string" ? empresaJson.canal : null,
+      papeis: (empresaJson == null ? void 0 : empresaJson.papeis) && typeof empresaJson.papeis === "object" ? empresaJson.papeis : {}
+    },
+    lastTickAt: ((_J = esteiraState == null ? void 0 : esteiraState.ultimo_ciclo) == null ? void 0 : _J.timestamp) ? Number(esteiraState.ultimo_ciclo.timestamp) < 1e12 ? Number(esteiraState.ultimo_ciclo.timestamp) * 1e3 : Number(esteiraState.ultimo_ciclo.timestamp) : Date.now(),
+    coordenador: !killSwitch && (slug === "board" || Boolean((_K = esteiraState == null ? void 0 : esteiraState.ultimo_ciclo) == null ? void 0 : _K.timestamp)) ? "ativo" : "parado",
+    kpis: kpis ? {
+      disponivel: true,
+      gerado_em: kpis.gerado_em || null,
+      fluxo: kpis.fluxo || null,
+      qualidade: kpis.qualidade || null,
+      economia: kpis.economia || null,
+      higiene: kpis.higiene || null
+    } : { disponivel: false },
+    lessons: Array.isArray(lessonsJson == null ? void 0 : lessonsJson.lessons) ? lessonsJson.lessons.filter((l) => !(l == null ? void 0 : l.forgotten)) : [],
+    lastDigest: digestJson || null,
+    ...spotChecksJson ? { spotChecks: spotChecksJson } : {},
+    modelos,
+    modelControlPlane,
+    evalWinners: (() => {
+      const seenW = /* @__PURE__ */ new Set();
+      const out = [];
+      for (const entry of evalMap.values()) {
+        if (entry.abaixo || !entry.model) continue;
+        const key = entry.model.toLowerCase();
+        if (seenW.has(key)) continue;
+        seenW.add(key);
+        out.push({
+          provider: entry.provider || (entry.model.includes("/") || entry.model.includes(":free") ? "nexusmind_openai" : "nexusmind_antigravity"),
+          model: entry.model,
+          score: entry.score,
+          scoreNum: entry.scoreNum,
+          latencyMs: entry.latencyMs,
+          costUsd: entry.costUsd
+        });
+      }
+      return out;
+    })(),
+    ciBySha: (() => {
+      const rawCi = esteiraState == null ? void 0 : esteiraState.ci;
+      if (!rawCi || typeof rawCi !== "object") return {};
+      const out = {};
+      for (const [sha, entry] of Object.entries(rawCi)) {
+        if (!sha || !entry || typeof entry !== "object") continue;
+        const st = String(entry.status || "").toLowerCase();
+        if (st !== "ok" && st !== "falha") continue;
+        out[sha.toLowerCase()] = {
+          status: st,
+          exitCode: typeof entry.exit_code === "number" ? entry.exit_code : void 0,
+          durationSeconds: typeof entry.duration_seconds === "number" ? entry.duration_seconds : void 0,
+          finishedAt: typeof entry.finished_at === "number" ? entry.finished_at : void 0,
+          log: typeof entry.log === "string" ? entry.log : void 0
+        };
+      }
+      return out;
+    })(),
+    indisponivel: [
+      ...!kpis ? ["kpis-esteira.json"] : [],
+      ...!digestJson ? ["lastDigest"] : [],
+      ...!(esteiraState == null ? void 0 : esteiraState.dark_factory) ? ["scout"] : []
+    ]
+  };
+}
+async function fetchFactoryStatus(ctx, tenant = "orgfy") {
+  const slug = (tenant || "orgfy").trim().toLowerCase() || "orgfy";
+  const host = ctx == null ? void 0 : ctx.host;
+  if (typeof (host == null ? void 0 : host.readFile) === "function") {
+    try {
+      const hydrated = await hydrateFactoryStatusFromFiles(ctx, slug);
+      return { ok: true, status: hydrated, error: null };
+    } catch {
+    }
+  }
+  try {
+    if (host == null ? void 0 : host.spawn) {
+      const proc = await host.spawn("python", {
+        args: [FABRICA_STATUS_SCRIPT_PATH, "--empresa", slug, "--json"]
+      });
+      let out = "";
+      if ((proc == null ? void 0 : proc.stdout) && typeof proc.stdout.getReader === "function") {
+        const reader = proc.stdout.getReader();
+        const dec = new TextDecoder();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          out += typeof value === "string" ? value : dec.decode(value, { stream: true });
+        }
+      } else if (typeof (proc == null ? void 0 : proc.stdout) === "string") {
+        out = proc.stdout;
+      }
+      if (proc == null ? void 0 : proc.exited) {
+        await Promise.race([proc.exited, new Promise((r) => setTimeout(r, 6e3))]);
+      }
+      if (out.trim()) {
+        const parsed = parseFactoryStatus(JSON.parse(out.trim()));
+        return { ok: true, status: parsed, error: null };
+      }
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      status: buildEmptyFactoryStatus(slug, (err == null ? void 0 : err.message) || "Falha ao ler dados do tenant"),
+      error: (err == null ? void 0 : err.message) || String(err)
+    };
+  }
+  try {
+    const hydrated = await hydrateFactoryStatusFromFiles(ctx, slug);
+    return { ok: true, status: hydrated, error: null };
+  } catch (err) {
+    return {
+      ok: false,
+      status: buildEmptyFactoryStatus(slug, (err == null ? void 0 : err.message) || "Falha ao ler dados do tenant"),
+      error: (err == null ? void 0 : err.message) || String(err)
+    };
+  }
+}
+async function writeTenantControl(ctx, tenant, patch) {
+  var _a;
+  const slug = (tenant || "orgfy").trim().toLowerCase() || "orgfy";
+  const path = getControlePath(slug);
+  const host = ctx == null ? void 0 : ctx.host;
+  let current = {
+    tenant: slug,
+    mode: "software_factory",
+    killSwitch: false,
+    drain: false,
+    autoMerge: false,
+    mergePolicy: "strict",
+    limits: { gastoDiaUsd: 50, mergesDia: 20, agentes: 4, prsAbertos: 6, falhasSeguidas: 3 },
+    pausedReason: null
+  };
+  try {
+    if (host == null ? void 0 : host.readFile) {
+      const raw = await host.readFile(path);
+      const txt = raw instanceof Uint8Array ? new TextDecoder().decode(raw) : String(raw || "");
+      const parsed = JSON.parse(txt);
+      if (parsed && typeof parsed === "object") current = { ...current, ...parsed };
+    }
+  } catch {
+  }
+  const mergedLimits = { ...current.limits || {}, ...patch.limits || {} };
+  const sanitizedLimits = {
+    gastoDiaUsd: Math.max(0, Number.isFinite(Number(mergedLimits.gastoDiaUsd)) ? Number(mergedLimits.gastoDiaUsd) : 50),
+    mergesDia: Math.max(0, Math.round(Number.isFinite(Number(mergedLimits.mergesDia)) ? Number(mergedLimits.mergesDia) : 20)),
+    agentes: Math.max(1, Math.round(Number.isFinite(Number(mergedLimits.agentes)) ? Number(mergedLimits.agentes) : 4)),
+    prsAbertos: Math.max(1, Math.round(Number.isFinite(Number(mergedLimits.prsAbertos)) ? Number(mergedLimits.prsAbertos) : 6)),
+    falhasSeguidas: Math.max(1, Math.round(Number.isFinite(Number(mergedLimits.falhasSeguidas)) ? Number(mergedLimits.falhasSeguidas) : 3))
+  };
+  const next = {
+    ...current,
+    ...patch,
+    mergePolicy: (patch.mergePolicy || current.mergePolicy) === "fast" ? "fast" : "strict",
+    limits: sanitizedLimits,
+    tenant: slug,
+    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  const serialized = JSON.stringify(next, null, 2) + "\n";
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(`orgfy_controle_cache_${slug}`, serialized);
+    }
+  } catch {
+  }
+  try {
+    if (typeof ((_a = ctx == null ? void 0 : ctx.artifactStorage) == null ? void 0 : _a.set) === "function") {
+      await ctx.artifactStorage.set(`orgfy:controle:${slug}`, next);
+    }
+  } catch {
+  }
+  if (typeof (host == null ? void 0 : host.runCommand) === "function") {
+    try {
+      const out = await host.runCommand(
+        "orgfy-controle-write",
+        JSON.stringify({ kind: "controle", tenant: slug, control: next })
+      );
+      if (out) {
+        const parsed = JSON.parse(out);
+        if (parsed == null ? void 0 : parsed.ok) {
+          return { ok: true, path: parsed.path || path, control: parsed.control || next };
+        }
+        return { ok: false, path, control: next, error: (parsed == null ? void 0 : parsed.error) || "Falha em orgfy-controle-write" };
+      }
+      if (!(host == null ? void 0 : host.writeFile)) {
+        return {
+          ok: false,
+          path,
+          control: next,
+          error: "orgfy-controle-write retornou vazio no Buzz Desktop (reinstale/recarregue o plugin para aplicar o manifest.json)."
+        };
+      }
+    } catch (err) {
+      if (!(host == null ? void 0 : host.writeFile)) {
+        return { ok: false, path, control: next, error: (err == null ? void 0 : err.message) || String(err) };
+      }
+    }
+  }
+  if (typeof (host == null ? void 0 : host.writeFile) === "function") {
+    try {
+      await host.writeFile(path, serialized);
+      return { ok: true, path, control: next };
+    } catch (err) {
+      return { ok: false, path, control: next, error: (err == null ? void 0 : err.message) || String(err) };
+    }
+  }
+  return { ok: true, path, control: next };
+}
 function buildUnifiedOrgfyTools(ctx) {
   const rawTools = [
     {
@@ -8833,6 +9854,39 @@ function buildUnifiedOrgfyTools(ctx) {
         const dryRun = (args == null ? void 0 : args.dry_run) !== false;
         const res = await reconcileAgentsViaBuzzApi(ctx, { dryRun });
         return { text: JSON.stringify({ ok: true, dryRun, ...res }, null, 2) };
+      }
+    },
+    {
+      name: "orgfy_ajustar_limites",
+      description: "Ajusta dinamicamente os limites e modo operacional da esteira de qualquer empresa (controle-<tenant>.json) — gastoDiaUsd, mergesDia, agentes, prsAbertos, falhasSeguidas, mode e autoMerge — permitindo que OrgFy Iris, Conselho e COO recalibrem a fábrica sem intervenção humana.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          empresa: { type: "string", description: "Slug da empresa (ex.: 'orgfy', 'lumen-iptv', 'saas-tributario')" },
+          mode: { type: "string", enum: ["manual", "assisted", "software_factory", "dark_factory"] },
+          autoMerge: { type: "boolean" },
+          gastoDiaUsd: { type: "number", description: "Teto diário de gasto em USD" },
+          mergesDia: { type: "number", description: "Máximo de merges por dia" },
+          agentes: { type: "number", description: "Capacidade simultânea de agentes/vagas no auto-despacho" },
+          prsAbertos: { type: "number", description: "Limite de PRs abertos em paralelo (WIP)" },
+          falhasSeguidas: { type: "number", description: "Limite de falhas seguidas antes de pausar" },
+          killSwitch: { type: "boolean" }
+        },
+        required: ["empresa"]
+      },
+      execute: async (args) => {
+        const empresa = String((args == null ? void 0 : args.empresa) || "orgfy").trim().toLowerCase();
+        const limits = {};
+        for (const k of ["gastoDiaUsd", "mergesDia", "agentes", "prsAbertos", "falhasSeguidas"]) {
+          if (typeof (args == null ? void 0 : args[k]) === "number" && Number.isFinite(args[k])) limits[k] = args[k];
+        }
+        const patch = {};
+        if (args == null ? void 0 : args.mode) patch.mode = args.mode;
+        if (typeof (args == null ? void 0 : args.autoMerge) === "boolean") patch.autoMerge = args.autoMerge;
+        if (typeof (args == null ? void 0 : args.killSwitch) === "boolean") patch.killSwitch = args.killSwitch;
+        if (Object.keys(limits).length > 0) patch.limits = limits;
+        const res = await writeTenantControl(ctx, empresa, patch);
+        return { text: JSON.stringify(res, null, 2), isError: !res.ok };
       }
     },
     {
@@ -14387,990 +15441,6 @@ const PT_BR = {
     modelsTitle: "Agentes & Eval de Tool Call (R5.1)"
   }
 };
-function resolveBuzzNavigationScope(ctx) {
-  var _a, _b, _c, _d, _e, _f;
-  try {
-    const navSnap = typeof ((_a = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a.snapshot) === "function" ? ctx.navigation.snapshot() : null;
-    const navScope = (_c = (_b = navSnap == null ? void 0 : navSnap.entry) == null ? void 0 : _b.target) == null ? void 0 : _c.scope;
-    if ((navScope == null ? void 0 : navScope.viewer) && (navScope == null ? void 0 : navScope.communityOrigin)) {
-      return { viewer: String(navScope.viewer), communityOrigin: String(navScope.communityOrigin) };
-    }
-  } catch {
-  }
-  try {
-    const relaySnap = typeof ((_d = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _d.snapshot) === "function" ? ctx.relay.snapshot() : null;
-    const viewer = (relaySnap == null ? void 0 : relaySnap.viewer) ? String(relaySnap.viewer) : ((_e = relaySnap == null ? void 0 : relaySnap.session) == null ? void 0 : _e.viewer) ? String(relaySnap.session.viewer) : "";
-    let communityOrigin = (relaySnap == null ? void 0 : relaySnap.origin) ? String(relaySnap.origin) : "";
-    if (!communityOrigin && viewer && typeof (relaySnap == null ? void 0 : relaySnap.scope) === "string" && relaySnap.scope.endsWith(`:${viewer}`)) {
-      communityOrigin = relaySnap.scope.slice(0, -(viewer.length + 1));
-    }
-    if (!communityOrigin && viewer && typeof ((_f = relaySnap == null ? void 0 : relaySnap.session) == null ? void 0 : _f.scope) === "string" && relaySnap.session.scope.endsWith(`:${viewer}`)) {
-      communityOrigin = relaySnap.session.scope.slice(0, -(viewer.length + 1));
-    }
-    if (viewer && communityOrigin) {
-      return { viewer, communityOrigin };
-    }
-  } catch {
-  }
-  return null;
-}
-function findBuzzChannelIdByName(ctx, candidateNames) {
-  var _a, _b, _c, _d;
-  try {
-    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
-    const listSnap = typeof ((_d = session == null ? void 0 : session.channels) == null ? void 0 : _d.list) === "function" ? session.channels.list() : null;
-    const allChannels = Array.isArray(listSnap == null ? void 0 : listSnap.channels) ? listSnap.channels : [];
-    const normalizedTargets = candidateNames.map((n) => n.trim().toLowerCase()).filter(Boolean);
-    if (normalizedTargets.length === 0) return null;
-    for (const target of normalizedTargets) {
-      const exact = allChannels.find(
-        (ch) => (ch == null ? void 0 : ch.id) && (ch == null ? void 0 : ch.channelType) !== "dm" && (ch == null ? void 0 : ch.channelType) !== "solo" && String((ch == null ? void 0 : ch.name) || "").trim().toLowerCase() === target
-      );
-      if (exact == null ? void 0 : exact.id) return String(exact.id);
-    }
-    for (const target of normalizedTargets) {
-      const partial = allChannels.find(
-        (ch) => (ch == null ? void 0 : ch.id) && (ch == null ? void 0 : ch.channelType) !== "dm" && (ch == null ? void 0 : ch.channelType) !== "solo" && String((ch == null ? void 0 : ch.name) || "").trim().toLowerCase().includes(target)
-      );
-      if (partial == null ? void 0 : partial.id) return String(partial.id);
-    }
-  } catch {
-  }
-  return null;
-}
-async function loadBuzzChannelLiveInfo(ctx, channelId) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
-  if (!channelId) return null;
-  try {
-    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
-    if (!session) return null;
-    const listSnap = typeof ((_d = session.channels) == null ? void 0 : _d.list) === "function" ? session.channels.list() : null;
-    const allChannels = Array.isArray(listSnap == null ? void 0 : listSnap.channels) ? listSnap.channels : [];
-    const summary = (typeof ((_e = session.channels) == null ? void 0 : _e.get) === "function" ? session.channels.get(channelId) : void 0) || allChannels.find((ch) => String((ch == null ? void 0 : ch.id) || "") === channelId) || null;
-    let details = null;
-    if (((_f = session.channelDetails) == null ? void 0 : _f.available) && typeof session.channelDetails.load === "function") {
-      try {
-        details = await session.channelDetails.load(channelId);
-      } catch {
-      }
-    }
-    const rawMembers = Array.isArray(summary == null ? void 0 : summary.members) ? summary.members : Array.isArray(summary == null ? void 0 : summary.participants) ? summary.participants : [];
-    const uniqueMembers = Array.from(new Set(rawMembers.map((m) => String(m || "").toLowerCase()).filter(Boolean)));
-    let unreadCount = null;
-    let attentionCount = null;
-    try {
-      if (typeof ((_g = session.unread) == null ? void 0 : _g.snapshot) === "function") {
-        const uSnap = session.unread.snapshot({ kind: "channel", channelId });
-        if (uSnap && typeof uSnap === "object") {
-          if (typeof uSnap.observedCount === "number") unreadCount = uSnap.observedCount;
-          if (typeof uSnap.attentionCount === "number") attentionCount = uSnap.attentionCount;
-        }
-      }
-    } catch {
-    }
-    let liveStatus2 = "unknown";
-    try {
-      const lSnap = (_i = (_h = session.live) == null ? void 0 : _h.snapshot) == null ? void 0 : _i.call(_h);
-      if (lSnap == null ? void 0 : lSnap.status) liveStatus2 = String(lSnap.status);
-    } catch {
-    }
-    const visibility = (details == null ? void 0 : details.visibility) === "private" || (summary == null ? void 0 : summary.visibility) === "private" || (summary == null ? void 0 : summary.private) === true ? "private" : (details == null ? void 0 : details.visibility) === "public" || (summary == null ? void 0 : summary.visibility) === "public" ? "public" : "unknown";
-    return {
-      available: Boolean(summary || details),
-      channelId,
-      name: String((details == null ? void 0 : details.name) || (summary == null ? void 0 : summary.name) || "Canal"),
-      description: String((details == null ? void 0 : details.description) ?? (summary == null ? void 0 : summary.description) ?? ""),
-      visibility,
-      channelType: String((summary == null ? void 0 : summary.channelType) || "stream"),
-      viewerRole: (summary == null ? void 0 : summary.viewerRole) ? String(summary.viewerRole) : void 0,
-      archived: Boolean(summary == null ? void 0 : summary.archived),
-      memberPubkeys: uniqueMembers,
-      memberCount: uniqueMembers.length,
-      labels: Array.isArray(details == null ? void 0 : details.labels) ? details.labels.map(String) : Array.isArray(summary == null ? void 0 : summary.labels) ? summary.labels.map(String) : [],
-      canEdit: Boolean((details == null ? void 0 : details.canEdit) && ((_j = session.channelDetails) == null ? void 0 : _j.available) && typeof session.channelDetails.save === "function"),
-      detailsBase: details || void 0,
-      unreadCount,
-      attentionCount,
-      liveStatus: liveStatus2,
-      rosterTotalChannels: allChannels.length,
-      lastActivityAt: typeof (summary == null ? void 0 : summary.lastActivityAt) === "number" ? summary.lastActivityAt : void 0
-    };
-  } catch {
-    return null;
-  }
-}
-async function saveBuzzChannelDetailsLive(ctx, detailsBase, patch) {
-  var _a, _b, _c, _d;
-  try {
-    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
-    if (!((_d = session == null ? void 0 : session.channelDetails) == null ? void 0 : _d.available) || typeof session.channelDetails.save !== "function") {
-      return { ok: false, error: "API session.channelDetails.save indisponível nesta versão do Buzz." };
-    }
-    if (!detailsBase) {
-      return { ok: false, error: "Metadados base do canal ainda não carregados." };
-    }
-    const draft = {
-      name: patch.name !== void 0 ? patch.name.trim() : String(detailsBase.name || ""),
-      description: patch.description !== void 0 ? patch.description.trim() : String(detailsBase.description || ""),
-      visibility: patch.visibility || (detailsBase.visibility === "public" ? "public" : "private"),
-      ...detailsBase.joinRole ? { joinRole: detailsBase.joinRole } : {},
-      ...typeof detailsBase.ttlSeconds === "number" ? { ttlSeconds: detailsBase.ttlSeconds } : {},
-      ...Array.isArray(detailsBase.labels) ? { labels: detailsBase.labels } : {}
-    };
-    await session.channelDetails.save(detailsBase, draft);
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: (err == null ? void 0 : err.message) || String(err) };
-  }
-}
-async function runBuzzChannelDiagnosticAction(ctx, channelId, action) {
-  var _a, _b, _c, _d, _e, _f, _g, _h;
-  try {
-    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
-    if (!session) return { ok: false, message: "Sessão do relay Buzz indisponível." };
-    if (action === "markRead") {
-      if (typeof ((_d = session.unread) == null ? void 0 : _d.markChannelRead) === "function") {
-        await session.unread.markChannelRead(channelId);
-        return { ok: true, message: "Canal marcado como lido no Buzz." };
-      }
-      return { ok: false, message: "markChannelRead indisponível." };
-    }
-    if (action === "markUnread") {
-      if (typeof ((_e = session.unread) == null ? void 0 : _e.markUnreadLocal) === "function") {
-        await session.unread.markUnreadLocal({ kind: "channel", channelId });
-        return { ok: true, message: "Canal marcado como não lido." };
-      }
-      return { ok: false, message: "markUnreadLocal indisponível." };
-    }
-    if (typeof ((_f = session.channels) == null ? void 0 : _f.refreshList) === "function") {
-      session.channels.refreshList();
-    }
-    if (typeof ((_g = session.channels) == null ? void 0 : _g.refreshRoster) === "function") {
-      await session.channels.refreshRoster(channelId).catch(() => {
-      });
-    }
-    if (typeof ((_h = session.channels) == null ? void 0 : _h.refresh) === "function") {
-      session.channels.refresh(channelId);
-    }
-    return { ok: true, message: "Lista de canais e roster atualizados via Buzz relay." };
-  } catch (err) {
-    return { ok: false, message: (err == null ? void 0 : err.message) || String(err) };
-  }
-}
-async function navigateToBuzzChannel(ctx, channelId, options) {
-  var _a, _b;
-  if (!channelId) return { ok: false, mode: "none" };
-  const scope = resolveBuzzNavigationScope(ctx);
-  if ((options == null ? void 0 : options.preferFullPage) && scope && typeof ((_a = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a.open) === "function") {
-    try {
-      const target = {
-        version: 1,
-        kind: "conversation",
-        scope,
-        channelId
-      };
-      if (options.panel) target.panel = options.panel;
-      const res = await ctx.navigation.open(target);
-      if (!res || res.status === "opened") {
-        return { ok: true, mode: "navigation" };
-      }
-    } catch {
-    }
-  }
-  if (options == null ? void 0 : options.sideTabOpener) {
-    try {
-      const opened = options.sideTabOpener({ channelId }, { keep: true });
-      if (opened) return { ok: true, mode: "sidetab" };
-    } catch {
-    }
-  }
-  if (scope && typeof ((_b = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _b.open) === "function") {
-    try {
-      const target = {
-        version: 1,
-        kind: "conversation",
-        scope,
-        channelId
-      };
-      if (options == null ? void 0 : options.panel) target.panel = options.panel;
-      const res = await ctx.navigation.open(target);
-      if (!res || res.status === "opened") {
-        return { ok: true, mode: "navigation" };
-      }
-    } catch {
-    }
-  }
-  return { ok: false, mode: "none" };
-}
-const VALID_MODES = /* @__PURE__ */ new Set(["manual", "assisted", "software_factory", "dark_factory"]);
-const VALID_LOOP_STATES = /* @__PURE__ */ new Set(["idle", "discovering", "building", "verifying", "paused", "stopped", "draining"]);
-function parseFactoryStatus(raw) {
-  if (!raw || typeof raw !== "object") {
-    throw new Error("FactoryStatus inválido: objeto esperado");
-  }
-  const obj = raw;
-  if (typeof obj.projectId !== "string" || !obj.projectId) {
-    throw new Error("FactoryStatus inválido: projectId obrigatório");
-  }
-  if (!VALID_MODES.has(String(obj.mode))) {
-    throw new Error(`FactoryStatus inválido: mode=${obj.mode}`);
-  }
-  if (!VALID_LOOP_STATES.has(String(obj.loopState))) {
-    throw new Error(`FactoryStatus inválido: loopState=${obj.loopState}`);
-  }
-  if (typeof obj.killSwitch !== "boolean" || typeof obj.globalKillSwitch !== "boolean") {
-    throw new Error("FactoryStatus inválido: killSwitch/globalKillSwitch boolean obrigatórios");
-  }
-  if (!obj.spendToday || typeof obj.spendToday.tokens !== "number" || typeof obj.spendToday.usd !== "number") {
-    throw new Error("FactoryStatus inválido: spendToday.tokens/usd obrigatórios");
-  }
-  if (!Array.isArray(obj.backlog) || !Array.isArray(obj.inProgress) || !Array.isArray(obj.recent)) {
-    throw new Error("FactoryStatus inválido: backlog/inProgress/recent devem ser arrays");
-  }
-  return obj;
-}
-function buildEmptyFactoryStatus(tenant, reason) {
-  return {
-    projectId: tenant,
-    mode: "software_factory",
-    experimental: true,
-    loopState: "stopped",
-    pausedReason: reason || null,
-    killSwitch: false,
-    globalKillSwitch: false,
-    drain: null,
-    limits: {
-      maxConcurrentSessions: 4,
-      maxMergesPerDay: 20,
-      dailyBudget: { usd: 50 },
-      pauseAfterConsecutiveFailures: 3,
-      autoMerge: false,
-      mergePolicy: "strict"
-    },
-    spendToday: { tokens: 0, usd: 0 },
-    mergesToday: 0,
-    stats: { mergedToday: 0, failedToday: 0, revertedToday: 0, medianMergeMs7d: null, merged7d: 0 },
-    consecutiveFailures: 0,
-    activeSessions: 0,
-    wip: { openPrs: 0, limit: 6, holding: false, waitingOnProvider: 0, note: null },
-    backlog: [],
-    inProgress: [],
-    mergeChecks: [],
-    pullRequests: [],
-    recent: [],
-    viewRecent: [],
-    ignored: [],
-    held: [],
-    visionExists: false,
-    lessons: [],
-    lastDigest: null,
-    lastTickAt: null,
-    tenant,
-    coordenador: "parado",
-    modelos: [],
-    indisponivel: ["lastDigest", "lessons", "mergeChecks", "pullRequests", "scout", "spotChecks"]
-  };
-}
-const VERIFIED_R51_BASELINE = {
-  "claude-sonnet-4-6": { score: "10/10", scoreNum: 10, abaixo: false, latencyMs: 4064, costUsd: "$0.0815", provider: "nexusmind_anthropic", model: "claude-sonnet-4-6" },
-  "gemini-2.5-flash": { score: "10/10", scoreNum: 10, abaixo: false, latencyMs: 2045, costUsd: "$0.0022", provider: "nexusmind_antigravity", model: "gemini-2.5-flash" },
-  "claude-sonnet-5-5": { score: "9/10", scoreNum: 9, abaixo: false, latencyMs: 5143, costUsd: "$0.0715", provider: "nexusmind_anthropic", model: "claude-sonnet-5-5" },
-  "claude-haiku-5-5": { score: "3/10", scoreNum: 3, abaixo: true, latencyMs: 3738, costUsd: "$0.0219", provider: "nexusmind_anthropic", model: "claude-haiku-5-5" },
-  "gemini-3.8-flash-medium": { score: "0/10", scoreNum: 0, abaixo: true, latencyMs: 4956, costUsd: "$0.0046", provider: "nexusmind_antigravity", model: "gemini-3.8-flash-medium" }
-};
-function parseEvalTable(md) {
-  const liveMap = /* @__PURE__ */ new Map();
-  if (md) {
-    let modelColIdx = 0;
-    let providerColIdx = -1;
-    for (const line of md.split("\n")) {
-      if (!line.trim().startsWith("|")) continue;
-      const cols = line.split("|").map((c) => c.trim()).filter(Boolean);
-      if (cols.length < 3) continue;
-      if (cols.every((c) => /^:?-+:?$/.test(c))) continue;
-      const lowerCols = cols.map((c) => c.toLowerCase());
-      const headerModelIdx = lowerCols.findIndex((c) => c === "model" || c === "modelo");
-      if (headerModelIdx >= 0) {
-        modelColIdx = headerModelIdx;
-        providerColIdx = lowerCols.findIndex((c) => c === "provider" || c === "provedor");
-        continue;
-      }
-      const model = (cols[modelColIdx] || cols[0] || "").replace(/`/g, "").trim();
-      const provider = providerColIdx >= 0 ? (cols[providerColIdx] || "").replace(/`/g, "").trim() : null;
-      const m = line.match(/(\d+)\s*\/\s*10(?!\d)/g);
-      if (model && m && m.length >= 1) {
-        const toolStr = m.length >= 2 ? m[1] : m[0];
-        const num = parseInt(toolStr.split("/")[0], 10);
-        if (!Number.isNaN(num)) {
-          const latCol = cols.find((c) => /^\d{2,6}$/.test(c));
-          const costCol = cols.find((c) => /^\$\d/.test(c));
-          const entry = {
-            score: `${num}/10`,
-            scoreNum: num,
-            abaixo: num < 8,
-            latencyMs: latCol ? parseInt(latCol, 10) : null,
-            costUsd: costCol || null,
-            provider: provider || null,
-            model
-          };
-          const shortName = model.includes("/") ? model.split("/").pop() : model;
-          liveMap.set(model.toLowerCase(), entry);
-          if (!liveMap.has(shortName.toLowerCase())) {
-            liveMap.set(shortName.toLowerCase(), entry);
-          }
-        }
-      }
-    }
-  }
-  if (liveMap.size > 0) return liveMap;
-  const fallbackMap = /* @__PURE__ */ new Map();
-  for (const [k, v2] of Object.entries(VERIFIED_R51_BASELINE)) {
-    fallbackMap.set(k.toLowerCase(), v2);
-  }
-  return fallbackMap;
-}
-function describeOrgfyRole(papelRaw) {
-  const p = String(papelRaw || "").trim().toLowerCase();
-  const map = {
-    ceo: { funcao: "CEO Master · Orquestrador da Holding", categoria: "lideranca" },
-    ceo_holding: { funcao: "CEO Master · Orquestrador da Holding", categoria: "lideranca" },
-    ceo_empresa: { funcao: "CEO da Empresa · Direção & Decisão", categoria: "lideranca" },
-    coo: { funcao: "COO · Operações, Despacho & Auto-cura", categoria: "lideranca" },
-    arquiteto: { funcao: "Arquiteto · Design Técnico & Revisão Estrutural", categoria: "lideranca" },
-    backend: { funcao: "Executor Backend · APIs & Serviços", categoria: "execucao" },
-    frontend: { funcao: "Executor Frontend · Interface & UX", categoria: "execucao" },
-    infra: { funcao: "Executor Infra · CI/CD, Deploy & Runtime", categoria: "execucao" },
-    executor: { funcao: "Executor · Implementação em Worktree", categoria: "execucao" },
-    release: { funcao: "Release · Empacotamento & Entrega", categoria: "execucao" },
-    prompts: { funcao: "Engenharia de Prompts & Regras", categoria: "execucao" },
-    growth: { funcao: "Growth & Aquisição", categoria: "execucao" },
-    pesquisa: { funcao: "Pesquisa Técnica & Descoberta", categoria: "execucao" },
-    qa: { funcao: "Revisor de Código & QA (Gate L-01)", categoria: "revisao" },
-    revisor_codigo: { funcao: "Revisor de Código & QA (Gate L-01)", categoria: "revisao" },
-    revisor_metodo: { funcao: "Revisor de Método & Specsfy (L-01)", categoria: "revisao" },
-    revisor_seguranca: { funcao: "Revisor de Segurança & Auditoria", categoria: "revisao" },
-    seguranca: { funcao: "Revisor de Segurança & Auditoria", categoria: "revisao" },
-    revisor_ui: { funcao: "Revisor de UI & Acessibilidade", categoria: "revisao" },
-    oraculo: { funcao: "Oráculo · Scout & Inteligência", categoria: "operacao" },
-    po: { funcao: "Product Owner · Escopo & Critérios L-22", categoria: "operacao" },
-    cron: { funcao: "Cron · Rotinas Agendadas da Esteira", categoria: "operacao" }
-  };
-  return map[p] || { funcao: p ? `Agente · ${p}` : "Agente da Esteira", categoria: "execucao" };
-}
-async function hydrateFactoryStatusFromFiles(ctx, slug) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x2, _y2, _z2, _A, _B, _C, _D, _E, _F, _G, _H, _I, _J, _K;
-  const base = buildEmptyFactoryStatus(slug);
-  const host = ctx == null ? void 0 : ctx.host;
-  const stateRelPath = slug === "orgfy" ? ".esteira/estado/esteira-minima-state.json" : `.esteira/estado/esteira-minima-${slug}-state.json`;
-  const [kpiRes, cards, empresaJson, boardJson, evalMd, projectMd, agentsMd, regrasJson, esteiraState, alcadasJson, spotChecksJson, lessonsJson, digestJson] = await Promise.all([
-    fetchKpisEsteira(ctx).catch(() => ({ kpis: null, history: [], error: null })),
-    fetchLiveKanbanCards(ctx, { empresa: slug, skipWorktreeScan: true }).catch(() => []),
-    readOrgfyJson(ctx, `empresas/${slug}.json`, null).catch(() => null),
-    readOrgfyJson(ctx, "empresas/board.json", null).catch(() => null),
-    readOrgfyText(ctx, "docs/eval-modelos-onda5.md").catch(() => null),
-    readOrgfyText(ctx, "PROJECT.md").catch(() => null),
-    readOrgfyText(ctx, "AGENTS.md").catch(() => null),
-    readOrgfyJson(ctx, ".esteira/estado/regras-probatorias.json", null).catch(() => null),
-    readOrgfyJson(ctx, stateRelPath, null).catch(() => null),
-    readOrgfyJson(ctx, "contratos/alcadas_politica.json", null).catch(() => null),
-    readOrgfyJson(ctx, `.esteira/estado/spot-checks-${slug}.json`, null).catch(() => null),
-    readOrgfyJson(ctx, `.esteira/estado/licoes-dinamicas-${slug}.json`, null).catch(() => null),
-    readOrgfyJson(ctx, `.esteira/estado/digest-${slug}.json`, null).catch(() => null)
-  ]);
-  let modelControlPlane = null;
-  if (typeof (host == null ? void 0 : host.readFile) === "function") {
-    for (const cpPath of ["~/.buzz/.scratch/model-control-plane.json", "/Users/heltonfraga/.buzz/.scratch/model-control-plane.json"]) {
-      try {
-        const rawCp = await host.readFile(cpPath);
-        if (!rawCp) continue;
-        const txtCp = rawCp instanceof Uint8Array ? new TextDecoder().decode(rawCp) : String(rawCp || "");
-        const parsedCp = JSON.parse(txtCp);
-        if (parsedCp && Array.isArray(parsedCp.models)) {
-          modelControlPlane = parsedCp;
-          break;
-        }
-      } catch {
-      }
-    }
-  }
-  let controle = null;
-  try {
-    if (host == null ? void 0 : host.readFile) {
-      const raw = await host.readFile(getControlePath(slug));
-      const txt = raw instanceof Uint8Array ? new TextDecoder().decode(raw) : String(raw || "");
-      controle = JSON.parse(txt);
-    }
-  } catch {
-    controle = null;
-  }
-  if (!controle && typeof localStorage !== "undefined") {
-    try {
-      const cached = localStorage.getItem(`orgfy_controle_cache_${slug}`);
-      if (cached) controle = JSON.parse(cached);
-    } catch {
-    }
-  }
-  const snap = ((_b = (_a = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) || {};
-  const runningList = Array.isArray(snap.running) ? snap.running : [];
-  const allAgents = Array.isArray(snap.agents) ? snap.agents : [];
-  const runningKeys = new Set(runningList.map((a) => String((a == null ? void 0 : a.key) || (a == null ? void 0 : a.name) || "").toLowerCase()));
-  const runningPubkeys = new Set(runningList.map((a) => String((a == null ? void 0 : a.pubkey) || "").toLowerCase()).filter(Boolean));
-  const liveByName = /* @__PURE__ */ new Map();
-  const liveByPubkey = /* @__PURE__ */ new Map();
-  for (const a of allAgents) {
-    if (a == null ? void 0 : a.name) liveByName.set(String(a.name).toLowerCase(), a);
-    if (a == null ? void 0 : a.pubkey) liveByPubkey.set(String(a.pubkey).toLowerCase(), a);
-  }
-  const evalMap = parseEvalTable(evalMd);
-  const modelos = [];
-  const tenantAgents = [];
-  const isBoardSlug = slug === "board";
-  const agentesObj = isBoardSlug && boardJson ? (() => {
-    var _a2, _b2;
-    const out = {};
-    const ceoNome = String(((_a2 = boardJson == null ? void 0 : boardJson.ceo_holding) == null ? void 0 : _a2.nome) || "OrgFy Iris");
-    out[ceoNome] = {
-      papel: "ceo_holding",
-      pubkey: ((_b2 = boardJson == null ? void 0 : boardJson.ceo_holding) == null ? void 0 : _b2.pubkey) || "",
-      model: "claude-sonnet-5-5",
-      provider: "nexusmind_anthropic",
-      parallelism: 1
-    };
-    const conselhoList = Array.isArray(boardJson == null ? void 0 : boardJson.conselho) ? boardJson.conselho : [];
-    for (const c of conselhoList) {
-      const resp = String((c == null ? void 0 : c.responsavel) || "").trim();
-      if (!resp || out[resp]) continue;
-      const roleKey = String((c == null ? void 0 : c.sigla) || (c == null ? void 0 : c.id) || "conselheiro").toLowerCase();
-      out[resp] = {
-        papel: roleKey,
-        funcaoCustom: `${(c == null ? void 0 : c.sigla) || "Board"} · ${(c == null ? void 0 : c.area) || "Conselho"}`,
-        pubkey: typeof (c == null ? void 0 : c.pubkey) === "string" ? c.pubkey : "",
-        model: (c == null ? void 0 : c.status) === "ativo" ? "claude-sonnet-5-5" : "planejado",
-        provider: "nexusmind_anthropic",
-        parallelism: 1
-      };
-    }
-    return out;
-  })() : (empresaJson == null ? void 0 : empresaJson.agentes) && typeof empresaJson.agentes === "object" ? empresaJson.agentes : {};
-  for (const [agName, info] of Object.entries(agentesObj)) {
-    const manifestPk = typeof (info == null ? void 0 : info.pubkey) === "string" ? info.pubkey.trim() : "";
-    const live = manifestPk && liveByPubkey.get(manifestPk.toLowerCase()) || liveByName.get(agName.toLowerCase()) || null;
-    const modelo = String(((_c = live == null ? void 0 : live.config) == null ? void 0 : _c.model) || (info == null ? void 0 : info.model) || "").trim() || null;
-    const provider = String(((_d = live == null ? void 0 : live.config) == null ? void 0 : _d.provider) || (info == null ? void 0 : info.provider) || "").trim() || null;
-    const ev = modelo ? evalMap.get(modelo.toLowerCase()) || evalMap.get((modelo.split("/").pop() || "").toLowerCase()) : void 0;
-    const roleMeta = (info == null ? void 0 : info.funcaoCustom) ? { funcao: String(info.funcaoCustom), categoria: "lideranca" } : describeOrgfyRole(info == null ? void 0 : info.papel);
-    const liveKey = String((live == null ? void 0 : live.key) || "");
-    const livePk = String((live == null ? void 0 : live.pubkey) || manifestPk || "");
-    const isRunning = Boolean(
-      liveKey && runningKeys.has(liveKey.toLowerCase()) || livePk && runningPubkeys.has(livePk.toLowerCase()) || runningKeys.has(agName.toLowerCase())
-    );
-    const modelLower = String(modelo || "").toLowerCase();
-    const isUnsupported = Boolean(
-      modelLower.includes("mistral-large-4-1t-a52b") || modelLower.includes("grok-4.5") || modelLower.includes("minimax-m3.1-flash")
-    );
-    const evalStatus = ev ? ev.abaixo ? "below_min" : "approved" : isUnsupported ? "unsupported" : "untested";
-    modelos.push({
-      agente: agName,
-      papel: (info == null ? void 0 : info.papel) || null,
-      modelo,
-      provider,
-      toolcall_eval: (ev == null ? void 0 : ev.score) || null,
-      abaixo_minimo: ev ? ev.abaixo : isUnsupported,
-      scoreNum: ev ? ev.scoreNum : null,
-      latencyMs: ev ? ev.latencyMs : null,
-      costUsd: ev ? ev.costUsd : null,
-      evalStatus,
-      agentKey: liveKey || `manifest:${slug}:${agName}`,
-      inBuzz: Boolean(live)
-    });
-    tenantAgents.push({
-      name: agName,
-      papel: String((info == null ? void 0 : info.papel) || "executor"),
-      funcao: roleMeta.funcao,
-      categoria: roleMeta.categoria,
-      pubkey: livePk,
-      model: modelo || "indisponível",
-      provider: provider || "buzz",
-      parallelism: Number((info == null ? void 0 : info.parallelism) ?? 1),
-      running: isRunning,
-      inBuzz: Boolean(live),
-      agentKey: liveKey || `manifest:${slug}:${agName}`
-    });
-  }
-  const resolvedBoardChannel = isBoardSlug ? typeof (boardJson == null ? void 0 : boardJson.canal) === "string" && boardJson.canal.trim() ? boardJson.canal.trim() : findBuzzChannelIdByName(ctx, [String((boardJson == null ? void 0 : boardJson.canal_nome) || "Conselho"), "Conselho", "Board", "Conselho da Holding"]) : null;
-  const tenantManifest = {
-    slug,
-    nome: isBoardSlug ? "Conselho da Holding" : String(((_e = empresaJson == null ? void 0 : empresaJson.hierarquia) == null ? void 0 : _e.workspace_buzz) || (empresaJson == null ? void 0 : empresaJson.empresa) || slug),
-    repoId: isBoardSlug ? "board" : String((empresaJson == null ? void 0 : empresaJson.repo_id) || slug),
-    nivel: isBoardSlug ? "holding" : String(((_f = empresaJson == null ? void 0 : empresaJson.hierarquia) == null ? void 0 : _f.nivel) || "subsidiaria"),
-    canal: isBoardSlug ? resolvedBoardChannel : typeof (empresaJson == null ? void 0 : empresaJson.canal) === "string" ? empresaJson.canal : null,
-    ceoEmpresa: isBoardSlug ? String(((_g = boardJson == null ? void 0 : boardJson.ceo_holding) == null ? void 0 : _g.nome) || "OrgFy Iris") : String(((_h = empresaJson == null ? void 0 : empresaJson.hierarquia) == null ? void 0 : _h.ceo_empresa) || ((_i = empresaJson == null ? void 0 : empresaJson.papeis) == null ? void 0 : _i.ceo_empresa) || "OrgFy Iris"),
-    coo: isBoardSlug ? String(((_j = boardJson == null ? void 0 : boardJson.ceo_holding) == null ? void 0 : _j.nome) || "OrgFy Iris") : String(((_k = empresaJson == null ? void 0 : empresaJson.papeis) == null ? void 0 : _k.coo) || "OrgFy Bento"),
-    modoExecucao: String((empresaJson == null ? void 0 : empresaJson.modo_execucao_workers) || "efemero_headless"),
-    ciModo: String(((_l = empresaJson == null ? void 0 : empresaJson.ci_runner) == null ? void 0 : _l.modo_padrao) || "local"),
-    ciCmd: Array.isArray((_m2 = empresaJson == null ? void 0 : empresaJson.ci_runner) == null ? void 0 : _m2.cmd) ? empresaJson.ci_runner.cmd.join(" ") : "—",
-    probesObrigatorios: Boolean((_n = empresaJson == null ? void 0 : empresaJson.probes_caixa_preta) == null ? void 0 : _n.obrigatorio_no_gate),
-    probesCount: Array.isArray((_o = empresaJson == null ? void 0 : empresaJson.probes_caixa_preta) == null ? void 0 : _o.probes_padrao) ? empresaJson.probes_caixa_preta.probes_padrao.length : 0,
-    budgetTokensDiario: typeof ((_p = empresaJson == null ? void 0 : empresaJson.governanca_orcamento) == null ? void 0 : _p.budget_tokens_diario) === "number" ? empresaJson.governanca_orcamento.budget_tokens_diario : null,
-    tokensPorCard: typeof ((_q = empresaJson == null ? void 0 : empresaJson.governanca_orcamento) == null ? void 0 : _q.tokens_planejados_por_card) === "number" ? empresaJson.governanca_orcamento.tokens_planejados_por_card : null,
-    cpiMinimo: typeof ((_r = empresaJson == null ? void 0 : empresaJson.governanca_orcamento) == null ? void 0 : _r.cpi_minimo) === "number" ? empresaJson.governanca_orcamento.cpi_minimo : null,
-    revisoresPorSuperficie: (empresaJson == null ? void 0 : empresaJson.revisores_por_superficie) && typeof empresaJson.revisores_por_superficie === "object" ? empresaJson.revisores_por_superficie : {},
-    agentes: tenantAgents
-  };
-  const toWorkItem = (c) => {
-    const itemType = /fix|bug|hotfix/i.test(String(c.title || "")) ? "bug" : /doc|readme|prd/i.test(String(c.title || "")) ? "docs" : "feature";
-    return {
-      id: String(c.fullIssueId || c.issueId || c.id),
-      title: String(c.title || "Card"),
-      workKey: String(c.issueId || c.id),
-      stage: c.stage === "feito" ? "merged" : c.stage === "revisao" ? "verifying" : c.stage === "execucao" || c.stage === "despachado" ? "building" : "backlog",
-      step: c.stage === "feito" ? "done" : c.stage === "revisao" ? "review" : c.stage === "execucao" ? "implement" : c.stage === "despachado" ? itemType === "bug" ? "reproduce" : "analyze" : "intake",
-      type: itemType,
-      attempts: Array.isArray(c.rejectionHistory) ? c.rejectionHistory.length + 1 : 1,
-      sessionId: null,
-      activeSessionId: null,
-      reason: null,
-      note: c.executor ? `Executor: ${c.executor}${c.revisor ? ` · Revisor: ${c.revisor}` : ""}` : null,
-      updatedAt: Date.now()
-    };
-  };
-  const kanbanBacklog = cards.filter((c) => c.stage === "triagem").map(toWorkItem);
-  const kanbanInProgress = cards.filter((c) => c.stage === "despachado" || c.stage === "execucao" || c.stage === "revisao").map(toWorkItem);
-  const recent = cards.filter((c) => c.stage === "feito").slice(0, 20).map(toWorkItem);
-  const boardSnap = (esteiraState == null ? void 0 : esteiraState.board_snapshot) && typeof esteiraState.board_snapshot === "object" ? esteiraState.board_snapshot : null;
-  const openPrsRaw = Array.isArray(boardSnap == null ? void 0 : boardSnap.open_prs) ? boardSnap.open_prs : [];
-  const openIssuesRaw = Array.isArray(boardSnap == null ? void 0 : boardSnap.open_issues) ? boardSnap.open_issues : [];
-  const seenIds = new Set([...kanbanBacklog, ...kanbanInProgress].map((w) => w.id));
-  const quarentenaMap = (esteiraState == null ? void 0 : esteiraState.quarentena) && typeof esteiraState.quarentena === "object" ? esteiraState.quarentena : {};
-  const ciMap = (esteiraState == null ? void 0 : esteiraState.ci) && typeof esteiraState.ci === "object" ? esteiraState.ci : {};
-  const timingsMap = (esteiraState == null ? void 0 : esteiraState.timings) && typeof esteiraState.timings === "object" ? esteiraState.timings : {};
-  const awaitingMergeMap = (esteiraState == null ? void 0 : esteiraState.awaiting_human_merge_notifications) && typeof esteiraState.awaiting_human_merge_notifications === "object" ? esteiraState.awaiting_human_merge_notifications : {};
-  const reviewerAgent = tenantAgents.find((a) => a.papel === "revisor_codigo" || a.papel === "qa") || tenantAgents.find((a) => /qa|revis/i.test(a.name)) || null;
-  const defaultExecutorAgent = tenantAgents.find((a) => ["executor", "backend", "frontend", "infra"].includes(a.papel)) || tenantAgents.find((a) => /dev|otto/i.test(a.name)) || null;
-  const agentByPubkey = /* @__PURE__ */ new Map();
-  for (const ag of tenantAgents) {
-    if (ag.pubkey) agentByPubkey.set(ag.pubkey.toLowerCase(), ag);
-  }
-  const openIssuesById = /* @__PURE__ */ new Map();
-  for (const iss of openIssuesRaw) {
-    if (iss == null ? void 0 : iss.id) openIssuesById.set(String(iss.id).toLowerCase(), iss);
-  }
-  const prWorkItems = openPrsRaw.filter((p) => {
-    if (!(p == null ? void 0 : p.id)) return false;
-    const canonicalId = p.issue_id ? String(p.issue_id) : String(p.id);
-    return !seenIds.has(String(p.id)) && !seenIds.has(canonicalId);
-  }).map((p) => {
-    const pid = String(p.id);
-    const canonicalId = p.issue_id ? String(p.issue_id) : pid;
-    const linkedIssue = p.issue_id ? openIssuesById.get(String(p.issue_id).toLowerCase()) : null;
-    const title = String(p.title || (linkedIssue == null ? void 0 : linkedIssue.title) || `PR ${pid.slice(0, 8)}`);
-    const qEntry = quarentenaMap[pid];
-    const isQuarantined = Boolean(p.quarentena || qEntry);
-    const tipSha = String(p.tip || "").toLowerCase();
-    const ciEntry = tipSha ? ciMap[tipSha] : null;
-    const timingEntry = timingsMap[pid] || timingsMap[pid.slice(0, 8)] || null;
-    const hasGateApproved = Boolean(
-      !isQuarantined && (typeof (timingEntry == null ? void 0 : timingEntry.gate_at) === "number" && timingEntry.gate_at > 0 || awaitingMergeMap[pid])
-    );
-    const ciWaiting = !isQuarantined && !hasGateApproved && (!ciEntry || String(ciEntry.status || "") !== "ok");
-    const qReason = typeof (qEntry == null ? void 0 : qEntry.motivo) === "string" && qEntry.motivo.trim() ? `Quarentena (COO): ${qEntry.motivo.trim().slice(0, 180)}` : isQuarantined ? "PR em quarentena no coordenador (requer ação do COO OrgFy Bento)" : ciWaiting ? "Aguardando CI" : null;
-    const execPk = Array.isArray(linkedIssue == null ? void 0 : linkedIssue.executors) && linkedIssue.executors[0] ? String(linkedIssue.executors[0]).toLowerCase() : "";
-    const execAg = (execPk ? agentByPubkey.get(execPk) : null) || defaultExecutorAgent;
-    const revName = (reviewerAgent == null ? void 0 : reviewerAgent.name) || "QA";
-    const noteParts = [
-      execAg ? `Executor: ${execAg.name}` : null,
-      `Revisor: ${revName}`,
-      hasGateApproved ? "GATE aprovado · fila de merge" : p.branch ? `PR · ${p.branch}` : "PR aberto"
-    ].filter(Boolean);
-    return {
-      id: canonicalId,
-      title,
-      workKey: `pr:${pid.slice(0, 12)}`,
-      // Na governança OrgFy (board.json), falhas/quarentena da esteira vão para Problemas (COO Bento -> CEO Empresa -> Iris), nunca direto para "Aguardando você" (Fundador)
-      stage: isQuarantined ? "failed" : "verifying",
-      step: isQuarantined ? "quarantine" : hasGateApproved ? "merge" : "review",
-      type: /fix|bug|hotfix/i.test(title) ? "bug" : /doc|readme|prd/i.test(title) ? "docs" : "feature",
-      attempts: 1,
-      sessionId: (reviewerAgent == null ? void 0 : reviewerAgent.agentKey) || null,
-      activeSessionId: (reviewerAgent == null ? void 0 : reviewerAgent.agentKey) || null,
-      reason: qReason,
-      note: noteParts.join(" · "),
-      updatedAt: typeof p.created_at === "number" ? p.created_at < 1e12 ? p.created_at * 1e3 : p.created_at : Date.now(),
-      executorPubkeys: execPk ? [execPk] : (execAg == null ? void 0 : execAg.pubkey) ? [execAg.pubkey.toLowerCase()] : []
-    };
-  });
-  const issueBacklogItems = openIssuesRaw.filter((i) => (i == null ? void 0 : i.id) && !i.assigned && !seenIds.has(String(i.id))).map((i) => {
-    const iid = String(i.id);
-    const title = String(i.title || `Issue ${iid.slice(0, 8)}`);
-    return {
-      id: iid,
-      title,
-      workKey: `issue:${iid.slice(0, 12)}`,
-      stage: "backlog",
-      step: "intake",
-      type: /fix|bug|hotfix/i.test(title) ? "bug" : /doc|readme|prd/i.test(title) ? "docs" : "feature",
-      attempts: 0,
-      sessionId: null,
-      activeSessionId: null,
-      reason: null,
-      note: null,
-      updatedAt: typeof i.created_at === "number" ? i.created_at < 1e12 ? i.created_at * 1e3 : i.created_at : Date.now()
-    };
-  });
-  const despachosMap = (esteiraState == null ? void 0 : esteiraState.despachos) && typeof esteiraState.despachos === "object" ? esteiraState.despachos : {};
-  const openPrIssueIds = new Set(
-    openPrsRaw.map((p) => String((p == null ? void 0 : p.issue_id) || "").toLowerCase()).filter(Boolean)
-  );
-  const STALL_THRESHOLD_MIN = 20;
-  const nowMs = Date.now();
-  const issueActiveItems = openIssuesRaw.filter((i) => (i == null ? void 0 : i.id) && i.assigned && !seenIds.has(String(i.id)) && !openPrIssueIds.has(String(i.id).toLowerCase())).map((i) => {
-    const iid = String(i.id);
-    const title = String(i.title || `Issue ${iid.slice(0, 8)}`);
-    const desp = despachosMap[iid];
-    const rawTs = typeof i.despachado_em === "number" ? i.despachado_em : typeof (desp == null ? void 0 : desp.despachado_em) === "number" ? desp.despachado_em : typeof i.created_at === "number" ? i.created_at : 0;
-    const updatedAt = rawTs > 0 ? rawTs < 1e12 ? rawTs * 1e3 : rawTs : nowMs;
-    const hasPr = Boolean(i.has_pr) || openPrIssueIds.has(iid.toLowerCase());
-    const computedMin = Math.max(0, Math.floor((nowMs - updatedAt) / 6e4));
-    const stalledMinutes = typeof i.stalled_minutes === "number" ? i.stalled_minutes : computedMin;
-    const stalled = typeof i.stalled === "boolean" ? i.stalled : !hasPr && stalledMinutes >= STALL_THRESHOLD_MIN;
-    const execPks = Array.isArray(i.executors) ? i.executors.map((x) => String(x || "").toLowerCase()).filter(Boolean) : (desp == null ? void 0 : desp.dono_operacional) ? [String(desp.dono_operacional).toLowerCase()] : [];
-    const execAg = (execPks[0] ? agentByPubkey.get(execPks[0]) : null) || defaultExecutorAgent;
-    const itemType = /fix|bug|hotfix/i.test(title) ? "bug" : /doc|readme|prd/i.test(title) ? "docs" : "feature";
-    const inPrepPhase = !hasPr && !stalled && computedMin < 3;
-    return {
-      id: iid,
-      title,
-      workKey: `issue:${iid.slice(0, 12)}`,
-      stage: "building",
-      step: inPrepPhase ? itemType === "bug" ? "reproduce" : "analyze" : "implement",
-      type: itemType,
-      attempts: 1,
-      sessionId: (execAg == null ? void 0 : execAg.agentKey) || null,
-      activeSessionId: (execAg == null ? void 0 : execAg.agentKey) || null,
-      reason: stalled ? `Sem PR aberto há ${stalledMinutes}m` : null,
-      note: stalled ? `${execAg ? `Executor: ${execAg.name} · ` : ""}Parada sem PR há ${stalledMinutes >= 60 ? `${Math.floor(stalledMinutes / 60)}h` : `${stalledMinutes}m`}` : execAg ? `Executor: ${execAg.name} · Em implementação` : "Issue atribuída no coordenador",
-      updatedAt,
-      stalled,
-      stalledMinutes,
-      executorPubkeys: execPks
-    };
-  });
-  const backlog = kanbanBacklog.length > 0 ? kanbanBacklog : issueBacklogItems;
-  const inProgress = [...kanbanInProgress, ...prWorkItems, ...kanbanInProgress.length === 0 ? issueActiveItems.slice(0, 12) : []];
-  const wipLimit = Number(((_s = controle == null ? void 0 : controle.limits) == null ? void 0 : _s.prsAbertos) ?? 6);
-  const realOpenPrs = openPrsRaw.length;
-  const wipHolding = realOpenPrs >= wipLimit;
-  const wipNote = wipHolding ? `WIP bloqueando novos despachos: ${realOpenPrs} PRs abertos (limite configurado: ${wipLimit})` : null;
-  const kpis = kpiRes.kpis;
-  const killSwitch = Boolean(controle == null ? void 0 : controle.killSwitch);
-  const drainOn = Boolean(controle == null ? void 0 : controle.drain);
-  const mode = VALID_MODES.has(String(controle == null ? void 0 : controle.mode)) ? controle.mode : "software_factory";
-  const nowDate = /* @__PURE__ */ new Date();
-  const todayKey = `${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, "0")}-${String(nowDate.getDate()).padStart(2, "0")}`;
-  const sevenDaysAgoMs = Date.now() - 7 * 24 * 60 * 60 * 1e3;
-  const mergedMap = (esteiraState == null ? void 0 : esteiraState.merged) && typeof esteiraState.merged === "object" ? esteiraState.merged : {};
-  let stateMergedToday = 0;
-  let stateMerged7d = 0;
-  for (const entry of Object.values(mergedMap)) {
-    if (!entry || typeof entry !== "object" || entry.exit !== 0) continue;
-    const rawTs = Number(entry.finished_at ?? entry.merged_at ?? 0);
-    if (!Number.isFinite(rawTs) || rawTs <= 0) continue;
-    const tsMs = rawTs < 1e12 ? rawTs * 1e3 : rawTs;
-    if (tsMs >= sevenDaysAgoMs) stateMerged7d += 1;
-    const d = new Date(tsMs);
-    const dKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    if (dKey === todayKey) stateMergedToday += 1;
-  }
-  const mergeDurationsMs = [];
-  for (const tEntry of Object.values(timingsMap)) {
-    const durS = Number(tEntry == null ? void 0 : tEntry.merge_duration_seconds);
-    if (Number.isFinite(durS) && durS > 0) mergeDurationsMs.push(Math.round(durS * 1e3));
-  }
-  mergeDurationsMs.sort((a, b) => a - b);
-  const medianMergeMs7d = mergeDurationsMs.length > 0 ? mergeDurationsMs[Math.floor(mergeDurationsMs.length / 2)] : null;
-  const kpiMergedToday = Number(((_v = (_u = (_t = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _t.vazao_por_tenant) == null ? void 0 : _u[slug]) == null ? void 0 : _v.hoje) ?? (slug === "orgfy" ? (_w = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _w.vazao_hoje : 0) ?? 0);
-  const realMergesToday = Math.max(stateMergedToday, Number.isFinite(kpiMergedToday) ? kpiMergedToday : 0);
-  const kpiMerged7d = Number(
-    ((_z2 = (_y2 = (_x2 = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _x2.vazao_por_tenant) == null ? void 0 : _y2[slug]) == null ? void 0 : _z2["7d"]) ?? (slug === "orgfy" ? (_A = kpis == null ? void 0 : kpis.fluxo) == null ? void 0 : _A.vazao_7d : void 0) ?? recent.length
-  );
-  const realMerged7d = Math.max(stateMerged7d, Number.isFinite(kpiMerged7d) ? kpiMerged7d : 0);
-  const mergeFailuresCount = (esteiraState == null ? void 0 : esteiraState.merge_failures) && typeof esteiraState.merge_failures === "object" ? Object.keys(esteiraState.merge_failures).length : 0;
-  const realFailedToday = Object.keys(quarentenaMap).length + mergeFailuresCount;
-  return {
-    ...base,
-    mode,
-    killSwitch,
-    drain: drainOn ? { since: Date.now(), inFlight: inProgress.length, total: inProgress.length, deadline: null } : null,
-    loopState: killSwitch ? "stopped" : drainOn ? "draining" : inProgress.length > 0 || runningList.length > 0 ? "building" : "idle",
-    pausedReason: (controle == null ? void 0 : controle.pausedReason) || null,
-    limits: {
-      maxConcurrentSessions: Number(((_B = controle == null ? void 0 : controle.limits) == null ? void 0 : _B.agentes) ?? 4),
-      maxMergesPerDay: Number(((_C = controle == null ? void 0 : controle.limits) == null ? void 0 : _C.mergesDia) ?? 20),
-      dailyBudget: { usd: Number(((_D = controle == null ? void 0 : controle.limits) == null ? void 0 : _D.gastoDiaUsd) ?? 50) },
-      pauseAfterConsecutiveFailures: Number(((_E = controle == null ? void 0 : controle.limits) == null ? void 0 : _E.falhasSeguidas) ?? 3),
-      autoMerge: Boolean((controle == null ? void 0 : controle.autoMerge) ?? false),
-      mergePolicy: (controle == null ? void 0 : controle.mergePolicy) === "fast" ? "fast" : "strict"
-    },
-    spendToday: {
-      tokens: Number(((_F = kpis == null ? void 0 : kpis.economia) == null ? void 0 : _F.tokens_hoje) ?? 0),
-      usd: Number(((_G = kpis == null ? void 0 : kpis.economia) == null ? void 0 : _G.custo_hoje_usd) ?? 0)
-    },
-    mergesToday: realMergesToday,
-    stats: {
-      mergedToday: realMergesToday,
-      failedToday: realFailedToday,
-      revertedToday: 0,
-      medianMergeMs7d,
-      merged7d: realMerged7d
-    },
-    activeSessions: tenantAgents.filter((a) => a.running).length,
-    wip: {
-      openPrs: realOpenPrs,
-      limit: wipLimit,
-      holding: wipHolding,
-      waitingOnProvider: 0,
-      note: wipNote
-    },
-    pullRequests: openPrsRaw,
-    quarentenaCount: (esteiraState == null ? void 0 : esteiraState.quarentena) && typeof esteiraState.quarentena === "object" ? Object.keys(esteiraState.quarentena).length : 0,
-    backlog,
-    inProgress,
-    recent,
-    viewRecent: recent,
-    visionExists: Boolean(projectMd || boardJson || empresaJson),
-    tenantManifest,
-    alcadasPolitica: alcadasJson ? {
-      modo: String(alcadasJson.modo || "observe"),
-      materiasReservadas: Object.entries(alcadasJson.materias_reservadas || {}).map(([id, m]) => ({
-        id,
-        nome: String((m == null ? void 0 : m.nome) || id),
-        alcada: String((m == null ? void 0 : m.alcada_minima) || "fundador"),
-        padroes: Array.isArray(m == null ? void 0 : m.padroes) ? m.padroes.map(String) : []
-      })),
-      regrasPath: Array.isArray(alcadasJson.regras_path) ? alcadasJson.regras_path.map((r) => ({
-        padrao: String((r == null ? void 0 : r.padrao) || ""),
-        alcada: String((r == null ? void 0 : r.alcada_minima) || "executor"),
-        descricao: String((r == null ? void 0 : r.descricao) || "")
-      })) : []
-    } : null,
-    orgfyVision: {
-      projectMd: projectMd ? projectMd.slice(0, 2400) : null,
-      agentsMd: agentsMd ? agentsMd.slice(0, 2400) : null,
-      invariantes: Array.isArray((_H = boardJson == null ? void 0 : boardJson.protocolo_governanca) == null ? void 0 : _H.invariantes) ? boardJson.protocolo_governanca.invariantes : [],
-      cadeiaComando: Array.isArray((_I = boardJson == null ? void 0 : boardJson.protocolo_governanca) == null ? void 0 : _I.cadeia_comando) ? boardJson.protocolo_governanca.cadeia_comando : [],
-      fluxoEscalada: (boardJson == null ? void 0 : boardJson.fluxo_escalada) && typeof boardJson.fluxo_escalada === "object" ? boardJson.fluxo_escalada : {},
-      regrasProbatorias: Object.entries((regrasJson == null ? void 0 : regrasJson.regras) || {}).map(([id, r]) => ({
-        id,
-        descricao: String((r == null ? void 0 : r.descricao) || id),
-        status: String((r == null ? void 0 : r.status) || "ATIVA"),
-        cardsAvaliados: Number((r == null ? void 0 : r.cards_avaliados) || 0),
-        janelaAlvo: Number((r == null ? void 0 : r.janela_alvo) || 10)
-      })),
-      canalBuzz: typeof (empresaJson == null ? void 0 : empresaJson.canal) === "string" ? empresaJson.canal : null,
-      papeis: (empresaJson == null ? void 0 : empresaJson.papeis) && typeof empresaJson.papeis === "object" ? empresaJson.papeis : {}
-    },
-    lastTickAt: ((_J = esteiraState == null ? void 0 : esteiraState.ultimo_ciclo) == null ? void 0 : _J.timestamp) ? Number(esteiraState.ultimo_ciclo.timestamp) < 1e12 ? Number(esteiraState.ultimo_ciclo.timestamp) * 1e3 : Number(esteiraState.ultimo_ciclo.timestamp) : Date.now(),
-    coordenador: !killSwitch && (slug === "board" || Boolean((_K = esteiraState == null ? void 0 : esteiraState.ultimo_ciclo) == null ? void 0 : _K.timestamp)) ? "ativo" : "parado",
-    kpis: kpis ? {
-      disponivel: true,
-      gerado_em: kpis.gerado_em || null,
-      fluxo: kpis.fluxo || null,
-      qualidade: kpis.qualidade || null,
-      economia: kpis.economia || null,
-      higiene: kpis.higiene || null
-    } : { disponivel: false },
-    lessons: Array.isArray(lessonsJson == null ? void 0 : lessonsJson.lessons) ? lessonsJson.lessons.filter((l) => !(l == null ? void 0 : l.forgotten)) : [],
-    lastDigest: digestJson || null,
-    ...spotChecksJson ? { spotChecks: spotChecksJson } : {},
-    modelos,
-    modelControlPlane,
-    evalWinners: (() => {
-      const seenW = /* @__PURE__ */ new Set();
-      const out = [];
-      for (const entry of evalMap.values()) {
-        if (entry.abaixo || !entry.model) continue;
-        const key = entry.model.toLowerCase();
-        if (seenW.has(key)) continue;
-        seenW.add(key);
-        out.push({
-          provider: entry.provider || (entry.model.includes("/") || entry.model.includes(":free") ? "nexusmind_openai" : "nexusmind_antigravity"),
-          model: entry.model,
-          score: entry.score,
-          scoreNum: entry.scoreNum,
-          latencyMs: entry.latencyMs,
-          costUsd: entry.costUsd
-        });
-      }
-      return out;
-    })(),
-    ciBySha: (() => {
-      const rawCi = esteiraState == null ? void 0 : esteiraState.ci;
-      if (!rawCi || typeof rawCi !== "object") return {};
-      const out = {};
-      for (const [sha, entry] of Object.entries(rawCi)) {
-        if (!sha || !entry || typeof entry !== "object") continue;
-        const st = String(entry.status || "").toLowerCase();
-        if (st !== "ok" && st !== "falha") continue;
-        out[sha.toLowerCase()] = {
-          status: st,
-          exitCode: typeof entry.exit_code === "number" ? entry.exit_code : void 0,
-          durationSeconds: typeof entry.duration_seconds === "number" ? entry.duration_seconds : void 0,
-          finishedAt: typeof entry.finished_at === "number" ? entry.finished_at : void 0,
-          log: typeof entry.log === "string" ? entry.log : void 0
-        };
-      }
-      return out;
-    })(),
-    indisponivel: [
-      ...!kpis ? ["kpis-esteira.json"] : [],
-      ...!digestJson ? ["lastDigest"] : [],
-      ...!(esteiraState == null ? void 0 : esteiraState.dark_factory) ? ["scout"] : []
-    ]
-  };
-}
-async function fetchFactoryStatus(ctx, tenant = "orgfy") {
-  const slug = (tenant || "orgfy").trim().toLowerCase() || "orgfy";
-  const host = ctx == null ? void 0 : ctx.host;
-  if (typeof (host == null ? void 0 : host.readFile) === "function") {
-    try {
-      const hydrated = await hydrateFactoryStatusFromFiles(ctx, slug);
-      return { ok: true, status: hydrated, error: null };
-    } catch {
-    }
-  }
-  try {
-    if (host == null ? void 0 : host.spawn) {
-      const proc = await host.spawn("python", {
-        args: [FABRICA_STATUS_SCRIPT_PATH, "--empresa", slug, "--json"]
-      });
-      let out = "";
-      if ((proc == null ? void 0 : proc.stdout) && typeof proc.stdout.getReader === "function") {
-        const reader = proc.stdout.getReader();
-        const dec = new TextDecoder();
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          out += typeof value === "string" ? value : dec.decode(value, { stream: true });
-        }
-      } else if (typeof (proc == null ? void 0 : proc.stdout) === "string") {
-        out = proc.stdout;
-      }
-      if (proc == null ? void 0 : proc.exited) {
-        await Promise.race([proc.exited, new Promise((r) => setTimeout(r, 6e3))]);
-      }
-      if (out.trim()) {
-        const parsed = parseFactoryStatus(JSON.parse(out.trim()));
-        return { ok: true, status: parsed, error: null };
-      }
-    }
-  } catch (err) {
-    return {
-      ok: false,
-      status: buildEmptyFactoryStatus(slug, (err == null ? void 0 : err.message) || "Falha ao ler dados do tenant"),
-      error: (err == null ? void 0 : err.message) || String(err)
-    };
-  }
-  try {
-    const hydrated = await hydrateFactoryStatusFromFiles(ctx, slug);
-    return { ok: true, status: hydrated, error: null };
-  } catch (err) {
-    return {
-      ok: false,
-      status: buildEmptyFactoryStatus(slug, (err == null ? void 0 : err.message) || "Falha ao ler dados do tenant"),
-      error: (err == null ? void 0 : err.message) || String(err)
-    };
-  }
-}
-async function writeTenantControl(ctx, tenant, patch) {
-  var _a;
-  const slug = (tenant || "orgfy").trim().toLowerCase() || "orgfy";
-  const path = getControlePath(slug);
-  const host = ctx == null ? void 0 : ctx.host;
-  let current = {
-    tenant: slug,
-    mode: "software_factory",
-    killSwitch: false,
-    drain: false,
-    autoMerge: false,
-    mergePolicy: "strict",
-    limits: { gastoDiaUsd: 50, mergesDia: 20, agentes: 4, prsAbertos: 6, falhasSeguidas: 3 },
-    pausedReason: null
-  };
-  try {
-    if (host == null ? void 0 : host.readFile) {
-      const raw = await host.readFile(path);
-      const txt = raw instanceof Uint8Array ? new TextDecoder().decode(raw) : String(raw || "");
-      const parsed = JSON.parse(txt);
-      if (parsed && typeof parsed === "object") current = { ...current, ...parsed };
-    }
-  } catch {
-  }
-  const mergedLimits = { ...current.limits || {}, ...patch.limits || {} };
-  const sanitizedLimits = {
-    gastoDiaUsd: Math.max(0, Number.isFinite(Number(mergedLimits.gastoDiaUsd)) ? Number(mergedLimits.gastoDiaUsd) : 50),
-    mergesDia: Math.max(0, Math.round(Number.isFinite(Number(mergedLimits.mergesDia)) ? Number(mergedLimits.mergesDia) : 20)),
-    agentes: Math.max(1, Math.round(Number.isFinite(Number(mergedLimits.agentes)) ? Number(mergedLimits.agentes) : 4)),
-    prsAbertos: Math.max(1, Math.round(Number.isFinite(Number(mergedLimits.prsAbertos)) ? Number(mergedLimits.prsAbertos) : 6)),
-    falhasSeguidas: Math.max(1, Math.round(Number.isFinite(Number(mergedLimits.falhasSeguidas)) ? Number(mergedLimits.falhasSeguidas) : 3))
-  };
-  const next = {
-    ...current,
-    ...patch,
-    mergePolicy: (patch.mergePolicy || current.mergePolicy) === "fast" ? "fast" : "strict",
-    limits: sanitizedLimits,
-    tenant: slug,
-    updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-  };
-  const serialized = JSON.stringify(next, null, 2) + "\n";
-  try {
-    if (typeof localStorage !== "undefined") {
-      localStorage.setItem(`orgfy_controle_cache_${slug}`, serialized);
-    }
-  } catch {
-  }
-  try {
-    if (typeof ((_a = ctx == null ? void 0 : ctx.artifactStorage) == null ? void 0 : _a.set) === "function") {
-      await ctx.artifactStorage.set(`orgfy:controle:${slug}`, next);
-    }
-  } catch {
-  }
-  if (typeof (host == null ? void 0 : host.runCommand) === "function") {
-    try {
-      const out = await host.runCommand(
-        "orgfy-controle-write",
-        JSON.stringify({ kind: "controle", tenant: slug, control: next })
-      );
-      if (out) {
-        const parsed = JSON.parse(out);
-        if (parsed == null ? void 0 : parsed.ok) {
-          return { ok: true, path: parsed.path || path, control: parsed.control || next };
-        }
-        return { ok: false, path, control: next, error: (parsed == null ? void 0 : parsed.error) || "Falha em orgfy-controle-write" };
-      }
-      if (!(host == null ? void 0 : host.writeFile)) {
-        return {
-          ok: false,
-          path,
-          control: next,
-          error: "orgfy-controle-write retornou vazio no Buzz Desktop (reinstale/recarregue o plugin para aplicar o manifest.json)."
-        };
-      }
-    } catch (err) {
-      if (!(host == null ? void 0 : host.writeFile)) {
-        return { ok: false, path, control: next, error: (err == null ? void 0 : err.message) || String(err) };
-      }
-    }
-  }
-  if (typeof (host == null ? void 0 : host.writeFile) === "function") {
-    try {
-      await host.writeFile(path, serialized);
-      return { ok: true, path, control: next };
-    } catch (err) {
-      return { ok: false, path, control: next, error: (err == null ? void 0 : err.message) || String(err) };
-    }
-  }
-  return { ok: true, path, control: next };
-}
 const FACTORY_SHADOW_CSS = `
 :host, [data-orgfy-factory-root="true"] {
   /* Cores 100% nativas do Buzz Desktop (herda modo light/dark e acento personalizado: bee, citrus, cobalt, iris, magenta, mono) */
@@ -67813,7 +67883,7 @@ const PINNED_HOST_COMMANDS = Object.freeze([
   {
     id: "orgfy-trust-engine",
     scriptPath: "ferramentas/esteira/trust_engine.py",
-    sha256: "682ae81a842589336e91c12ff4f6dc23333ea47677fd363e17ab7662b6c9cb3e"
+    sha256: "4e735a1f13dcbcc0930c548216003239c02c363edbb38dc4dbecd6a376ed99ef"
   },
   {
     id: "orgfy-holding-scaffold",
@@ -71122,13 +71192,14 @@ REGRAS POR PAPEL (APLIQUE APENAS O SEU):
 - [Executor]: use 'orgfy_handoff_pack' ao retomar; mantenha 'orgfy_card_progress' atualizado; edite apenas Escrita exclusiva; se 'git push relay' der exit 128, pegue o header via 'buzz__repo' com GIT_CONFIG_COUNT=1.
 - [Revisor]: máx 15 shells; use 'orgfy_handoff_pack', rode o comando L-22 e faça triagem de obsolescência ANTES de pedir rebase: cheque 'git diff origin/main <branch>' nos arquivos úteis — se o código útil já estiver idêntico na 'main' (diff vazio) ou o único conflito ('modificar/excluir') for em módulo legado removido (ex.: 'porteiro.py', 'pr_processor.py'), NÃO peça rebase nem CI; emita 'GATE: OBSOLETO — FECHAR PR' recomendando fechar o PR e a issue vinculada imediatamente. Caso contrário, confira diff/escopo e emita 'GATE: aceito' ou 'GATE: recusado' (nunca debugue porteiro.py em revisão).
 - [COO]: antes de delegar chame 'orgfy_roster_live' e 'orgfy_smart_dispatch'; limite exploração a 10 shells; escale Agente -> COO -> CEO Empresa -> Iris (só último caso). Todo wake '[ORGFY RADAR AUTO-CURA]' exige 1 desfecho fechado: (A) erro API -> stop + 'orgfy_model_failover'; (B) aberto -> 'orgfy_session_stop(relaunch=true, reset_session_before_relaunch=true)'; (C) já na main -> stop sem relançar. Use 'python3 ferramentas/assign_issue.py' (nunca 'buzz issues assign' direto) e 'python3 ferramentas/issue_status.py --resumo' para placar.
-- [CEO / Board]: delegue sempre com alvo fechado (1-3 arquivos + critério L-22 + o que não refazer).`
+- [CEO / Board]: delegue sempre com alvo fechado (1-3 arquivos + critério L-22 + o que não refazer). Você tem autonomia via 'orgfy_ajustar_limites' para recalibrar teto diário (gastoDiaUsd), mergesDia, agentes e prsAbertos de cada empresa conforme a demanda real, e 'orgfy_reconciliar_agentes(dry_run=false)' para corrigir modelos reprovados no Eval.`
       });
       console.log("[ORGFY] ctx.agents.addInstructions registrado com sucesso.");
     } catch (err) {
       console.warn("[ORGFY] Falha ao registrar addInstructions:", err);
     }
   }
+  const stopAutoReconciler = startAutoAgentModelReconciler(ctx);
   if ((_c = ctx.agents) == null ? void 0 : _c.addTool) {
     try {
       const unifiedTools = buildUnifiedOrgfyTools(ctx);
@@ -71156,6 +71227,10 @@ REGRAS POR PAPEL (APLIQUE APENAS O SEU):
   });
   if (ctx.on) {
     ctx.on("dispose", () => {
+      try {
+        stopAutoReconciler();
+      } catch (_e) {
+      }
       if (mcpServerInstance == null ? void 0 : mcpServerInstance.close) {
         try {
           mcpServerInstance.close();
@@ -71235,6 +71310,7 @@ export {
   resetThreadWakeGuardForTests,
   runOneShotDecisionDispatch,
   sendBuzzChatMessageOrWake,
+  startAutoAgentModelReconciler,
   triageCardWithDecisions,
   triageDiffWithDecisions,
   verifyHostCommandIntegrity,

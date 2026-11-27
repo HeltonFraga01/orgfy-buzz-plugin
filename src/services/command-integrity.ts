@@ -57,7 +57,7 @@ export const PINNED_HOST_COMMANDS: readonly PinnedHostCommandSpec[] = Object.fre
   {
     id: "orgfy-trust-engine",
     scriptPath: "ferramentas/esteira/trust_engine.py",
-    sha256: "682ae81a842589336e91c12ff4f6dc23333ea47677fd363e17ab7662b6c9cb3e",
+    sha256: "4e735a1f13dcbcc0930c548216003239c02c363edbb38dc4dbecd6a376ed99ef",
   },
   {
     id: "orgfy-holding-scaffold",

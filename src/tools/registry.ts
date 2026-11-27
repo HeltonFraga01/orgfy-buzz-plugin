@@ -50,6 +50,7 @@ import { getOrgfyCrdtStore } from "../services/orgfy-crdt-store";
 import { sendBuzzChatMessageOrWake } from "../services/buzz-chat-dispatch";
 import { sendDesktopNotification } from "../services/mcp-server";
 import { recordGenAISpan } from "../services/telemetry-otel";
+import { writeTenantControl } from "../factory/factory-adapter";
 
 export interface UnifiedOrgfyTool {
   name: string;
@@ -785,6 +786,40 @@ export function buildUnifiedOrgfyTools(ctx: Context | any): UnifiedOrgfyTool[] {
         const dryRun = args?.dry_run !== false;
         const res = await reconcileAgentsViaBuzzApi(ctx, { dryRun });
         return { text: JSON.stringify({ ok: true, dryRun, ...res }, null, 2) };
+      },
+    },
+    {
+      name: "orgfy_ajustar_limites",
+      description:
+        "Ajusta dinamicamente os limites e modo operacional da esteira de qualquer empresa (controle-<tenant>.json) — gastoDiaUsd, mergesDia, agentes, prsAbertos, falhasSeguidas, mode e autoMerge — permitindo que OrgFy Iris, Conselho e COO recalibrem a fábrica sem intervenção humana.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          empresa: { type: "string", description: "Slug da empresa (ex.: 'orgfy', 'lumen-iptv', 'saas-tributario')" },
+          mode: { type: "string", enum: ["manual", "assisted", "software_factory", "dark_factory"] },
+          autoMerge: { type: "boolean" },
+          gastoDiaUsd: { type: "number", description: "Teto diário de gasto em USD" },
+          mergesDia: { type: "number", description: "Máximo de merges por dia" },
+          agentes: { type: "number", description: "Capacidade simultânea de agentes/vagas no auto-despacho" },
+          prsAbertos: { type: "number", description: "Limite de PRs abertos em paralelo (WIP)" },
+          falhasSeguidas: { type: "number", description: "Limite de falhas seguidas antes de pausar" },
+          killSwitch: { type: "boolean" },
+        },
+        required: ["empresa"],
+      },
+      execute: async (args: any) => {
+        const empresa = String(args?.empresa || "orgfy").trim().toLowerCase();
+        const limits: Record<string, number> = {};
+        for (const k of ["gastoDiaUsd", "mergesDia", "agentes", "prsAbertos", "falhasSeguidas"]) {
+          if (typeof args?.[k] === "number" && Number.isFinite(args[k])) limits[k] = args[k];
+        }
+        const patch: any = {};
+        if (args?.mode) patch.mode = args.mode;
+        if (typeof args?.autoMerge === "boolean") patch.autoMerge = args.autoMerge;
+        if (typeof args?.killSwitch === "boolean") patch.killSwitch = args.killSwitch;
+        if (Object.keys(limits).length > 0) patch.limits = limits;
+        const res = await writeTenantControl(ctx, empresa, patch);
+        return { text: JSON.stringify(res, null, 2), isError: !res.ok };
       },
     },
     {
