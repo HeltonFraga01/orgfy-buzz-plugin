@@ -10139,26 +10139,53 @@ function createCodeDenInspectorDrawer(React) {
                     (linkedPr == null ? void 0 : linkedPr.title) || (repoDetail == null ? void 0 : repoDetail.title) || item.title
                   )
                 ),
-                onOpenPrInBuzz && linkedPr ? h(
-                  "button",
-                  {
-                    type: "button",
-                    className: "of-btn",
-                    title: "Abrir PR no Buzz Repos",
-                    style: { padding: "5px 9px", fontSize: "11px", flexShrink: 0 },
-                    onClick: () => onOpenPrInBuzz(linkedPr)
-                  },
-                  "Buzz PR ↗"
-                ) : onOpenInBuzz && h(
-                  "button",
-                  {
-                    type: "button",
-                    className: "of-btn",
-                    title: "Abrir no Buzz Repos",
-                    style: { padding: "5px 9px", fontSize: "11px", flexShrink: 0 },
-                    onClick: () => onOpenInBuzz(item)
-                  },
-                  "Buzz Repos ↗"
+                h(
+                  "div",
+                  { style: { display: "inline-flex", alignItems: "center", gap: "5px", flexShrink: 0, flexWrap: "wrap" }, "data-issue-actions-bar": "true" },
+                  props.onManageIssue && item.stage !== "merged" && h(
+                    "button",
+                    {
+                      type: "button",
+                      className: "of-btn",
+                      title: "Marcar issue como concluída / resolvida",
+                      style: { padding: "4px 8px", fontSize: "11px", color: "var(--status-done, #3dd68c)", borderColor: "rgba(61,214,140,0.35)" },
+                      onClick: () => void props.onManageIssue(item, { action: "resolve" })
+                    },
+                    "✓ Concluir"
+                  ),
+                  props.onManageIssue && item.stage !== "merged" && h(
+                    "button",
+                    {
+                      type: "button",
+                      className: "of-btn",
+                      "data-variant": "danger",
+                      title: "Fechar / excluir issue da fila ativa",
+                      style: { padding: "4px 8px", fontSize: "11px" },
+                      onClick: () => void props.onManageIssue(item, { action: "close" })
+                    },
+                    "× Fechar"
+                  ),
+                  onOpenPrInBuzz && linkedPr ? h(
+                    "button",
+                    {
+                      type: "button",
+                      className: "of-btn",
+                      title: "Abrir PR no Buzz Repos",
+                      style: { padding: "4px 8px", fontSize: "11px" },
+                      onClick: () => onOpenPrInBuzz(linkedPr)
+                    },
+                    "Buzz PR ↗"
+                  ) : onOpenInBuzz && h(
+                    "button",
+                    {
+                      type: "button",
+                      className: "of-btn",
+                      title: "Abrir no Buzz Repos",
+                      style: { padding: "4px 8px", fontSize: "11px" },
+                      onClick: () => onOpenInBuzz(item)
+                    },
+                    "Buzz Repos ↗"
+                  )
                 )
               ),
               // Badges de Estado, Checks, Revisão, +add/-del e Branch/Commit (1:1 CodeDen)
@@ -10524,20 +10551,50 @@ function createCodeDenInspectorDrawer(React) {
                   { style: { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "8px" } },
                   structured.papeis.executor && h(
                     "div",
-                    { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
-                    h("div", { style: { fontSize: "10px", color: "var(--muted-foreground)", marginBottom: "4px" } }, "Executor"),
+                    { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)", display: "flex", flexDirection: "column", gap: "5px" } },
+                    h("div", { style: { fontSize: "10px", color: "var(--muted-foreground)" } }, "Executor"),
                     h(
-                      "button",
-                      {
-                        type: "button",
-                        className: "of-btn",
-                        style: { padding: "2px 8px", fontSize: "11.5px" },
-                        onClick: () => {
-                          const ag = resolveCrewByName(structured.papeis.executor);
-                          if (ag) onOpenAgentDm == null ? void 0 : onOpenAgentDm(ag);
-                        }
-                      },
-                      `${structured.papeis.executor} ↗`
+                      "div",
+                      { style: { display: "flex", alignItems: "center", gap: "5px", flexWrap: "wrap" } },
+                      h(
+                        "button",
+                        {
+                          type: "button",
+                          className: "of-btn",
+                          style: { padding: "2px 8px", fontSize: "11.5px" },
+                          onClick: () => {
+                            const ag = resolveCrewByName(structured.papeis.executor);
+                            if (ag) onOpenAgentDm == null ? void 0 : onOpenAgentDm(ag);
+                          }
+                        },
+                        `${structured.papeis.executor} ↗`
+                      ),
+                      props.onManageIssue && Array.isArray(props.tenantAgents) && props.tenantAgents.length > 0 && h(
+                        "select",
+                        {
+                          "aria-label": "Trocar executor",
+                          title: "Trocar executor desta issue",
+                          defaultValue: "",
+                          style: {
+                            fontSize: "10.5px",
+                            padding: "2px 5px",
+                            borderRadius: "5px",
+                            border: "1px solid var(--border)",
+                            background: "var(--muted)",
+                            color: "var(--foreground)",
+                            maxWidth: "120px"
+                          },
+                          onChange: (e) => {
+                            const pickedName = String(e.target.value || "").trim();
+                            if (!pickedName) return;
+                            const ag = props.tenantAgents.find((a) => a.name === pickedName);
+                            void props.onManageIssue(item, { action: "reassign", executorName: pickedName, executorPubkey: ag == null ? void 0 : ag.pubkey });
+                            e.target.value = "";
+                          }
+                        },
+                        h("option", { value: "" }, "Trocar..."),
+                        props.tenantAgents.map((a) => h("option", { key: a.name, value: a.name }, a.name))
+                      )
                     )
                   ),
                   structured.papeis.revisor && h(
@@ -63958,7 +64015,7 @@ const PINNED_HOST_COMMANDS = Object.freeze([
   {
     id: "orgfy-controle-write",
     scriptPath: "ferramentas/esteira/controle_fabrica_write.py",
-    sha256: "7a82fb68983294965a42ff93cc805e9340a8ddd96563aec108abe774dae49345"
+    sha256: "a0e3938e0f9d79bd074ee15092ad20dc776381b6d1993674fefe3d6bfea9f3bd"
   },
   {
     id: "orgfy-holdout",
@@ -66494,6 +66551,46 @@ Nota: ${evidence.note}`
         onToggleChecklistStep: handleToggleChecklistStep,
         onSendDiffReview: handleSendDiffReview,
         onRecordVisualEvidence: handleRecordVisualEvidence,
+        tenantAgents: tenantAgents.map((a) => ({ name: a.name, pubkey: a.pubkey, papel: a.papel })),
+        onManageIssue: async (targetItem, req) => {
+          var _a2;
+          const host = ctx == null ? void 0 : ctx.host;
+          if (typeof (host == null ? void 0 : host.runCommand) !== "function") {
+            notify2("ctx.host.runCommand indisponível para gerenciar issues.");
+            return;
+          }
+          try {
+            const rawOut = await host.runCommand(
+              "orgfy-controle-write",
+              JSON.stringify({
+                kind: "issue_action",
+                tenant,
+                repoId: (liveRepo == null ? void 0 : liveRepo.dtag) || ((_a2 = status.tenantManifest) == null ? void 0 : _a2.repoId) || tenant,
+                repoOwner: (liveRepo == null ? void 0 : liveRepo.owner) || DEFAULT_ORGFY_REPO_OWNER,
+                issueId: targetItem.id,
+                action: req.action,
+                executorName: req.executorName,
+                executorPubkey: req.executorPubkey
+              })
+            );
+            const parsed = rawOut ? JSON.parse(rawOut) : { ok: false };
+            if (!(parsed == null ? void 0 : parsed.ok)) {
+              notify2(`Falha ao ${req.action === "reassign" ? "reatribuir" : "atualizar"} issue: ${(parsed == null ? void 0 : parsed.error) || "erro desconhecido"}`);
+              return;
+            }
+            if (req.action === "resolve" || req.action === "close") {
+              setSelectedItem(null);
+              notify2(
+                req.action === "resolve" ? `Issue #${targetItem.id.slice(0, 8)} marcada como concluída${parsed.relayOk ? " (relay + board)" : " (board local)"} ✓` : `Issue #${targetItem.id.slice(0, 8)} fechada e removida da fila${parsed.relayOk ? " (relay + board)" : " (board local)"} ✓`
+              );
+            } else {
+              notify2(`Executor de #${targetItem.id.slice(0, 8)} alterado para ${req.executorName}${parsed.relayOk ? " (relay + board)" : " (board local)"} ✓`);
+            }
+            await refresh(tenant, false, false);
+          } catch (err) {
+            notify2(`Erro ao atualizar issue: ${(err == null ? void 0 : err.message) || err}`);
+          }
+        },
         onEscalateItem: async (targetItem, target) => {
           var _a2, _b2, _c2;
           const targetName = target === "iris" ? ((_a2 = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _a2.nome) || "OrgFy Iris" : target === "review_l01" ? Object.values(((_b2 = status.tenantManifest) == null ? void 0 : _b2.revisoresPorSuperficie) || {})[0] || "OrgFy Teo" : ((_c2 = status.tenantManifest) == null ? void 0 : _c2.coo) || "OrgFy Bento";

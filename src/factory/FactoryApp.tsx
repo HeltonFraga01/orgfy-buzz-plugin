@@ -2761,6 +2761,47 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         onToggleChecklistStep: handleToggleChecklistStep,
         onSendDiffReview: handleSendDiffReview,
         onRecordVisualEvidence: handleRecordVisualEvidence,
+        tenantAgents: tenantAgents.map((a) => ({ name: a.name, pubkey: a.pubkey, papel: a.papel })),
+        onManageIssue: async (targetItem: FactoryWorkItem, req: { action: "resolve" | "close" | "reassign"; executorName?: string; executorPubkey?: string }) => {
+          const host = (ctx as any)?.host;
+          if (typeof host?.runCommand !== "function") {
+            notify("ctx.host.runCommand indisponível para gerenciar issues.");
+            return;
+          }
+          try {
+            const rawOut = await host.runCommand(
+              "orgfy-controle-write",
+              JSON.stringify({
+                kind: "issue_action",
+                tenant,
+                repoId: liveRepo?.dtag || status.tenantManifest?.repoId || tenant,
+                repoOwner: liveRepo?.owner || DEFAULT_ORGFY_REPO_OWNER,
+                issueId: targetItem.id,
+                action: req.action,
+                executorName: req.executorName,
+                executorPubkey: req.executorPubkey,
+              })
+            );
+            const parsed = rawOut ? JSON.parse(rawOut) : { ok: false };
+            if (!parsed?.ok) {
+              notify(`Falha ao ${req.action === "reassign" ? "reatribuir" : "atualizar"} issue: ${parsed?.error || "erro desconhecido"}`);
+              return;
+            }
+            if (req.action === "resolve" || req.action === "close") {
+              setSelectedItem(null);
+              notify(
+                req.action === "resolve"
+                  ? `Issue #${targetItem.id.slice(0, 8)} marcada como concluída${parsed.relayOk ? " (relay + board)" : " (board local)"} ✓`
+                  : `Issue #${targetItem.id.slice(0, 8)} fechada e removida da fila${parsed.relayOk ? " (relay + board)" : " (board local)"} ✓`
+              );
+            } else {
+              notify(`Executor de #${targetItem.id.slice(0, 8)} alterado para ${req.executorName}${parsed.relayOk ? " (relay + board)" : " (board local)"} ✓`);
+            }
+            await refresh(tenant, false, false);
+          } catch (err: any) {
+            notify(`Erro ao atualizar issue: ${err?.message || err}`);
+          }
+        },
         onEscalateItem: async (targetItem: FactoryWorkItem, target: "coo" | "ceo_empresa" | "iris" | "review_l01") => {
           const targetName =
             target === "iris"

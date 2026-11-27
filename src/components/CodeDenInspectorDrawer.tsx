@@ -60,10 +60,12 @@ export interface CodeDenInspectorDrawerProps {
   onOpenCommitInBuzz?: (commit: string) => void;
   onOpenAgentDm?: (agent: { key?: string; pubkey?: string; name?: string }) => void;
   onSessionAction?: (agentKey: string, action: "interrupt" | "compact" | "new") => void;
+  tenantAgents?: Array<{ name: string; pubkey?: string; papel?: string }>;
   onToggleChecklistStep?: (stepId: string, nextDone: boolean, item: FactoryWorkItem) => void;
   onSendDiffReview?: (comments: DiffAnchoredComment[], item: FactoryWorkItem, executorName?: string) => Promise<void> | void;
   onRecordVisualEvidence?: (evidence: VisualEvidenceSubmission, item: FactoryWorkItem, executorName?: string) => Promise<void> | void;
   onEscalateItem?: (item: FactoryWorkItem, target: "coo" | "ceo_empresa" | "iris" | "review_l01") => Promise<void> | void;
+  onManageIssue?: (item: FactoryWorkItem, req: { action: "resolve" | "close" | "reassign"; executorName?: string; executorPubkey?: string }) => Promise<void> | void;
   onClose: () => void;
 }
 
@@ -1412,30 +1414,59 @@ export function createCodeDenInspectorDrawer(React: Context["react"]) {
                       linkedPr?.title || repoDetail?.title || item.title
                     )
                   ),
-                  (onOpenPrInBuzz && linkedPr
-                    ? h(
-                        "button",
-                        {
-                          type: "button",
-                          className: "of-btn",
-                          title: "Abrir PR no Buzz Repos",
-                          style: { padding: "5px 9px", fontSize: "11px", flexShrink: 0 },
-                          onClick: () => onOpenPrInBuzz(linkedPr),
-                        },
-                        "Buzz PR ↗"
-                      )
-                    : onOpenInBuzz &&
+                  h(
+                    "div",
+                    { style: { display: "inline-flex", alignItems: "center", gap: "5px", flexShrink: 0, flexWrap: "wrap" }, "data-issue-actions-bar": "true" },
+                    props.onManageIssue && item.stage !== "merged" &&
                       h(
                         "button",
                         {
                           type: "button",
                           className: "of-btn",
-                          title: "Abrir no Buzz Repos",
-                          style: { padding: "5px 9px", fontSize: "11px", flexShrink: 0 },
-                          onClick: () => onOpenInBuzz(item),
+                          title: "Marcar issue como concluída / resolvida",
+                          style: { padding: "4px 8px", fontSize: "11px", color: "var(--status-done, #3dd68c)", borderColor: "rgba(61,214,140,0.35)" },
+                          onClick: () => void props.onManageIssue!(item, { action: "resolve" }),
                         },
-                        "Buzz Repos ↗"
-                      ))
+                        "✓ Concluir"
+                      ),
+                    props.onManageIssue && item.stage !== "merged" &&
+                      h(
+                        "button",
+                        {
+                          type: "button",
+                          className: "of-btn",
+                          "data-variant": "danger",
+                          title: "Fechar / excluir issue da fila ativa",
+                          style: { padding: "4px 8px", fontSize: "11px" },
+                          onClick: () => void props.onManageIssue!(item, { action: "close" }),
+                        },
+                        "× Fechar"
+                      ),
+                    (onOpenPrInBuzz && linkedPr
+                      ? h(
+                          "button",
+                          {
+                            type: "button",
+                            className: "of-btn",
+                            title: "Abrir PR no Buzz Repos",
+                            style: { padding: "4px 8px", fontSize: "11px" },
+                            onClick: () => onOpenPrInBuzz(linkedPr),
+                          },
+                          "Buzz PR ↗"
+                        )
+                      : onOpenInBuzz &&
+                        h(
+                          "button",
+                          {
+                            type: "button",
+                            className: "of-btn",
+                            title: "Abrir no Buzz Repos",
+                            style: { padding: "4px 8px", fontSize: "11px" },
+                            onClick: () => onOpenInBuzz(item),
+                          },
+                          "Buzz Repos ↗"
+                        ))
+                  )
                 ),
 
                 // Badges de Estado, Checks, Revisão, +add/-del e Branch/Commit (1:1 CodeDen)
@@ -1863,20 +1894,51 @@ export function createCodeDenInspectorDrawer(React: Context["react"]) {
                         structured.papeis.executor &&
                           h(
                             "div",
-                            { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)" } },
-                            h("div", { style: { fontSize: "10px", color: "var(--muted-foreground)", marginBottom: "4px" } }, "Executor"),
+                            { style: { padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)", display: "flex", flexDirection: "column", gap: "5px" } },
+                            h("div", { style: { fontSize: "10px", color: "var(--muted-foreground)" } }, "Executor"),
                             h(
-                              "button",
-                              {
-                                type: "button",
-                                className: "of-btn",
-                                style: { padding: "2px 8px", fontSize: "11.5px" },
-                                onClick: () => {
-                                  const ag = resolveCrewByName(structured.papeis.executor);
-                                  if (ag) onOpenAgentDm?.(ag);
+                              "div",
+                              { style: { display: "flex", alignItems: "center", gap: "5px", flexWrap: "wrap" } },
+                              h(
+                                "button",
+                                {
+                                  type: "button",
+                                  className: "of-btn",
+                                  style: { padding: "2px 8px", fontSize: "11.5px" },
+                                  onClick: () => {
+                                    const ag = resolveCrewByName(structured.papeis.executor);
+                                    if (ag) onOpenAgentDm?.(ag);
+                                  },
                                 },
-                              },
-                              `${structured.papeis.executor} ↗`
+                                `${structured.papeis.executor} ↗`
+                              ),
+                              props.onManageIssue && Array.isArray(props.tenantAgents) && props.tenantAgents.length > 0 &&
+                                h(
+                                  "select",
+                                  {
+                                    "aria-label": "Trocar executor",
+                                    title: "Trocar executor desta issue",
+                                    defaultValue: "",
+                                    style: {
+                                      fontSize: "10.5px",
+                                      padding: "2px 5px",
+                                      borderRadius: "5px",
+                                      border: "1px solid var(--border)",
+                                      background: "var(--muted)",
+                                      color: "var(--foreground)",
+                                      maxWidth: "120px",
+                                    },
+                                    onChange: (e: any) => {
+                                      const pickedName = String(e.target.value || "").trim();
+                                      if (!pickedName) return;
+                                      const ag = props.tenantAgents!.find((a) => a.name === pickedName);
+                                      void props.onManageIssue!(item, { action: "reassign", executorName: pickedName, executorPubkey: ag?.pubkey });
+                                      e.target.value = "";
+                                    },
+                                  },
+                                  h("option", { value: "" }, "Trocar..."),
+                                  props.tenantAgents.map((a) => h("option", { key: a.name, value: a.name }, a.name))
+                                )
                             )
                           ),
                         structured.papeis.revisor &&
