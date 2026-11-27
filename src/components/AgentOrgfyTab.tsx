@@ -103,13 +103,18 @@ function isBlockedGatewayCatalogModel(modelId: string): boolean {
     m === "haiku" ||
     m === "grok-4.5" ||
     m.includes("gemini-3.8-flash-medium") ||
-    m.includes("gemini-4-hydrogen") ||
     m.includes("mistral-large-4-1t-a52b") ||
     m.includes("claude-opus-5-5") ||
     m.includes("minimax-m3.1-flash") ||
     m.includes("pol/community/") ||
+    m.includes("pollinations/community/") ||
     m.startsWith("auto/")
   );
+}
+
+export function isVipOrLeadershipAgent(roleOrName: string): boolean {
+  const lower = normName(roleOrName);
+  return /(iris|bento|arquit|teo|vera|hugo|lara|ceo|coo|revis|qa|segur|secur|oraculo|conselho|board)/.test(lower);
 }
 
 function formatLatencyShort(ms?: number): string {
@@ -452,27 +457,35 @@ export function pickLiveRecommendedModel(
   roleOrName: string,
   catalog: LiveGatewayModelCatalog | null
 ): { provider: string; model: string; tierLabel: string } {
-  const lower = normName(roleOrName);
-  const isTier1 = /(iris|bento|arquit|teo|vera|hugo|lara|ceo|coo|revis|qa|segur|secur|oraculo|conselho|board)/.test(lower);
-  const tierLabel = isTier1 ? "Tier 1 (Liderança/Revisão)" : "Tier 2 (Execução/Rápido)";
+  const isTier1 = isVipOrLeadershipAgent(roleOrName);
+  const tierLabel = isTier1 ? "Tier 1 (VIP · Somente Pago)" : "Tier 2 (Execução/Rápido)";
 
   if (catalog && catalog.approvedOptions.length > 0) {
-    const pool = catalog.approvedOptions.filter((o) => !isBlockedGatewayCatalogModel(o.model) && (catalog.forceFree || !o.isFree));
-    if (pool.length > 0) {
-      if (isTier1) {
+    const unblocked = catalog.approvedOptions.filter((o) => !isBlockedGatewayCatalogModel(o.model) && o.mode !== "blocked");
+    if (isTier1) {
+      // Regra estrita VIP: NUNCA usa :free quando houver qualquer modelo pago disponível, mesmo com forceFree ligado.
+      const paidPool = unblocked.filter((o) => !o.isFree);
+      if (paidPool.length > 0) {
         const preferredPaid =
-          pool.find((o) => !o.isFree && o.mode === "vip") ||
-          pool.find((o) => !o.isFree && /(gpt-6\.1|claude-sonnet-4-6|claude-opus-4-6|gemini-2\.5-flash)/.test(o.model.toLowerCase())) ||
-          pool.find((o) => !o.isFree) ||
-          pool[0];
+          paidPool.find((o) => o.mode === "vip") ||
+          paidPool.find((o) => /(gpt-6\.1|claude-sonnet-4-6|claude-opus-4-6|gemini-4-hydrogen|gemini-2\.5-flash)/.test(o.model.toLowerCase())) ||
+          paidPool[0];
         return { provider: preferredPaid.provider, model: preferredPaid.model, tierLabel };
       }
-      const preferredFast =
-        (catalog.forceFree ? pool.find((o) => o.isFree && o.mode !== "blocked") : null) ||
-        pool.find((o) => !o.isFree && o.mode !== "blocked" && o.model.toLowerCase() === "gemini-2.5-flash") ||
-        pool.find((o) => !o.isFree && o.mode !== "blocked") ||
-        pool[0];
-      return { provider: preferredFast.provider, model: preferredFast.model, tierLabel };
+      if (unblocked.length > 0) {
+        return { provider: unblocked[0].provider, model: unblocked[0].model, tierLabel };
+      }
+    } else {
+      const pool = unblocked.filter((o) => catalog.forceFree || !o.isFree);
+      if (pool.length > 0) {
+        const preferredFast =
+          (catalog.forceFree ? pool.find((o) => o.isFree) : null) ||
+          pool.find((o) => !o.isFree && o.model.toLowerCase() === "gemini-2.5-flash") ||
+          pool.find((o) => !o.isFree && o.model.toLowerCase().includes("gemini-4-hydrogen")) ||
+          pool.find((o) => !o.isFree) ||
+          pool[0];
+        return { provider: preferredFast.provider, model: preferredFast.model, tierLabel };
+      }
     }
   }
 

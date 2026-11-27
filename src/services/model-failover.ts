@@ -1,6 +1,6 @@
 import { joinHome } from "../config";
 import type { Context } from "@buzz/author";
-import { loadLiveGatewayModelCatalog, pickLiveRecommendedModel } from "../components/AgentOrgfyTab";
+import { isVipOrLeadershipAgent, loadLiveGatewayModelCatalog, pickLiveRecommendedModel } from "../components/AgentOrgfyTab";
 
 export interface ModelCandidateScore {
   model: string;
@@ -64,18 +64,18 @@ export async function reconcileAgentsViaBuzzApi(
     const model = cfg.model || ag?.model || null;
     const mlow = String(model || "").trim().toLowerCase();
     const shortM = String(mlow.split("/").pop() || mlow).trim();
+    const isVip = isVipOrLeadershipAgent(String(ag?.name || ag?.key || ""));
+    const hasAnyPaidApproved = Boolean(!hasLiveCatalog || catalog?.approvedOptions.some((o) => !o.isFree));
     const isOfflineInGateway = Boolean(
       hasLiveCatalog && (catalog?.offlineModels.has(mlow) || catalog?.offlineModels.has(shortM))
-    );
-    const isApprovedInGateway = Boolean(
-      hasLiveCatalog && (catalog?.approvedModels.has(mlow) || catalog?.approvedModels.has(shortM))
     );
     const needsFix =
       !prov ||
       !model ||
       isUnsupportedAgentModel(mlow) ||
       isOfflineInGateway ||
-      (!catalog?.forceFree && isFreeModelId(mlow)) ||
+      (isVip && isFreeModelId(mlow) && hasAnyPaidApproved) ||
+      (!isVip && !catalog?.forceFree && isFreeModelId(mlow)) ||
       (prov === "nexusmind_openai" && mlow.startsWith("antigravity/"));
     if (!needsFix) continue;
     let nextModel: string;
@@ -318,11 +318,11 @@ export function isUnsupportedAgentModel(modelId: string): boolean {
     m === "haiku" ||
     m === "grok-4.5" ||
     m.includes("gemini-3.8-flash-medium") ||
-    m.includes("gemini-4-hydrogen") ||
     m.includes("mistral-large-4-1t-a52b") ||
     m.includes("claude-opus-5-5") ||
     m.includes("minimax-m3.1-flash") ||
     m.includes("pol/community/") ||
+    m.includes("pollinations/community/") ||
     m.startsWith("auto/") ||
     m.includes("tab_jump") ||
     m.includes("autocomplete") ||
@@ -392,7 +392,8 @@ function getDisabledModelsFromLocalStorage(): Set<string> {
 async function loadSharedNexusMindRanking(
   ctx: Context,
   excludeSet: Set<string>,
-  preferFree: boolean
+  preferFree: boolean,
+  isVip: boolean = false
 ): Promise<ModelCandidateScore[]> {
   const disabled = getDisabledModelsFromLocalStorage();
   let parsed: any = null;
@@ -407,13 +408,14 @@ async function loadSharedNexusMindRanking(
         const cp = JSON.parse(decodeHostBytes(raw));
         if (cp && Array.isArray(cp.models) && cp.models.length > 0) {
           const cpPolicy = cp.policy && typeof cp.policy === "object" ? cp.policy : {};
-          const effectivePreferFree = preferFree || Boolean(cpPolicy.forceFree);
+          // Regra estrita VIP: ignora forceFree para agentes VIP quando houver modelos pagos
+          const effectivePreferFree = isVip ? false : (preferFree || Boolean(cpPolicy.forceFree));
           const cpCandidates: ModelCandidateScore[] = [];
           for (const m of cp.models) {
             const mid = String(m?.model || "").trim();
             if (!mid || isUnsupportedAgentModel(mid) || disabled.has(mid) || excludeSet.has(mid.toLowerCase())) continue;
             if (!m.online || !m.evalApproved) continue;
-            if (m.policyState === "blocked" || m.policyState === "vip") continue;
+            if (m.policyState === "blocked" || (!isVip && m.policyState === "vip")) continue;
             const free = Boolean(m.isFree) || isFreeModelId(mid);
             if (effectivePreferFree && !free) continue;
             if (!effectivePreferFree && free) continue;
@@ -470,7 +472,7 @@ async function loadSharedNexusMindRanking(
 
   if (parsed && Array.isArray(parsed.models)) {
     const policy = parsed.policy && typeof parsed.policy === "object" ? parsed.policy : {};
-    const effectivePreferFree = preferFree || Boolean(policy.forceFree);
+    const effectivePreferFree = isVip ? false : (preferFree || Boolean(policy.forceFree));
     const blockedAuto = new Set(
       (Array.isArray(policy.autoAssignBlocked) ? policy.autoAssignBlocked : []).map((x: any) =>
         String(x || "").trim().toLowerCase()
@@ -755,7 +757,6 @@ export async function executeSmartModelFailover(
   ctx: Context,
   input: ModelFailoverInput = {}
 ): Promise<ModelFailoverResult> {
-  const preferFree = Boolean(input.prefer_free);
   const applyChange = Boolean(input.apply);
   const retrigger = input.retrigger !== false;
   const maxProbes = Math.max(1, Math.min(10, Number(input.max_probes || 6)));
@@ -765,6 +766,9 @@ export async function executeSmartModelFailover(
   const matchedAgent = input.agente || input.agent_pubkey
     ? findAgentInSnapshot(agentsApi, input.agente, input.agent_pubkey)
     : undefined;
+  const isVip = isVipOrLeadershipAgent(String(matchedAgent?.name || input.agente || ""));
+  // Regra estrita VIP: nunca prefere :free enquanto existir qualquer modelo pago disponível.
+  const preferFree = isVip ? false : Boolean(input.prefer_free);
 
   const previousModel =
     (matchedAgent?.config && typeof matchedAgent.config === "object"
@@ -785,13 +789,13 @@ export async function executeSmartModelFailover(
   if (previousModel) excludeSet.add(previousModel.toLowerCase());
 
   // 1. Primeiro verifica o ranking real compartilhado pelo NexusMind Gateway
-  let sharedRanking = await loadSharedNexusMindRanking(ctx, excludeSet, preferFree);
+  let sharedRanking = await loadSharedNexusMindRanking(ctx, excludeSet, preferFree, isVip);
   // Se todos os modelos do ranking estiverem em quarentena, relaxa quarentena mantendo apenas o modelo atual excluído
   if (sharedRanking.length === 0 && quarantined.size > 0) {
     const minimalExclude = new Set<string>();
     if (failedNorm) minimalExclude.add(failedNorm);
     if (previousModel) minimalExclude.add(previousModel.toLowerCase());
-    sharedRanking = await loadSharedNexusMindRanking(ctx, minimalExclude, preferFree);
+    sharedRanking = await loadSharedNexusMindRanking(ctx, minimalExclude, preferFree, isVip);
   }
   // Separação de domínio de falha (Cross-Provider Preference): prioriza provedor distinto do modelo que falhou
   const failedProvider = previousModel ? inferProviderId(previousModel) : failedNorm ? inferProviderId(failedNorm) : null;
