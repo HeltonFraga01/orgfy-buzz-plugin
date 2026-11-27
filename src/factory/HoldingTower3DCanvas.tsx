@@ -1,10 +1,9 @@
 // Adaptado de CodeDen (MIT) commit b0b2a5a — Torre da Holding Cortexx / OrgFy (Maquete LEGO / Voxel 3D Multi-Andares)
-// - Estética LEGO Architecture / Voxel: pódio com pinos LEGO, plantas em blocos voxel, personagens LEGO/Voxel,
-//   fachadas de vidro temperado, iluminação interna quente em cada andar e marcadores externos 1F..4F
-// - Navegação livre 3D: Orbit 360° até nível do piso (phi 0.18..1.50), Pan (botão direito ou Shift+arrastar),
-//   Zoom profundo até close-up (frustum 2.0..26) no ponto do cursor e teclas W/A/S/D + Q/E
-// - Janela flutuante Picture-in-Picture (PiP) nativa estilo YouTube (captureStream + requestPictureInPicture)
-// - Telemetria 100% real clicável: pacotes na esteira e cápsulas no elevador ligados a PRs/cards/turnos reais
+// - Estética LEGO Architecture / Voxel: pódio com pinos LEGO (InstancedMesh), plantas em blocos voxel, personagens LEGO/Voxel,
+//   fachadas de vidro temperado, iluminação PBR (RoomEnvironment + ACESFilmic + FogExp2), semáforo CI e portal de entrega por andar
+// - Unificado com a Fábrica 3D: agentes reais por manifesto, micro-animação de entrega na esteira, confete InstancedMesh,
+//   balão minimalista (• • •), clique em qualquer agente/pacote/andar e modo "▶ Simular" (ciclo completo Conselho <-> Subsidiária)
+// - HUD minimalista estilo Apple Floating Glass Dock + Picture-in-Picture (PiP) + Vista Explodida / Isolar Andar / Planta / Nível Piso
 
 import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
@@ -70,6 +69,17 @@ type TowerSelection =
   | { kind: "floor"; floor: HoldingTowerFloorInfo }
   | { kind: "packet"; packet: TowerLivePacket; floor: HoldingTowerFloorInfo }
   | { kind: "agent"; agent: HoldingTowerFloorInfo["agents"][number]; floor: HoldingTowerFloorInfo };
+
+const TOWER_DEMO_STEP_MS = [4400, 5000, 4800, 5000, 4600];
+
+function towerDemoLabel(phase: number, floorName: string): string {
+  if (phase === 1) return `1/5 · Diretriz descendo do 4F Conselho pelo elevador para ${floorName}`;
+  if (phase === 2) return `2/5 · Equipe de ${floorName} recebendo a tarefa e levando para a esteira`;
+  if (phase === 3) return `3/5 · CI rodando (semáforo âmbar) e revisão L-01 em andamento`;
+  if (phase === 4) return `4/5 · Aprovado! Pacote entregue no portal SHIP com comemoração`;
+  if (phase === 5) return `5/5 · Telemetria de entrega subindo ao 4F Conselho da Holding`;
+  return "";
+}
 
 function rgbToCss([r, g, b]: Rgb, alpha = 1): string {
   const rr = Math.round(Math.max(0, Math.min(1, r)) * 255);
@@ -364,7 +374,6 @@ function buildWorkstationUnit(
   mug.position.set(0.36, 0.7, 0.28);
   g.add(mug);
 
-  // Cadeira em blocos LEGO
   const base = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.38, 0.05, 0.38)), matChrome);
   base.position.set(0, 0.025, -0.14);
   g.add(base);
@@ -407,6 +416,49 @@ function buildBoardChair(
   return chair;
 }
 
+/** Semáforo de CI minimalista (vermelho / âmbar / verde) igual ao da Fábrica 3D. */
+function buildCiSignalTower(
+  kit: Kit,
+  p: FloorPalette,
+  matSteel: THREE.Material,
+  state: "green" | "amber" | "red"
+): { group: THREE.Group; amberMat: THREE.MeshStandardMaterial; greenMat: THREE.MeshStandardMaterial } {
+  const g = new THREE.Group();
+  const pole = new THREE.Mesh(kit.own(new THREE.CylinderGeometry(0.032, 0.04, 1.02, 10)), matSteel);
+  pole.position.y = 0.51;
+  g.add(pole);
+
+  const lampGeo = kit.own(new THREE.CylinderGeometry(0.07, 0.07, 0.11, 16));
+  const makeLampMat = (rgb: Rgb, lit: boolean) =>
+    kit.own(
+      new THREE.MeshStandardMaterial({
+        color: colour(lit ? rgb : ([rgb[0] * 0.35, rgb[1] * 0.35, rgb[2] * 0.35] as Rgb)),
+        emissive: colour(rgb),
+        emissiveIntensity: lit ? 1.55 : 0.05,
+        roughness: 0.28,
+      })
+    );
+
+  const greenMat = makeLampMat(p.lamp.green, state === "green");
+  const amberMat = makeLampMat(p.lamp.amber, state === "amber");
+  const redMat = makeLampMat(p.lamp.red, state === "red");
+
+  const specs: Array<[THREE.MeshStandardMaterial, number]> = [
+    [greenMat, 0.96],
+    [amberMat, 1.09],
+    [redMat, 1.22],
+  ];
+  for (const [mat, y] of specs) {
+    const m = new THREE.Mesh(lampGeo, mat);
+    m.position.y = y;
+    g.add(m);
+  }
+  const cap = new THREE.Mesh(kit.own(new THREE.CylinderGeometry(0.078, 0.078, 0.035, 16)), matSteel);
+  cap.position.y = 1.29;
+  g.add(cap);
+  return { group: g, amberMat, greenMat };
+}
+
 export function createHoldingTower3DComponent(ctx: Context) {
   const React = ctx.react;
   const h = React.createElement;
@@ -419,14 +471,15 @@ export function createHoldingTower3DComponent(ctx: Context) {
 
     const [selection, setSelection] = React.useState<TowerSelection | null>(null);
     const [hoveredSlug, setHoveredSlug] = React.useState<string | null>(null);
-    const [fitTick, setFitTick] = React.useState(0);
+    const [fitTick] = React.useState(0);
     const [darkFactoryMode, setDarkFactoryMode] = React.useState(true);
     const [explodedView, setExplodedView] = React.useState(false);
     const [isolateSelected, setIsolateSelected] = React.useState(false);
     const [isFullscreen, setIsFullscreen] = React.useState(false);
     const [isPipActive, setIsPipActive] = React.useState(false);
+    const [demoPhase, setDemoPhase] = React.useState<number | null>(null);
 
-    // Refs de controle de câmera suave e visualização por camadas (60fps sem recriar WebGL)
+    // Refs de controle de câmera suave, camadas e simulação (60fps sem recriar WebGL)
     const desiredTargetRef = React.useRef<THREE.Vector3>(new THREE.Vector3(0, 6.2, 0));
     const desiredFrustumRef = React.useRef<number>(15.8);
     const desiredPhiRef = React.useRef<number | null>(null);
@@ -434,16 +487,34 @@ export function createHoldingTower3DComponent(ctx: Context) {
     const isolateRef = React.useRef<boolean>(false);
     const selectedSlugRef = React.useRef<string | null>(null);
     const hoveredSlugRef = React.useRef<string | null>(null);
+    const demoPhaseRef = React.useRef<number | null>(null);
+    const demoStartedAtRef = React.useRef<number>(0);
     explodedRef.current = explodedView;
     isolateRef.current = isolateSelected;
     selectedSlugRef.current = selection?.floor.slug || null;
     hoveredSlugRef.current = hoveredSlug;
+    demoPhaseRef.current = demoPhase;
+
+    // Avança automaticamente os 5 atos do modo "▶ Simular" na Torre
+    React.useEffect(() => {
+      if (demoPhase === null) return;
+      demoStartedAtRef.current = performance.now();
+      const delay = TOWER_DEMO_STEP_MS[demoPhase - 1] ?? 4500;
+      const timer = window.setTimeout(() => {
+        setDemoPhase((cur) => {
+          if (cur === null) return null;
+          return cur < 5 ? cur + 1 : null;
+        });
+      }, delay);
+      return () => window.clearTimeout(timer);
+    }, [demoPhase]);
 
     const floors = React.useMemo<HoldingTowerFloorInfo[]>(() => {
       const byPk = props.telemetry?.byPubkey || {};
       const crew = props.liveCrew || [];
+      // Apenas tarefas ativas (em progresso ou backlog), sem misturar cards antigos já concluídos de recent
       const activeItems = props.status
-        ? [...(props.status.inProgress || []), ...(props.status.backlog || []), ...(props.status.recent || []).slice(0, 3)]
+        ? [...(props.status.inProgress || []), ...(props.status.backlog || [])]
         : [];
 
       const empresas =
@@ -460,7 +531,6 @@ export function createHoldingTower3DComponent(ctx: Context) {
         const empCanal = String(emp.canal || "").trim().toLowerCase();
         const manifestAgents: any[] = Array.isArray(emp.agentes) ? emp.agentes : [];
 
-        // Resolve cada agente a partir do manifesto real da empresa (1:1 com empresas/<slug>.json), cruzando com liveCrew
         let workingCount = 0;
         let errorCount = 0;
         const resolvedAgents =
@@ -475,7 +545,6 @@ export function createHoldingTower3DComponent(ctx: Context) {
                 );
                 const pk = (liveMatch?.pubkey || maPk || "").toLowerCase();
                 const rawTurn = pk ? byPk[pk] : undefined;
-                // Isolamento por canal: agentes compartilhados (COO/CEO) só acendem balão no andar do canal daquele turno
                 const turn =
                   rawTurn && (!empCanal || !rawTurn.channelId || rawTurn.channelId.toLowerCase() === empCanal)
                     ? rawTurn
@@ -550,6 +619,18 @@ export function createHoldingTower3DComponent(ctx: Context) {
               detail: it.note || it.reason || it.step || it.stage,
               floorSlug: emp.slug,
               workItem: it,
+            });
+          }
+        } else {
+          // Também reflete PRs/cards abertos nos demais andares da Holding sem precisar trocar de empresa
+          const otherPrs = Math.min(3, Number(emp.prsAbertos ?? emp.emRevisao ?? 0));
+          for (let i = 0; i < otherPrs; i += 1) {
+            packets.push({
+              id: `${emp.slug}-pr-${i + 1}`,
+              label: `PR #${i + 1} em revisão (${emp.nome || emp.slug})`,
+              stage: "verifying",
+              detail: "Revisão L-01 / CI na esteira",
+              floorSlug: emp.slug,
             });
           }
         }
@@ -642,6 +723,14 @@ export function createHoldingTower3DComponent(ctx: Context) {
       return [...subsidiaryFloors, penthouse];
     }, [props.holding, props.status, props.liveCrew, props.telemetry, props.activeTenant]);
 
+    const demoTargetFloorIdx = React.useMemo(() => {
+      const byActive = floors.findIndex((f) => !f.isBoard && f.slug.toLowerCase() === String(props.activeTenant || "").toLowerCase());
+      if (byActive >= 0) return byActive;
+      const byLumen = floors.findIndex((f) => !f.isBoard && f.slug.toLowerCase().includes("lumen"));
+      return byLumen >= 0 ? byLumen : 0;
+    }, [floors, props.activeTenant]);
+    const demoTargetFloorName = floors[demoTargetFloorIdx]?.nome || "Lumen IPTV";
+
     const floorsSignature = floors
       .map((f) => `${f.slug}:${f.workingCount}:${f.errorCount}:${f.agentesCount}:${f.packets.map((p) => `${p.id}:${p.stage}`).join(",")}`)
       .join("|");
@@ -704,8 +793,11 @@ export function createHoldingTower3DComponent(ctx: Context) {
       const width = Math.max(320, container.clientWidth || 780);
       const height = Math.max(320, container.clientHeight || 540);
 
+      const bgHex = darkFactoryMode ? 0x090c12 : 0xeef2f7;
       const scene = new THREE.Scene();
-      scene.background = darkFactoryMode ? new THREE.Color(0x090c12) : new THREE.Color(0xeef2f7);
+      scene.background = new THREE.Color(bgHex);
+      // Profundidade atmosférica sutil de maquete física de estúdio
+      scene.fog = new THREE.FogExp2(bgHex, 0.0075);
 
       const FLOOR_H = 3.65;
       const totalH = floors.length * FLOOR_H;
@@ -754,7 +846,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
         renderer = new THREE.WebGLRenderer({
           antialias: true,
           alpha: false,
-          preserveDrawingBuffer: true, // garante captura fluida no Picture-in-Picture (PiP)
+          preserveDrawingBuffer: true,
           powerPreference: "high-performance",
         });
       } catch {
@@ -773,25 +865,25 @@ export function createHoldingTower3DComponent(ctx: Context) {
       canvasRef.current = renderer.domElement;
 
       const maxAniso = renderer.capabilities.getMaxAnisotropy?.() || 8;
-      // IBL PBR instantâneo via RoomEnvironment + PMREMGenerator (profundidade real em metais, vidros e lajes)
       const pmremGenerator = new THREE.PMREMGenerator(renderer);
       const envScene = new RoomEnvironment();
       const envRT = pmremGenerator.fromScene(envScene, 0.04);
       scene.environment = envRT.texture;
-      (scene as any).environmentIntensity = darkFactoryMode ? 0.48 : 0.78;
+      (scene as any).environmentIntensity = darkFactoryMode ? 0.5 : 0.8;
       envScene.dispose();
 
       const lights = new Lights();
       scene.add(lights.hemi, lights.sun, lights.sun.target);
       lights.set([{ x0: -7.5, x1: 7.5, y0: 0, y1: totalH + 2, z0: -5, z1: 5 }], palette, false);
       lights.hemi.intensity = darkFactoryMode ? 0.95 : 1.1;
+      lights.sun.shadow.bias = -0.0005;
+      lights.sun.shadow.normalBias = 0.02;
 
       if (!darkFactoryMode) {
         const dayFill = new THREE.DirectionalLight(0xffffff, 0.85);
         dayFill.position.set(-10, 20, 12);
         scene.add(dayFill);
       } else {
-        // Luz frontal suave para que 1F/2F/3F tenham ótima leitura em close-up
         const frontFill = new THREE.DirectionalLight(0xdbeafe, 0.52);
         frontFill.position.set(12, totalH * 0.55, 16);
         scene.add(frontFill);
@@ -821,7 +913,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
       const floorW = 11.8;
       const floorD = 7.0;
 
-      // ── PÓDIO BASEPLATE LEGO ARCHITECTURE SOB O 1F (InstancedMesh = 1 draw call!) ──
+      // ── PÓDIO BASEPLATE LEGO ARCHITECTURE (InstancedMesh = 1 draw call) ──
       const podium = new THREE.Mesh(kit.own(new THREE.BoxGeometry(floorW + 1.2, 0.55, floorD + 1.2)), matPodium);
       podium.position.set(0, -0.54, 0);
       podium.receiveShadow = true;
@@ -856,6 +948,20 @@ export function createHoldingTower3DComponent(ctx: Context) {
           scene.add(rail);
         }
       }
+
+      // Cápsula dedicada do modo Simulação no elevador panorâmico (4F Conselho <-> Andar alvo)
+      const demoElevGroup = new THREE.Group();
+      const demoElevFrame = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.72, 0.38, 0.72)), matSteel);
+      const demoElevCoreMat = kit.matte(palette.accent.reviewer, {
+        roughness: 0.2,
+        emissive: colour(palette.accent.reviewer),
+        emissiveIntensity: 1.1,
+      });
+      const demoElevCore = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.56, 0.26, 0.56)), demoElevCoreMat);
+      demoElevGroup.add(demoElevFrame, demoElevCore);
+      demoElevGroup.visible = false;
+      demoElevGroup.position.set(shaftX, 0, shaftZ);
+      scene.add(demoElevGroup);
 
       const realElevatorEvents: Array<{
         packet: TowerLivePacket;
@@ -945,8 +1051,11 @@ export function createHoldingTower3DComponent(ctx: Context) {
         index: number;
         group: THREE.Group;
         edgeMat: THREE.LineBasicMaterial;
+        ciAmberMat?: THREE.MeshStandardMaterial;
+        ciGreenMat?: THREE.MeshStandardMaterial;
+        portalMat?: THREE.MeshStandardMaterial;
       }> = [];
-      const avatars: Array<{ handle: Avatar3DHandle; phase: number; working: boolean; error: boolean }> = [];
+      const avatars: Array<{ handle: Avatar3DHandle; phase: number; working: boolean; error: boolean; floorIndex: number }> = [];
       const thinkingSprites: Array<{ sprite: THREE.Sprite; baseY: number; phase: number }> = [];
       const thinkingMatWorking = kit.own(
         new THREE.SpriteMaterial({
@@ -982,6 +1091,12 @@ export function createHoldingTower3DComponent(ctx: Context) {
       const rackLeds: THREE.Mesh[] = [];
       const holoCores: THREE.Object3D[] = [];
 
+      // Pacote + boneco mensageiro + confete (InstancedMesh = 1 draw call) para o modo Simulação no andar alvo
+      let demoBeltPacket: THREE.Group | null = null;
+      let demoCourier: { root: THREE.Group; handle: Avatar3DHandle; crate: THREE.Mesh } | null = null;
+      let demoConfetti: { mesh: THREE.InstancedMesh; baseX: number; baseY: number; baseZ: number } | null = null;
+      const CONFETTI_COUNT = 16;
+
       const sharedSlabGeo = kit.own(new THREE.BoxGeometry(floorW, 0.28, floorD));
       const sharedSlabEdgesGeo = kit.own(new THREE.EdgesGeometry(sharedSlabGeo));
 
@@ -1008,7 +1123,6 @@ export function createHoldingTower3DComponent(ctx: Context) {
           emissiveIntensity: darkFactoryMode ? 0.68 : 0.36,
         });
 
-        // Iluminação interna quente por andar para eliminar zonas escuras no 1F/2F/3F
         if (darkFactoryMode) {
           const interiorLight = new THREE.PointLight(floor.isBoard ? 0xfff1d6 : 0xe0f2fe, 0.85, 11.5);
           interiorLight.position.set(0.5, FLOOR_H - 0.85, 0.5);
@@ -1031,7 +1145,14 @@ export function createHoldingTower3DComponent(ctx: Context) {
         const slabEdges = new THREE.LineSegments(sharedSlabEdgesGeo, edgeMat);
         slabEdges.position.set(0, -0.14, 0);
         floorGroup.add(slabEdges);
-        floorEntries.push({ slug: floor.slug, index: fIdx, group: floorGroup, edgeMat });
+
+        const floorEntry: (typeof floorEntries)[number] = {
+          slug: floor.slug,
+          index: fIdx,
+          group: floorGroup,
+          edgeMat,
+        };
+        floorEntries.push(floorEntry);
 
         const trimFront = new THREE.Mesh(kit.own(new THREE.BoxGeometry(floorW + 0.05, 0.075, 0.08)), matAccent);
         trimFront.position.set(0, -0.02, floorD / 2);
@@ -1210,7 +1331,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
               focusPos: new THREE.Vector3(slot.pos[0], y0 + 0.9, slot.pos[2]),
             });
 
-            avatars.push({ handle: av, phase: idx * 0.95, working: ag.status === "working", error: ag.status === "error" });
+            avatars.push({ handle: av, phase: idx * 0.95, working: ag.status === "working", error: ag.status === "error", floorIndex: fIdx });
           });
         } else if (floor.estagio === "planejado" && floor.agents.length <= 2) {
           const blueprintFloor = new THREE.Mesh(
@@ -1239,7 +1360,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
             av.root.position.set(-1.4 + idx * 1.4, 0, 0.1);
             av.root.rotation.y = Math.PI / 2;
             floorGroup.add(av.root);
-            avatars.push({ handle: av, phase: fIdx * 1.4 + idx, working: false, error: false });
+            avatars.push({ handle: av, phase: fIdx * 1.4 + idx, working: false, error: false, floorIndex: fIdx });
           });
         } else {
           const workZone = new THREE.Mesh(kit.own(new THREE.BoxGeometry(9.2, 0.022, 3.0)), matFloorWood);
@@ -1282,6 +1403,37 @@ export function createHoldingTower3DComponent(ctx: Context) {
             floorGroup.add(rail);
           }
 
+          // Semáforo de CI + Portal de Entrega (SHIP) na ponta direita da esteira (unificado com a Fábrica 3D)
+          const ciState: "green" | "amber" | "red" =
+            floor.errorCount > 0 ? "red" : floor.packets.length > 0 || floor.workingCount > 0 ? "amber" : "green";
+          const ciTower = buildCiSignalTower(kit, palette, matSteel, ciState);
+          ciTower.group.position.set(-3.45, 0, 1.9);
+          floorGroup.add(ciTower.group);
+          floorEntry.ciAmberMat = ciTower.amberMat;
+          floorEntry.ciGreenMat = ciTower.greenMat;
+
+          const portalFrame = new THREE.Group();
+          portalFrame.position.set(5.05, 0, 1.9);
+          const pLeft = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.12, 0.98, 0.12)), matSteel);
+          pLeft.position.set(0, 0.49, -0.52);
+          const pRight = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.12, 0.98, 0.12)), matSteel);
+          pRight.position.set(0, 0.49, 0.52);
+          const pTop = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.14, 0.12, 1.18)), matSteel);
+          pTop.position.set(0, 0.98, 0);
+          const portalMat = kit.own(
+            new THREE.MeshStandardMaterial({
+              color: colour(palette.lamp.green),
+              emissive: colour(palette.lamp.green),
+              emissiveIntensity: floor.packets.length > 0 ? 0.9 : 0.25,
+              roughness: 0.25,
+            })
+          );
+          const pStrip = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.16, 0.05, 1.02)), portalMat);
+          pStrip.position.set(0, 0.9, 0);
+          portalFrame.add(pLeft, pRight, pTop, pStrip);
+          floorGroup.add(portalFrame);
+          floorEntry.portalMat = portalMat;
+
           const pktTotal = floor.packets.length;
           floor.packets.forEach((pktData, pIdx) => {
             const pktRgb = stageColorRgb(pktData.stage, palette);
@@ -1317,6 +1469,56 @@ export function createHoldingTower3DComponent(ctx: Context) {
               offset: pIdx / Math.max(1, pktTotal),
             });
           });
+
+          // Elementos do modo "▶ Simular" montados no andar alvo (invisíveis fora da simulação)
+          if (fIdx === demoTargetFloorIdx) {
+            const dPkt = new THREE.Group();
+            const dCrate = new THREE.Mesh(
+              kit.own(new THREE.BoxGeometry(0.6, 0.3, 0.5)),
+              kit.matte([0.2, 0.24, 0.32], { roughness: 0.4 })
+            );
+            const dStripe = new THREE.Mesh(
+              kit.own(new THREE.BoxGeometry(0.62, 0.07, 0.52)),
+              kit.matte(palette.lamp.green, { roughness: 0.2, emissive: colour(palette.lamp.green), emissiveIntensity: 1.0 })
+            );
+            dStripe.position.y = 0.15;
+            dPkt.add(dCrate, dStripe);
+            dPkt.position.set(-2.9, 0.41, 1.9);
+            dPkt.visible = false;
+            floorGroup.add(dPkt);
+            demoBeltPacket = dPkt;
+
+            // Boneco mensageiro andando da bancada até a esteira carregando a caixa
+            const courierRoot = new THREE.Group();
+            const courierAg = floor.agents.find((a) => /dev|exec/i.test(`${a.name} ${a.role || ""}`)) || floor.agents[0];
+            const courierHandle = buildCustomAvatar3D(kit, palette, courierAg || { name: "Dev", status: "working" }, {
+              seatHeight: 0.02,
+              scale: 0.9,
+              showPortraitMedallion: false,
+            });
+            const carriedCrate = new THREE.Mesh(
+              kit.own(new THREE.BoxGeometry(0.32, 0.22, 0.28)),
+              kit.matte(palette.accent.reviewer, { roughness: 0.3, emissive: colour(palette.accent.reviewer), emissiveIntensity: 0.55 })
+            );
+            carriedCrate.position.set(0, 0.48, 0.26);
+            courierRoot.add(courierHandle.root, carriedCrate);
+            courierRoot.visible = false;
+            floorGroup.add(courierRoot);
+            demoCourier = { root: courierRoot, handle: courierHandle, crate: carriedCrate };
+
+            // Confete minimalista em InstancedMesh (1 único draw call) na saída SHIP
+            const confGeo = kit.own(new THREE.BoxGeometry(0.08, 0.08, 0.02));
+            const confMat = kit.own(new THREE.MeshBasicMaterial({ color: 0xffffff }));
+            const confMesh = new THREE.InstancedMesh(confGeo, confMat, CONFETTI_COUNT);
+            const confColors = [0x34d399, 0x60a5fa, 0xfbbf24, 0xf472b6];
+            for (let ci = 0; ci < CONFETTI_COUNT; ci += 1) {
+              confMesh.setColorAt(ci, new THREE.Color(confColors[ci % confColors.length]));
+            }
+            if (confMesh.instanceColor) confMesh.instanceColor.needsUpdate = true;
+            confMesh.visible = false;
+            floorGroup.add(confMesh);
+            demoConfetti = { mesh: confMesh, baseX: 4.75, baseY: 0.9, baseZ: 1.9 };
+          }
 
           const screenMatA = kit.own(new THREE.MeshBasicMaterial({ map: makeDeskScreenTexture(kit, floorAccent, fIdx * 7 + 1, maxAniso) }));
           const screenMatB = kit.own(new THREE.MeshBasicMaterial({ map: makeDeskScreenTexture(kit, palette.accent.reviewer, fIdx * 7 + 2, maxAniso) }));
@@ -1370,7 +1572,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
               focusPos: new THREE.Vector3(dx, y0 + 0.85, dz),
             });
 
-            avatars.push({ handle: av, phase: fIdx * 1.7 + idx * 0.85, working: ag.status === "working", error: ag.status === "error" });
+            avatars.push({ handle: av, phase: fIdx * 1.7 + idx * 0.85, working: ag.status === "working", error: ag.status === "error", floorIndex: fIdx });
           });
         }
 
@@ -1433,10 +1635,8 @@ export function createHoldingTower3DComponent(ctx: Context) {
 
           if (dragMode === "orbit") {
             theta -= dx * 0.0085;
-            // Ângulo phi ampliado até 1.50 rad (~86°): permite abaixar quase até o nível do piso!
             phi = Math.max(0.18, Math.min(1.5, phi - dy * 0.007));
           } else {
-            // Pan 3D proporcional ao nível de zoom atual (cobre toda a altura da torre mesmo explodida)
             const rect = renderer.domElement.getBoundingClientRect();
             const unitsPerPx = frustum / Math.max(200, rect.height);
             const right = new THREE.Vector3(Math.cos(theta), 0, -Math.sin(theta));
@@ -1487,12 +1687,10 @@ export function createHoldingTower3DComponent(ctx: Context) {
         const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
         const ny = -((e.clientY - rect.top) / rect.height) * 2 + 1;
         const prevFrustum = frustum;
-        // Zoom amplo: de 48 (torre inteira explodida com folga) até 2.0 (close-up de uma mesa/personagem!)
         const factor = e.deltaY > 0 ? 1.1 : 0.91;
         const nextF = Math.max(2.0, Math.min(48, frustum * factor));
         const deltaF = prevFrustum - nextF;
 
-        // Desloca suavemente o alvo na direção do cursor ao aproximar o zoom
         if (deltaF > 0) {
           const asp = rect.width / Math.max(1, rect.height);
           const right = new THREE.Vector3(Math.cos(theta), 0, -Math.sin(theta));
@@ -1535,24 +1733,110 @@ export function createHoldingTower3DComponent(ctx: Context) {
 
       let rafId = 0;
       const clock = new THREE.Clock();
+      const confDummy = new THREE.Object3D();
+
       const animate = () => {
         rafId = requestAnimationFrame(animate);
         const t = clock.getElapsedTime();
 
-        // Visualização por Camadas (Vista Explodida + Isolamento/Cutaway + Highlight EdgesGeometry a 60fps)
         const explodeGap = explodedRef.current ? 1.95 : 0;
+        const stepH = FLOOR_H + explodeGap;
         const selSlug = selectedSlugRef.current;
         const hovSlug = hoveredSlugRef.current;
         const selIdx = selSlug ? floorEntries.findIndex((fe) => fe.slug === selSlug) : -1;
+        const dPhase = demoPhaseRef.current;
+        const dStepMs = dPhase ? TOWER_DEMO_STEP_MS[dPhase - 1] ?? 4500 : 1;
+        const dFrac = dPhase ? Math.min(1, Math.max(0, (performance.now() - demoStartedAtRef.current) / dStepMs)) : 0;
+
         for (const fe of floorEntries) {
-          const targetY = fe.index * (FLOOR_H + explodeGap);
+          const targetY = fe.index * stepH;
           if (Math.abs(fe.group.position.y - targetY) > 0.005) {
             fe.group.position.y += (targetY - fe.group.position.y) * 0.14;
           }
           fe.group.visible = !(isolateRef.current && selIdx >= 0 && fe.index > selIdx);
-          const isSel = fe.slug === selSlug;
+          const isSel = fe.slug === selSlug || (dPhase !== null && fe.index === demoTargetFloorIdx);
           const isHov = fe.slug === hovSlug;
           fe.edgeMat.opacity = isSel ? 0.85 : isHov ? 0.55 : darkFactoryMode ? 0.22 : 0.18;
+
+          // Atualiza semáforo CI e portal de entrega durante a simulação no andar alvo
+          if (fe.index === demoTargetFloorIdx && fe.ciAmberMat && fe.ciGreenMat && fe.portalMat) {
+            if (dPhase === 3) {
+              fe.ciAmberMat.emissiveIntensity = 1.6 + Math.sin(t * 9) * 0.5;
+              fe.ciGreenMat.emissiveIntensity = 0.06;
+              fe.portalMat.emissiveIntensity = 0.3;
+            } else if (dPhase === 4 || dPhase === 5) {
+              fe.ciAmberMat.emissiveIntensity = 0.06;
+              fe.ciGreenMat.emissiveIntensity = 1.8;
+              fe.portalMat.emissiveIntensity = 1.6 + Math.sin(t * 10) * 0.4;
+            }
+          }
+        }
+
+        // Coreografia do Modo Simulação na Torre (5 atos: Elevador -> Mensageiro -> Esteira+CI -> SHIP+Confete -> Telemetria ao Conselho)
+        const targetFloorBaseY = demoTargetFloorIdx * stepH + 0.65;
+        const boardFloorTopY = (floors.length - 1) * stepH + 0.65;
+        if (dPhase === 1) {
+          demoElevGroup.visible = true;
+          demoElevGroup.position.y = boardFloorTopY - (boardFloorTopY - targetFloorBaseY) * dFrac;
+          demoElevGroup.rotation.y = t * 1.8;
+        } else if (dPhase === 5) {
+          demoElevGroup.visible = true;
+          demoElevGroup.position.y = targetFloorBaseY + (boardFloorTopY - targetFloorBaseY) * dFrac;
+          demoElevGroup.rotation.y = t * 2.2;
+        } else {
+          demoElevGroup.visible = false;
+        }
+
+        if (demoCourier) {
+          if (dPhase === 2) {
+            demoCourier.root.visible = true;
+            // Vai da bancada (-2.6, -0.3) até a entrada da esteira (-2.9, 1.25) carregando a caixa e volta
+            const leg = dFrac < 0.65 ? dFrac / 0.65 : 1 - (dFrac - 0.65) / 0.35;
+            demoCourier.root.position.set(-2.6 - 0.25 * leg, 0, -0.25 + 1.45 * leg);
+            demoCourier.root.rotation.y = dFrac < 0.65 ? 0 : Math.PI;
+            demoCourier.crate.visible = dFrac < 0.65;
+            demoCourier.handle.animate(t, 0.5, { working: true });
+          } else {
+            demoCourier.root.visible = false;
+          }
+        }
+
+        if (demoBeltPacket) {
+          if (dPhase === 3 || dPhase === 4) {
+            demoBeltPacket.visible = true;
+            const xStart = dPhase === 3 ? -2.9 : 1.0;
+            const xEnd = dPhase === 3 ? 1.0 : 5.05;
+            demoBeltPacket.position.set(xStart + (xEnd - xStart) * dFrac, 0.41 + Math.sin(t * 5) * 0.014, 1.9);
+            const scaleOut = dPhase === 4 && dFrac > 0.85 ? Math.max(0.05, (1 - dFrac) / 0.15) : 1;
+            demoBeltPacket.scale.setScalar(scaleOut);
+          } else {
+            demoBeltPacket.visible = false;
+          }
+        }
+
+        if (demoConfetti) {
+          if (dPhase === 4) {
+            demoConfetti.mesh.visible = true;
+            const age = dFrac * 1.4;
+            for (let ci = 0; ci < CONFETTI_COUNT; ci += 1) {
+              const ang = (ci / CONFETTI_COUNT) * Math.PI * 2 + ci * 0.37;
+              const spd = 0.45 + (ci % 4) * 0.18;
+              const up = 1.2 + (ci % 3) * 0.35;
+              const s = Math.max(0, 1 - dFrac * 1.05);
+              confDummy.position.set(
+                demoConfetti.baseX + Math.cos(ang) * spd * age,
+                demoConfetti.baseY + up * age - 1.3 * age * age,
+                demoConfetti.baseZ + Math.sin(ang) * spd * age
+              );
+              confDummy.rotation.set(t * 5 + ci, t * 4 + ci, t * 3);
+              confDummy.scale.setScalar(s);
+              confDummy.updateMatrix();
+              demoConfetti.mesh.setMatrixAt(ci, confDummy.matrix);
+            }
+            demoConfetti.mesh.instanceMatrix.needsUpdate = true;
+          } else {
+            demoConfetti.mesh.visible = false;
+          }
         }
 
         let camDirty = false;
@@ -1571,7 +1855,13 @@ export function createHoldingTower3DComponent(ctx: Context) {
         if (camDirty) updateCamera();
 
         for (const a of avatars) {
-          a.handle.animate(t, a.phase, { working: a.working, error: a.error });
+          const isDemoWork = dPhase !== null && dPhase >= 2 && dPhase <= 3 && a.floorIndex === demoTargetFloorIdx;
+          const isDemoCheer = dPhase === 4 && a.floorIndex === demoTargetFloorIdx;
+          a.handle.animate(t, a.phase, {
+            working: a.working || isDemoWork,
+            error: a.error,
+            celebrating: isDemoCheer,
+          });
         }
 
         for (const cap of dataCapsules) {
@@ -1592,8 +1882,9 @@ export function createHoldingTower3DComponent(ctx: Context) {
         }
 
         for (const holo of holoCores) {
-          holo.rotation.y = t * 0.8;
+          holo.rotation.y = t * (dPhase === 5 ? 2.4 : 0.8);
           holo.position.y = 1.56 + Math.sin(t * 1.7) * 0.045;
+          holo.scale.setScalar(dPhase === 5 ? 1.2 + Math.sin(t * 8) * 0.08 : 1);
         }
 
         for (const b of warningBeacons) {
@@ -1637,7 +1928,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
         kit.dispose();
         renderer.dispose();
       };
-    }, [floorsSignature, fitTick, darkFactoryMode, props.activeTenant]);
+    }, [floorsSignature, fitTick, darkFactoryMode, props.activeTenant, demoTargetFloorIdx]);
 
     const selectedSlug = selection?.floor.slug || null;
     const activeFloorCard = selection?.floor || floors.find((f) => f.slug === hoveredSlug) || null;
@@ -1664,7 +1955,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
       const stepH = 3.65 + (explodedRef.current ? 1.95 : 0);
       desiredTargetRef.current.set(0, idx * stepH + 0.85, 0);
       desiredFrustumRef.current = 4.4;
-      desiredPhiRef.current = 1.42; // ângulo bem baixo, quase no nível do piso!
+      desiredPhiRef.current = 1.42;
     };
 
     const handleToggleExploded = () => {
@@ -1678,6 +1969,9 @@ export function createHoldingTower3DComponent(ctx: Context) {
     };
 
     const totalLivePackets = floors.reduce((sum, f) => sum + f.packets.length, 0);
+    const dockDivider = h("span", {
+      style: { width: "1px", height: "16px", background: "var(--border)", opacity: 0.7, margin: "0 2px" },
+    });
 
     return h(
       "div",
@@ -1703,6 +1997,44 @@ export function createHoldingTower3DComponent(ctx: Context) {
         },
         h("div", { ref: mountRef, style: { width: "100%", height: "100%" } }),
 
+        // Pílula minimalista no topo durante o modo Simular fluxo
+        demoPhase !== null &&
+          h(
+            "div",
+            {
+              "data-tower-demo-banner": "true",
+              style: {
+                position: "absolute",
+                top: "12px",
+                left: "50%",
+                transform: "translateX(-50%)",
+                zIndex: 24,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "8px",
+                padding: "6px 12px",
+                borderRadius: "999px",
+                border: "1px solid rgba(59, 130, 246, 0.55)",
+                background: "rgba(14, 17, 24, 0.92)",
+                backdropFilter: "blur(10px)",
+                fontSize: "11.5px",
+                fontWeight: 600,
+                color: "var(--foreground)",
+                boxShadow: "0 8px 24px rgba(0,0,0,0.45)",
+              },
+            },
+            h("span", {
+              style: {
+                width: "8px",
+                height: "8px",
+                borderRadius: "999px",
+                background: demoPhase >= 4 ? "#34d399" : "#60a5fa",
+                boxShadow: `0 0 8px ${demoPhase >= 4 ? "#34d399" : "#60a5fa"}`,
+              },
+            }),
+            h("span", null, towerDemoLabel(demoPhase, demoTargetFloorName))
+          ),
+
         // Seletor rápido de andares (Elevador na esquerda)
         h(
           "div",
@@ -1718,7 +2050,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
               padding: "8px",
               borderRadius: "10px",
               border: "1px solid var(--border)",
-              background: "rgba(14, 17, 24, 0.92)",
+              background: "rgba(14, 17, 24, 0.9)",
               backdropFilter: "blur(10px)",
             },
           },
@@ -1760,7 +2092,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
                 width: "286px",
                 borderRadius: "10px",
                 border: "1px solid var(--border-strong)",
-                background: "rgba(15, 18, 24, 0.95)",
+                background: "rgba(15, 18, 24, 0.94)",
                 backdropFilter: "blur(10px)",
                 padding: "11px 13px",
                 display: "flex",
@@ -1895,20 +2227,62 @@ export function createHoldingTower3DComponent(ctx: Context) {
                 ]
           ),
 
-        // Controles no canto inferior direito (Ângulo Piso, Flutuar PiP, Dia/Noite, Tela cheia, Fit)
+        // HUD Minimalista Unificado (Floating Glass Dock estilo Apple no rodapé)
         h(
           "div",
-          { style: { position: "absolute", right: "12px", bottom: "12px", zIndex: 20, display: "inline-flex", gap: "6px", flexWrap: "wrap" } },
+          {
+            "data-tower-glass-dock": "true",
+            style: {
+              position: "absolute",
+              left: "50%",
+              bottom: "12px",
+              transform: "translateX(-50%)",
+              zIndex: 20,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "4px",
+              padding: "4px 6px",
+              borderRadius: "12px",
+              border: "1px solid var(--border)",
+              background: "rgba(14, 17, 24, 0.86)",
+              backdropFilter: "blur(12px)",
+              boxShadow: "0 10px 28px rgba(0, 0, 0, 0.42)",
+              maxWidth: "calc(100% - 24px)",
+            },
+          },
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-tower-demo-btn": "true",
+              "data-variant": demoPhase !== null ? "primary" : "ghost",
+              style: { padding: "4px 9px", fontSize: "11px" },
+              onClick: () => {
+                setDemoPhase((cur) => {
+                  if (cur !== null) return null;
+                  const effH = floors.length * 3.65 + (explodedRef.current ? (floors.length - 1) * 1.95 : 0);
+                  desiredTargetRef.current.set(0, Math.max(2.6, effH * 0.48), 0);
+                  desiredFrustumRef.current = Math.max(14.5, effH * 1.18);
+                  desiredPhiRef.current = 1.02;
+                  return 1;
+                });
+              },
+              title: demoPhase !== null ? "Parar simulação" : "Simular ciclo completo (Conselho → Andar → Esteira → SHIP)",
+            },
+            demoPhase !== null ? "■ Parar" : "▶ Simular"
+          ),
+          dockDivider,
           h(
             "button",
             {
               type: "button",
               className: "of-btn",
               "data-tower-exploded-btn": "true",
-              "data-variant": explodedView ? "primary" : undefined,
-              style: { background: explodedView ? undefined : "rgba(18, 20, 26, 0.88)" },
+              "data-variant": explodedView ? "primary" : "ghost",
+              style: { padding: "4px 8px", fontSize: "11px" },
               onClick: handleToggleExploded,
-              title: "Separar os andares verticalmente para inspecionar cada camada (Vista Explodida)",
+              title: "Separar os andares verticalmente (Vista Explodida)",
             },
             explodedView ? "⊟ Compactar" : "⊞ Explodir"
           ),
@@ -1918,8 +2292,8 @@ export function createHoldingTower3DComponent(ctx: Context) {
               type: "button",
               className: "of-btn",
               "data-tower-isolate-btn": "true",
-              "data-variant": isolateSelected ? "primary" : undefined,
-              style: { background: isolateSelected ? undefined : "rgba(18, 20, 26, 0.88)" },
+              "data-variant": isolateSelected ? "primary" : "ghost",
+              style: { padding: "4px 8px", fontSize: "11px" },
               onClick: () => {
                 setIsolateSelected((v) => {
                   const next = !v;
@@ -1934,17 +2308,19 @@ export function createHoldingTower3DComponent(ctx: Context) {
                   return next;
                 });
               },
-              title: "Ocultar os andares acima do andar selecionado para ver por dentro (Cutaway)",
+              title: "Ocultar andares acima do selecionado (Cutaway)",
             },
-            isolateSelected ? "◫ Mostrar Todos" : "◫ Isolar Andar"
+            isolateSelected ? "◫ Todos" : "◫ Isolar"
           ),
+          dockDivider,
           h(
             "button",
             {
               type: "button",
               className: "of-btn",
               "data-tower-plan-btn": "true",
-              style: { background: "rgba(18, 20, 26, 0.88)" },
+              "data-variant": "ghost",
+              style: { padding: "4px 8px", fontSize: "11px" },
               onClick: () => {
                 const idx = selectedSlug ? Math.max(0, floors.findIndex((f) => f.slug === selectedSlug)) : 0;
                 const stepH = 3.65 + (explodedRef.current ? 1.95 : 0);
@@ -1952,7 +2328,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
                 desiredFrustumRef.current = 7.4;
                 desiredPhiRef.current = 0.34;
               },
-              title: "Vista de Planta Baixa (ângulo superior inclinado)",
+              title: "Vista superior de planta baixa",
             },
             "⌖ Planta"
           ),
@@ -1961,11 +2337,43 @@ export function createHoldingTower3DComponent(ctx: Context) {
             {
               type: "button",
               className: "of-btn",
-              style: { background: "rgba(18, 20, 26, 0.88)" },
+              "data-variant": "ghost",
+              style: { padding: "4px 8px", fontSize: "11px" },
               onClick: handleEyeLevelView,
-              title: "Aproximar câmera no nível do piso do andar selecionado",
+              title: "Aproximar câmera no nível do piso",
             },
-            "👁 Nível Piso"
+            "👁 Piso"
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-variant": "ghost",
+              style: { padding: "4px 8px", fontSize: "11px" },
+              onClick: () => {
+                setSelection(null);
+                const effH = floors.length * 3.65 + (explodedRef.current ? (floors.length - 1) * 1.95 : 0);
+                desiredTargetRef.current.set(0, Math.max(2.6, effH * 0.48), 0);
+                desiredFrustumRef.current = Math.max(14.5, effH * 1.18);
+                desiredPhiRef.current = 1.02;
+              },
+              title: "Enquadrar toda a torre",
+            },
+            "⤢ Fit"
+          ),
+          dockDivider,
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-variant": "ghost",
+              style: { padding: "4px 7px", fontSize: "12px" },
+              onClick: () => setDarkFactoryMode((v) => !v),
+              title: darkFactoryMode ? "Alternar para Modo Dia" : "Alternar para Dark Factory",
+            },
+            darkFactoryMode ? "☀" : "☾"
           ),
           h(
             "button",
@@ -1973,30 +2381,20 @@ export function createHoldingTower3DComponent(ctx: Context) {
               type: "button",
               className: "of-btn",
               "data-tower-pip-btn": "true",
-              "data-variant": isPipActive ? "primary" : undefined,
-              style: { background: isPipActive ? undefined : "rgba(18, 20, 26, 0.88)" },
+              "data-variant": isPipActive ? "primary" : "ghost",
+              style: { padding: "4px 7px", fontSize: "12px" },
               onClick: () => void handleTogglePiP(),
-              title: "Abrir a Torre 3D como janela flutuante (Picture-in-Picture) fora do Buzz",
+              title: isPipActive ? "Fechar janela flutuante (PiP)" : "Abrir Torre 3D em janela flutuante (Picture-in-Picture)",
             },
-            isPipActive ? "⧉ Fechar PiP" : "⧉ Flutuar (PiP)"
+            "⧉"
           ),
           h(
             "button",
             {
               type: "button",
               className: "of-btn",
-              style: { background: "rgba(18, 20, 26, 0.88)" },
-              onClick: () => setDarkFactoryMode((v) => !v),
-              title: "Alternar iluminação Dia vs. Dark Factory",
-            },
-            darkFactoryMode ? "☀ Modo Dia" : "☾ Dark Factory"
-          ),
-          h(
-            "button",
-            {
-              type: "button",
-              className: "of-btn",
-              style: { background: "rgba(18, 20, 26, 0.88)" },
+              "data-variant": "ghost",
+              style: { padding: "4px 7px", fontSize: "12px" },
               onClick: () => {
                 const el = hostRef.current;
                 if (!el) return;
@@ -2010,31 +2408,16 @@ export function createHoldingTower3DComponent(ctx: Context) {
                   }
                 } catch {}
               },
+              title: isFullscreen ? "Sair da tela cheia" : "Tela cheia",
             },
-            isFullscreen ? "↙ Sair" : "⛶ Tela cheia"
-          ),
-          h(
-            "button",
-            {
-              type: "button",
-              className: "of-btn",
-              style: { background: "rgba(18, 20, 26, 0.88)" },
-              onClick: () => {
-                setSelection(null);
-                const effH = floors.length * 3.65 + (explodedRef.current ? (floors.length - 1) * 1.95 : 0);
-                desiredTargetRef.current.set(0, Math.max(2.6, effH * 0.48), 0);
-                desiredFrustumRef.current = Math.max(14.5, effH * 1.18);
-                desiredPhiRef.current = 1.02;
-              },
-            },
-            "⤢ Fit"
+            isFullscreen ? "↙" : "⛶"
           )
         )
       ),
       h(
         "div",
         { className: "of-muted", style: { textAlign: "center", fontSize: "11px" } },
-        `Torre Cortexx · ${floors.length} andares · ${totalLivePackets} pacote(s) reais · Arraste: girar · Botão direito/Shift: mover · Scroll: zoom profundo · W/A/S/D/Q/E`
+        `Torre Cortexx · ${floors.length} andares · ${totalLivePackets} pacote(s) ativos · Arraste: girar · Botão direito/Shift: mover · Scroll: zoom profundo · W/A/S/D/Q/E`
       )
     );
   };

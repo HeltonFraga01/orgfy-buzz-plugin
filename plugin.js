@@ -28681,6 +28681,42 @@ class Color {
 }
 const _color = /* @__PURE__ */ new Color();
 Color.NAMES = _colorKeywords;
+class FogExp2 {
+  /**
+   * Constructs a new fog.
+   *
+   * @param {number|Color} color - The fog's color.
+   * @param {number} [density=0.00025] - Defines how fast the fog will grow dense.
+   */
+  constructor(color, density = 25e-5) {
+    this.isFogExp2 = true;
+    this.name = "";
+    this.color = new Color(color);
+    this.density = density;
+  }
+  /**
+   * Returns a new fog with copied values from this instance.
+   *
+   * @return {FogExp2} A clone of this instance.
+   */
+  clone() {
+    return new FogExp2(this.color, this.density);
+  }
+  /**
+   * Serializes the fog into JSON.
+   *
+   * @param {?(Object|string)} meta - An optional value holding meta information about the serialization.
+   * @return {Object} A JSON object representing the serialized fog
+   */
+  toJSON() {
+    return {
+      type: "FogExp2",
+      name: this.name,
+      color: this.color.getHex(),
+      density: this.density
+    };
+  }
+}
 class Scene extends Object3D {
   /**
    * Constructs a new scene.
@@ -57824,6 +57860,15 @@ function createAreaLightMaterial(intensity) {
   });
   return material;
 }
+const TOWER_DEMO_STEP_MS = [4400, 5e3, 4800, 5e3, 4600];
+function towerDemoLabel(phase, floorName) {
+  if (phase === 1) return `1/5 · Diretriz descendo do 4F Conselho pelo elevador para ${floorName}`;
+  if (phase === 2) return `2/5 · Equipe de ${floorName} recebendo a tarefa e levando para a esteira`;
+  if (phase === 3) return `3/5 · CI rodando (semáforo âmbar) e revisão L-01 em andamento`;
+  if (phase === 4) return `4/5 · Aprovado! Pacote entregue no portal SHIP com comemoração`;
+  if (phase === 5) return `5/5 · Telemetria de entrega subindo ao 4F Conselho da Holding`;
+  return "";
+}
 function rgbToCss([r, g, b], alpha = 1) {
   const rr = Math.round(Math.max(0, Math.min(1, r)) * 255);
   const gg = Math.round(Math.max(0, Math.min(1, g)) * 255);
@@ -58093,22 +58138,56 @@ function buildBoardChair(kit, matLeather, matSteel, matChrome) {
   chair.add(back);
   return chair;
 }
+function buildCiSignalTower(kit, p, matSteel, state) {
+  const g = new Group();
+  const pole = new Mesh(kit.own(new CylinderGeometry(0.032, 0.04, 1.02, 10)), matSteel);
+  pole.position.y = 0.51;
+  g.add(pole);
+  const lampGeo = kit.own(new CylinderGeometry(0.07, 0.07, 0.11, 16));
+  const makeLampMat = (rgb, lit) => kit.own(
+    new MeshStandardMaterial({
+      color: colour(lit ? rgb : [rgb[0] * 0.35, rgb[1] * 0.35, rgb[2] * 0.35]),
+      emissive: colour(rgb),
+      emissiveIntensity: lit ? 1.55 : 0.05,
+      roughness: 0.28
+    })
+  );
+  const greenMat = makeLampMat(p.lamp.green, state === "green");
+  const amberMat = makeLampMat(p.lamp.amber, state === "amber");
+  const redMat = makeLampMat(p.lamp.red, state === "red");
+  const specs = [
+    [greenMat, 0.96],
+    [amberMat, 1.09],
+    [redMat, 1.22]
+  ];
+  for (const [mat, y] of specs) {
+    const m = new Mesh(lampGeo, mat);
+    m.position.y = y;
+    g.add(m);
+  }
+  const cap = new Mesh(kit.own(new CylinderGeometry(0.078, 0.078, 0.035, 16)), matSteel);
+  cap.position.y = 1.29;
+  g.add(cap);
+  return { group: g, amberMat, greenMat };
+}
 function createHoldingTower3DComponent(ctx) {
   const React = ctx.react;
   const h = React.createElement;
   return function HoldingTower3DCanvas(props) {
+    var _a;
     const hostRef = React.useRef(null);
     const mountRef = React.useRef(null);
     const canvasRef = React.useRef(null);
     const pipVideoRef = React.useRef(null);
     const [selection, setSelection] = React.useState(null);
     const [hoveredSlug, setHoveredSlug] = React.useState(null);
-    const [fitTick, setFitTick] = React.useState(0);
+    const [fitTick] = React.useState(0);
     const [darkFactoryMode, setDarkFactoryMode] = React.useState(true);
     const [explodedView, setExplodedView] = React.useState(false);
     const [isolateSelected, setIsolateSelected] = React.useState(false);
     const [isFullscreen, setIsFullscreen] = React.useState(false);
     const [isPipActive, setIsPipActive] = React.useState(false);
+    const [demoPhase, setDemoPhase] = React.useState(null);
     const desiredTargetRef = React.useRef(new Vector3(0, 6.2, 0));
     const desiredFrustumRef = React.useRef(15.8);
     const desiredPhiRef = React.useRef(null);
@@ -58116,22 +58195,37 @@ function createHoldingTower3DComponent(ctx) {
     const isolateRef = React.useRef(false);
     const selectedSlugRef = React.useRef(null);
     const hoveredSlugRef = React.useRef(null);
+    const demoPhaseRef = React.useRef(null);
+    const demoStartedAtRef = React.useRef(0);
     explodedRef.current = explodedView;
     isolateRef.current = isolateSelected;
     selectedSlugRef.current = (selection == null ? void 0 : selection.floor.slug) || null;
     hoveredSlugRef.current = hoveredSlug;
+    demoPhaseRef.current = demoPhase;
+    React.useEffect(() => {
+      if (demoPhase === null) return;
+      demoStartedAtRef.current = performance.now();
+      const delay = TOWER_DEMO_STEP_MS[demoPhase - 1] ?? 4500;
+      const timer = window.setTimeout(() => {
+        setDemoPhase((cur) => {
+          if (cur === null) return null;
+          return cur < 5 ? cur + 1 : null;
+        });
+      }, delay);
+      return () => window.clearTimeout(timer);
+    }, [demoPhase]);
     const floors = React.useMemo(() => {
-      var _a, _b;
-      const byPk = ((_a = props.telemetry) == null ? void 0 : _a.byPubkey) || {};
+      var _a2, _b;
+      const byPk = ((_a2 = props.telemetry) == null ? void 0 : _a2.byPubkey) || {};
       const crew = props.liveCrew || [];
-      const activeItems = props.status ? [...props.status.inProgress || [], ...props.status.backlog || [], ...(props.status.recent || []).slice(0, 3)] : [];
+      const activeItems = props.status ? [...props.status.inProgress || [], ...props.status.backlog || []] : [];
       const empresas = ((_b = props.holding) == null ? void 0 : _b.empresas) && props.holding.empresas.length > 0 ? props.holding.empresas : [
         { slug: "orgfy", nome: "OrgFy Core", estagio: "operacional", agentesTotal: 16, agentesProntos: 16 },
         { slug: "lumen-iptv", nome: "Lumen IPTV", estagio: "operacional", agentesTotal: 6, agentesProntos: 6 },
         { slug: "saas-tributario", nome: "SaaS Tributário", estagio: "planejado", agentesTotal: 0, agentesProntos: 0 }
       ];
       const subsidiaryFloors = empresas.map((emp) => {
-        var _a2, _b2, _c, _d;
+        var _a3, _b2, _c, _d;
         const slugLower = String(emp.slug || "").toLowerCase();
         const empCanal = String(emp.canal || "").trim().toLowerCase();
         const manifestAgents = Array.isArray(emp.agentes) ? emp.agentes : [];
@@ -58197,6 +58291,17 @@ function createHoldingTower3DComponent(ctx) {
               workItem: it
             });
           }
+        } else {
+          const otherPrs = Math.min(3, Number(emp.prsAbertos ?? emp.emRevisao ?? 0));
+          for (let i = 0; i < otherPrs; i += 1) {
+            packets.push({
+              id: `${emp.slug}-pr-${i + 1}`,
+              label: `PR #${i + 1} em revisão (${emp.nome || emp.slug})`,
+              stage: "verifying",
+              detail: "Revisão L-01 / CI na esteira",
+              floorSlug: emp.slug
+            });
+          }
         }
         for (const ag of agents) {
           if (ag.turn && packets.length < 6) {
@@ -58210,7 +58315,7 @@ function createHoldingTower3DComponent(ctx) {
             });
           }
         }
-        const openPrsCount = slugLower === String(props.activeTenant || "").toLowerCase() ? ((_b2 = (_a2 = props.status) == null ? void 0 : _a2.wip) == null ? void 0 : _b2.openPrs) ?? 0 : Number(emp.prsAbertos ?? emp.emRevisao ?? 0);
+        const openPrsCount = slugLower === String(props.activeTenant || "").toLowerCase() ? ((_b2 = (_a3 = props.status) == null ? void 0 : _a3.wip) == null ? void 0 : _b2.openPrs) ?? 0 : Number(emp.prsAbertos ?? emp.emRevisao ?? 0);
         const openIssuesCount = slugLower === String(props.activeTenant || "").toLowerCase() ? ((_d = (_c = props.status) == null ? void 0 : _c.backlog) == null ? void 0 : _d.length) ?? 0 : Number(emp.abertas ?? 0);
         return {
           slug: emp.slug,
@@ -58267,6 +58372,13 @@ function createHoldingTower3DComponent(ctx) {
       };
       return [...subsidiaryFloors, penthouse];
     }, [props.holding, props.status, props.liveCrew, props.telemetry, props.activeTenant]);
+    const demoTargetFloorIdx = React.useMemo(() => {
+      const byActive = floors.findIndex((f) => !f.isBoard && f.slug.toLowerCase() === String(props.activeTenant || "").toLowerCase());
+      if (byActive >= 0) return byActive;
+      const byLumen = floors.findIndex((f) => !f.isBoard && f.slug.toLowerCase().includes("lumen"));
+      return byLumen >= 0 ? byLumen : 0;
+    }, [floors, props.activeTenant]);
+    const demoTargetFloorName = ((_a = floors[demoTargetFloorIdx]) == null ? void 0 : _a.nome) || "Lumen IPTV";
     const floorsSignature = floors.map((f) => `${f.slug}:${f.workingCount}:${f.errorCount}:${f.agentesCount}:${f.packets.map((p) => `${p.id}:${p.stage}`).join(",")}`).join("|");
     const handleTogglePiP = async () => {
       try {
@@ -58314,15 +58426,17 @@ function createHoldingTower3DComponent(ctx) {
       };
     }, []);
     React.useEffect(() => {
-      var _a, _b;
+      var _a2, _b;
       const container = mountRef.current;
       if (!container) return;
       const palette = readPalette();
       const kit = new Kit();
       const width = Math.max(320, container.clientWidth || 780);
       const height = Math.max(320, container.clientHeight || 540);
+      const bgHex = darkFactoryMode ? 592914 : 15659767;
       const scene = new Scene();
-      scene.background = darkFactoryMode ? new Color(592914) : new Color(15659767);
+      scene.background = new Color(bgHex);
+      scene.fog = new FogExp2(bgHex, 75e-4);
       const FLOOR_H = 3.65;
       const totalH = floors.length * FLOOR_H;
       const defaultCenterY = Math.max(2.6, totalH * 0.46);
@@ -58367,7 +58481,6 @@ function createHoldingTower3DComponent(ctx) {
           antialias: true,
           alpha: false,
           preserveDrawingBuffer: true,
-          // garante captura fluida no Picture-in-Picture (PiP)
           powerPreference: "high-performance"
         });
       } catch {
@@ -58384,17 +58497,19 @@ function createHoldingTower3DComponent(ctx) {
       container.innerHTML = "";
       container.appendChild(renderer.domElement);
       canvasRef.current = renderer.domElement;
-      const maxAniso = ((_b = (_a = renderer.capabilities).getMaxAnisotropy) == null ? void 0 : _b.call(_a)) || 8;
+      const maxAniso = ((_b = (_a2 = renderer.capabilities).getMaxAnisotropy) == null ? void 0 : _b.call(_a2)) || 8;
       const pmremGenerator = new PMREMGenerator(renderer);
       const envScene = new RoomEnvironment();
       const envRT = pmremGenerator.fromScene(envScene, 0.04);
       scene.environment = envRT.texture;
-      scene.environmentIntensity = darkFactoryMode ? 0.48 : 0.78;
+      scene.environmentIntensity = darkFactoryMode ? 0.5 : 0.8;
       envScene.dispose();
       const lights = new Lights();
       scene.add(lights.hemi, lights.sun, lights.sun.target);
       lights.set([{ x0: -7.5, x1: 7.5, y0: 0, y1: totalH + 2, z0: -5, z1: 5 }], palette, false);
       lights.hemi.intensity = darkFactoryMode ? 0.95 : 1.1;
+      lights.sun.shadow.bias = -5e-4;
+      lights.sun.shadow.normalBias = 0.02;
       if (!darkFactoryMode) {
         const dayFill = new DirectionalLight(16777215, 0.85);
         dayFill.position.set(-10, 20, 12);
@@ -58456,6 +58571,18 @@ function createHoldingTower3DComponent(ctx) {
           scene.add(rail);
         }
       }
+      const demoElevGroup = new Group();
+      const demoElevFrame = new Mesh(kit.own(new BoxGeometry(0.72, 0.38, 0.72)), matSteel);
+      const demoElevCoreMat = kit.matte(palette.accent.reviewer, {
+        roughness: 0.2,
+        emissive: colour(palette.accent.reviewer),
+        emissiveIntensity: 1.1
+      });
+      const demoElevCore = new Mesh(kit.own(new BoxGeometry(0.56, 0.26, 0.56)), demoElevCoreMat);
+      demoElevGroup.add(demoElevFrame, demoElevCore);
+      demoElevGroup.visible = false;
+      demoElevGroup.position.set(shaftX, 0, shaftZ);
+      scene.add(demoElevGroup);
       const realElevatorEvents = [];
       const topFloorY = (floors.length - 1) * FLOOR_H + 0.65;
       floors.forEach((f, fIdx) => {
@@ -58551,6 +58678,10 @@ function createHoldingTower3DComponent(ctx) {
       const warningBeacons = [];
       const rackLeds = [];
       const holoCores = [];
+      let demoBeltPacket = null;
+      let demoCourier = null;
+      let demoConfetti = null;
+      const CONFETTI_COUNT = 16;
       const sharedSlabGeo = kit.own(new BoxGeometry(floorW, 0.28, floorD));
       const sharedSlabEdgesGeo = kit.own(new EdgesGeometry(sharedSlabGeo));
       floors.forEach((floor, fIdx) => {
@@ -58584,7 +58715,13 @@ function createHoldingTower3DComponent(ctx) {
         const slabEdges = new LineSegments(sharedSlabEdgesGeo, edgeMat);
         slabEdges.position.set(0, -0.14, 0);
         floorGroup.add(slabEdges);
-        floorEntries.push({ slug: floor.slug, index: fIdx, group: floorGroup, edgeMat });
+        const floorEntry = {
+          slug: floor.slug,
+          index: fIdx,
+          group: floorGroup,
+          edgeMat
+        };
+        floorEntries.push(floorEntry);
         const trimFront = new Mesh(kit.own(new BoxGeometry(floorW + 0.05, 0.075, 0.08)), matAccent);
         trimFront.position.set(0, -0.02, floorD / 2);
         floorGroup.add(trimFront);
@@ -58737,7 +58874,7 @@ function createHoldingTower3DComponent(ctx) {
               sel: { kind: "agent", agent: ag, floor },
               focusPos: new Vector3(slot.pos[0], y0 + 0.9, slot.pos[2])
             });
-            avatars.push({ handle: av, phase: idx * 0.95, working: ag.status === "working", error: ag.status === "error" });
+            avatars.push({ handle: av, phase: idx * 0.95, working: ag.status === "working", error: ag.status === "error", floorIndex: fIdx });
           });
         } else if (floor.estagio === "planejado" && floor.agents.length <= 2) {
           const blueprintFloor = new Mesh(
@@ -58764,7 +58901,7 @@ function createHoldingTower3DComponent(ctx) {
             av.root.position.set(-1.4 + idx * 1.4, 0, 0.1);
             av.root.rotation.y = Math.PI / 2;
             floorGroup.add(av.root);
-            avatars.push({ handle: av, phase: fIdx * 1.4 + idx, working: false, error: false });
+            avatars.push({ handle: av, phase: fIdx * 1.4 + idx, working: false, error: false, floorIndex: fIdx });
           });
         } else {
           const workZone = new Mesh(kit.own(new BoxGeometry(9.2, 0.022, 3)), matFloorWood);
@@ -58801,6 +58938,33 @@ function createHoldingTower3DComponent(ctx) {
             rail.position.set(0.85, 0.27, rz);
             floorGroup.add(rail);
           }
+          const ciState = floor.errorCount > 0 ? "red" : floor.packets.length > 0 || floor.workingCount > 0 ? "amber" : "green";
+          const ciTower = buildCiSignalTower(kit, palette, matSteel, ciState);
+          ciTower.group.position.set(-3.45, 0, 1.9);
+          floorGroup.add(ciTower.group);
+          floorEntry.ciAmberMat = ciTower.amberMat;
+          floorEntry.ciGreenMat = ciTower.greenMat;
+          const portalFrame = new Group();
+          portalFrame.position.set(5.05, 0, 1.9);
+          const pLeft = new Mesh(kit.own(new BoxGeometry(0.12, 0.98, 0.12)), matSteel);
+          pLeft.position.set(0, 0.49, -0.52);
+          const pRight = new Mesh(kit.own(new BoxGeometry(0.12, 0.98, 0.12)), matSteel);
+          pRight.position.set(0, 0.49, 0.52);
+          const pTop = new Mesh(kit.own(new BoxGeometry(0.14, 0.12, 1.18)), matSteel);
+          pTop.position.set(0, 0.98, 0);
+          const portalMat = kit.own(
+            new MeshStandardMaterial({
+              color: colour(palette.lamp.green),
+              emissive: colour(palette.lamp.green),
+              emissiveIntensity: floor.packets.length > 0 ? 0.9 : 0.25,
+              roughness: 0.25
+            })
+          );
+          const pStrip = new Mesh(kit.own(new BoxGeometry(0.16, 0.05, 1.02)), portalMat);
+          pStrip.position.set(0, 0.9, 0);
+          portalFrame.add(pLeft, pRight, pTop, pStrip);
+          floorGroup.add(portalFrame);
+          floorEntry.portalMat = portalMat;
           const pktTotal = floor.packets.length;
           floor.packets.forEach((pktData, pIdx) => {
             const pktRgb = stageColorRgb(pktData.stage, palette);
@@ -58832,6 +58996,49 @@ function createHoldingTower3DComponent(ctx) {
               offset: pIdx / Math.max(1, pktTotal)
             });
           });
+          if (fIdx === demoTargetFloorIdx) {
+            const dPkt = new Group();
+            const dCrate = new Mesh(
+              kit.own(new BoxGeometry(0.6, 0.3, 0.5)),
+              kit.matte([0.2, 0.24, 0.32], { roughness: 0.4 })
+            );
+            const dStripe = new Mesh(
+              kit.own(new BoxGeometry(0.62, 0.07, 0.52)),
+              kit.matte(palette.lamp.green, { roughness: 0.2, emissive: colour(palette.lamp.green), emissiveIntensity: 1 })
+            );
+            dStripe.position.y = 0.15;
+            dPkt.add(dCrate, dStripe);
+            dPkt.position.set(-2.9, 0.41, 1.9);
+            dPkt.visible = false;
+            floorGroup.add(dPkt);
+            demoBeltPacket = dPkt;
+            const courierRoot = new Group();
+            const courierAg = floor.agents.find((a) => /dev|exec/i.test(`${a.name} ${a.role || ""}`)) || floor.agents[0];
+            const courierHandle = buildCustomAvatar3D(kit, palette, courierAg || { name: "Dev", status: "working" }, {
+              seatHeight: 0.02,
+              scale: 0.9
+            });
+            const carriedCrate = new Mesh(
+              kit.own(new BoxGeometry(0.32, 0.22, 0.28)),
+              kit.matte(palette.accent.reviewer, { roughness: 0.3, emissive: colour(palette.accent.reviewer), emissiveIntensity: 0.55 })
+            );
+            carriedCrate.position.set(0, 0.48, 0.26);
+            courierRoot.add(courierHandle.root, carriedCrate);
+            courierRoot.visible = false;
+            floorGroup.add(courierRoot);
+            demoCourier = { root: courierRoot, handle: courierHandle, crate: carriedCrate };
+            const confGeo = kit.own(new BoxGeometry(0.08, 0.08, 0.02));
+            const confMat = kit.own(new MeshBasicMaterial({ color: 16777215 }));
+            const confMesh = new InstancedMesh(confGeo, confMat, CONFETTI_COUNT);
+            const confColors = [3462041, 6333946, 16498468, 16020150];
+            for (let ci = 0; ci < CONFETTI_COUNT; ci += 1) {
+              confMesh.setColorAt(ci, new Color(confColors[ci % confColors.length]));
+            }
+            if (confMesh.instanceColor) confMesh.instanceColor.needsUpdate = true;
+            confMesh.visible = false;
+            floorGroup.add(confMesh);
+            demoConfetti = { mesh: confMesh, baseX: 4.75, baseY: 0.9, baseZ: 1.9 };
+          }
           const screenMatA = kit.own(new MeshBasicMaterial({ map: makeDeskScreenTexture(kit, floorAccent, fIdx * 7 + 1, maxAniso) }));
           const screenMatB = kit.own(new MeshBasicMaterial({ map: makeDeskScreenTexture(kit, palette.accent.reviewer, fIdx * 7 + 2, maxAniso) }));
           const floorAgents = floor.agents.slice(0, 16);
@@ -58876,7 +59083,7 @@ function createHoldingTower3DComponent(ctx) {
               sel: { kind: "agent", agent: ag, floor },
               focusPos: new Vector3(dx, y0 + 0.85, dz)
             });
-            avatars.push({ handle: av, phase: fIdx * 1.7 + idx * 0.85, working: ag.status === "working", error: ag.status === "error" });
+            avatars.push({ handle: av, phase: fIdx * 1.7 + idx * 0.85, working: ag.status === "working", error: ag.status === "error", floorIndex: fIdx });
           });
         }
         const floorHit = new Mesh(
@@ -59024,22 +59231,99 @@ function createHoldingTower3DComponent(ctx) {
       dom.addEventListener("wheel", onWheel, { passive: false });
       let rafId = 0;
       const clock = new Clock();
+      const confDummy = new Object3D();
       const animate = () => {
         rafId = requestAnimationFrame(animate);
         const t = clock.getElapsedTime();
         const explodeGap = explodedRef.current ? 1.95 : 0;
+        const stepH = FLOOR_H + explodeGap;
         const selSlug = selectedSlugRef.current;
         const hovSlug = hoveredSlugRef.current;
         const selIdx = selSlug ? floorEntries.findIndex((fe) => fe.slug === selSlug) : -1;
+        const dPhase = demoPhaseRef.current;
+        const dStepMs = dPhase ? TOWER_DEMO_STEP_MS[dPhase - 1] ?? 4500 : 1;
+        const dFrac = dPhase ? Math.min(1, Math.max(0, (performance.now() - demoStartedAtRef.current) / dStepMs)) : 0;
         for (const fe of floorEntries) {
-          const targetY = fe.index * (FLOOR_H + explodeGap);
+          const targetY = fe.index * stepH;
           if (Math.abs(fe.group.position.y - targetY) > 5e-3) {
             fe.group.position.y += (targetY - fe.group.position.y) * 0.14;
           }
           fe.group.visible = !(isolateRef.current && selIdx >= 0 && fe.index > selIdx);
-          const isSel = fe.slug === selSlug;
+          const isSel = fe.slug === selSlug || dPhase !== null && fe.index === demoTargetFloorIdx;
           const isHov = fe.slug === hovSlug;
           fe.edgeMat.opacity = isSel ? 0.85 : isHov ? 0.55 : darkFactoryMode ? 0.22 : 0.18;
+          if (fe.index === demoTargetFloorIdx && fe.ciAmberMat && fe.ciGreenMat && fe.portalMat) {
+            if (dPhase === 3) {
+              fe.ciAmberMat.emissiveIntensity = 1.6 + Math.sin(t * 9) * 0.5;
+              fe.ciGreenMat.emissiveIntensity = 0.06;
+              fe.portalMat.emissiveIntensity = 0.3;
+            } else if (dPhase === 4 || dPhase === 5) {
+              fe.ciAmberMat.emissiveIntensity = 0.06;
+              fe.ciGreenMat.emissiveIntensity = 1.8;
+              fe.portalMat.emissiveIntensity = 1.6 + Math.sin(t * 10) * 0.4;
+            }
+          }
+        }
+        const targetFloorBaseY = demoTargetFloorIdx * stepH + 0.65;
+        const boardFloorTopY = (floors.length - 1) * stepH + 0.65;
+        if (dPhase === 1) {
+          demoElevGroup.visible = true;
+          demoElevGroup.position.y = boardFloorTopY - (boardFloorTopY - targetFloorBaseY) * dFrac;
+          demoElevGroup.rotation.y = t * 1.8;
+        } else if (dPhase === 5) {
+          demoElevGroup.visible = true;
+          demoElevGroup.position.y = targetFloorBaseY + (boardFloorTopY - targetFloorBaseY) * dFrac;
+          demoElevGroup.rotation.y = t * 2.2;
+        } else {
+          demoElevGroup.visible = false;
+        }
+        if (demoCourier) {
+          if (dPhase === 2) {
+            demoCourier.root.visible = true;
+            const leg = dFrac < 0.65 ? dFrac / 0.65 : 1 - (dFrac - 0.65) / 0.35;
+            demoCourier.root.position.set(-2.6 - 0.25 * leg, 0, -0.25 + 1.45 * leg);
+            demoCourier.root.rotation.y = dFrac < 0.65 ? 0 : Math.PI;
+            demoCourier.crate.visible = dFrac < 0.65;
+            demoCourier.handle.animate(t, 0.5, { working: true });
+          } else {
+            demoCourier.root.visible = false;
+          }
+        }
+        if (demoBeltPacket) {
+          if (dPhase === 3 || dPhase === 4) {
+            demoBeltPacket.visible = true;
+            const xStart = dPhase === 3 ? -2.9 : 1;
+            const xEnd = dPhase === 3 ? 1 : 5.05;
+            demoBeltPacket.position.set(xStart + (xEnd - xStart) * dFrac, 0.41 + Math.sin(t * 5) * 0.014, 1.9);
+            const scaleOut = dPhase === 4 && dFrac > 0.85 ? Math.max(0.05, (1 - dFrac) / 0.15) : 1;
+            demoBeltPacket.scale.setScalar(scaleOut);
+          } else {
+            demoBeltPacket.visible = false;
+          }
+        }
+        if (demoConfetti) {
+          if (dPhase === 4) {
+            demoConfetti.mesh.visible = true;
+            const age = dFrac * 1.4;
+            for (let ci = 0; ci < CONFETTI_COUNT; ci += 1) {
+              const ang = ci / CONFETTI_COUNT * Math.PI * 2 + ci * 0.37;
+              const spd = 0.45 + ci % 4 * 0.18;
+              const up = 1.2 + ci % 3 * 0.35;
+              const s = Math.max(0, 1 - dFrac * 1.05);
+              confDummy.position.set(
+                demoConfetti.baseX + Math.cos(ang) * spd * age,
+                demoConfetti.baseY + up * age - 1.3 * age * age,
+                demoConfetti.baseZ + Math.sin(ang) * spd * age
+              );
+              confDummy.rotation.set(t * 5 + ci, t * 4 + ci, t * 3);
+              confDummy.scale.setScalar(s);
+              confDummy.updateMatrix();
+              demoConfetti.mesh.setMatrixAt(ci, confDummy.matrix);
+            }
+            demoConfetti.mesh.instanceMatrix.needsUpdate = true;
+          } else {
+            demoConfetti.mesh.visible = false;
+          }
         }
         let camDirty = false;
         if (target.distanceTo(desiredTargetRef.current) > 0.01) {
@@ -59056,7 +59340,13 @@ function createHoldingTower3DComponent(ctx) {
         }
         if (camDirty) updateCamera();
         for (const a of avatars) {
-          a.handle.animate(t, a.phase, { working: a.working, error: a.error });
+          const isDemoWork = dPhase !== null && dPhase >= 2 && dPhase <= 3 && a.floorIndex === demoTargetFloorIdx;
+          const isDemoCheer = dPhase === 4 && a.floorIndex === demoTargetFloorIdx;
+          a.handle.animate(t, a.phase, {
+            working: a.working || isDemoWork,
+            error: a.error,
+            celebrating: isDemoCheer
+          });
         }
         for (const cap of dataCapsules) {
           const frac = (t * cap.speed + cap.offset) % 1;
@@ -59073,8 +59363,9 @@ function createHoldingTower3DComponent(ctx) {
           rackLeds[i].visible = Math.sin(t * 3.4 + i * 1.5) > -0.65;
         }
         for (const holo of holoCores) {
-          holo.rotation.y = t * 0.8;
+          holo.rotation.y = t * (dPhase === 5 ? 2.4 : 0.8);
           holo.position.y = 1.56 + Math.sin(t * 1.7) * 0.045;
+          holo.scale.setScalar(dPhase === 5 ? 1.2 + Math.sin(t * 8) * 0.08 : 1);
         }
         for (const b of warningBeacons) {
           b.mesh.scale.setScalar(1 + Math.sin(t * 7 + b.phase) * 0.14);
@@ -59110,7 +59401,7 @@ function createHoldingTower3DComponent(ctx) {
         kit.dispose();
         renderer.dispose();
       };
-    }, [floorsSignature, fitTick, darkFactoryMode, props.activeTenant]);
+    }, [floorsSignature, fitTick, darkFactoryMode, props.activeTenant, demoTargetFloorIdx]);
     const selectedSlug = (selection == null ? void 0 : selection.floor.slug) || null;
     const activeFloorCard = (selection == null ? void 0 : selection.floor) || floors.find((f) => f.slug === hoveredSlug) || null;
     const focusFloorBySlug = (slug) => {
@@ -59146,6 +59437,9 @@ function createHoldingTower3DComponent(ctx) {
       });
     };
     const totalLivePackets = floors.reduce((sum, f) => sum + f.packets.length, 0);
+    const dockDivider = h("span", {
+      style: { width: "1px", height: "16px", background: "var(--border)", opacity: 0.7, margin: "0 2px" }
+    });
     return h(
       "div",
       {
@@ -59169,6 +59463,42 @@ function createHoldingTower3DComponent(ctx) {
           }
         },
         h("div", { ref: mountRef, style: { width: "100%", height: "100%" } }),
+        // Pílula minimalista no topo durante o modo Simular fluxo
+        demoPhase !== null && h(
+          "div",
+          {
+            "data-tower-demo-banner": "true",
+            style: {
+              position: "absolute",
+              top: "12px",
+              left: "50%",
+              transform: "translateX(-50%)",
+              zIndex: 24,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "8px",
+              padding: "6px 12px",
+              borderRadius: "999px",
+              border: "1px solid rgba(59, 130, 246, 0.55)",
+              background: "rgba(14, 17, 24, 0.92)",
+              backdropFilter: "blur(10px)",
+              fontSize: "11.5px",
+              fontWeight: 600,
+              color: "var(--foreground)",
+              boxShadow: "0 8px 24px rgba(0,0,0,0.45)"
+            }
+          },
+          h("span", {
+            style: {
+              width: "8px",
+              height: "8px",
+              borderRadius: "999px",
+              background: demoPhase >= 4 ? "#34d399" : "#60a5fa",
+              boxShadow: `0 0 8px ${demoPhase >= 4 ? "#34d399" : "#60a5fa"}`
+            }
+          }),
+          h("span", null, towerDemoLabel(demoPhase, demoTargetFloorName))
+        ),
         // Seletor rápido de andares (Elevador na esquerda)
         h(
           "div",
@@ -59184,7 +59514,7 @@ function createHoldingTower3DComponent(ctx) {
               padding: "8px",
               borderRadius: "10px",
               border: "1px solid var(--border)",
-              background: "rgba(14, 17, 24, 0.92)",
+              background: "rgba(14, 17, 24, 0.9)",
               backdropFilter: "blur(10px)"
             }
           },
@@ -59224,7 +59554,7 @@ function createHoldingTower3DComponent(ctx) {
               width: "286px",
               borderRadius: "10px",
               border: "1px solid var(--border-strong)",
-              background: "rgba(15, 18, 24, 0.95)",
+              background: "rgba(15, 18, 24, 0.94)",
               backdropFilter: "blur(10px)",
               padding: "11px 13px",
               display: "flex",
@@ -59350,20 +59680,62 @@ function createHoldingTower3DComponent(ctx) {
             )
           ]
         ),
-        // Controles no canto inferior direito (Ângulo Piso, Flutuar PiP, Dia/Noite, Tela cheia, Fit)
+        // HUD Minimalista Unificado (Floating Glass Dock estilo Apple no rodapé)
         h(
           "div",
-          { style: { position: "absolute", right: "12px", bottom: "12px", zIndex: 20, display: "inline-flex", gap: "6px", flexWrap: "wrap" } },
+          {
+            "data-tower-glass-dock": "true",
+            style: {
+              position: "absolute",
+              left: "50%",
+              bottom: "12px",
+              transform: "translateX(-50%)",
+              zIndex: 20,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "4px",
+              padding: "4px 6px",
+              borderRadius: "12px",
+              border: "1px solid var(--border)",
+              background: "rgba(14, 17, 24, 0.86)",
+              backdropFilter: "blur(12px)",
+              boxShadow: "0 10px 28px rgba(0, 0, 0, 0.42)",
+              maxWidth: "calc(100% - 24px)"
+            }
+          },
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-tower-demo-btn": "true",
+              "data-variant": demoPhase !== null ? "primary" : "ghost",
+              style: { padding: "4px 9px", fontSize: "11px" },
+              onClick: () => {
+                setDemoPhase((cur) => {
+                  if (cur !== null) return null;
+                  const effH = floors.length * 3.65 + (explodedRef.current ? (floors.length - 1) * 1.95 : 0);
+                  desiredTargetRef.current.set(0, Math.max(2.6, effH * 0.48), 0);
+                  desiredFrustumRef.current = Math.max(14.5, effH * 1.18);
+                  desiredPhiRef.current = 1.02;
+                  return 1;
+                });
+              },
+              title: demoPhase !== null ? "Parar simulação" : "Simular ciclo completo (Conselho → Andar → Esteira → SHIP)"
+            },
+            demoPhase !== null ? "■ Parar" : "▶ Simular"
+          ),
+          dockDivider,
           h(
             "button",
             {
               type: "button",
               className: "of-btn",
               "data-tower-exploded-btn": "true",
-              "data-variant": explodedView ? "primary" : void 0,
-              style: { background: explodedView ? void 0 : "rgba(18, 20, 26, 0.88)" },
+              "data-variant": explodedView ? "primary" : "ghost",
+              style: { padding: "4px 8px", fontSize: "11px" },
               onClick: handleToggleExploded,
-              title: "Separar os andares verticalmente para inspecionar cada camada (Vista Explodida)"
+              title: "Separar os andares verticalmente (Vista Explodida)"
             },
             explodedView ? "⊟ Compactar" : "⊞ Explodir"
           ),
@@ -59373,8 +59745,8 @@ function createHoldingTower3DComponent(ctx) {
               type: "button",
               className: "of-btn",
               "data-tower-isolate-btn": "true",
-              "data-variant": isolateSelected ? "primary" : void 0,
-              style: { background: isolateSelected ? void 0 : "rgba(18, 20, 26, 0.88)" },
+              "data-variant": isolateSelected ? "primary" : "ghost",
+              style: { padding: "4px 8px", fontSize: "11px" },
               onClick: () => {
                 setIsolateSelected((v2) => {
                   const next = !v2;
@@ -59389,17 +59761,19 @@ function createHoldingTower3DComponent(ctx) {
                   return next;
                 });
               },
-              title: "Ocultar os andares acima do andar selecionado para ver por dentro (Cutaway)"
+              title: "Ocultar andares acima do selecionado (Cutaway)"
             },
-            isolateSelected ? "◫ Mostrar Todos" : "◫ Isolar Andar"
+            isolateSelected ? "◫ Todos" : "◫ Isolar"
           ),
+          dockDivider,
           h(
             "button",
             {
               type: "button",
               className: "of-btn",
               "data-tower-plan-btn": "true",
-              style: { background: "rgba(18, 20, 26, 0.88)" },
+              "data-variant": "ghost",
+              style: { padding: "4px 8px", fontSize: "11px" },
               onClick: () => {
                 const idx = selectedSlug ? Math.max(0, floors.findIndex((f) => f.slug === selectedSlug)) : 0;
                 const stepH = 3.65 + (explodedRef.current ? 1.95 : 0);
@@ -59407,7 +59781,7 @@ function createHoldingTower3DComponent(ctx) {
                 desiredFrustumRef.current = 7.4;
                 desiredPhiRef.current = 0.34;
               },
-              title: "Vista de Planta Baixa (ângulo superior inclinado)"
+              title: "Vista superior de planta baixa"
             },
             "⌖ Planta"
           ),
@@ -59416,11 +59790,43 @@ function createHoldingTower3DComponent(ctx) {
             {
               type: "button",
               className: "of-btn",
-              style: { background: "rgba(18, 20, 26, 0.88)" },
+              "data-variant": "ghost",
+              style: { padding: "4px 8px", fontSize: "11px" },
               onClick: handleEyeLevelView,
-              title: "Aproximar câmera no nível do piso do andar selecionado"
+              title: "Aproximar câmera no nível do piso"
             },
-            "👁 Nível Piso"
+            "👁 Piso"
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-variant": "ghost",
+              style: { padding: "4px 8px", fontSize: "11px" },
+              onClick: () => {
+                setSelection(null);
+                const effH = floors.length * 3.65 + (explodedRef.current ? (floors.length - 1) * 1.95 : 0);
+                desiredTargetRef.current.set(0, Math.max(2.6, effH * 0.48), 0);
+                desiredFrustumRef.current = Math.max(14.5, effH * 1.18);
+                desiredPhiRef.current = 1.02;
+              },
+              title: "Enquadrar toda a torre"
+            },
+            "⤢ Fit"
+          ),
+          dockDivider,
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-variant": "ghost",
+              style: { padding: "4px 7px", fontSize: "12px" },
+              onClick: () => setDarkFactoryMode((v2) => !v2),
+              title: darkFactoryMode ? "Alternar para Modo Dia" : "Alternar para Dark Factory"
+            },
+            darkFactoryMode ? "☀" : "☾"
           ),
           h(
             "button",
@@ -59428,37 +59834,27 @@ function createHoldingTower3DComponent(ctx) {
               type: "button",
               className: "of-btn",
               "data-tower-pip-btn": "true",
-              "data-variant": isPipActive ? "primary" : void 0,
-              style: { background: isPipActive ? void 0 : "rgba(18, 20, 26, 0.88)" },
+              "data-variant": isPipActive ? "primary" : "ghost",
+              style: { padding: "4px 7px", fontSize: "12px" },
               onClick: () => void handleTogglePiP(),
-              title: "Abrir a Torre 3D como janela flutuante (Picture-in-Picture) fora do Buzz"
+              title: isPipActive ? "Fechar janela flutuante (PiP)" : "Abrir Torre 3D em janela flutuante (Picture-in-Picture)"
             },
-            isPipActive ? "⧉ Fechar PiP" : "⧉ Flutuar (PiP)"
+            "⧉"
           ),
           h(
             "button",
             {
               type: "button",
               className: "of-btn",
-              style: { background: "rgba(18, 20, 26, 0.88)" },
-              onClick: () => setDarkFactoryMode((v2) => !v2),
-              title: "Alternar iluminação Dia vs. Dark Factory"
-            },
-            darkFactoryMode ? "☀ Modo Dia" : "☾ Dark Factory"
-          ),
-          h(
-            "button",
-            {
-              type: "button",
-              className: "of-btn",
-              style: { background: "rgba(18, 20, 26, 0.88)" },
+              "data-variant": "ghost",
+              style: { padding: "4px 7px", fontSize: "12px" },
               onClick: () => {
-                var _a, _b;
+                var _a2, _b;
                 const el = hostRef.current;
                 if (!el) return;
                 try {
                   if (document.fullscreenElement) {
-                    void ((_a = document.exitFullscreen) == null ? void 0 : _a.call(document));
+                    void ((_a2 = document.exitFullscreen) == null ? void 0 : _a2.call(document));
                     setIsFullscreen(false);
                   } else {
                     void ((_b = el.requestFullscreen) == null ? void 0 : _b.call(el));
@@ -59466,32 +59862,17 @@ function createHoldingTower3DComponent(ctx) {
                   }
                 } catch {
                 }
-              }
+              },
+              title: isFullscreen ? "Sair da tela cheia" : "Tela cheia"
             },
-            isFullscreen ? "↙ Sair" : "⛶ Tela cheia"
-          ),
-          h(
-            "button",
-            {
-              type: "button",
-              className: "of-btn",
-              style: { background: "rgba(18, 20, 26, 0.88)" },
-              onClick: () => {
-                setSelection(null);
-                const effH = floors.length * 3.65 + (explodedRef.current ? (floors.length - 1) * 1.95 : 0);
-                desiredTargetRef.current.set(0, Math.max(2.6, effH * 0.48), 0);
-                desiredFrustumRef.current = Math.max(14.5, effH * 1.18);
-                desiredPhiRef.current = 1.02;
-              }
-            },
-            "⤢ Fit"
+            isFullscreen ? "↙" : "⛶"
           )
         )
       ),
       h(
         "div",
         { className: "of-muted", style: { textAlign: "center", fontSize: "11px" } },
-        `Torre Cortexx · ${floors.length} andares · ${totalLivePackets} pacote(s) reais · Arraste: girar · Botão direito/Shift: mover · Scroll: zoom profundo · W/A/S/D/Q/E`
+        `Torre Cortexx · ${floors.length} andares · ${totalLivePackets} pacote(s) ativos · Arraste: girar · Botão direito/Shift: mover · Scroll: zoom profundo · W/A/S/D/Q/E`
       )
     );
   };
