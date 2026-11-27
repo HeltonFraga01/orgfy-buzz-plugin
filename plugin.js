@@ -6453,12 +6453,12 @@ function resolveBuzzNavigationScope$1(ctx) {
   return null;
 }
 async function openBuzzRepoEntity(ctx, route) {
-  var _a;
+  var _a, _b, _c, _d, _e, _f;
   const scope = resolveBuzzNavigationScope$1(ctx);
   if (!scope || typeof ((_a = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a.open) !== "function") {
     return false;
   }
-  const normalizedRoute = "id" in route ? {
+  let normalizedRoute = "id" in route ? {
     type: route.type,
     owner: route.owner.toLowerCase().trim(),
     dtag: route.dtag.trim(),
@@ -6470,6 +6470,69 @@ async function openBuzzRepoEntity(ctx, route) {
     ...route.tab ? { tab: route.tab } : {},
     ...route.commit ? { commit: route.commit.toLowerCase().trim() } : {}
   };
+  const session = typeof ((_b = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _b.snapshot) === "function" ? (_c = ctx.relay.snapshot()) == null ? void 0 : _c.session : null;
+  if ("id" in normalizedRoute && (session == null ? void 0 : session.repositories) && typeof session.repositories.load === "function") {
+    const tryLoad = async (cand) => {
+      const ac = new AbortController();
+      const t = setTimeout(() => ac.abort(), 3e3);
+      try {
+        const det = await session.repositories.load(cand, ac.signal);
+        return Boolean(det == null ? void 0 : det.item);
+      } catch {
+        return false;
+      } finally {
+        clearTimeout(t);
+      }
+    };
+    const okDirect = await tryLoad(normalizedRoute);
+    if (!okDirect) {
+      let resolved = null;
+      try {
+        const navSnap = typeof ((_d = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _d.snapshot) === "function" ? ctx.navigation.snapshot() : null;
+        const activeCh = ((_f = (_e = navSnap == null ? void 0 : navSnap.entry) == null ? void 0 : _e.target) == null ? void 0 : _f.kind) === "conversation" ? navSnap.entry.target.channelId : null;
+        if (activeCh && typeof session.repositories.home === "function") {
+          const acH = new AbortController();
+          const tH = setTimeout(() => acH.abort(), 2500);
+          try {
+            const home = await session.repositories.home(activeCh, acH.signal);
+            const repos = (home == null ? void 0 : home.status) === "home" && Array.isArray(home.repositories) ? home.repositories : [];
+            for (const r of repos) {
+              if (!(r == null ? void 0 : r.owner) || !(r == null ? void 0 : r.dtag)) continue;
+              const cand = { ...normalizedRoute, owner: String(r.owner).toLowerCase(), dtag: String(r.dtag) };
+              if (await tryLoad(cand)) {
+                resolved = cand;
+                break;
+              }
+            }
+          } finally {
+            clearTimeout(tH);
+          }
+        }
+      } catch {
+      }
+      if (!resolved && normalizedRoute.dtag !== "orgfy") {
+        const orgfyCand = { ...normalizedRoute, owner: DEFAULT_ORGFY_REPO_OWNER, dtag: "orgfy" };
+        if (await tryLoad(orgfyCand)) {
+          resolved = orgfyCand;
+        }
+      }
+      if (resolved) {
+        normalizedRoute = resolved;
+      } else {
+        try {
+          await ctx.navigation.open({
+            version: 1,
+            kind: "page",
+            pluginId: "digital.cortexx.orgfy",
+            pageId: "orgfy-factory",
+            scope
+          });
+          return true;
+        } catch {
+        }
+      }
+    }
+  }
   try {
     const res = await ctx.navigation.open({
       version: 1,

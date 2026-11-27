@@ -110,7 +110,7 @@ export async function openBuzzRepoEntity(
     return false;
   }
 
-  const normalizedRoute: BuzzEntityRoute =
+  let normalizedRoute: BuzzEntityRoute =
     "id" in route
       ? {
           type: route.type,
@@ -125,6 +125,73 @@ export async function openBuzzRepoEntity(
           ...(route.tab ? { tab: route.tab } : {}),
           ...(route.commit ? { commit: route.commit.toLowerCase().trim() } : {}),
         };
+
+  // Verifica se o repositório/issue existe no relay sob (owner, dtag) antes de navegar;
+  // evita cair na tela "This page isn't available" quando o dtag/owner diverge ou falta anúncio kind:30617.
+  const session = typeof ctx?.relay?.snapshot === "function" ? ctx.relay.snapshot()?.session : null;
+  if ("id" in normalizedRoute && session?.repositories && typeof session.repositories.load === "function") {
+    const tryLoad = async (cand: BuzzEntityRoute): Promise<boolean> => {
+      const ac = new AbortController();
+      const t = setTimeout(() => ac.abort(), 3000);
+      try {
+        const det = await session.repositories.load(cand, ac.signal);
+        return Boolean(det?.item);
+      } catch {
+        return false;
+      } finally {
+        clearTimeout(t);
+      }
+    };
+
+    const okDirect = await tryLoad(normalizedRoute);
+    if (!okDirect) {
+      let resolved: BuzzEntityRoute | null = null;
+      try {
+        const navSnap = typeof ctx?.navigation?.snapshot === "function" ? ctx.navigation.snapshot() : null;
+        const activeCh = navSnap?.entry?.target?.kind === "conversation" ? navSnap.entry.target.channelId : null;
+        if (activeCh && typeof session.repositories.home === "function") {
+          const acH = new AbortController();
+          const tH = setTimeout(() => acH.abort(), 2500);
+          try {
+            const home = await session.repositories.home(activeCh, acH.signal);
+            const repos: any[] = home?.status === "home" && Array.isArray(home.repositories) ? home.repositories : [];
+            for (const r of repos) {
+              if (!r?.owner || !r?.dtag) continue;
+              const cand: BuzzEntityRoute = { ...normalizedRoute, owner: String(r.owner).toLowerCase(), dtag: String(r.dtag) };
+              if (await tryLoad(cand)) {
+                resolved = cand;
+                break;
+              }
+            }
+          } finally {
+            clearTimeout(tH);
+          }
+        }
+      } catch {}
+
+      if (!resolved && normalizedRoute.dtag !== "orgfy") {
+        const orgfyCand: BuzzEntityRoute = { ...normalizedRoute, owner: DEFAULT_ORGFY_REPO_OWNER, dtag: "orgfy" };
+        if (await tryLoad(orgfyCand)) {
+          resolved = orgfyCand;
+        }
+      }
+
+      if (resolved) {
+        normalizedRoute = resolved;
+      } else {
+        try {
+          await ctx.navigation.open({
+            version: 1,
+            kind: "page",
+            pluginId: "digital.cortexx.orgfy",
+            pageId: "orgfy-factory",
+            scope,
+          });
+          return true;
+        } catch {}
+      }
+    }
+  }
 
   try {
     const res = await ctx.navigation.open({
