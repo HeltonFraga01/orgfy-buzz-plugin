@@ -103,6 +103,8 @@ function isBlockedGatewayCatalogModel(modelId: string): boolean {
     m === "haiku" ||
     m === "grok-4.5" ||
     m.includes("gemini-3.8-flash-medium") ||
+    m.includes("gemini-3-pro-low") ||
+    m.includes("gemini-3-pro-high") ||
     m.includes("mistral-large-4-1t-a52b") ||
     m.includes("claude-opus-5-5") ||
     m.includes("minimax-m3.1-flash") ||
