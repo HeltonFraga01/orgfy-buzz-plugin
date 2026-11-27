@@ -47,7 +47,7 @@ export const PINNED_HOST_COMMANDS: readonly PinnedHostCommandSpec[] = Object.fre
   {
     id: "orgfy-controle-write",
     scriptPath: "ferramentas/esteira/controle_fabrica_write.py",
-    sha256: "a0e3938e0f9d79bd074ee15092ad20dc776381b6d1993674fefe3d6bfea9f3bd",
+    sha256: "de6c534db82c4d7339a6706eceff2b11ebe791fc5dfb325e48093c5e4bd5be0e",
   },
   {
     id: "orgfy-holdout",

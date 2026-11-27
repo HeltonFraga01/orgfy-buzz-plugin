@@ -371,17 +371,26 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
           if (!cancelled) setChannelInfo(info);
         })
         .catch(() => {});
+      setLiveRepo(null);
       loadLiveRepoSnapshot(ctx, { channelId: canal, dtag })
         .then((snap) => {
-          if (!cancelled && snap.available) setLiveRepo(snap);
+          if (cancelled) return;
+          // Isolamento estrito por empresa: nunca herda repo NIP-34 de outra empresa (ex.: orgfy vazando em lumen-iptv)
+          if (snap.available && String(snap.dtag || "").toLowerCase() === String(dtag || "").toLowerCase()) {
+            setLiveRepo(snap);
+          } else {
+            setLiveRepo(null);
+          }
         })
-        .catch(() => {});
+        .catch(() => {
+          if (!cancelled) setLiveRepo(null);
+        });
       return () => {
         cancelled = true;
       };
     }, [tenant, linkedChannelId, status.tenantManifest?.canal, status.tenantManifest?.repoId, holding, relayTick, activityTick]);
 
-    // Ao abrir um card no ItemSheetDrawer, carrega conteúdo NIP-34, comentários e diff Git via Buzz Repos
+    // Ao abrir um card no ItemSheetDrawer, carrega conteúdo NIP-34 + fallback local em REPOS/<repoId>/cards/*.md
     React.useEffect(() => {
       let cancelled = false;
       if (!selectedItem || !/^[0-9a-f]{64}$/i.test(selectedItem.id || "")) {
@@ -391,28 +400,88 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       }
       setSelectedItemDetailLoading(true);
       const isPr = String(selectedItem.workKey || "").startsWith("pr:");
+      const expectedDtag = status.tenantManifest?.repoId || tenant;
+      const matchedRepoDtag = liveRepo?.dtag && liveRepo.dtag.toLowerCase() === expectedDtag.toLowerCase() ? liveRepo.dtag : expectedDtag;
+      const readLocalCardFallback = async (): Promise<string | null> => {
+        const readFile = (ctx as any)?.host?.readFile;
+        if (typeof readFile !== "function") return null;
+        const decode = (raw: any) => (raw instanceof Uint8Array ? new TextDecoder().decode(raw) : String(raw || ""));
+        const repoRoot = `/Users/heltonfraga/.buzz/REPOS/${expectedDtag}`;
+        try {
+          const rawIdx = decode(await readFile(`${repoRoot}/cards/.index.json`));
+          const parsed = JSON.parse(rawIdx);
+          const cardsObj = parsed?.cards && typeof parsed.cards === "object" ? parsed.cards : parsed;
+          if (cardsObj && typeof cardsObj === "object") {
+            const targetId = selectedItem.id.toLowerCase();
+            for (const [slug, meta] of Object.entries<any>(cardsObj)) {
+              const mid = String(meta?.issue_id || meta?.issueId || "").toLowerCase();
+              if (mid && (mid === targetId || mid.startsWith(targetId.slice(0, 8)) || targetId.startsWith(mid.slice(0, 8)))) {
+                const fname = String(meta?.slug || slug).endsWith(".md") ? String(meta?.slug || slug) : `${String(meta?.slug || slug)}.md`;
+                const md = decode(await readFile(`${repoRoot}/cards/${fname}`));
+                if (md.trim()) return md;
+              }
+            }
+          }
+        } catch {}
+        return null;
+      };
       loadLiveRepoEntityDetail(ctx, {
         type: isPr ? "pr" : "issue",
         owner: liveRepo?.owner || DEFAULT_ORGFY_REPO_OWNER,
-        dtag: liveRepo?.dtag || status.tenantManifest?.repoId || tenant,
+        dtag: matchedRepoDtag,
         id: selectedItem.id,
       })
-        .then((det) => {
-          if (!cancelled) {
+        .then(async (det) => {
+          if (cancelled) return;
+          if (det && det.content && det.content.trim()) {
             setSelectedItemDetail(det);
             setSelectedItemDetailLoading(false);
+            return;
           }
+          const localMd = await readLocalCardFallback();
+          if (cancelled) return;
+          if (localMd) {
+            setSelectedItemDetail({
+              route: det?.route || { type: isPr ? "pr" : "issue", owner: liveRepo?.owner || DEFAULT_ORGFY_REPO_OWNER, dtag: matchedRepoDtag, id: selectedItem.id },
+              title: det?.title || selectedItem.title,
+              content: localMd,
+              status: det?.status || selectedItem.stage,
+              authorPubkey: det?.authorPubkey || "",
+              createdAt: det?.createdAt || selectedItem.updatedAt,
+              commit: det?.commit,
+              commitDiff: det?.commitDiff || null,
+              channels: det?.channels || [],
+              comments: det?.comments || [],
+            });
+          } else {
+            setSelectedItemDetail(det);
+          }
+          setSelectedItemDetailLoading(false);
         })
-        .catch(() => {
-          if (!cancelled) {
+        .catch(async () => {
+          const localMd = await readLocalCardFallback();
+          if (cancelled) return;
+          if (localMd) {
+            setSelectedItemDetail({
+              route: { type: isPr ? "pr" : "issue", owner: liveRepo?.owner || DEFAULT_ORGFY_REPO_OWNER, dtag: matchedRepoDtag, id: selectedItem.id },
+              title: selectedItem.title,
+              content: localMd,
+              status: selectedItem.stage,
+              authorPubkey: "",
+              createdAt: selectedItem.updatedAt,
+              commitDiff: null,
+              channels: [],
+              comments: [],
+            });
+          } else {
             setSelectedItemDetail(null);
-            setSelectedItemDetailLoading(false);
           }
+          setSelectedItemDetailLoading(false);
         });
       return () => {
         cancelled = true;
       };
-    }, [selectedItem?.id, liveRepo?.owner, liveRepo?.dtag, tenant]);
+    }, [selectedItem?.id, liveRepo?.owner, liveRepo?.dtag, status.tenantManifest?.repoId, tenant]);
 
     // Estados das páginas
     const [scorecardView, setScorecardView] = React.useState<"builders" | "reviewers" | "pairs">("builders");
@@ -2464,6 +2533,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
                     telemetry,
                     workingNowCount: tenantWorkingNowCount,
                     otherTenantChannels,
+                    automations,
                     onOpenTurnInSideChat: handleOpenTurnInSideChat,
                     onInterruptTurn: handleInterruptTurn,
                     onOpenAgentDm: handleOpenAgentDmInBuzz,
@@ -2735,7 +2805,7 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         item: selectedItem,
         tenant,
         repoOwner: liveRepo?.owner || DEFAULT_ORGFY_REPO_OWNER,
-        repoDtag: liveRepo?.dtag || tenant,
+        repoDtag: liveRepo?.dtag && liveRepo.dtag.toLowerCase() === (status.tenantManifest?.repoId || tenant).toLowerCase() ? liveRepo.dtag : (status.tenantManifest?.repoId || tenant),
         repoDetail: selectedItemDetail,
         repoLoading: selectedItemDetailLoading,
         linkedPr: selectedItem && liveRepo?.prs?.length

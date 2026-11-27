@@ -17,6 +17,7 @@ export interface FactoryOverviewProps {
   telemetry?: BuzzLiveTelemetrySnapshot;
   workingNowCount?: number;
   otherTenantChannels?: string[];
+  automations?: Array<{ id: string; name: string; enabled: boolean; triggerKind: string; timeHHMM?: string; frequency?: string }>;
   onOpenTurnInSideChat?: (turn: LiveAgentTurn) => void;
   onInterruptTurn?: (turn: LiveAgentTurn) => void;
   onOpenAgentDm?: (agent: { key?: string; pubkey?: string; name?: string }) => void;
@@ -164,27 +165,23 @@ export function renderFactoryOverviewPanel(props: FactoryOverviewProps) {
   const nowCardsTotal = activeTurns.length + status.inProgress.length;
   const queuedCount = status.backlog.length;
 
+  const tenantCoordLabel = status.launchAgent || (tenant === "orgfy" ? "xyz.orgfy.esteira-minima" : `xyz.${tenant.split("-")[0]}.esteira-minima`);
+  const enabledTenantAutomations = (props.automations || []).filter((a) => a.enabled);
   const nextScheduleRows: Array<{ id: string; title: string; when: string; action: () => void }> = [
     {
-      id: "coord-cycle",
-      title: `Coordenador ${status.launchAgent || "esteira-minima"}`,
+      id: `coord-cycle-${tenant}`,
+      title: `Coordenador · ${tenantCoordLabel}`,
       when: status.coordenador === "ativo" ? (status.lastTickAt ? `ciclo ${fmtAge(status.lastTickAt)}` : "ativo") : "parado",
       action: () => onNavigateTab?.("automations"),
     },
-    {
-      id: "ceo-routine",
-      title: "Rotina CEO · Workflow Buzz (Kind 30620)",
-      when: "nativo",
+    ...enabledTenantAutomations.slice(0, 2).map((auto) => ({
+      id: `auto-${tenant}-${auto.id}`,
+      title: auto.name,
+      when: auto.triggerKind === "schedule" ? (auto.timeHHMM || auto.frequency || "agendado") : "evento",
       action: () => onNavigateTab?.("automations"),
-    },
-    {
-      id: "ci-runner",
-      title: `CI & Probes (${status.tenantManifest?.ciModo || "local"})`,
-      when: status.tenantManifest?.probesObrigatorios ? `${status.tenantManifest.probesCount} probes` : "sob PR",
-      action: () => onNavigateTab?.("automations"),
-    },
-    ...status.backlog.slice(0, 2).map((b) => ({
-      id: `backlog-${b.id}`,
+    })),
+    ...status.backlog.slice(0, 3).map((b) => ({
+      id: `backlog-${tenant}-${b.id}`,
       title: b.title,
       when: "na fila",
       action: () => onSelectItem(b),

@@ -16390,7 +16390,7 @@ function Meter(h, props) {
   );
 }
 function renderFactoryOverviewPanel(props) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n;
   const {
     h,
     tenant,
@@ -16457,27 +16457,23 @@ function renderFactoryOverviewPanel(props) {
   const nowLiveCount = activeTurns.length;
   const nowCardsTotal = activeTurns.length + status.inProgress.length;
   const queuedCount = status.backlog.length;
+  const tenantCoordLabel = status.launchAgent || (tenant === "orgfy" ? "xyz.orgfy.esteira-minima" : `xyz.${tenant.split("-")[0]}.esteira-minima`);
+  const enabledTenantAutomations = (props.automations || []).filter((a) => a.enabled);
   const nextScheduleRows = [
     {
-      id: "coord-cycle",
-      title: `Coordenador ${status.launchAgent || "esteira-minima"}`,
+      id: `coord-cycle-${tenant}`,
+      title: `Coordenador · ${tenantCoordLabel}`,
       when: status.coordenador === "ativo" ? status.lastTickAt ? `ciclo ${fmtAge(status.lastTickAt)}` : "ativo" : "parado",
       action: () => onNavigateTab == null ? void 0 : onNavigateTab("automations")
     },
-    {
-      id: "ceo-routine",
-      title: "Rotina CEO · Workflow Buzz (Kind 30620)",
-      when: "nativo",
+    ...enabledTenantAutomations.slice(0, 2).map((auto) => ({
+      id: `auto-${tenant}-${auto.id}`,
+      title: auto.name,
+      when: auto.triggerKind === "schedule" ? auto.timeHHMM || auto.frequency || "agendado" : "evento",
       action: () => onNavigateTab == null ? void 0 : onNavigateTab("automations")
-    },
-    {
-      id: "ci-runner",
-      title: `CI & Probes (${((_h = status.tenantManifest) == null ? void 0 : _h.ciModo) || "local"})`,
-      when: ((_i = status.tenantManifest) == null ? void 0 : _i.probesObrigatorios) ? `${status.tenantManifest.probesCount} probes` : "sob PR",
-      action: () => onNavigateTab == null ? void 0 : onNavigateTab("automations")
-    },
-    ...status.backlog.slice(0, 2).map((b) => ({
-      id: `backlog-${b.id}`,
+    })),
+    ...status.backlog.slice(0, 3).map((b) => ({
+      id: `backlog-${tenant}-${b.id}`,
       title: b.title,
       when: "na fila",
       action: () => onSelectItem(b)
@@ -16848,14 +16844,14 @@ function renderFactoryOverviewPanel(props) {
         "div",
         { className: "of-panel-body" },
         // Alerta de Kill Switch / Pausa / Esteira Parada / Estagnação
-        (status.globalKillSwitch || status.pausedReason || ((_j = status.wip) == null ? void 0 : _j.holding) && ((_k = status.wip) == null ? void 0 : _k.note) || !stopped && workingNow === 0 && stalledInProgress.length > 0) && h(
+        (status.globalKillSwitch || status.pausedReason || ((_h = status.wip) == null ? void 0 : _h.holding) && ((_i = status.wip) == null ? void 0 : _i.note) || !stopped && workingNow === 0 && stalledInProgress.length > 0) && h(
           "div",
           { className: "of-alert-banner" },
           h("span", { style: { color: "var(--status-waiting)", fontWeight: 700 } }, "⚠"),
           h(
             "span",
             { style: { flex: 1 } },
-            status.globalKillSwitch ? "Kill switch global ativado: nenhuma fábrica da Holding está rodando." : status.pausedReason ? `Pausado: ${status.pausedReason}` : ((_l = status.wip) == null ? void 0 : _l.holding) && ((_m2 = status.wip) == null ? void 0 : _m2.note) ? status.wip.note : `${stalledInProgress.length} issue${stalledInProgress.length > 1 ? "s" : ""} parada${stalledInProgress.length > 1 ? "s" : ""} sem agente ativo e sem PR há mais de 20m — clique no #id para inspecionar, reatribuir ou fechar.`
+            status.globalKillSwitch ? "Kill switch global ativado: nenhuma fábrica da Holding está rodando." : status.pausedReason ? `Pausado: ${status.pausedReason}` : ((_j = status.wip) == null ? void 0 : _j.holding) && ((_k = status.wip) == null ? void 0 : _k.note) ? status.wip.note : `${stalledInProgress.length} issue${stalledInProgress.length > 1 ? "s" : ""} parada${stalledInProgress.length > 1 ? "s" : ""} sem agente ativo e sem PR há mais de 20m — clique no #id para inspecionar, reatribuir ou fechar.`
           )
         ),
         // Pipelines ao vivo
@@ -17730,10 +17726,10 @@ function renderFactoryOverviewPanel(props) {
           },
           {
             id: "ci-probes",
-            name: `CI Runner & Probes (${((_n = status.tenantManifest) == null ? void 0 : _n.ciModo) || "local"})`,
-            desc: ((_o = status.tenantManifest) == null ? void 0 : _o.ciCmd) || "ferramentas/ci.sh com isolamento de segredos e GATE humano",
+            name: `CI Runner & Probes (${((_l = status.tenantManifest) == null ? void 0 : _l.ciModo) || "local"})`,
+            desc: ((_m2 = status.tenantManifest) == null ? void 0 : _m2.ciCmd) || "ferramentas/ci.sh com isolamento de segredos e GATE humano",
             tone: "done",
-            badge: ((_p = status.tenantManifest) == null ? void 0 : _p.probesObrigatorios) ? `${status.tenantManifest.probesCount} probes` : "Habilitado"
+            badge: ((_n = status.tenantManifest) == null ? void 0 : _n.probesObrigatorios) ? `${status.tenantManifest.probesCount} probes` : "Habilitado"
           }
         ].map(
           (auto) => h(
@@ -64090,7 +64086,7 @@ const PINNED_HOST_COMMANDS = Object.freeze([
   {
     id: "orgfy-controle-write",
     scriptPath: "ferramentas/esteira/controle_fabrica_write.py",
-    sha256: "a0e3938e0f9d79bd074ee15092ad20dc776381b6d1993674fefe3d6bfea9f3bd"
+    sha256: "de6c534db82c4d7339a6706eceff2b11ebe791fc5dfb325e48093c5e4bd5be0e"
   },
   {
     id: "orgfy-holdout",
@@ -64201,7 +64197,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
   const QuestionCardsPanel = createQuestionCardsPanel(React);
   const crdtStore = getOrgfyCrdtStore(ctx);
   return function OrgFyFactoryApp() {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x2, _y2, _z2, _A;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x2, _y2, _z2, _A, _B, _C, _D;
     const [tenant, setTenant] = React.useState("orgfy");
     const [tab, setTab] = React.useState("overview");
     const [dmAgentKey, setDmAgentKey] = React.useState("");
@@ -64433,9 +64429,16 @@ function createFactoryAppComponent(ctx, opts = {}) {
         if (!cancelled) setChannelInfo(info);
       }).catch(() => {
       });
+      setLiveRepo(null);
       loadLiveRepoSnapshot(ctx, { channelId: canal, dtag }).then((snap) => {
-        if (!cancelled && snap.available) setLiveRepo(snap);
+        if (cancelled) return;
+        if (snap.available && String(snap.dtag || "").toLowerCase() === String(dtag || "").toLowerCase()) {
+          setLiveRepo(snap);
+        } else {
+          setLiveRepo(null);
+        }
       }).catch(() => {
+        if (!cancelled) setLiveRepo(null);
       });
       return () => {
         cancelled = true;
@@ -64451,26 +64454,88 @@ function createFactoryAppComponent(ctx, opts = {}) {
       }
       setSelectedItemDetailLoading(true);
       const isPr = String(selectedItem.workKey || "").startsWith("pr:");
+      const expectedDtag = ((_a2 = status.tenantManifest) == null ? void 0 : _a2.repoId) || tenant;
+      const matchedRepoDtag = (liveRepo == null ? void 0 : liveRepo.dtag) && liveRepo.dtag.toLowerCase() === expectedDtag.toLowerCase() ? liveRepo.dtag : expectedDtag;
+      const readLocalCardFallback = async () => {
+        var _a3;
+        const readFile = (_a3 = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a3.readFile;
+        if (typeof readFile !== "function") return null;
+        const decode = (raw) => raw instanceof Uint8Array ? new TextDecoder().decode(raw) : String(raw || "");
+        const repoRoot = `/Users/heltonfraga/.buzz/REPOS/${expectedDtag}`;
+        try {
+          const rawIdx = decode(await readFile(`${repoRoot}/cards/.index.json`));
+          const parsed = JSON.parse(rawIdx);
+          const cardsObj = (parsed == null ? void 0 : parsed.cards) && typeof parsed.cards === "object" ? parsed.cards : parsed;
+          if (cardsObj && typeof cardsObj === "object") {
+            const targetId = selectedItem.id.toLowerCase();
+            for (const [slug, meta] of Object.entries(cardsObj)) {
+              const mid = String((meta == null ? void 0 : meta.issue_id) || (meta == null ? void 0 : meta.issueId) || "").toLowerCase();
+              if (mid && (mid === targetId || mid.startsWith(targetId.slice(0, 8)) || targetId.startsWith(mid.slice(0, 8)))) {
+                const fname = String((meta == null ? void 0 : meta.slug) || slug).endsWith(".md") ? String((meta == null ? void 0 : meta.slug) || slug) : `${String((meta == null ? void 0 : meta.slug) || slug)}.md`;
+                const md = decode(await readFile(`${repoRoot}/cards/${fname}`));
+                if (md.trim()) return md;
+              }
+            }
+          }
+        } catch {
+        }
+        return null;
+      };
       loadLiveRepoEntityDetail(ctx, {
         type: isPr ? "pr" : "issue",
         owner: (liveRepo == null ? void 0 : liveRepo.owner) || DEFAULT_ORGFY_REPO_OWNER,
-        dtag: (liveRepo == null ? void 0 : liveRepo.dtag) || ((_a2 = status.tenantManifest) == null ? void 0 : _a2.repoId) || tenant,
+        dtag: matchedRepoDtag,
         id: selectedItem.id
-      }).then((det) => {
-        if (!cancelled) {
+      }).then(async (det) => {
+        if (cancelled) return;
+        if (det && det.content && det.content.trim()) {
           setSelectedItemDetail(det);
           setSelectedItemDetailLoading(false);
+          return;
         }
-      }).catch(() => {
-        if (!cancelled) {
+        const localMd = await readLocalCardFallback();
+        if (cancelled) return;
+        if (localMd) {
+          setSelectedItemDetail({
+            route: (det == null ? void 0 : det.route) || { type: isPr ? "pr" : "issue", owner: (liveRepo == null ? void 0 : liveRepo.owner) || DEFAULT_ORGFY_REPO_OWNER, dtag: matchedRepoDtag, id: selectedItem.id },
+            title: (det == null ? void 0 : det.title) || selectedItem.title,
+            content: localMd,
+            status: (det == null ? void 0 : det.status) || selectedItem.stage,
+            authorPubkey: (det == null ? void 0 : det.authorPubkey) || "",
+            createdAt: (det == null ? void 0 : det.createdAt) || selectedItem.updatedAt,
+            commit: det == null ? void 0 : det.commit,
+            commitDiff: (det == null ? void 0 : det.commitDiff) || null,
+            channels: (det == null ? void 0 : det.channels) || [],
+            comments: (det == null ? void 0 : det.comments) || []
+          });
+        } else {
+          setSelectedItemDetail(det);
+        }
+        setSelectedItemDetailLoading(false);
+      }).catch(async () => {
+        const localMd = await readLocalCardFallback();
+        if (cancelled) return;
+        if (localMd) {
+          setSelectedItemDetail({
+            route: { type: isPr ? "pr" : "issue", owner: (liveRepo == null ? void 0 : liveRepo.owner) || DEFAULT_ORGFY_REPO_OWNER, dtag: matchedRepoDtag, id: selectedItem.id },
+            title: selectedItem.title,
+            content: localMd,
+            status: selectedItem.stage,
+            authorPubkey: "",
+            createdAt: selectedItem.updatedAt,
+            commitDiff: null,
+            channels: [],
+            comments: []
+          });
+        } else {
           setSelectedItemDetail(null);
-          setSelectedItemDetailLoading(false);
         }
+        setSelectedItemDetailLoading(false);
       });
       return () => {
         cancelled = true;
       };
-    }, [selectedItem == null ? void 0 : selectedItem.id, liveRepo == null ? void 0 : liveRepo.owner, liveRepo == null ? void 0 : liveRepo.dtag, tenant]);
+    }, [selectedItem == null ? void 0 : selectedItem.id, liveRepo == null ? void 0 : liveRepo.owner, liveRepo == null ? void 0 : liveRepo.dtag, (_f = status.tenantManifest) == null ? void 0 : _f.repoId, tenant]);
     const [scorecardView, setScorecardView] = React.useState("builders");
     const [scorecardDays, setScorecardDays] = React.useState(30);
     const [storeyFocus, setStoreyFocus] = React.useState("both");
@@ -64805,13 +64870,13 @@ function createFactoryAppComponent(ctx, opts = {}) {
       return () => {
         cancelled = true;
       };
-    }, [linkedChannelId, (_f = status.tenantManifest) == null ? void 0 : _f.canal, liveCrew, relayTick, activityTick]);
+    }, [linkedChannelId, (_g = status.tenantManifest) == null ? void 0 : _g.canal, liveCrew, relayTick, activityTick]);
     const { agents: tenantAgents, source: tenantAgentsSource } = React.useMemo(
       () => {
         var _a2;
         return buildEffectiveTenantAgents(((_a2 = status.tenantManifest) == null ? void 0 : _a2.agentes) || [], liveChannelAgents);
       },
-      [(_g = status.tenantManifest) == null ? void 0 : _g.agentes, liveChannelAgents]
+      [(_h = status.tenantManifest) == null ? void 0 : _h.agentes, liveChannelAgents]
     );
     const effectiveStatus = React.useMemo(
       () => status.tenantManifest ? {
@@ -64885,7 +64950,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
           setSavingEnterpriseLink(false);
         }
       },
-      [tenant, buzzCatalog, liveCrew, (_h = status.tenantManifest) == null ? void 0 : _h.agentes, notify2, refresh]
+      [tenant, buzzCatalog, liveCrew, (_i = status.tenantManifest) == null ? void 0 : _i.agentes, notify2, refresh]
     );
     const handleSaveWorkspaceSettings = React.useCallback(async () => {
       if (!workspaceDetails) {
@@ -65861,7 +65926,7 @@ ${body}`
         setAutomationView("detail");
         notify2(`Automação criada em 1 clique a partir da sessão de ${input.agentName}.`);
       },
-      [tenant, (_i = status.tenantManifest) == null ? void 0 : _i.nome, handleCreateAutomation, notify2]
+      [tenant, (_j = status.tenantManifest) == null ? void 0 : _j.nome, handleCreateAutomation, notify2]
     );
     const handleEvaluateTrustEngine = React.useCallback(
       async (override) => {
@@ -66002,7 +66067,7 @@ Nota: ${evidence.note}`
       var _a2;
       return ((_a2 = a.pubkey) == null ? void 0 : _a2.toLowerCase()) === mainAgentPubkey;
     }) || liveCrew.find((a) => a.name.toLowerCase().includes("iris")) || liveCrew[0] || null;
-    const masterAgentName = (masterLive == null ? void 0 : masterLive.name) || ((_j = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _j.nome) || "OrgFy Iris";
+    const masterAgentName = (masterLive == null ? void 0 : masterLive.name) || ((_k = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _k.nome) || "OrgFy Iris";
     const masterTurn = (masterLive == null ? void 0 : masterLive.pubkey) ? telemetry.byPubkey[masterLive.pubkey.toLowerCase()] || null : null;
     const workspaces = (holding == null ? void 0 : holding.empresas) && holding.empresas.length > 0 ? holding.empresas.map((e) => ({
       slug: e.slug,
@@ -66013,8 +66078,8 @@ Nota: ${evidence.note}`
     })) : DEFAULT_WORKSPACES.map((w) => ({ ...w, agentesInfo: "" }));
     const isBoardTenant = tenant === "board";
     const activeWorkspace = workspaces.find((w) => w.slug === tenant) || workspaces[0];
-    const empresaNome = isBoardTenant ? "Conselho da Holding" : ((_k = status.tenantManifest) == null ? void 0 : _k.nome) || (activeWorkspace == null ? void 0 : activeWorkspace.nome) || tenant;
-    const empresaRepo = isBoardTenant ? "holding" : ((_l = status.tenantManifest) == null ? void 0 : _l.repoId) || tenant;
+    const empresaNome = isBoardTenant ? "Conselho da Holding" : ((_l = status.tenantManifest) == null ? void 0 : _l.nome) || (activeWorkspace == null ? void 0 : activeWorkspace.nome) || tenant;
+    const empresaRepo = isBoardTenant ? "holding" : ((_m2 = status.tenantManifest) == null ? void 0 : _m2.repoId) || tenant;
     const isGlobalView = GLOBAL_TABS.has(tab);
     const pendingApprovals = ((holding == null ? void 0 : holding.approvals) || []).filter((a) => a.status === "pendente").length;
     const pendingQuestionCardsCount = questionCards.filter((c) => c.status === "pending").length;
@@ -66101,7 +66166,7 @@ Nota: ${evidence.note}`
       }] : [],
       { id: "settings", label: PT_BR.nav.settings }
     ];
-    const NativeTabs = (_n = (_m2 = ctx == null ? void 0 : ctx.conversation) == null ? void 0 : _m2.ui) == null ? void 0 : _n.Tabs;
+    const NativeTabs = (_o = (_n = ctx == null ? void 0 : ctx.conversation) == null ? void 0 : _n.ui) == null ? void 0 : _o.Tabs;
     const relaySnap = React.useMemo(() => {
       var _a2;
       try {
@@ -66111,7 +66176,7 @@ Nota: ${evidence.note}`
       }
     }, [relayTick, status.lastTickAt]);
     const useNativeSideTabs = Boolean(
-      NativeTabs && (relaySnap == null ? void 0 : relaySnap.session) && typeof (relaySnap == null ? void 0 : relaySnap.scope) === "string" && relaySnap.scope.length > 0 && typeof ((_o = relaySnap == null ? void 0 : relaySnap.session) == null ? void 0 : _o.viewer) === "string" && relaySnap.session.viewer.length > 0
+      NativeTabs && (relaySnap == null ? void 0 : relaySnap.session) && typeof (relaySnap == null ? void 0 : relaySnap.scope) === "string" && relaySnap.scope.length > 0 && typeof ((_p = relaySnap == null ? void 0 : relaySnap.session) == null ? void 0 : _p.viewer) === "string" && relaySnap.session.viewer.length > 0
     );
     const pageContent = h(
       "div",
@@ -66159,7 +66224,7 @@ Nota: ${evidence.note}`
             status,
             telemetry,
             masterAgentName,
-            masterAgentPubkey: (masterLive == null ? void 0 : masterLive.pubkey) || ((_p = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _p.pubkey) || "",
+            masterAgentPubkey: (masterLive == null ? void 0 : masterLive.pubkey) || ((_q = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _q.pubkey) || "",
             masterTurn,
             pendingApprovals,
             inboxCount,
@@ -66318,7 +66383,7 @@ Nota: ${evidence.note}`
                     if (picked) handleOpenAgentDmInBuzz(picked);
                   }
                 },
-                dmPool.length > 0 ? dmPool.map((a) => h("option", { key: a.key, value: a.key }, a.label)) : h("option", { value: "" }, ((_q = status.tenantManifest) == null ? void 0 : _q.coo) || "OrgFy Bento (COO)")
+                dmPool.length > 0 ? dmPool.map((a) => h("option", { key: a.key, value: a.key }, a.label)) : h("option", { value: "" }, ((_r = status.tenantManifest) == null ? void 0 : _r.coo) || "OrgFy Bento (COO)")
               )
             ),
             toast && h("span", { className: "of-pill", "data-tone": "done" }, toast),
@@ -66342,6 +66407,7 @@ Nota: ${evidence.note}`
                 telemetry,
                 workingNowCount: tenantWorkingNowCount,
                 otherTenantChannels,
+                automations,
                 onOpenTurnInSideChat: handleOpenTurnInSideChat,
                 onInterruptTurn: handleInterruptTurn,
                 onOpenAgentDm: handleOpenAgentDmInBuzz,
@@ -66604,17 +66670,17 @@ Nota: ${evidence.note}`
         item: selectedItem,
         tenant,
         repoOwner: (liveRepo == null ? void 0 : liveRepo.owner) || DEFAULT_ORGFY_REPO_OWNER,
-        repoDtag: (liveRepo == null ? void 0 : liveRepo.dtag) || tenant,
+        repoDtag: (liveRepo == null ? void 0 : liveRepo.dtag) && liveRepo.dtag.toLowerCase() === (((_s = status.tenantManifest) == null ? void 0 : _s.repoId) || tenant).toLowerCase() ? liveRepo.dtag : ((_t = status.tenantManifest) == null ? void 0 : _t.repoId) || tenant,
         repoDetail: selectedItemDetail,
         repoLoading: selectedItemDetailLoading,
-        linkedPr: selectedItem && ((_r = liveRepo == null ? void 0 : liveRepo.prs) == null ? void 0 : _r.length) ? liveRepo.prs.find(
+        linkedPr: selectedItem && ((_u = liveRepo == null ? void 0 : liveRepo.prs) == null ? void 0 : _u.length) ? liveRepo.prs.find(
           (pr) => pr.id === selectedItem.id || selectedItem.workKey && pr.title.toLowerCase().includes(selectedItem.workKey.toLowerCase()) || pr.title.toLowerCase().includes(selectedItem.title.slice(0, 24).toLowerCase())
         ) || null : null,
         liveCrew,
         liveTurnsByPubkey: telemetry.byPubkey,
         resolveAuthor: (pk) => resolveBuzzIdentityName(ctx, pk, nameByPubkey),
-        EmbeddedThread: (_t = (_s = ctx == null ? void 0 : ctx.conversation) == null ? void 0 : _s.ui) == null ? void 0 : _t.Thread,
-        threadChannelId: ((_u = status.tenantManifest) == null ? void 0 : _u.canal) || ((_v = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _v.canal) || null,
+        EmbeddedThread: (_w = (_v = ctx == null ? void 0 : ctx.conversation) == null ? void 0 : _v.ui) == null ? void 0 : _w.Thread,
+        threadChannelId: ((_x2 = status.tenantManifest) == null ? void 0 : _x2.canal) || ((_y2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _y2.canal) || null,
         relaySession: relaySnap == null ? void 0 : relaySnap.session,
         relayScope: typeof (relaySnap == null ? void 0 : relaySnap.scope) === "string" ? relaySnap.scope : null,
         onOpenInBuzz: handleOpenInBuzz,
@@ -66704,8 +66770,8 @@ Nota: ${evidence.note}`
           const ag = liveCrew.find((a) => a.key === selectedAgentKey);
           return (ag == null ? void 0 : ag.pubkey) ? telemetry.byPubkey[ag.pubkey.toLowerCase()] || null : null;
         })(),
-        TranscriptComponent: (_x2 = (_w = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _w.ui) == null ? void 0 : _x2.Transcript,
-        channelId: ((_y2 = status.tenantManifest) == null ? void 0 : _y2.canal) || ((_z2 = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _z2.canal) || null,
+        TranscriptComponent: (_A = (_z2 = ctx == null ? void 0 : ctx.agents) == null ? void 0 : _z2.ui) == null ? void 0 : _A.Transcript,
+        channelId: ((_B = status.tenantManifest) == null ? void 0 : _B.canal) || ((_C = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant)) == null ? void 0 : _C.canal) || null,
         onOpenDm: handleOpenAgentDmInBuzz,
         onSessionAction: handleAgentSessionAction,
         onClose: () => setSelectedAgentKey(null)
@@ -66734,7 +66800,7 @@ Nota: ${evidence.note}`
           status,
           telemetry,
           masterAgentName,
-          masterAgentPubkey: (masterLive == null ? void 0 : masterLive.pubkey) || ((_A = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _A.pubkey) || "",
+          masterAgentPubkey: (masterLive == null ? void 0 : masterLive.pubkey) || ((_D = holding == null ? void 0 : holding.ceoHolding) == null ? void 0 : _D.pubkey) || "",
           masterTurn,
           pendingApprovals,
           inboxCount,
