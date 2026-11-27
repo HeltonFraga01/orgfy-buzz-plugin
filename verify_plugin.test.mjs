@@ -640,18 +640,18 @@ console.log("[MODEL FAILOVER NEXUSMIND OK]", JSON.stringify({ selected: failover
       },
     },
     {
-      id: "card-t020",
-      issueId: "7f8311ac",
-      fullIssueId: "7f8311acbc5018c01e800afa7b4fccd9cccad37a865d67218846a3c23b98c9d7",
-      title: "SPEC-0006-T020 Implementar descoberta-lint e cleanup-check (xfail para pass)",
-      stage: "execucao",
+      id: "card-hyg-roster",
+      issueId: "bcbf106e",
+      fullIssueId: "bcbf106e00000000000000000000000000000000000000000000000000000000",
+      title: "HYG-ROSTER-MODEL-UNSUPPORTED: flag do roster só com erro de API no último turno",
+      stage: "triagem",
       priority: "P1",
       empresa: "orgfy",
-      executor: "OrgFy Lia",
+      executor: "OrgFy Livia",
     }
   );
-  assert.equal(hydrated.cardFileFound, "cards/SPEC-0006-T020.md");
-  assert.ok(hydrated.contexto && hydrated.contexto.includes("SPEC-0006"));
+  assert.equal(hydrated.cardFileFound, "cards/HYG-ROSTER-MODEL-UNSUPPORTED.md");
+  assert.ok(hydrated.contexto && hydrated.contexto.length > 10);
   assert.equal(hydrated.acceptanceFrozenValid, false, "sem arquivo em aceites/, não pode marcar congelamento válido");
   assert.equal(hydrated.acceptanceHash, null);
   // R4.1: leitura direta de agents/state/ removida; modelo vem de ctx.agents.snapshot() no runtime

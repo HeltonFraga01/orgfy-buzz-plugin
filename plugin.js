@@ -18521,23 +18521,26 @@ const MARGIN$1 = 0.4;
 const GAP_PER_DEPTH = 0.6;
 const SLAB_H = 0.16;
 const LOOKOUT_WALL_H = 0.9;
-function lookoutLayout(w) {
+function lookoutLayout(w, customPods) {
   const depth = w.bounds.z1 - w.bounds.z0;
   const y = WALL_H + GAP_PER_DEPTH * depth;
   const x0 = w.bounds.x0 + 0.3;
   const z0 = w.bounds.z0;
   const podsX0 = x0 + MARGIN$1 + HOPPER_W;
-  const pods = AREAS.map((area, i) => {
-    const x = podsX0 + POD_PITCH / 2 + i * POD_PITCH;
+  const specs = customPods && customPods.length > 0 ? customPods : AREAS.map((area) => ({ area, label: POD_LABEL[area] }));
+  const podsSpan = Math.max(specs.length * POD_PITCH, TABLE.w + 1.2);
+  const startX = podsX0 + (podsSpan - specs.length * POD_PITCH) / 2;
+  const pods = specs.map((spec, i) => {
+    const x = startX + POD_PITCH / 2 + i * POD_PITCH;
     return {
-      area,
-      label: POD_LABEL[area],
+      area: spec.area,
+      label: spec.label,
       console: { x, z: z0 + 0.95 },
       stand: { x, z: z0 + 0.5 }
     };
   });
-  const x1 = podsX0 + AREAS.length * POD_PITCH + MARGIN$1;
-  const tableX = podsX0 + AREAS.length * POD_PITCH / 2;
+  const x1 = podsX0 + podsSpan + MARGIN$1;
+  const tableX = podsX0 + podsSpan / 2;
   const table = { x: tableX, z: z0 + 2.15 };
   const pallet = w.pallet;
   return {
@@ -50425,7 +50428,7 @@ function dimTree(root, light) {
   });
 }
 function lookoutKey(l, lit, p) {
-  return JSON.stringify([l.bounds, l.y, [...lit].sort(), p]);
+  return JSON.stringify([l.bounds, l.y, l.pods.map((pod) => [pod.area, pod.label]), [...lit].sort(), p]);
 }
 function buildLookout(l, lit, p, kit, unit) {
   const group = new Group();
@@ -51710,12 +51713,28 @@ function toCodeDenStage(item) {
   if (st === "candidate" || item.step === "intake") return "type";
   return "intake";
 }
+function podLabelForAgent(papel, name) {
+  const p = (papel || "").toLowerCase();
+  if (p === "revisor_codigo" || p === "qa") return "QA · L-01";
+  if (p === "revisor_seguranca" || p === "seguranca") return "SEGURANÇA";
+  if (p === "revisor_metodo") return "MÉTODO";
+  if (p === "revisor_ui") return "UI · QA";
+  if (p === "growth") return "GROWTH";
+  if (p === "arquiteto") return "ARQUITETO";
+  if (p === "ceo_empresa" || p === "ceo" || p === "ceo_holding") return "CEO";
+  if (p === "oraculo") return "ORÁCULO";
+  if (p === "pesquisa") return "PESQUISA";
+  if (p === "prompts") return "PROMPTS";
+  if (p === "po") return "PO";
+  return name.replace(/^orgfy\s+/i, "").slice(0, 11).toUpperCase();
+}
 function adaptStatusFor3D(status, liveCrew, telemetry) {
-  var _a;
+  var _a, _b;
   const sessions = /* @__PURE__ */ new Map();
   let pmSessionId = null;
   let scoutSessionId = null;
-  const tenantAgents = ((_a = status.tenantManifest) == null ? void 0 : _a.agentes) || [];
+  const tenantCanal = (((_a = status.tenantManifest) == null ? void 0 : _a.canal) || "").trim().toLowerCase();
+  const tenantAgents = ((_b = status.tenantManifest) == null ? void 0 : _b.agentes) || [];
   const pool = tenantAgents.length > 0 ? tenantAgents.map((a) => ({
     key: a.agentKey,
     pubkey: a.pubkey || "",
@@ -51725,13 +51744,14 @@ function adaptStatusFor3D(status, liveCrew, telemetry) {
     running: a.running,
     papel: a.papel
   })) : liveCrew.map((a) => ({ ...a, pubkey: a.pubkey || "", papel: "" }));
+  const cooAgent = pool.find((a) => a.papel === "coo") || pool.find((a) => /bento|coo/i.test(a.name)) || null;
+  const poOrScoutAgent = pool.find((a) => a.papel === "po") || pool.find((a) => a.papel === "oraculo") || pool.find((a) => /\bpo\b|oraculo|oráculo|scout/i.test(a.name)) || null;
+  pmSessionId = (cooAgent == null ? void 0 : cooAgent.key) || null;
+  scoutSessionId = (poOrScoutAgent == null ? void 0 : poOrScoutAgent.key) || null;
   for (const agent of pool) {
     const sid = agent.key;
-    const liveTurn = agent.pubkey && (telemetry == null ? void 0 : telemetry.byPubkey) ? telemetry.byPubkey[agent.pubkey.toLowerCase()] || null : null;
-    const isPm = agent.papel === "coo" || agent.papel === "ceo_empresa" || /bento|iris|coo|ceo|pm/i.test(agent.name);
-    const isScout = agent.papel === "oraculo" || /oraculo|oráculo|scout/i.test(agent.name);
-    if (isPm && !pmSessionId) pmSessionId = sid;
-    if (isScout && !scoutSessionId) scoutSessionId = sid;
+    const rawTurn = agent.pubkey && (telemetry == null ? void 0 : telemetry.byPubkey) ? telemetry.byPubkey[agent.pubkey.toLowerCase()] || null : null;
+    const liveTurn = rawTurn && (!tenantCanal || !rawTurn.channelId || rawTurn.channelId.toLowerCase() === tenantCanal) ? rawTurn : null;
     sessions.set(sid, {
       status: liveTurn ? liveTurn.state === "error" ? "failed" : "running" : agent.running ? "running" : "idle",
       progress: (liveTurn == null ? void 0 : liveTurn.stepLabel) || (agent.running ? `Executando (${agent.model})` : "Aguardando"),
@@ -51822,52 +51842,36 @@ function adaptStatusFor3D(status, liveCrew, telemetry) {
     viewRecent: recent,
     ignored: status.ignored.map(mapItem),
     held: [],
-    scout: (() => {
-      const areaMatchers = {
-        features: /^(po|pesquisa|produto)$|sol\s*po|sol$/i,
-        ux: /^(frontend|ui|revisor_ui)$|livia/i,
-        performance: /^(backend|performance)$|otto/i,
-        tech_debt: /^(arquiteto)$|arquiteto/i,
-        test_gaps: /^(qa|revisor_codigo)$|teo/i,
-        security: /^(seguranca|revisor_seguranca)$|hugo/i,
-        bugs: /^(infra|release)$|atlas|ravi/i,
-        docs: /^(prompts|revisor_metodo|docs)$|lia|vera/i
-      };
-      const usedKeys = new Set([pmSessionId || "", scoutSessionId || ""].filter(Boolean));
-      const pickAgentForArea = (area) => {
-        const rx = areaMatchers[area];
-        const exact = pool.find((a) => !usedKeys.has(a.key) && (rx.test(a.papel || "") || rx.test(a.name)));
-        if (exact) {
-          usedKeys.add(exact.key);
-          return exact;
-        }
-        const fallback = pool.find((a) => !usedKeys.has(a.key)) || pool.find((a) => a.key !== scoutSessionId) || pool[0] || null;
-        if (fallback) usedKeys.add(fallback.key);
-        return fallback;
-      };
-      const scoutAgent = pool.find((a) => a.key === scoutSessionId) || null;
+    scout: void 0
+  };
+  const WORKSHOP_ROLES = /* @__PURE__ */ new Set(["coo", "executor", "backend", "frontend", "infra", "release", "cron"]);
+  const lookoutMembers = pool.filter(
+    (a) => a.key !== pmSessionId && a.key !== scoutSessionId && !WORKSHOP_ROLES.has((a.papel || "").toLowerCase())
+  );
+  const lookoutPods = lookoutMembers.slice(0, DISCOVERY_AREAS.length).map((ag, idx) => ({
+    area: DISCOVERY_AREAS[idx],
+    label: podLabelForAgent(ag.papel || "", ag.name)
+  }));
+  const scoutAgent = pool.find((a) => a.key === scoutSessionId) || null;
+  f.scout = {
+    sessionId: scoutSessionId,
+    phase: status.loopState === "discovering" ? "reviewing" : "idle",
+    rounds: 2,
+    lenses: lookoutMembers.slice(0, DISCOVERY_AREAS.length).map((ag, idx) => {
+      const area = DISCOVERY_AREAS[idx];
+      const sess = sessions.get(ag.key);
+      const isRunning = (sess == null ? void 0 : sess.status) === "running" || status.loopState === "discovering";
       return {
-        sessionId: scoutSessionId,
-        phase: status.loopState === "discovering" ? "reviewing" : "idle",
-        rounds: 2,
-        lenses: DISCOVERY_AREAS.map((area) => {
-          const assigned = pickAgentForArea(area);
-          const sid = (assigned == null ? void 0 : assigned.key) || `scout-${status.projectId}-${area}`;
-          const sess = sessions.get(sid);
-          const isRunning = (sess == null ? void 0 : sess.status) === "running" || status.loopState === "discovering";
-          return {
-            area,
-            sessionId: sid,
-            status: isRunning ? "running" : "idle",
-            active: isRunning,
-            reported: false
-          };
-        }),
-        provider: (scoutAgent == null ? void 0 : scoutAgent.provider) || "nexusmind_antigravity",
-        model: (scoutAgent == null ? void 0 : scoutAgent.model) || "gemini-2.5-flash",
-        lastRoundAt: null
+        area,
+        sessionId: ag.key,
+        status: isRunning ? "running" : "idle",
+        active: isRunning,
+        reported: false
       };
-    })()
+    }),
+    provider: (scoutAgent == null ? void 0 : scoutAgent.provider) || "nexusmind_antigravity",
+    model: (scoutAgent == null ? void 0 : scoutAgent.model) || "gemini-2.5-flash",
+    lastRoundAt: null
   };
   return {
     f,
@@ -51878,7 +51882,8 @@ function adaptStatusFor3D(status, liveCrew, telemetry) {
       failed: needsYou.filter((c) => c.state === "failed").length
     },
     sessions,
-    pmSessionId
+    pmSessionId,
+    lookoutPods
   };
 }
 const COMPLETED_BUBBLE_TTL_MS = 3 * 60 * 1e3;
@@ -51947,7 +51952,7 @@ function createFloor3DComponent(ctx) {
       seatingRef.current = nextScene.seating;
       return { scene: nextScene, layout: finalLayout };
     }, [adapted]);
-    const lookout = React.useMemo(() => lookoutLayout(layout), [layout]);
+    const lookout = React.useMemo(() => lookoutLayout(layout, adapted.lookoutPods), [layout, adapted.lookoutPods]);
     React.useEffect(() => {
       const currentMap = (telemetry == null ? void 0 : telemetry.byPubkey) || {};
       const prevMap = prevActiveByPubkeyRef.current;
@@ -52119,33 +52124,35 @@ function createFloor3DComponent(ctx) {
     const workingNowCount = tenantAgents.filter((a) => Boolean(turnOf(a))).length;
     const inBuzzCount = tenantAgents.filter((a) => a.inBuzz).length;
     const speechBubbles = React.useMemo(() => {
-      var _a2, _b2, _c;
+      var _a2, _b2, _c, _d;
       const now = Date.now();
       const entries = [];
       const usedFigures = /* @__PURE__ */ new Set();
       const areaFigures = scene.agents.filter((a) => a.role === "area").map((a) => a.key);
       const workerFigures = scene.agents.filter((a) => a.role !== "pm" && a.role !== "scout" && a.role !== "area");
       let areaCursor = 0;
+      const tenantCanal = (((_a2 = status.tenantManifest) == null ? void 0 : _a2.canal) || "").trim().toLowerCase();
       const resolveFigureKey = (ag) => {
-        const isPm = ag.agentKey === adapted.pmSessionId || ag.papel === "coo" || ag.papel === "ceo_empresa" || /bento|iris|coo|ceo|pm/i.test(ag.name);
+        var _a3;
+        const isPm = ag.agentKey === adapted.pmSessionId || ag.papel === "coo";
         if (isPm && !usedFigures.has("pm") && scene.agents.some((s) => s.key === "pm")) {
           return "pm";
         }
-        const isScout = ag.papel === "oraculo" || /oraculo|oráculo|scout/i.test(ag.name);
+        const isScout = ag.agentKey === ((_a3 = adapted.f.scout) == null ? void 0 : _a3.sessionId) || ag.papel === "po" || ag.papel === "oraculo";
         if (isScout && !usedFigures.has("scout") && scene.agents.some((s) => s.key === "scout")) {
           return "scout";
         }
-        const directWorker = workerFigures.find(
-          (w) => {
-            var _a3;
-            return !usedFigures.has(w.key) && (w.sessionId === ag.agentKey || Boolean(((_a3 = w.card) == null ? void 0 : _a3.item.note) && w.card.item.note.toLowerCase().includes(ag.name.toLowerCase())));
-          }
-        );
-        if (directWorker) return directWorker.key;
         const directArea = scene.agents.find(
           (a) => a.role === "area" && !usedFigures.has(a.key) && a.sessionId === ag.agentKey
         );
         if (directArea) return directArea.key;
+        const directWorker = workerFigures.find(
+          (w) => {
+            var _a4;
+            return !usedFigures.has(w.key) && (w.sessionId === ag.agentKey || Boolean(((_a4 = w.card) == null ? void 0 : _a4.item.note) && w.card.item.note.toLowerCase().includes(ag.name.toLowerCase())));
+          }
+        );
+        if (directWorker) return directWorker.key;
         while (areaCursor < areaFigures.length) {
           const candidate = areaFigures[areaCursor++];
           if (!usedFigures.has(candidate)) return candidate;
@@ -52156,7 +52163,8 @@ function createFloor3DComponent(ctx) {
       for (const ag of tenantAgents) {
         const pk = (ag.pubkey || "").toLowerCase();
         if (!pk) continue;
-        const liveTurnsList = ((_b2 = (_a2 = telemetry == null ? void 0 : telemetry.turnsByPubkey) == null ? void 0 : _a2[pk]) == null ? void 0 : _b2.length) ? telemetry.turnsByPubkey[pk] : ((_c = telemetry == null ? void 0 : telemetry.byPubkey) == null ? void 0 : _c[pk]) ? [telemetry.byPubkey[pk]] : [];
+        const rawTurnsList = ((_c = (_b2 = telemetry == null ? void 0 : telemetry.turnsByPubkey) == null ? void 0 : _b2[pk]) == null ? void 0 : _c.length) ? telemetry.turnsByPubkey[pk] : ((_d = telemetry == null ? void 0 : telemetry.byPubkey) == null ? void 0 : _d[pk]) ? [telemetry.byPubkey[pk]] : [];
+        const liveTurnsList = tenantCanal ? rawTurnsList.filter((t) => !t.channelId || t.channelId.toLowerCase() === tenantCanal) : rawTurnsList;
         const liveTurn = liveTurnsList[0] || null;
         const doneRec = completedTurns[pk];
         const hasFreshDone = Boolean(doneRec && !doneRec.dismissed && now - doneRec.finishedAt < COMPLETED_BUBBLE_TTL_MS);
@@ -52812,14 +52820,15 @@ function createFloor3DComponent(ctx) {
           const focusKey = selectedKey || hoveredKey;
           if (!focusKey) return null;
           const sceneAg = scene.agents.find((a) => a.key === focusKey || a.sessionId === focusKey) || null;
-          const matchedTenantAg = ((sceneAg == null ? void 0 : sceneAg.sessionId) ? tenantAgents.find((a) => a.agentKey === sceneAg.sessionId) : null) || tenantAgents.find((a) => a.agentKey === focusKey || a.name === focusKey) || ((sceneAg == null ? void 0 : sceneAg.role) === "pm" ? tenantAgents.find((a) => a.papel === "coo" || /bento|coo/i.test(a.name)) : (sceneAg == null ? void 0 : sceneAg.role) === "scout" ? tenantAgents.find((a) => a.papel === "oraculo" || /oraculo|oráculo|scout/i.test(a.name)) : null) || null;
+          const matchedTenantAg = ((sceneAg == null ? void 0 : sceneAg.sessionId) ? tenantAgents.find((a) => a.agentKey === sceneAg.sessionId) : null) || tenantAgents.find((a) => a.agentKey === focusKey || a.name === focusKey) || ((sceneAg == null ? void 0 : sceneAg.role) === "pm" ? tenantAgents.find((a) => a.papel === "coo" || /bento|coo/i.test(a.name)) : (sceneAg == null ? void 0 : sceneAg.role) === "scout" ? tenantAgents.find((a) => a.papel === "po" || a.papel === "oraculo" || /\bpo\b|oraculo|oráculo|scout/i.test(a.name)) : null) || null;
           const matchedLive = matchedTenantAg ? liveCrew.find((c) => {
             var _a3;
             return c.key === matchedTenantAg.agentKey || matchedTenantAg.pubkey && ((_a3 = c.pubkey) == null ? void 0 : _a3.toLowerCase()) === matchedTenantAg.pubkey.toLowerCase();
           }) : liveCrew.find((c) => c.key === focusKey || (sceneAg == null ? void 0 : sceneAg.sessionId) && c.key === sceneAg.sessionId) || null;
           const liveTurn = matchedTenantAg ? turnOf(matchedTenantAg) : null;
-          const areaTag = (sceneAg == null ? void 0 : sceneAg.area) ? `Mirante · ${AREA_LABEL[sceneAg.area]}` : null;
-          const displayTitle = (matchedTenantAg == null ? void 0 : matchedTenantAg.name) || ((sceneAg == null ? void 0 : sceneAg.role) === "pm" ? `${((_a2 = status.tenantManifest) == null ? void 0 : _a2.coo) || "COO"} (${empresaNome})` : (sceneAg == null ? void 0 : sceneAg.role) === "scout" ? "Oráculo · Scout" : ((_b2 = sceneAg == null ? void 0 : sceneAg.card) == null ? void 0 : _b2.item.title) || areaTag || focusKey);
+          const customPod = (sceneAg == null ? void 0 : sceneAg.area) ? adapted.lookoutPods.find((p) => p.area === sceneAg.area) : null;
+          const areaTag = (sceneAg == null ? void 0 : sceneAg.area) ? `Mirante · ${(customPod == null ? void 0 : customPod.label) || AREA_LABEL[sceneAg.area]}` : null;
+          const displayTitle = (matchedTenantAg == null ? void 0 : matchedTenantAg.name) || ((sceneAg == null ? void 0 : sceneAg.role) === "pm" ? `${((_a2 = status.tenantManifest) == null ? void 0 : _a2.coo) || "COO"} (${empresaNome})` : (sceneAg == null ? void 0 : sceneAg.role) === "scout" ? "PO · Discovery" : ((_b2 = sceneAg == null ? void 0 : sceneAg.card) == null ? void 0 : _b2.item.title) || areaTag || focusKey);
           const statusText = liveTurn ? "Respondendo" : (matchedTenantAg == null ? void 0 : matchedTenantAg.running) || (sceneAg == null ? void 0 : sceneAg.status) === "working" ? "Em execução" : (matchedTenantAg == null ? void 0 : matchedTenantAg.inBuzz) ? "Disponível" : "Ocioso";
           const statusTone = liveTurn ? liveTurn.state === "error" ? "failed" : "running" : (matchedTenantAg == null ? void 0 : matchedTenantAg.inBuzz) ? "done" : "idle";
           const stepLabel = (liveTurn == null ? void 0 : liveTurn.stepLabel) || ((_c = sceneAg == null ? void 0 : sceneAg.card) == null ? void 0 : _c.item.title) || (areaTag && (matchedTenantAg == null ? void 0 : matchedTenantAg.funcao) ? `${areaTag} — ${matchedTenantAg.funcao}` : areaTag) || (matchedTenantAg == null ? void 0 : matchedTenantAg.funcao) || (sceneAg == null ? void 0 : sceneAg.progress) || "Aguardando tarefa";
@@ -64101,7 +64110,7 @@ const PINNED_HOST_COMMANDS = Object.freeze([
   {
     id: "orgfy-holding-scaffold",
     scriptPath: "ferramentas/esteira/holding_scaffold.py",
-    sha256: "0bbbca3675731a32a5c4aa36efa49b279e157cc6c65c2b1da6bedb0cf05884d7"
+    sha256: "95233db4a246b1f6fc7e2ed48c53d360609b25363ca549f047c323c6fd05df16"
   }
 ]);
 async function computeUtf8Sha256(content) {

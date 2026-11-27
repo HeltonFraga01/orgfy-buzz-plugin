@@ -62,7 +62,7 @@ export const PINNED_HOST_COMMANDS: readonly PinnedHostCommandSpec[] = Object.fre
   {
     id: "orgfy-holding-scaffold",
     scriptPath: "ferramentas/esteira/holding_scaffold.py",
-    sha256: "0bbbca3675731a32a5c4aa36efa49b279e157cc6c65c2b1da6bedb0cf05884d7",
+    sha256: "95233db4a246b1f6fc7e2ed48c53d360609b25363ca549f047c323c6fd05df16",
   },
 ]);
 

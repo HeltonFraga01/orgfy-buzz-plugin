@@ -27,7 +27,7 @@ import { type BoxSpec, boxes } from "./workshop";
 
 /** What the Lookout shows, to tell whether it needs rebuilding. */
 export function lookoutKey(l: LookoutLayout, lit: ReadonlySet<string>, p: FloorPalette): string {
-  return JSON.stringify([l.bounds, l.y, [...lit].sort(), p]);
+  return JSON.stringify([l.bounds, l.y, l.pods.map((pod) => [pod.area, pod.label]), [...lit].sort(), p]);
 }
 
 export function buildLookout(

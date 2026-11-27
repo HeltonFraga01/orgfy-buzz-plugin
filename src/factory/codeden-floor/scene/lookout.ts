@@ -61,24 +61,38 @@ export interface LookoutLayout {
   chute: { x: number; z: number; top: number; bottom: number };
 }
 
+export interface LookoutPodSpec {
+  area: DiscoveryArea;
+  label: string;
+}
+
 /** The Lookout over a Workshop. */
-export function lookoutLayout(w: WorkshopLayout): LookoutLayout {
+export function lookoutLayout(
+  w: WorkshopLayout,
+  customPods?: readonly LookoutPodSpec[],
+): LookoutLayout {
   const depth = w.bounds.z1 - w.bounds.z0;
   const y = WALL_H + GAP_PER_DEPTH * depth;
   const x0 = w.bounds.x0 + 0.3;
   const z0 = w.bounds.z0;
   const podsX0 = x0 + MARGIN + HOPPER_W;
-  const pods = AREAS.map((area, i) => {
-    const x = podsX0 + POD_PITCH / 2 + i * POD_PITCH;
+  const specs: readonly LookoutPodSpec[] =
+    customPods && customPods.length > 0
+      ? customPods
+      : AREAS.map((area) => ({ area, label: POD_LABEL[area] }));
+  const podsSpan = Math.max(specs.length * POD_PITCH, TABLE.w + 1.2);
+  const startX = podsX0 + (podsSpan - specs.length * POD_PITCH) / 2;
+  const pods = specs.map((spec, i) => {
+    const x = startX + POD_PITCH / 2 + i * POD_PITCH;
     return {
-      area,
-      label: POD_LABEL[area],
+      area: spec.area,
+      label: spec.label,
       console: { x, z: z0 + 0.95 },
       stand: { x, z: z0 + 0.5 },
     };
   });
-  const x1 = podsX0 + AREAS.length * POD_PITCH + MARGIN;
-  const tableX = podsX0 + (AREAS.length * POD_PITCH) / 2;
+  const x1 = podsX0 + podsSpan + MARGIN;
+  const tableX = podsX0 + podsSpan / 2;
   const table = { x: tableX, z: z0 + 2.15 };
   const pallet = w.pallet;
   return {

@@ -17,7 +17,7 @@ import {
   type ViewStageId,
 } from "./contracts-shim";
 import { workshopLayout, type WorkshopLayout } from "./scene/layout";
-import { lookoutLayout } from "./scene/lookout";
+import { lookoutLayout, type LookoutPodSpec } from "./scene/lookout";
 import { sceneOf, sceneSummary } from "./scene/scene-model";
 import type { SceneAgent } from "./scene/agents";
 import { NO_SEATING, type Seating } from "./scene/seating";
@@ -35,6 +35,22 @@ function toCodeDenStage(item: OrgfyWorkItem): ViewStageId {
   return "intake";
 }
 
+function podLabelForAgent(papel: string, name: string): string {
+  const p = (papel || "").toLowerCase();
+  if (p === "revisor_codigo" || p === "qa") return "QA · L-01";
+  if (p === "revisor_seguranca" || p === "seguranca") return "SEGURANÇA";
+  if (p === "revisor_metodo") return "MÉTODO";
+  if (p === "revisor_ui") return "UI · QA";
+  if (p === "growth") return "GROWTH";
+  if (p === "arquiteto") return "ARQUITETO";
+  if (p === "ceo_empresa" || p === "ceo" || p === "ceo_holding") return "CEO";
+  if (p === "oraculo") return "ORÁCULO";
+  if (p === "pesquisa") return "PESQUISA";
+  if (p === "prompts") return "PROMPTS";
+  if (p === "po") return "PO";
+  return name.replace(/^orgfy\s+/i, "").slice(0, 11).toUpperCase();
+}
+
 function adaptStatusFor3D(
   status: FactoryStatusPayload,
   liveCrew: LiveCrewAgent[],
@@ -44,10 +60,12 @@ function adaptStatusFor3D(
   pipeline: ViewPipeline;
   sessions: Map<string, SessionInfo>;
   pmSessionId: string | null;
+  lookoutPods: LookoutPodSpec[];
 } {
   const sessions = new Map<string, SessionInfo>();
   let pmSessionId: string | null = null;
   let scoutSessionId: string | null = null;
+  const tenantCanal = (status.tenantManifest?.canal || "").trim().toLowerCase();
 
   // Usa preferencialmente os agentes reais DAQUELA empresa (empresas/<tenant>.json × Buzz)
   const tenantAgents = status.tenantManifest?.agentes || [];
@@ -64,13 +82,23 @@ function adaptStatusFor3D(
         }))
       : liveCrew.map((a) => ({ ...a, pubkey: a.pubkey || "", papel: "" }));
 
+  // Prioridade estrita por papel real: COO no posto PM; PO (ou Oráculo) na mesa central do Mirante
+  const cooAgent = pool.find((a) => a.papel === "coo") || pool.find((a) => /bento|coo/i.test(a.name)) || null;
+  const poOrScoutAgent =
+    pool.find((a) => a.papel === "po") ||
+    pool.find((a) => a.papel === "oraculo") ||
+    pool.find((a) => /\bpo\b|oraculo|oráculo|scout/i.test(a.name)) ||
+    null;
+  pmSessionId = cooAgent?.key || null;
+  scoutSessionId = poOrScoutAgent?.key || null;
+
   for (const agent of pool) {
     const sid = agent.key;
-    const liveTurn = agent.pubkey && telemetry?.byPubkey ? telemetry.byPubkey[agent.pubkey.toLowerCase()] || null : null;
-    const isPm = agent.papel === "coo" || agent.papel === "ceo_empresa" || /bento|iris|coo|ceo|pm/i.test(agent.name);
-    const isScout = agent.papel === "oraculo" || /oraculo|oráculo|scout/i.test(agent.name);
-    if (isPm && !pmSessionId) pmSessionId = sid;
-    if (isScout && !scoutSessionId) scoutSessionId = sid;
+    const rawTurn = agent.pubkey && telemetry?.byPubkey ? telemetry.byPubkey[agent.pubkey.toLowerCase()] || null : null;
+    const liveTurn =
+      rawTurn && (!tenantCanal || !rawTurn.channelId || rawTurn.channelId.toLowerCase() === tenantCanal)
+        ? rawTurn
+        : null;
     sessions.set(sid, {
       status: liveTurn ? (liveTurn.state === "error" ? "failed" : "running") : agent.running ? "running" : "idle",
       progress: liveTurn?.stepLabel || (agent.running ? `Executando (${agent.model})` : "Aguardando"),
@@ -177,53 +205,39 @@ function adaptStatusFor3D(
     viewRecent: recent,
     ignored: status.ignored.map(mapItem),
     held: [],
-    scout: (() => {
-      // Mapeia cada uma das 8 lentes do Mirante 1:1 para um agente real do Buzz da empresa ativa (zero bonecos fantasmas)
-      const areaMatchers: Record<DiscoveryArea, RegExp> = {
-        features: /^(po|pesquisa|produto)$|sol\s*po|sol$/i,
-        ux: /^(frontend|ui|revisor_ui)$|livia/i,
-        performance: /^(backend|performance)$|otto/i,
-        tech_debt: /^(arquiteto)$|arquiteto/i,
-        test_gaps: /^(qa|revisor_codigo)$|teo/i,
-        security: /^(seguranca|revisor_seguranca)$|hugo/i,
-        bugs: /^(infra|release)$|atlas|ravi/i,
-        docs: /^(prompts|revisor_metodo|docs)$|lia|vera/i,
-      };
-      const usedKeys = new Set<string>([pmSessionId || "", scoutSessionId || ""].filter(Boolean));
-      const pickAgentForArea = (area: DiscoveryArea) => {
-        const rx = areaMatchers[area];
-        const exact = pool.find((a) => !usedKeys.has(a.key) && (rx.test(a.papel || "") || rx.test(a.name)));
-        if (exact) {
-          usedKeys.add(exact.key);
-          return exact;
-        }
-        const fallback = pool.find((a) => !usedKeys.has(a.key)) || pool.find((a) => a.key !== scoutSessionId) || pool[0] || null;
-        if (fallback) usedKeys.add(fallback.key);
-        return fallback;
-      };
-      const scoutAgent = pool.find((a) => a.key === scoutSessionId) || null;
+    scout: undefined,
+  };
+
+  // Mirante dinâmico por papéis reais da empresa: apenas Revisão L-01, Growth, Arquitetura, Estratégia/CEO e Oráculo secundário.
+  // Executores (executor/backend/frontend/infra/release) ficam exclusivamente na Oficina; COO fica no posto PM; PO na mesa central.
+  const WORKSHOP_ROLES = new Set(["coo", "executor", "backend", "frontend", "infra", "release", "cron"]);
+  const lookoutMembers = pool.filter(
+    (a) => a.key !== pmSessionId && a.key !== scoutSessionId && !WORKSHOP_ROLES.has((a.papel || "").toLowerCase()),
+  );
+  const lookoutPods: LookoutPodSpec[] = lookoutMembers.slice(0, DISCOVERY_AREAS.length).map((ag, idx) => ({
+    area: DISCOVERY_AREAS[idx],
+    label: podLabelForAgent(ag.papel || "", ag.name),
+  }));
+  const scoutAgent = pool.find((a) => a.key === scoutSessionId) || null;
+  f.scout = {
+    sessionId: scoutSessionId,
+    phase: status.loopState === "discovering" ? "reviewing" : "idle",
+    rounds: 2,
+    lenses: lookoutMembers.slice(0, DISCOVERY_AREAS.length).map((ag, idx) => {
+      const area = DISCOVERY_AREAS[idx];
+      const sess = sessions.get(ag.key);
+      const isRunning = sess?.status === "running" || status.loopState === "discovering";
       return {
-        sessionId: scoutSessionId,
-        phase: status.loopState === "discovering" ? "reviewing" : "idle",
-        rounds: 2,
-        lenses: DISCOVERY_AREAS.map((area) => {
-          const assigned = pickAgentForArea(area);
-          const sid = assigned?.key || `scout-${status.projectId}-${area}`;
-          const sess = sessions.get(sid);
-          const isRunning = sess?.status === "running" || status.loopState === "discovering";
-          return {
-            area,
-            sessionId: sid,
-            status: isRunning ? "running" : "idle",
-            active: isRunning,
-            reported: false,
-          };
-        }),
-        provider: scoutAgent?.provider || "nexusmind_antigravity",
-        model: scoutAgent?.model || "gemini-2.5-flash",
-        lastRoundAt: null,
+        area,
+        sessionId: ag.key,
+        status: isRunning ? "running" : "idle",
+        active: isRunning,
+        reported: false,
       };
-    })(),
+    }),
+    provider: scoutAgent?.provider || "nexusmind_antigravity",
+    model: scoutAgent?.model || "gemini-2.5-flash",
+    lastRoundAt: null,
   };
 
   return {
@@ -236,6 +250,7 @@ function adaptStatusFor3D(
     },
     sessions,
     pmSessionId,
+    lookoutPods,
   };
 }
 
@@ -341,7 +356,7 @@ export function createFloor3DComponent(ctx: Context) {
       seatingRef.current = nextScene.seating;
       return { scene: nextScene, layout: finalLayout };
     }, [adapted]);
-    const lookout = React.useMemo(() => lookoutLayout(layout), [layout]);
+    const lookout = React.useMemo(() => lookoutLayout(layout, adapted.lookoutPods), [layout, adapted.lookoutPods]);
 
     // Detecta transições ativo -> concluído para exibir balão "Respondeu · Abrir resposta ↗" acima do bonequinho 3D
     React.useEffect(() => {
@@ -531,25 +546,29 @@ export function createFloor3DComponent(ctx: Context) {
       const workerFigures = scene.agents.filter((a: SceneAgent) => a.role !== "pm" && a.role !== "scout" && a.role !== "area");
       let areaCursor = 0;
 
+      const tenantCanal = (status.tenantManifest?.canal || "").trim().toLowerCase();
       const resolveFigureKey = (ag: (typeof tenantAgents)[number]): string | null => {
-        const isPm = ag.agentKey === adapted.pmSessionId || ag.papel === "coo" || ag.papel === "ceo_empresa" || /bento|iris|coo|ceo|pm/i.test(ag.name);
+        const isPm = ag.agentKey === adapted.pmSessionId || ag.papel === "coo";
         if (isPm && !usedFigures.has("pm") && scene.agents.some((s: SceneAgent) => s.key === "pm")) {
           return "pm";
         }
-        const isScout = ag.papel === "oraculo" || /oraculo|oráculo|scout/i.test(ag.name);
+        const isScout =
+          ag.agentKey === adapted.f.scout?.sessionId ||
+          ag.papel === "po" ||
+          ag.papel === "oraculo";
         if (isScout && !usedFigures.has("scout") && scene.agents.some((s: SceneAgent) => s.key === "scout")) {
           return "scout";
         }
+        const directArea = scene.agents.find(
+          (a: SceneAgent) => a.role === "area" && !usedFigures.has(a.key) && a.sessionId === ag.agentKey
+        );
+        if (directArea) return directArea.key;
         const directWorker = workerFigures.find(
           (w: SceneAgent) =>
             !usedFigures.has(w.key) &&
             (w.sessionId === ag.agentKey || Boolean(w.card?.item.note && w.card.item.note.toLowerCase().includes(ag.name.toLowerCase())))
         );
         if (directWorker) return directWorker.key;
-        const directArea = scene.agents.find(
-          (a: SceneAgent) => a.role === "area" && !usedFigures.has(a.key) && a.sessionId === ag.agentKey
-        );
-        if (directArea) return directArea.key;
         while (areaCursor < areaFigures.length) {
           const candidate = areaFigures[areaCursor++];
           if (!usedFigures.has(candidate)) return candidate;
@@ -561,12 +580,16 @@ export function createFloor3DComponent(ctx: Context) {
       for (const ag of tenantAgents) {
         const pk = (ag.pubkey || "").toLowerCase();
         if (!pk) continue;
-        const liveTurnsList: LiveAgentTurn[] =
+        const rawTurnsList: LiveAgentTurn[] =
           telemetry?.turnsByPubkey?.[pk]?.length
             ? telemetry.turnsByPubkey[pk]
             : telemetry?.byPubkey?.[pk]
             ? [telemetry.byPubkey[pk]]
             : [];
+        // Isolamento multi-empresa: agentes compartilhados (ex.: COO/CEO) só acendem balão na fábrica do canal daquele turno
+        const liveTurnsList = tenantCanal
+          ? rawTurnsList.filter((t) => !t.channelId || t.channelId.toLowerCase() === tenantCanal)
+          : rawTurnsList;
         const liveTurn = liveTurnsList[0] || null;
         const doneRec = completedTurns[pk];
         const hasFreshDone = Boolean(doneRec && !doneRec.dismissed && now - doneRec.finishedAt < COMPLETED_BUBBLE_TTL_MS);
@@ -1274,20 +1297,21 @@ export function createFloor3DComponent(ctx: Context) {
             (sceneAg?.role === "pm"
               ? tenantAgents.find((a) => a.papel === "coo" || /bento|coo/i.test(a.name))
               : sceneAg?.role === "scout"
-              ? tenantAgents.find((a) => a.papel === "oraculo" || /oraculo|oráculo|scout/i.test(a.name))
+              ? tenantAgents.find((a) => a.papel === "po" || a.papel === "oraculo" || /\bpo\b|oraculo|oráculo|scout/i.test(a.name))
               : null) ||
             null;
           const matchedLive = matchedTenantAg
             ? liveCrew.find((c) => c.key === matchedTenantAg.agentKey || (matchedTenantAg.pubkey && c.pubkey?.toLowerCase() === matchedTenantAg.pubkey.toLowerCase()))
             : liveCrew.find((c) => c.key === focusKey || (sceneAg?.sessionId && c.key === sceneAg.sessionId)) || null;
           const liveTurn = matchedTenantAg ? turnOf(matchedTenantAg) : null;
-          const areaTag = sceneAg?.area ? `Mirante · ${AREA_LABEL[sceneAg.area]}` : null;
+          const customPod = sceneAg?.area ? adapted.lookoutPods.find((p) => p.area === sceneAg.area) : null;
+          const areaTag = sceneAg?.area ? `Mirante · ${customPod?.label || AREA_LABEL[sceneAg.area]}` : null;
           const displayTitle =
             matchedTenantAg?.name ||
             (sceneAg?.role === "pm"
               ? `${status.tenantManifest?.coo || "COO"} (${empresaNome})`
               : sceneAg?.role === "scout"
-              ? "Oráculo · Scout"
+              ? "PO · Discovery"
               : sceneAg?.card?.item.title || areaTag || focusKey);
           const statusText = liveTurn
             ? "Respondendo"
