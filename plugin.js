@@ -14939,14 +14939,42 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
   const openIssuesRaw = Array.isArray(boardSnap == null ? void 0 : boardSnap.open_issues) ? boardSnap.open_issues : [];
   const seenIds = new Set([...kanbanBacklog, ...kanbanInProgress].map((w) => w.id));
   const quarentenaMap = (esteiraState == null ? void 0 : esteiraState.quarentena) && typeof esteiraState.quarentena === "object" ? esteiraState.quarentena : {};
-  const prWorkItems = openPrsRaw.filter((p) => (p == null ? void 0 : p.id) && !seenIds.has(String(p.id))).map((p) => {
+  const ciMap = (esteiraState == null ? void 0 : esteiraState.ci) && typeof esteiraState.ci === "object" ? esteiraState.ci : {};
+  const reviewerAgent = tenantAgents.find((a) => a.papel === "revisor_codigo" || a.papel === "qa") || tenantAgents.find((a) => /qa|revis/i.test(a.name)) || null;
+  const defaultExecutorAgent = tenantAgents.find((a) => ["executor", "backend", "frontend", "infra"].includes(a.papel)) || tenantAgents.find((a) => /dev|otto/i.test(a.name)) || null;
+  const agentByPubkey = /* @__PURE__ */ new Map();
+  for (const ag of tenantAgents) {
+    if (ag.pubkey) agentByPubkey.set(ag.pubkey.toLowerCase(), ag);
+  }
+  const openIssuesById = /* @__PURE__ */ new Map();
+  for (const iss of openIssuesRaw) {
+    if (iss == null ? void 0 : iss.id) openIssuesById.set(String(iss.id).toLowerCase(), iss);
+  }
+  const prWorkItems = openPrsRaw.filter((p) => {
+    if (!(p == null ? void 0 : p.id)) return false;
+    const canonicalId = p.issue_id ? String(p.issue_id) : String(p.id);
+    return !seenIds.has(String(p.id)) && !seenIds.has(canonicalId);
+  }).map((p) => {
     const pid = String(p.id);
-    const title = String(p.title || `PR ${pid.slice(0, 8)}`);
+    const canonicalId = p.issue_id ? String(p.issue_id) : pid;
+    const linkedIssue = p.issue_id ? openIssuesById.get(String(p.issue_id).toLowerCase()) : null;
+    const title = String(p.title || (linkedIssue == null ? void 0 : linkedIssue.title) || `PR ${pid.slice(0, 8)}`);
     const qEntry = quarentenaMap[pid];
     const isQuarantined = Boolean(p.quarentena || qEntry);
-    const qReason = typeof (qEntry == null ? void 0 : qEntry.motivo) === "string" && qEntry.motivo.trim() ? `Quarentena (COO): ${qEntry.motivo.trim().slice(0, 180)}` : isQuarantined ? "PR em quarentena no coordenador (requer ação do COO OrgFy Bento)" : null;
+    const tipSha = String(p.tip || "").toLowerCase();
+    const ciEntry = tipSha ? ciMap[tipSha] : null;
+    const ciWaiting = !isQuarantined && (!ciEntry || String(ciEntry.status || "") !== "ok");
+    const qReason = typeof (qEntry == null ? void 0 : qEntry.motivo) === "string" && qEntry.motivo.trim() ? `Quarentena (COO): ${qEntry.motivo.trim().slice(0, 180)}` : isQuarantined ? "PR em quarentena no coordenador (requer ação do COO OrgFy Bento)" : ciWaiting ? "Aguardando CI" : null;
+    const execPk = Array.isArray(linkedIssue == null ? void 0 : linkedIssue.executors) && linkedIssue.executors[0] ? String(linkedIssue.executors[0]).toLowerCase() : "";
+    const execAg = (execPk ? agentByPubkey.get(execPk) : null) || defaultExecutorAgent;
+    const revName = (reviewerAgent == null ? void 0 : reviewerAgent.name) || "QA";
+    const noteParts = [
+      execAg ? `Executor: ${execAg.name}` : null,
+      `Revisor: ${revName}`,
+      p.branch ? `PR · ${p.branch}` : "PR aberto"
+    ].filter(Boolean);
     return {
-      id: pid,
+      id: canonicalId,
       title,
       workKey: `pr:${pid.slice(0, 12)}`,
       // Na governança OrgFy (board.json), falhas/quarentena da esteira vão para Problemas (COO Bento -> CEO Empresa -> Iris), nunca direto para "Aguardando você" (Fundador)
@@ -14954,11 +14982,12 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
       step: isQuarantined ? "quarantine" : "review",
       type: /fix|bug|hotfix/i.test(title) ? "bug" : /doc|readme|prd/i.test(title) ? "docs" : "feature",
       attempts: 1,
-      sessionId: null,
-      activeSessionId: null,
+      sessionId: (reviewerAgent == null ? void 0 : reviewerAgent.agentKey) || null,
+      activeSessionId: (reviewerAgent == null ? void 0 : reviewerAgent.agentKey) || null,
       reason: qReason,
-      note: p.branch ? `PR aberto · ${p.branch}` : "PR aberto aguardando revisão/GATE",
-      updatedAt: typeof p.created_at === "number" ? p.created_at < 1e12 ? p.created_at * 1e3 : p.created_at : Date.now()
+      note: noteParts.join(" · "),
+      updatedAt: typeof p.created_at === "number" ? p.created_at < 1e12 ? p.created_at * 1e3 : p.created_at : Date.now(),
+      executorPubkeys: execPk ? [execPk] : (execAg == null ? void 0 : execAg.pubkey) ? [execAg.pubkey.toLowerCase()] : []
     };
   });
   const issueBacklogItems = openIssuesRaw.filter((i) => (i == null ? void 0 : i.id) && !i.assigned && !seenIds.has(String(i.id))).map((i) => {
@@ -14985,7 +15014,7 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
   );
   const STALL_THRESHOLD_MIN = 20;
   const nowMs = Date.now();
-  const issueActiveItems = openIssuesRaw.filter((i) => (i == null ? void 0 : i.id) && i.assigned && !seenIds.has(String(i.id))).map((i) => {
+  const issueActiveItems = openIssuesRaw.filter((i) => (i == null ? void 0 : i.id) && i.assigned && !seenIds.has(String(i.id)) && !openPrIssueIds.has(String(i.id).toLowerCase())).map((i) => {
     const iid = String(i.id);
     const title = String(i.title || `Issue ${iid.slice(0, 8)}`);
     const desp = despachosMap[iid];
@@ -14996,6 +15025,7 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
     const stalledMinutes = typeof i.stalled_minutes === "number" ? i.stalled_minutes : computedMin;
     const stalled = typeof i.stalled === "boolean" ? i.stalled : !hasPr && stalledMinutes >= STALL_THRESHOLD_MIN;
     const execPks = Array.isArray(i.executors) ? i.executors.map((x) => String(x || "").toLowerCase()).filter(Boolean) : (desp == null ? void 0 : desp.dono_operacional) ? [String(desp.dono_operacional).toLowerCase()] : [];
+    const execAg = (execPks[0] ? agentByPubkey.get(execPks[0]) : null) || defaultExecutorAgent;
     return {
       id: iid,
       title,
@@ -15004,10 +15034,10 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
       step: "implement",
       type: /fix|bug|hotfix/i.test(title) ? "bug" : /doc|readme|prd/i.test(title) ? "docs" : "feature",
       attempts: 1,
-      sessionId: null,
-      activeSessionId: null,
+      sessionId: (execAg == null ? void 0 : execAg.agentKey) || null,
+      activeSessionId: (execAg == null ? void 0 : execAg.agentKey) || null,
       reason: stalled ? `Sem PR aberto há ${stalledMinutes}m` : null,
-      note: stalled ? `Parada sem PR há ${stalledMinutes >= 60 ? `${Math.floor(stalledMinutes / 60)}h` : `${stalledMinutes}m`}` : "Issue atribuída no coordenador",
+      note: stalled ? `${execAg ? `Executor: ${execAg.name} · ` : ""}Parada sem PR há ${stalledMinutes >= 60 ? `${Math.floor(stalledMinutes / 60)}h` : `${stalledMinutes}m`}` : execAg ? `Executor: ${execAg.name} · Em implementação` : "Issue atribuída no coordenador",
       updatedAt,
       stalled,
       stalledMinutes,
@@ -20078,8 +20108,8 @@ const SCOUT_ACTIVITY = {
   filing: "Filing issues"
 };
 const AREA_SEATS = 8;
-function sceneAgents({ f, pipeline, sessions, pmSessionId }) {
-  var _a, _b;
+function sceneAgents({ f, pipeline, sessions, pmSessionId, workshopRoster }) {
+  var _a, _b, _c, _d, _e;
   const out = [];
   const facts = (sid) => {
     const s = sid ? sessions.get(sid) : void 0;
@@ -20091,10 +20121,12 @@ function sceneAgents({ f, pipeline, sessions, pmSessionId }) {
       progress: (s == null ? void 0 : s.progress) ?? null
     };
   };
+  const activeBuilderSessionIds = /* @__PURE__ */ new Set();
   for (const card of cardsOnFloor(pipeline)) {
     const active = card.sessionId ? sessions.get(card.sessionId) : void 0;
     const role = roleOf(card, active);
     const sid = sessionIdOf(card, role, sessions);
+    if (role === "builder" && sid) activeBuilderSessionIds.add(sid);
     const { session, ...about } = facts(sid);
     const key = `item:${card.item.id}:${role}`;
     out.push({
@@ -20112,6 +20144,31 @@ function sceneAgents({ f, pipeline, sessions, pmSessionId }) {
       area: null
     });
   }
+  if (workshopRoster && workshopRoster.length > 0) {
+    for (const w of workshopRoster) {
+      if (activeBuilderSessionIds.has(w.sessionId)) continue;
+      const wf = facts(w.sessionId);
+      const wLive = wf.session ? liveStatus(wf.session, null) : null;
+      out.push({
+        key: `worker:${w.key}`,
+        role: "builder",
+        sessionId: w.sessionId,
+        card: null,
+        step: "implementing",
+        activity: wLive ? wf.progress || "Executando" : "Aguardando próxima tarefa",
+        status: ((_a = wf.session) == null ? void 0 : _a.status) === "failed" ? "blocked" : wLive ? wLive : "idle",
+        blockedOn: ((_b = wf.session) == null ? void 0 : _b.status) === "failed" ? "failed" : null,
+        failed: ((_c = wf.session) == null ? void 0 : _c.status) === "failed",
+        provider: wf.provider,
+        providerId: wf.providerId,
+        model: wf.model,
+        progress: wf.progress,
+        since: null,
+        seed: w.sessionId || w.key,
+        area: null
+      });
+    }
+  }
   const pm = facts(pmSessionId);
   const pmLive = pm.session ? liveStatus(pm.session, null) : null;
   out.push({
@@ -20121,9 +20178,9 @@ function sceneAgents({ f, pipeline, sessions, pmSessionId }) {
     card: null,
     step: null,
     activity: pmLive ? "Answering" : "Listening",
-    status: ((_a = pm.session) == null ? void 0 : _a.status) === "waiting" ? "approval" : pmLive ? "working" : "idle",
+    status: ((_d = pm.session) == null ? void 0 : _d.status) === "waiting" ? "approval" : pmLive ? "working" : "idle",
     blockedOn: null,
-    failed: ((_b = pm.session) == null ? void 0 : _b.status) === "failed",
+    failed: ((_e = pm.session) == null ? void 0 : _e.status) === "failed",
     provider: pm.provider,
     providerId: pm.providerId,
     model: pm.model,
@@ -54273,7 +54330,17 @@ function podLabelForAgent(papel, name) {
   if (p === "po") return "PO";
   return name.replace(/^orgfy\s+/i, "").slice(0, 11).toUpperCase();
 }
-function adaptStatusFor3D(status, liveCrew, telemetry) {
+const DEMO_CARD_ID = "demo-cycle-card-01";
+const DEMO_STEP_DURATION_MS = [4200, 5200, 5600, 5e3, 4800];
+function demoStepLabel(phase, names) {
+  if (phase === 1) return `1/5 · ${names.po} enviando nova tarefa pelo tubo para o Intake`;
+  if (phase === 2) return `2/5 · ${names.dev} buscando a tarefa no Intake e indo programar`;
+  if (phase === 3) return `3/5 · ${names.dev} entregando PR para ${names.qa} (CI rodando)`;
+  if (phase === 4) return `4/5 · ${names.qa} aprovando, carimbando e levando para a esteira`;
+  if (phase === 5) return `5/5 · Entrega despachada na porta SHIP!`;
+  return "";
+}
+function adaptStatusFor3D(status, liveCrew, telemetry, demoPhase) {
   var _a, _b;
   const sessions = /* @__PURE__ */ new Map();
   let pmSessionId = null;
@@ -54291,6 +54358,8 @@ function adaptStatusFor3D(status, liveCrew, telemetry) {
   })) : liveCrew.map((a) => ({ ...a, pubkey: a.pubkey || "", papel: "" }));
   const cooAgent = pool.find((a) => a.papel === "coo") || pool.find((a) => /bento|coo/i.test(a.name)) || null;
   const poOrScoutAgent = pool.find((a) => a.papel === "po") || pool.find((a) => a.papel === "oraculo") || pool.find((a) => /\bpo\b|oraculo|oráculo|scout/i.test(a.name)) || null;
+  const primaryExec = pool.find((a) => ["executor", "backend", "frontend", "infra"].includes((a.papel || "").toLowerCase())) || pool.find((a) => /dev|otto/i.test(a.name)) || null;
+  const primaryRev = pool.find((a) => ["revisor_codigo", "qa"].includes((a.papel || "").toLowerCase())) || pool.find((a) => /qa|teo|vera/i.test(a.name)) || null;
   pmSessionId = (cooAgent == null ? void 0 : cooAgent.key) || null;
   scoutSessionId = (poOrScoutAgent == null ? void 0 : poOrScoutAgent.key) || null;
   for (const agent of pool) {
@@ -54344,6 +54413,8 @@ function adaptStatusFor3D(status, liveCrew, telemetry) {
     const stageStr = String(raw.stage || "");
     const isFailed = stageStr === "failed" || stageStr === "reverted";
     const isPerson = stageStr === "escalated";
+    const isReviewOrMerge = place === "reviewing" || place === "merge";
+    const resolvedSid = raw.activeSessionId || raw.sessionId || (place === "building" ? (primaryExec == null ? void 0 : primaryExec.key) || null : isReviewOrMerge ? (primaryRev == null ? void 0 : primaryRev.key) || null : null);
     const card = {
       item,
       place: isFailed || isPerson ? "needs_you" : place,
@@ -54351,9 +54422,14 @@ function adaptStatusFor3D(status, liveCrew, telemetry) {
       need: isFailed ? { kind: "retry", label: "Retry" } : isPerson ? { kind: "merge", label: "Review & merge" } : null,
       activity: raw.note || raw.reason || raw.step || raw.stage,
       since: new Date(raw.updatedAt || Date.now()).toISOString(),
-      pr: null,
-      session: raw.activeSessionId ? sessions.get(raw.activeSessionId) ?? null : null,
-      sessionId: raw.activeSessionId || raw.sessionId || null
+      pr: isReviewOrMerge ? {
+        itemId: item.id,
+        pr: { number: 1, url: "", state: "open" },
+        state: raw.reason === "Aguardando CI" ? "waiting_ci" : "open",
+        sessionId: resolvedSid
+      } : null,
+      session: resolvedSid ? sessions.get(resolvedSid) ?? null : null,
+      sessionId: resolvedSid
     };
     if (isFailed || isPerson) {
       needsYou.push(card);
@@ -54361,24 +54437,82 @@ function adaptStatusFor3D(status, liveCrew, telemetry) {
       stages[place].push(card);
     }
   }
+  let demoExtraMerged = 0;
+  if (demoPhase && demoPhase >= 1 && demoPhase <= 5) {
+    const devSid = (primaryExec == null ? void 0 : primaryExec.key) || "demo-dev";
+    const qaSid = (primaryRev == null ? void 0 : primaryRev.key) || "demo-qa";
+    const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+    const devSession = {
+      status: "running",
+      progress: demoPhase === 2 ? "Implementando feature + testes" : "Entregando PR",
+      progressAt: nowIso,
+      provider: (primaryExec == null ? void 0 : primaryExec.provider) || "nexusmind_antigravity",
+      providerId: (primaryExec == null ? void 0 : primaryExec.provider) || "nexusmind_antigravity",
+      model: (primaryExec == null ? void 0 : primaryExec.model) || "gemini-2.5-flash",
+      workKey: null
+    };
+    const qaSession = {
+      status: "running",
+      progress: demoPhase === 3 ? "Auditando diff + CI" : "GATE: aceito · enviando para esteira",
+      progressAt: nowIso,
+      provider: (primaryRev == null ? void 0 : primaryRev.provider) || "nexusmind_antigravity",
+      providerId: (primaryRev == null ? void 0 : primaryRev.provider) || "nexusmind_antigravity",
+      model: (primaryRev == null ? void 0 : primaryRev.model) || "gemini-2.5-flash",
+      workKey: `factory:review:${DEMO_CARD_ID}`
+    };
+    if (demoPhase === 2) sessions.set(devSid, devSession);
+    if (demoPhase === 3 || demoPhase === 4) sessions.set(qaSid, qaSession);
+    const demoItemBase = {
+      id: DEMO_CARD_ID,
+      title: "Demonstração · Nova funcionalidade na fábrica",
+      workKey: "demo:01",
+      stage: demoPhase === 1 ? "backlog" : demoPhase === 2 ? "building" : demoPhase === 3 ? "verifying" : demoPhase === 4 ? "verifying" : "merged",
+      step: demoPhase === 1 ? "intake" : demoPhase === 2 ? "implement" : demoPhase === 3 ? "review" : demoPhase === 4 ? "merge" : "done",
+      type: "feature",
+      attempts: 0,
+      sessionId: demoPhase === 2 ? devSid : demoPhase === 3 || demoPhase === 4 ? qaSid : null,
+      activeSessionId: demoPhase === 2 ? devSid : demoPhase === 3 || demoPhase === 4 ? qaSid : null,
+      reason: null,
+      note: `Executor: ${(primaryExec == null ? void 0 : primaryExec.name) || "Dev"} · Revisor: ${(primaryRev == null ? void 0 : primaryRev.name) || "QA"}`,
+      updatedAt: Date.now()
+    };
+    const demoPlace = demoPhase === 1 ? "intake" : demoPhase === 2 ? "building" : demoPhase === 3 ? "reviewing" : demoPhase === 4 ? "merge" : "merged";
+    stages[demoPlace].push({
+      item: demoItemBase,
+      place: demoPlace,
+      state: demoPhase === 5 ? "idle" : "running",
+      need: null,
+      activity: demoItemBase.note || "Demonstração",
+      since: nowIso,
+      pr: demoPhase === 3 ? { itemId: DEMO_CARD_ID, pr: { number: 99, url: "", state: "open" }, state: "waiting_ci", sessionId: qaSid } : demoPhase === 4 ? { itemId: DEMO_CARD_ID, pr: { number: 99, url: "", state: "open" }, state: "open", sessionId: qaSid } : null,
+      session: demoPhase === 2 ? devSession : demoPhase === 3 || demoPhase === 4 ? qaSession : null,
+      sessionId: demoItemBase.activeSessionId
+    });
+    if (demoPhase === 5) demoExtraMerged = 1;
+  }
+  const EXECUTOR_ROLES = /* @__PURE__ */ new Set(["executor", "backend", "frontend", "infra", "release"]);
+  const workshopRoster = pool.filter((a) => EXECUTOR_ROLES.has((a.papel || "").toLowerCase())).map((a) => ({ key: a.key, name: a.name, sessionId: a.key }));
   const f = {
     projectId: status.projectId,
     mode: "dark_factory",
     experimental: status.experimental,
-    loopState: status.loopState,
+    loopState: demoPhase ? "building" : status.loopState,
     pausedReason: status.pausedReason,
-    killSwitch: status.killSwitch,
-    globalKillSwitch: status.globalKillSwitch,
-    drain: status.drain,
+    killSwitch: demoPhase ? false : status.killSwitch,
+    globalKillSwitch: demoPhase ? false : status.globalKillSwitch,
+    drain: demoPhase ? null : status.drain,
     limits: {
       ...status.limits,
-      maxConcurrentSessions: Math.max(4, status.limits.maxConcurrentSessions || 4)
+      maxConcurrentSessions: Math.max(4, status.limits.maxConcurrentSessions || 4, workshopRoster.length)
     },
     spendToday: status.spendToday,
-    mergesToday: status.mergesToday,
-    stats: status.stats,
+    mergesToday: status.mergesToday + demoExtraMerged,
+    stats: {
+      ...status.stats,
+      mergedToday: status.stats.mergedToday + demoExtraMerged
+    },
     consecutiveFailures: status.consecutiveFailures,
-    activeSessions: status.activeSessions,
+    activeSessions: demoPhase ? Math.max(1, status.activeSessions) : status.activeSessions,
     wip: status.wip,
     backlog,
     inProgress,
@@ -54398,14 +54532,16 @@ function adaptStatusFor3D(status, liveCrew, telemetry) {
     label: podLabelForAgent(ag.papel || "", ag.name)
   }));
   const scoutAgent = pool.find((a) => a.key === scoutSessionId) || null;
+  const scoutSess = scoutSessionId ? sessions.get(scoutSessionId) : void 0;
+  const scoutIsFiling = demoPhase === 1 || (scoutSess == null ? void 0 : scoutSess.status) === "running" || status.loopState === "discovering";
   f.scout = {
     sessionId: scoutSessionId,
-    phase: status.loopState === "discovering" ? "reviewing" : "idle",
+    phase: scoutIsFiling ? "filing" : "idle",
     rounds: 2,
     lenses: lookoutMembers.slice(0, DISCOVERY_AREAS.length).map((ag, idx) => {
       const area = DISCOVERY_AREAS[idx];
       const sess = sessions.get(ag.key);
-      const isRunning = (sess == null ? void 0 : sess.status) === "running" || status.loopState === "discovering";
+      const isRunning = (sess == null ? void 0 : sess.status) === "running" || scoutIsFiling;
       return {
         area,
         sessionId: ag.key,
@@ -54428,7 +54564,13 @@ function adaptStatusFor3D(status, liveCrew, telemetry) {
     },
     sessions,
     pmSessionId,
-    lookoutPods
+    lookoutPods,
+    workshopRoster,
+    demoNames: {
+      po: (poOrScoutAgent == null ? void 0 : poOrScoutAgent.name) || "PO",
+      dev: (primaryExec == null ? void 0 : primaryExec.name) || "Dev",
+      qa: (primaryRev == null ? void 0 : primaryRev.name) || "QA"
+    }
   };
 }
 const COMPLETED_BUBBLE_TTL_MS = 3 * 60 * 1e3;
@@ -54457,7 +54599,7 @@ function createFloor3DComponent(ctx) {
   const React = ctx.react;
   const h = React.createElement;
   return function CodeDenFloor3D({ tenant, status, liveCrew, telemetry, focus, onSelectItem, onOpenAgentDm, onOpenAgentProfile, onOpenTurnInSideChat }) {
-    var _a, _b;
+    var _a, _b, _c, _d;
     const hostRef = React.useRef(null);
     const stageRef = React.useRef(null);
     const seatingRef = React.useRef(NO_SEATING);
@@ -54471,12 +54613,30 @@ function createFloor3DComponent(ctx) {
     const [hoveredKey, setHoveredKey] = React.useState(null);
     const [selectedKey, setSelectedKey] = React.useState(null);
     const [isFullscreen, setIsFullscreen] = React.useState(false);
+    const [demoPhase, setDemoPhase] = React.useState(null);
     const [completedTurns, setCompletedTurns] = React.useState({});
     const [, setClockTick] = React.useState(0);
     const [themeVersion, setThemeVersion] = React.useState(0);
     const tenantAgents = ((_a = status.tenantManifest) == null ? void 0 : _a.agentes) || [];
     const empresaNome = ((_b = status.tenantManifest) == null ? void 0 : _b.nome) || tenant;
-    const adapted = React.useMemo(() => adaptStatusFor3D(status, liveCrew, telemetry), [status, liveCrew, telemetry]);
+    React.useEffect(() => {
+      if (demoPhase === null) return;
+      const delay = DEMO_STEP_DURATION_MS[demoPhase - 1] ?? 4500;
+      const timer = window.setTimeout(() => {
+        setDemoPhase((cur) => {
+          if (cur === null) return null;
+          return cur < 5 ? cur + 1 : null;
+        });
+      }, delay);
+      return () => window.clearTimeout(timer);
+    }, [demoPhase]);
+    React.useEffect(() => {
+      setDemoPhase(null);
+    }, [tenant]);
+    const adapted = React.useMemo(
+      () => adaptStatusFor3D(status, liveCrew, telemetry, demoPhase),
+      [status, liveCrew, telemetry, demoPhase]
+    );
     const { scene, layout } = React.useMemo(() => {
       let nextLayout = layoutRef.current;
       const nextScene = sceneOf(
@@ -54484,7 +54644,8 @@ function createFloor3DComponent(ctx) {
           f: adapted.f,
           pipeline: adapted.pipeline,
           sessions: adapted.sessions,
-          pmSessionId: adapted.pmSessionId
+          pmSessionId: adapted.pmSessionId,
+          workshopRoster: adapted.workshopRoster
         },
         seatingRef.current,
         (demand) => {
@@ -54664,12 +54825,11 @@ function createFloor3DComponent(ctx) {
     }, [rosterOpen]);
     const leadershipAndExec = tenantAgents.filter((a) => a.categoria === "lideranca" || a.categoria === "execucao");
     const reviewAndOps = tenantAgents.filter((a) => a.categoria === "revisao" || a.categoria === "operacao");
-    scene.agents.find((a) => a.key === (hoveredKey || selectedKey)) || null;
     const turnOf = (ag) => ag.pubkey && (telemetry == null ? void 0 : telemetry.byPubkey) ? telemetry.byPubkey[ag.pubkey.toLowerCase()] || null : null;
     const workingNowCount = tenantAgents.filter((a) => Boolean(turnOf(a))).length;
     const inBuzzCount = tenantAgents.filter((a) => a.inBuzz).length;
     const speechBubbles = React.useMemo(() => {
-      var _a2, _b2, _c, _d;
+      var _a2, _b2, _c2, _d2;
       const now = Date.now();
       const entries = [];
       const usedFigures = /* @__PURE__ */ new Set();
@@ -54687,17 +54847,17 @@ function createFloor3DComponent(ctx) {
         if (isScout && !usedFigures.has("scout") && scene.agents.some((s) => s.key === "scout")) {
           return "scout";
         }
+        const directWorker = workerFigures.find(
+          (w) => {
+            var _a4;
+            return !usedFigures.has(w.key) && (w.sessionId === ag.agentKey || w.key === `worker:${ag.agentKey}` || Boolean(((_a4 = w.card) == null ? void 0 : _a4.item.note) && w.card.item.note.toLowerCase().includes(ag.name.toLowerCase())));
+          }
+        );
+        if (directWorker) return directWorker.key;
         const directArea = scene.agents.find(
           (a) => a.role === "area" && !usedFigures.has(a.key) && a.sessionId === ag.agentKey
         );
         if (directArea) return directArea.key;
-        const directWorker = workerFigures.find(
-          (w) => {
-            var _a4;
-            return !usedFigures.has(w.key) && (w.sessionId === ag.agentKey || Boolean(((_a4 = w.card) == null ? void 0 : _a4.item.note) && w.card.item.note.toLowerCase().includes(ag.name.toLowerCase())));
-          }
-        );
-        if (directWorker) return directWorker.key;
         while (areaCursor < areaFigures.length) {
           const candidate = areaFigures[areaCursor++];
           if (!usedFigures.has(candidate)) return candidate;
@@ -54708,7 +54868,7 @@ function createFloor3DComponent(ctx) {
       for (const ag of tenantAgents) {
         const pk = (ag.pubkey || "").toLowerCase();
         if (!pk) continue;
-        const rawTurnsList = ((_c = (_b2 = telemetry == null ? void 0 : telemetry.turnsByPubkey) == null ? void 0 : _b2[pk]) == null ? void 0 : _c.length) ? telemetry.turnsByPubkey[pk] : ((_d = telemetry == null ? void 0 : telemetry.byPubkey) == null ? void 0 : _d[pk]) ? [telemetry.byPubkey[pk]] : [];
+        const rawTurnsList = ((_c2 = (_b2 = telemetry == null ? void 0 : telemetry.turnsByPubkey) == null ? void 0 : _b2[pk]) == null ? void 0 : _c2.length) ? telemetry.turnsByPubkey[pk] : ((_d2 = telemetry == null ? void 0 : telemetry.byPubkey) == null ? void 0 : _d2[pk]) ? [telemetry.byPubkey[pk]] : [];
         const liveTurnsList = tenantCanal ? rawTurnsList.filter((t) => !t.channelId || t.channelId.toLowerCase() === tenantCanal) : rawTurnsList;
         const liveTurn = liveTurnsList[0] || null;
         const doneRec = completedTurns[pk];
@@ -54745,7 +54905,7 @@ function createFloor3DComponent(ctx) {
         }
       }
       return entries;
-    }, [tenantAgents, telemetry, completedTurns, scene.agents, adapted.pmSessionId, liveCrew]);
+    }, [tenantAgents, telemetry, completedTurns, scene.agents, adapted.pmSessionId, (_c = adapted.f.scout) == null ? void 0 : _c.sessionId, liveCrew, (_d = status.tenantManifest) == null ? void 0 : _d.canal]);
     React.useEffect(() => {
       if (speechBubbles.length === 0) return;
       const timer = window.setInterval(() => {
@@ -54779,15 +54939,21 @@ function createFloor3DComponent(ctx) {
         h("div", { className: "of-muted", style: { marginTop: "6px" } }, "O Andar 3D requer WebGL ativo; use a aba Board para acompanhar os cards.")
       );
     }
-    const allWorkItems = [...status.inProgress, ...status.backlog, ...status.recent];
-    const findAssignedWork = (agName) => allWorkItems.find((w) => w.note && w.note.toLowerCase().includes(agName.toLowerCase())) || null;
+    const activeWorkItems = [...status.inProgress, ...status.backlog];
+    const findAssignedWork = (ag) => {
+      const pk = (ag.pubkey || "").toLowerCase();
+      const nameLower = ag.name.toLowerCase();
+      return activeWorkItems.find(
+        (w) => w.activeSessionId && w.activeSessionId === ag.agentKey || w.sessionId && w.sessionId === ag.agentKey || pk && Array.isArray(w.executorPubkeys) && w.executorPubkeys.includes(pk) || Boolean(w.note && w.note.toLowerCase().includes(nameLower))
+      ) || null;
+    };
     const renderCrewRow = (ag) => {
       const liveTurn = turnOf(ag);
       const liveMatch = liveCrew.find((c) => {
         var _a2;
         return c.key === ag.agentKey || ag.pubkey && ((_a2 = c.pubkey) == null ? void 0 : _a2.toLowerCase()) === ag.pubkey.toLowerCase();
       });
-      const assignedItem = findAssignedWork(ag.name);
+      const assignedItem = findAssignedWork(ag);
       const isSelected = selectedKey === ag.agentKey;
       const statusLabel = liveTurn ? liveTurn.state === "error" ? "Erro" : "Respondendo" : ag.running ? "Em execução" : ag.inBuzz ? "Disponível" : "Pendente";
       const stepLine = (liveTurn == null ? void 0 : liveTurn.stepLabel) || (assignedItem == null ? void 0 : assignedItem.step) || ag.funcao;
@@ -54813,7 +54979,7 @@ function createFloor3DComponent(ctx) {
           onClick: () => {
             var _a2;
             const fig = scene.agents.find(
-              (a) => a.sessionId === ag.agentKey || a.key === ag.agentKey
+              (a) => a.sessionId === ag.agentKey || a.key === ag.agentKey || a.key === `worker:${ag.agentKey}`
             );
             setSelectedKey(fig ? fig.key : ag.agentKey);
             (_a2 = stageRef.current) == null ? void 0 : _a2.select(fig ? fig.key : ag.agentKey);
@@ -54927,6 +55093,42 @@ function createFloor3DComponent(ctx) {
             overflow: "hidden"
           }
         },
+        // Pílula minimalista no topo durante o modo de simulação
+        demoPhase !== null && h(
+          "div",
+          {
+            "data-floor3d-demo-banner": "true",
+            style: {
+              position: "absolute",
+              top: "12px",
+              left: "50%",
+              transform: "translateX(-50%)",
+              zIndex: 24,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "8px",
+              padding: "6px 12px",
+              borderRadius: "999px",
+              border: "1px solid rgba(59, 130, 246, 0.55)",
+              background: "rgba(15, 18, 24, 0.92)",
+              backdropFilter: "blur(8px)",
+              fontSize: "11.5px",
+              fontWeight: 600,
+              color: "var(--foreground)",
+              boxShadow: "0 8px 24px rgba(0,0,0,0.45)"
+            }
+          },
+          h("span", {
+            style: {
+              width: "8px",
+              height: "8px",
+              borderRadius: "999px",
+              background: "#60a5fa",
+              boxShadow: "0 0 8px #60a5fa"
+            }
+          }),
+          h("span", null, demoStepLabel(demoPhase, adapted.demoNames))
+        ),
         // Camada de balões de chat ao vivo ancorados sobre a cabeça dos bonequinhos 3D
         h(
           "div",
@@ -55361,7 +55563,7 @@ function createFloor3DComponent(ctx) {
           `Equipe ${empresaNome} (${tenantAgents.length}) ›`
         ),
         (() => {
-          var _a2, _b2, _c;
+          var _a2, _b2, _c2;
           const focusKey = selectedKey || hoveredKey;
           if (!focusKey) return null;
           const sceneAg = scene.agents.find((a) => a.key === focusKey || a.sessionId === focusKey) || null;
@@ -55376,7 +55578,7 @@ function createFloor3DComponent(ctx) {
           const displayTitle = (matchedTenantAg == null ? void 0 : matchedTenantAg.name) || ((sceneAg == null ? void 0 : sceneAg.role) === "pm" ? `${((_a2 = status.tenantManifest) == null ? void 0 : _a2.coo) || "COO"} (${empresaNome})` : (sceneAg == null ? void 0 : sceneAg.role) === "scout" ? "PO · Discovery" : ((_b2 = sceneAg == null ? void 0 : sceneAg.card) == null ? void 0 : _b2.item.title) || areaTag || focusKey);
           const statusText = liveTurn ? "Respondendo" : (matchedTenantAg == null ? void 0 : matchedTenantAg.running) || (sceneAg == null ? void 0 : sceneAg.status) === "working" ? "Em execução" : (matchedTenantAg == null ? void 0 : matchedTenantAg.inBuzz) ? "Disponível" : "Ocioso";
           const statusTone = liveTurn ? liveTurn.state === "error" ? "failed" : "running" : (matchedTenantAg == null ? void 0 : matchedTenantAg.inBuzz) ? "done" : "idle";
-          const stepLabel = (liveTurn == null ? void 0 : liveTurn.stepLabel) || ((_c = sceneAg == null ? void 0 : sceneAg.card) == null ? void 0 : _c.item.title) || (areaTag && (matchedTenantAg == null ? void 0 : matchedTenantAg.funcao) ? `${areaTag} — ${matchedTenantAg.funcao}` : areaTag) || (matchedTenantAg == null ? void 0 : matchedTenantAg.funcao) || (sceneAg == null ? void 0 : sceneAg.progress) || "Aguardando tarefa";
+          const stepLabel = (liveTurn == null ? void 0 : liveTurn.stepLabel) || ((_c2 = sceneAg == null ? void 0 : sceneAg.card) == null ? void 0 : _c2.item.title) || (areaTag && (matchedTenantAg == null ? void 0 : matchedTenantAg.funcao) ? `${areaTag} — ${matchedTenantAg.funcao}` : areaTag) || (matchedTenantAg == null ? void 0 : matchedTenantAg.funcao) || (sceneAg == null ? void 0 : sceneAg.progress) || "Aguardando tarefa";
           const modelLabel = `${(matchedLive == null ? void 0 : matchedLive.provider) || (matchedTenantAg == null ? void 0 : matchedTenantAg.provider) || "buzz"} · ${(matchedLive == null ? void 0 : matchedLive.model) || (matchedTenantAg == null ? void 0 : matchedTenantAg.model) || (sceneAg == null ? void 0 : sceneAg.model) || "padrão"}`;
           return h(
             "div",
@@ -55500,6 +55702,21 @@ function createFloor3DComponent(ctx) {
         h(
           "div",
           { style: { position: "absolute", right: "12px", bottom: "12px", zIndex: 20, display: "inline-flex", gap: "6px" } },
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-floor3d-demo-toggle": "true",
+              style: {
+                background: demoPhase !== null ? "rgba(37, 99, 235, 0.9)" : "rgba(18, 20, 26, 0.88)",
+                borderColor: demoPhase !== null ? "rgba(96, 165, 250, 0.8)" : void 0
+              },
+              title: demoPhase !== null ? "Parar simulação e voltar ao modo ao vivo" : "Simular ciclo completo de uma tarefa na fábrica 3D",
+              onClick: () => setDemoPhase((cur) => cur === null ? 1 : null)
+            },
+            demoPhase !== null ? "■ Parar" : "▶ Simular fluxo"
+          ),
           h(
             "button",
             {

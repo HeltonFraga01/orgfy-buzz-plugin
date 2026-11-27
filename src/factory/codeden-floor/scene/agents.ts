@@ -173,16 +173,24 @@ const SCOUT_ACTIVITY: Record<ScoutStatus["phase"], string> = {
 /** Area reviewers: one per review area, each at its pod on the Lookout. */
 export const AREA_SEATS = 8;
 
+export interface WorkshopRosterAgent {
+  key: string;
+  name: string;
+  sessionId: string;
+}
+
 export interface AgentInputs {
   f: FactoryStatus;
   pipeline: ViewPipeline;
   sessions: ReadonlyMap<string, SessionInfo>;
   /** The project's PM session, when there is one. */
   pmSessionId: string | null;
+  /** Executores reais da empresa que ficam permanentemente visíveis na Oficina (BUILD) mesmo entre tarefas. */
+  workshopRoster?: readonly WorkshopRosterAgent[];
 }
 
-/** Every agent on the floor, in pipeline order, then the PM, the scout and its area reviewers. */
-export function sceneAgents({ f, pipeline, sessions, pmSessionId }: AgentInputs): SceneAgent[] {
+/** Every agent on the floor, in pipeline order, then standing workshop executors, then the PM, the scout and its area reviewers. */
+export function sceneAgents({ f, pipeline, sessions, pmSessionId, workshopRoster }: AgentInputs): SceneAgent[] {
   const out: SceneAgent[] = [];
   const facts = (sid: string | null) => {
     const s = sid ? sessions.get(sid) : undefined;
@@ -195,10 +203,12 @@ export function sceneAgents({ f, pipeline, sessions, pmSessionId }: AgentInputs)
     };
   };
 
+  const activeBuilderSessionIds = new Set<string>();
   for (const card of cardsOnFloor(pipeline)) {
     const active = card.sessionId ? sessions.get(card.sessionId) : undefined;
     const role = roleOf(card, active);
     const sid = sessionIdOf(card, role, sessions);
+    if (role === "builder" && sid) activeBuilderSessionIds.add(sid);
     const { session, ...about } = facts(sid);
     const key = `item:${card.item.id}:${role}`;
     out.push({
@@ -215,6 +225,33 @@ export function sceneAgents({ f, pipeline, sessions, pmSessionId }: AgentInputs)
       seed: sid ?? key,
       area: null,
     });
+  }
+
+  // Garante que todo executor real do tenant (ex.: Lumen Dev) permaneça visível na sua bancada BUILD mesmo quando não há card em building
+  if (workshopRoster && workshopRoster.length > 0) {
+    for (const w of workshopRoster) {
+      if (activeBuilderSessionIds.has(w.sessionId)) continue;
+      const wf = facts(w.sessionId);
+      const wLive = wf.session ? liveStatus(wf.session, null) : null;
+      out.push({
+        key: `worker:${w.key}`,
+        role: "builder",
+        sessionId: w.sessionId,
+        card: null,
+        step: "implementing",
+        activity: wLive ? wf.progress || "Executando" : "Aguardando próxima tarefa",
+        status: wf.session?.status === "failed" ? "blocked" : wLive ? wLive : "idle",
+        blockedOn: wf.session?.status === "failed" ? "failed" : null,
+        failed: wf.session?.status === "failed",
+        provider: wf.provider,
+        providerId: wf.providerId,
+        model: wf.model,
+        progress: wf.progress,
+        since: null,
+        seed: w.sessionId || w.key,
+        area: null,
+      });
+    }
   }
 
   const pm = facts(pmSessionId);

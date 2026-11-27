@@ -667,21 +667,62 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
     esteiraState?.quarentena && typeof esteiraState.quarentena === "object"
       ? (esteiraState.quarentena as Record<string, any>)
       : {};
+  const ciMap: Record<string, any> =
+    esteiraState?.ci && typeof esteiraState.ci === "object" ? (esteiraState.ci as Record<string, any>) : {};
+  const reviewerAgent =
+    tenantAgents.find((a) => a.papel === "revisor_codigo" || a.papel === "qa") ||
+    tenantAgents.find((a) => /qa|revis/i.test(a.name)) ||
+    null;
+  const defaultExecutorAgent =
+    tenantAgents.find((a) => ["executor", "backend", "frontend", "infra"].includes(a.papel)) ||
+    tenantAgents.find((a) => /dev|otto/i.test(a.name)) ||
+    null;
+  const agentByPubkey = new Map<string, TenantAgentSpec>();
+  for (const ag of tenantAgents) {
+    if (ag.pubkey) agentByPubkey.set(ag.pubkey.toLowerCase(), ag);
+  }
+  const openIssuesById = new Map<string, any>();
+  for (const iss of openIssuesRaw) {
+    if (iss?.id) openIssuesById.set(String(iss.id).toLowerCase(), iss);
+  }
+
+  // Usa o issue_id canônico quando o PR está vinculado a uma issue aberta, preservando identidade entre BUILD -> REVIEW -> MERGE -> SHIP para as animações 3D
   const prWorkItems: FactoryWorkItem[] = openPrsRaw
-    .filter((p) => p?.id && !seenIds.has(String(p.id)))
+    .filter((p) => {
+      if (!p?.id) return false;
+      const canonicalId = p.issue_id ? String(p.issue_id) : String(p.id);
+      return !seenIds.has(String(p.id)) && !seenIds.has(canonicalId);
+    })
     .map((p) => {
       const pid = String(p.id);
-      const title = String(p.title || `PR ${pid.slice(0, 8)}`);
+      const canonicalId = p.issue_id ? String(p.issue_id) : pid;
+      const linkedIssue = p.issue_id ? openIssuesById.get(String(p.issue_id).toLowerCase()) : null;
+      const title = String(p.title || linkedIssue?.title || `PR ${pid.slice(0, 8)}`);
       const qEntry = quarentenaMap[pid];
       const isQuarantined = Boolean(p.quarentena || qEntry);
+      const tipSha = String(p.tip || "").toLowerCase();
+      const ciEntry = tipSha ? ciMap[tipSha] : null;
+      const ciWaiting = !isQuarantined && (!ciEntry || String(ciEntry.status || "") !== "ok");
       const qReason =
         typeof qEntry?.motivo === "string" && qEntry.motivo.trim()
           ? `Quarentena (COO): ${qEntry.motivo.trim().slice(0, 180)}`
           : isQuarantined
           ? "PR em quarentena no coordenador (requer ação do COO OrgFy Bento)"
+          : ciWaiting
+          ? "Aguardando CI"
           : null;
+      const execPk = Array.isArray(linkedIssue?.executors) && linkedIssue.executors[0]
+        ? String(linkedIssue.executors[0]).toLowerCase()
+        : "";
+      const execAg = (execPk ? agentByPubkey.get(execPk) : null) || defaultExecutorAgent;
+      const revName = reviewerAgent?.name || "QA";
+      const noteParts = [
+        execAg ? `Executor: ${execAg.name}` : null,
+        `Revisor: ${revName}`,
+        p.branch ? `PR · ${p.branch}` : "PR aberto",
+      ].filter(Boolean);
       return {
-        id: pid,
+        id: canonicalId,
         title,
         workKey: `pr:${pid.slice(0, 12)}`,
         // Na governança OrgFy (board.json), falhas/quarentena da esteira vão para Problemas (COO Bento -> CEO Empresa -> Iris), nunca direto para "Aguardando você" (Fundador)
@@ -689,11 +730,12 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
         step: isQuarantined ? "quarantine" : "review",
         type: /fix|bug|hotfix/i.test(title) ? "bug" : /doc|readme|prd/i.test(title) ? "docs" : "feature",
         attempts: 1,
-        sessionId: null,
-        activeSessionId: null,
+        sessionId: reviewerAgent?.agentKey || null,
+        activeSessionId: reviewerAgent?.agentKey || null,
         reason: qReason,
-        note: p.branch ? `PR aberto · ${p.branch}` : "PR aberto aguardando revisão/GATE",
+        note: noteParts.join(" · "),
         updatedAt: typeof p.created_at === "number" ? (p.created_at < 1e12 ? p.created_at * 1000 : p.created_at) : Date.now(),
+        executorPubkeys: execPk ? [execPk] : execAg?.pubkey ? [execAg.pubkey.toLowerCase()] : [],
       };
     });
   const issueBacklogItems: FactoryWorkItem[] = openIssuesRaw
@@ -722,8 +764,9 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
   );
   const STALL_THRESHOLD_MIN = 20;
   const nowMs = Date.now();
+  // Ignora issues que já têm PR aberto em openPrsRaw (elas já foram promovidas para prWorkItems em revisão com o mesmo canonicalId)
   const issueActiveItems: FactoryWorkItem[] = openIssuesRaw
-    .filter((i) => i?.id && i.assigned && !seenIds.has(String(i.id)))
+    .filter((i) => i?.id && i.assigned && !seenIds.has(String(i.id)) && !openPrIssueIds.has(String(i.id).toLowerCase()))
     .map((i) => {
       const iid = String(i.id);
       const title = String(i.title || `Issue ${iid.slice(0, 8)}`);
@@ -739,6 +782,7 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
         : desp?.dono_operacional
         ? [String(desp.dono_operacional).toLowerCase()]
         : [];
+      const execAg = (execPks[0] ? agentByPubkey.get(execPks[0]) : null) || defaultExecutorAgent;
       return {
         id: iid,
         title,
@@ -747,10 +791,14 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
         step: "implement",
         type: /fix|bug|hotfix/i.test(title) ? "bug" : /doc|readme|prd/i.test(title) ? "docs" : "feature",
         attempts: 1,
-        sessionId: null,
-        activeSessionId: null,
+        sessionId: execAg?.agentKey || null,
+        activeSessionId: execAg?.agentKey || null,
         reason: stalled ? `Sem PR aberto há ${stalledMinutes}m` : null,
-        note: stalled ? `Parada sem PR há ${stalledMinutes >= 60 ? `${Math.floor(stalledMinutes / 60)}h` : `${stalledMinutes}m`}` : "Issue atribuída no coordenador",
+        note: stalled
+          ? `${execAg ? `Executor: ${execAg.name} · ` : ""}Parada sem PR há ${stalledMinutes >= 60 ? `${Math.floor(stalledMinutes / 60)}h` : `${stalledMinutes}m`}`
+          : execAg
+          ? `Executor: ${execAg.name} · Em implementação`
+          : "Issue atribuída no coordenador",
         updatedAt,
         stalled,
         stalledMinutes,

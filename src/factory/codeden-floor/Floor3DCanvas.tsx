@@ -8,7 +8,6 @@ import type { LiveCrewAgent } from "../FactoryBoardAndFloor";
 import {
   AREA_LABEL,
   DISCOVERY_AREAS,
-  type DiscoveryArea,
   type FactoryStatus,
   type FactoryWorkItem,
   type SessionInfo,
@@ -19,7 +18,7 @@ import {
 import { workshopLayout, type WorkshopLayout } from "./scene/layout";
 import { lookoutLayout, type LookoutPodSpec } from "./scene/lookout";
 import { sceneOf, sceneSummary } from "./scene/scene-model";
-import type { SceneAgent } from "./scene/agents";
+import type { SceneAgent, WorkshopRosterAgent } from "./scene/agents";
 import { NO_SEATING, type Seating } from "./scene/seating";
 import type { StoreyFocus } from "./scene/storeys";
 import { readPalette } from "./floor/palette";
@@ -51,16 +50,34 @@ function podLabelForAgent(papel: string, name: string): string {
   return name.replace(/^orgfy\s+/i, "").slice(0, 11).toUpperCase();
 }
 
+const DEMO_CARD_ID = "demo-cycle-card-01";
+const DEMO_STEP_DURATION_MS = [4200, 5200, 5600, 5000, 4800];
+
+function demoStepLabel(
+  phase: number,
+  names: { po: string; dev: string; qa: string },
+): string {
+  if (phase === 1) return `1/5 · ${names.po} enviando nova tarefa pelo tubo para o Intake`;
+  if (phase === 2) return `2/5 · ${names.dev} buscando a tarefa no Intake e indo programar`;
+  if (phase === 3) return `3/5 · ${names.dev} entregando PR para ${names.qa} (CI rodando)`;
+  if (phase === 4) return `4/5 · ${names.qa} aprovando, carimbando e levando para a esteira`;
+  if (phase === 5) return `5/5 · Entrega despachada na porta SHIP!`;
+  return "";
+}
+
 function adaptStatusFor3D(
   status: FactoryStatusPayload,
   liveCrew: LiveCrewAgent[],
   telemetry?: BuzzLiveTelemetrySnapshot,
+  demoPhase?: number | null,
 ): {
   f: FactoryStatus;
   pipeline: ViewPipeline;
   sessions: Map<string, SessionInfo>;
   pmSessionId: string | null;
   lookoutPods: LookoutPodSpec[];
+  workshopRoster: WorkshopRosterAgent[];
+  demoNames: { po: string; dev: string; qa: string };
 } {
   const sessions = new Map<string, SessionInfo>();
   let pmSessionId: string | null = null;
@@ -89,6 +106,15 @@ function adaptStatusFor3D(
     pool.find((a) => a.papel === "oraculo") ||
     pool.find((a) => /\bpo\b|oraculo|oráculo|scout/i.test(a.name)) ||
     null;
+  const primaryExec =
+    pool.find((a) => ["executor", "backend", "frontend", "infra"].includes((a.papel || "").toLowerCase())) ||
+    pool.find((a) => /dev|otto/i.test(a.name)) ||
+    null;
+  const primaryRev =
+    pool.find((a) => ["revisor_codigo", "qa"].includes((a.papel || "").toLowerCase())) ||
+    pool.find((a) => /qa|teo|vera/i.test(a.name)) ||
+    null;
+
   pmSessionId = cooAgent?.key || null;
   scoutSessionId = poOrScoutAgent?.key || null;
 
@@ -128,7 +154,6 @@ function adaptStatusFor3D(
   const backlog = status.backlog.map(mapItem);
   const inProgress = status.inProgress.map(mapItem);
   const recent = status.recent.map(mapItem);
-  // Limita a amostra no palco 3D para manter fluidez e leitura clara das caixas e bancadas
   const allOrgfy = [
     ...status.backlog.slice(0, 12),
     ...status.inProgress.slice(0, 16),
@@ -151,6 +176,11 @@ function adaptStatusFor3D(
     const stageStr = String(raw.stage || "");
     const isFailed = stageStr === "failed" || stageStr === "reverted";
     const isPerson = stageStr === "escalated";
+    const isReviewOrMerge = place === "reviewing" || place === "merge";
+    const resolvedSid =
+      raw.activeSessionId ||
+      raw.sessionId ||
+      (place === "building" ? primaryExec?.key || null : isReviewOrMerge ? primaryRev?.key || null : null);
     const card: ViewCard = {
       item,
       place: isFailed || isPerson ? "needs_you" : place,
@@ -168,9 +198,16 @@ function adaptStatusFor3D(
         : null,
       activity: raw.note || raw.reason || raw.step || raw.stage,
       since: new Date(raw.updatedAt || Date.now()).toISOString(),
-      pr: null,
-      session: raw.activeSessionId ? sessions.get(raw.activeSessionId) ?? null : null,
-      sessionId: raw.activeSessionId || raw.sessionId || null,
+      pr: isReviewOrMerge
+        ? {
+            itemId: item.id,
+            pr: { number: 1, url: "", state: "open" },
+            state: raw.reason === "Aguardando CI" ? "waiting_ci" : "open",
+            sessionId: resolvedSid,
+          }
+        : null,
+      session: resolvedSid ? sessions.get(resolvedSid) ?? null : null,
+      sessionId: resolvedSid,
     };
     if (isFailed || isPerson) {
       needsYou.push(card);
@@ -179,24 +216,123 @@ function adaptStatusFor3D(
     }
   }
 
+  // Injeção temporária do ciclo de demonstração no motor 3D real (não altera dados reais da esteira)
+  let demoExtraMerged = 0;
+  if (demoPhase && demoPhase >= 1 && demoPhase <= 5) {
+    const devSid = primaryExec?.key || "demo-dev";
+    const qaSid = primaryRev?.key || "demo-qa";
+    const nowIso = new Date().toISOString();
+    const devSession: SessionInfo = {
+      status: "running",
+      progress: demoPhase === 2 ? "Implementando feature + testes" : "Entregando PR",
+      progressAt: nowIso,
+      provider: primaryExec?.provider || "nexusmind_antigravity",
+      providerId: primaryExec?.provider || "nexusmind_antigravity",
+      model: primaryExec?.model || "gemini-2.5-flash",
+      workKey: null,
+    };
+    const qaSession: SessionInfo = {
+      status: "running",
+      progress: demoPhase === 3 ? "Auditando diff + CI" : "GATE: aceito · enviando para esteira",
+      progressAt: nowIso,
+      provider: primaryRev?.provider || "nexusmind_antigravity",
+      providerId: primaryRev?.provider || "nexusmind_antigravity",
+      model: primaryRev?.model || "gemini-2.5-flash",
+      workKey: `factory:review:${DEMO_CARD_ID}`,
+    };
+    if (demoPhase === 2) sessions.set(devSid, devSession);
+    if (demoPhase === 3 || demoPhase === 4) sessions.set(qaSid, qaSession);
+
+    const demoItemBase: FactoryWorkItem = {
+      id: DEMO_CARD_ID,
+      title: "Demonstração · Nova funcionalidade na fábrica",
+      workKey: "demo:01",
+      stage:
+        demoPhase === 1
+          ? "backlog"
+          : demoPhase === 2
+          ? "building"
+          : demoPhase === 3
+          ? "verifying"
+          : demoPhase === 4
+          ? "verifying"
+          : "merged",
+      step:
+        demoPhase === 1
+          ? "intake"
+          : demoPhase === 2
+          ? "implement"
+          : demoPhase === 3
+          ? "review"
+          : demoPhase === 4
+          ? "merge"
+          : "done",
+      type: "feature",
+      attempts: 0,
+      sessionId: demoPhase === 2 ? devSid : demoPhase === 3 || demoPhase === 4 ? qaSid : null,
+      activeSessionId: demoPhase === 2 ? devSid : demoPhase === 3 || demoPhase === 4 ? qaSid : null,
+      reason: null,
+      note: `Executor: ${primaryExec?.name || "Dev"} · Revisor: ${primaryRev?.name || "QA"}`,
+      updatedAt: Date.now(),
+    };
+
+    const demoPlace: ViewStageId =
+      demoPhase === 1
+        ? "intake"
+        : demoPhase === 2
+        ? "building"
+        : demoPhase === 3
+        ? "reviewing"
+        : demoPhase === 4
+        ? "merge"
+        : "merged";
+
+    stages[demoPlace].push({
+      item: demoItemBase,
+      place: demoPlace,
+      state: demoPhase === 5 ? "idle" : "running",
+      need: null,
+      activity: demoItemBase.note || "Demonstração",
+      since: nowIso,
+      pr:
+        demoPhase === 3
+          ? { itemId: DEMO_CARD_ID, pr: { number: 99, url: "", state: "open" }, state: "waiting_ci", sessionId: qaSid }
+          : demoPhase === 4
+          ? { itemId: DEMO_CARD_ID, pr: { number: 99, url: "", state: "open" }, state: "open", sessionId: qaSid }
+          : null,
+      session: demoPhase === 2 ? devSession : demoPhase === 3 || demoPhase === 4 ? qaSession : null,
+      sessionId: demoItemBase.activeSessionId,
+    });
+    if (demoPhase === 5) demoExtraMerged = 1;
+  }
+
+  // Executores reais da empresa que ficam permanentemente visíveis na Oficina (BUILD), mesmo quando não há card em building
+  const EXECUTOR_ROLES = new Set(["executor", "backend", "frontend", "infra", "release"]);
+  const workshopRoster: WorkshopRosterAgent[] = pool
+    .filter((a) => EXECUTOR_ROLES.has((a.papel || "").toLowerCase()))
+    .map((a) => ({ key: a.key, name: a.name, sessionId: a.key }));
+
   const f: FactoryStatus = {
     projectId: status.projectId,
     mode: "dark_factory",
     experimental: status.experimental,
-    loopState: status.loopState,
+    loopState: demoPhase ? "building" : status.loopState,
     pausedReason: status.pausedReason,
-    killSwitch: status.killSwitch,
-    globalKillSwitch: status.globalKillSwitch,
-    drain: status.drain,
+    killSwitch: demoPhase ? false : status.killSwitch,
+    globalKillSwitch: demoPhase ? false : status.globalKillSwitch,
+    drain: demoPhase ? null : status.drain,
     limits: {
       ...status.limits,
-      maxConcurrentSessions: Math.max(4, status.limits.maxConcurrentSessions || 4),
+      maxConcurrentSessions: Math.max(4, status.limits.maxConcurrentSessions || 4, workshopRoster.length),
     },
     spendToday: status.spendToday,
-    mergesToday: status.mergesToday,
-    stats: status.stats,
+    mergesToday: status.mergesToday + demoExtraMerged,
+    stats: {
+      ...status.stats,
+      mergedToday: status.stats.mergedToday + demoExtraMerged,
+    },
     consecutiveFailures: status.consecutiveFailures,
-    activeSessions: status.activeSessions,
+    activeSessions: demoPhase ? Math.max(1, status.activeSessions) : status.activeSessions,
     wip: status.wip,
     backlog,
     inProgress,
@@ -219,14 +355,19 @@ function adaptStatusFor3D(
     label: podLabelForAgent(ag.papel || "", ag.name),
   }));
   const scoutAgent = pool.find((a) => a.key === scoutSessionId) || null;
+  const scoutSess = scoutSessionId ? sessions.get(scoutSessionId) : undefined;
+  const scoutIsFiling =
+    demoPhase === 1 ||
+    scoutSess?.status === "running" ||
+    status.loopState === "discovering";
   f.scout = {
     sessionId: scoutSessionId,
-    phase: status.loopState === "discovering" ? "reviewing" : "idle",
+    phase: scoutIsFiling ? "filing" : "idle",
     rounds: 2,
     lenses: lookoutMembers.slice(0, DISCOVERY_AREAS.length).map((ag, idx) => {
       const area = DISCOVERY_AREAS[idx];
       const sess = sessions.get(ag.key);
-      const isRunning = sess?.status === "running" || status.loopState === "discovering";
+      const isRunning = sess?.status === "running" || scoutIsFiling;
       return {
         area,
         sessionId: ag.key,
@@ -251,6 +392,12 @@ function adaptStatusFor3D(
     sessions,
     pmSessionId,
     lookoutPods,
+    workshopRoster,
+    demoNames: {
+      po: poOrScoutAgent?.name || "PO",
+      dev: primaryExec?.name || "Dev",
+      qa: primaryRev?.name || "QA",
+    },
   };
 }
 
@@ -328,6 +475,7 @@ export function createFloor3DComponent(ctx: Context) {
     const [hoveredKey, setHoveredKey] = React.useState<string | null>(null);
     const [selectedKey, setSelectedKey] = React.useState<string | null>(null);
     const [isFullscreen, setIsFullscreen] = React.useState<boolean>(false);
+    const [demoPhase, setDemoPhase] = React.useState<number | null>(null);
     const [completedTurns, setCompletedTurns] = React.useState<Record<string, CompletedBubbleTurn>>({});
     const [, setClockTick] = React.useState<number>(0);
     const [themeVersion, setThemeVersion] = React.useState<number>(0);
@@ -335,7 +483,28 @@ export function createFloor3DComponent(ctx: Context) {
     const tenantAgents = status.tenantManifest?.agentes || [];
     const empresaNome = status.tenantManifest?.nome || tenant;
 
-    const adapted = React.useMemo(() => adaptStatusFor3D(status, liveCrew, telemetry), [status, liveCrew, telemetry]);
+    // Avança automaticamente os 5 atos da simulação de demonstração e volta ao modo ao vivo ao concluir
+    React.useEffect(() => {
+      if (demoPhase === null) return;
+      const delay = DEMO_STEP_DURATION_MS[demoPhase - 1] ?? 4500;
+      const timer = window.setTimeout(() => {
+        setDemoPhase((cur) => {
+          if (cur === null) return null;
+          return cur < 5 ? cur + 1 : null;
+        });
+      }, delay);
+      return () => window.clearTimeout(timer);
+    }, [demoPhase]);
+
+    // Encerra simulação se o usuário trocar de empresa
+    React.useEffect(() => {
+      setDemoPhase(null);
+    }, [tenant]);
+
+    const adapted = React.useMemo(
+      () => adaptStatusFor3D(status, liveCrew, telemetry, demoPhase),
+      [status, liveCrew, telemetry, demoPhase],
+    );
     const { scene, layout } = React.useMemo(() => {
       let nextLayout = layoutRef.current;
       const nextScene = sceneOf(
@@ -344,6 +513,7 @@ export function createFloor3DComponent(ctx: Context) {
           pipeline: adapted.pipeline,
           sessions: adapted.sessions,
           pmSessionId: adapted.pmSessionId,
+          workshopRoster: adapted.workshopRoster,
         },
         seatingRef.current,
         (demand) => {
@@ -531,7 +701,6 @@ export function createFloor3DComponent(ctx: Context) {
 
     const leadershipAndExec = tenantAgents.filter((a) => a.categoria === "lideranca" || a.categoria === "execucao");
     const reviewAndOps = tenantAgents.filter((a) => a.categoria === "revisao" || a.categoria === "operacao");
-    const activeHoverAgent = scene.agents.find((a: SceneAgent) => a.key === (hoveredKey || selectedKey)) || null;
     const turnOf = (ag: (typeof tenantAgents)[number]) =>
       ag.pubkey && telemetry?.byPubkey ? telemetry.byPubkey[ag.pubkey.toLowerCase()] || null : null;
     const workingNowCount = tenantAgents.filter((a) => Boolean(turnOf(a))).length;
@@ -559,16 +728,19 @@ export function createFloor3DComponent(ctx: Context) {
         if (isScout && !usedFigures.has("scout") && scene.agents.some((s: SceneAgent) => s.key === "scout")) {
           return "scout";
         }
+        // Prioriza o boneco na Oficina (BUILD / REVIEW / MERGE) quando o agente está trabalhando em um card ou bancada
+        const directWorker = workerFigures.find(
+          (w: SceneAgent) =>
+            !usedFigures.has(w.key) &&
+            (w.sessionId === ag.agentKey ||
+              w.key === `worker:${ag.agentKey}` ||
+              Boolean(w.card?.item.note && w.card.item.note.toLowerCase().includes(ag.name.toLowerCase())))
+        );
+        if (directWorker) return directWorker.key;
         const directArea = scene.agents.find(
           (a: SceneAgent) => a.role === "area" && !usedFigures.has(a.key) && a.sessionId === ag.agentKey
         );
         if (directArea) return directArea.key;
-        const directWorker = workerFigures.find(
-          (w: SceneAgent) =>
-            !usedFigures.has(w.key) &&
-            (w.sessionId === ag.agentKey || Boolean(w.card?.item.note && w.card.item.note.toLowerCase().includes(ag.name.toLowerCase())))
-        );
-        if (directWorker) return directWorker.key;
         while (areaCursor < areaFigures.length) {
           const candidate = areaFigures[areaCursor++];
           if (!usedFigures.has(candidate)) return candidate;
@@ -626,7 +798,7 @@ export function createFloor3DComponent(ctx: Context) {
         }
       }
       return entries;
-    }, [tenantAgents, telemetry, completedTurns, scene.agents, adapted.pmSessionId, liveCrew]);
+    }, [tenantAgents, telemetry, completedTurns, scene.agents, adapted.pmSessionId, adapted.f.scout?.sessionId, liveCrew, status.tenantManifest?.canal]);
 
     // Atualiza o relógio dos balões a cada 1s enquanto houver balão ativo/recente e expira balões antigos
     React.useEffect(() => {
@@ -666,14 +838,26 @@ export function createFloor3DComponent(ctx: Context) {
       );
     }
 
-    const allWorkItems = [...status.inProgress, ...status.backlog, ...status.recent];
-    const findAssignedWork = (agName: string) =>
-      allWorkItems.find((w) => w.note && w.note.toLowerCase().includes(agName.toLowerCase())) || null;
+    // Considera apenas tarefas ativas (em andamento ou na fila), nunca cards antigos concluídos de status.recent
+    const activeWorkItems = [...status.inProgress, ...status.backlog];
+    const findAssignedWork = (ag: (typeof tenantAgents)[number]) => {
+      const pk = (ag.pubkey || "").toLowerCase();
+      const nameLower = ag.name.toLowerCase();
+      return (
+        activeWorkItems.find(
+          (w) =>
+            (w.activeSessionId && w.activeSessionId === ag.agentKey) ||
+            (w.sessionId && w.sessionId === ag.agentKey) ||
+            (pk && Array.isArray(w.executorPubkeys) && w.executorPubkeys.includes(pk)) ||
+            Boolean(w.note && w.note.toLowerCase().includes(nameLower))
+        ) || null
+      );
+    };
 
     const renderCrewRow = (ag: (typeof tenantAgents)[number]) => {
       const liveTurn = turnOf(ag);
       const liveMatch = liveCrew.find((c) => c.key === ag.agentKey || (ag.pubkey && c.pubkey?.toLowerCase() === ag.pubkey.toLowerCase()));
-      const assignedItem = findAssignedWork(ag.name);
+      const assignedItem = findAssignedWork(ag);
       const isSelected = selectedKey === ag.agentKey;
       const statusLabel = liveTurn
         ? liveTurn.state === "error"
@@ -707,7 +891,7 @@ export function createFloor3DComponent(ctx: Context) {
           onMouseLeave: () => setHoveredKey((cur) => (cur === ag.agentKey ? null : cur)),
           onClick: () => {
             const fig = scene.agents.find(
-              (a: SceneAgent) => a.sessionId === ag.agentKey || a.key === ag.agentKey
+              (a: SceneAgent) => a.sessionId === ag.agentKey || a.key === ag.agentKey || a.key === `worker:${ag.agentKey}`
             );
             setSelectedKey(fig ? fig.key : ag.agentKey);
             stageRef.current?.select(fig ? fig.key : ag.agentKey);
@@ -832,6 +1016,44 @@ export function createFloor3DComponent(ctx: Context) {
             overflow: "hidden",
           },
         },
+        // Pílula minimalista no topo durante o modo de simulação
+        demoPhase !== null &&
+          h(
+            "div",
+            {
+              "data-floor3d-demo-banner": "true",
+              style: {
+                position: "absolute",
+                top: "12px",
+                left: "50%",
+                transform: "translateX(-50%)",
+                zIndex: 24,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "8px",
+                padding: "6px 12px",
+                borderRadius: "999px",
+                border: "1px solid rgba(59, 130, 246, 0.55)",
+                background: "rgba(15, 18, 24, 0.92)",
+                backdropFilter: "blur(8px)",
+                fontSize: "11.5px",
+                fontWeight: 600,
+                color: "var(--foreground)",
+                boxShadow: "0 8px 24px rgba(0,0,0,0.45)",
+              },
+            },
+            h("span", {
+              style: {
+                width: "8px",
+                height: "8px",
+                borderRadius: "999px",
+                background: "#60a5fa",
+                boxShadow: "0 0 8px #60a5fa",
+              },
+            }),
+            h("span", null, demoStepLabel(demoPhase, adapted.demoNames))
+          ),
+
         // Camada de balões de chat ao vivo ancorados sobre a cabeça dos bonequinhos 3D
         h(
           "div",
@@ -1464,6 +1686,21 @@ export function createFloor3DComponent(ctx: Context) {
         h(
           "div",
           { style: { position: "absolute", right: "12px", bottom: "12px", zIndex: 20, display: "inline-flex", gap: "6px" } },
+          h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-floor3d-demo-toggle": "true",
+              style: {
+                background: demoPhase !== null ? "rgba(37, 99, 235, 0.9)" : "rgba(18, 20, 26, 0.88)",
+                borderColor: demoPhase !== null ? "rgba(96, 165, 250, 0.8)" : undefined,
+              },
+              title: demoPhase !== null ? "Parar simulação e voltar ao modo ao vivo" : "Simular ciclo completo de uma tarefa na fábrica 3D",
+              onClick: () => setDemoPhase((cur) => (cur === null ? 1 : null)),
+            },
+            demoPhase !== null ? "■ Parar" : "▶ Simular fluxo"
+          ),
           h(
             "button",
             {
