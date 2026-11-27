@@ -341,13 +341,87 @@ export async function loadLiveGatewayModelCatalog(ctx: Context): Promise<LiveGat
     }
   }
 
+  // 0. Prioridade máxima: Control Plane Único (model-control-plane.json) gerado pelo Eval SOTA v2
+  let controlPlaneParsed: any = null;
+  if (typeof host?.readFile === "function") {
+    for (const p of [
+      "~/.buzz/.scratch/model-control-plane.json",
+      "/Users/heltonfraga/.buzz/.scratch/model-control-plane.json",
+    ]) {
+      try {
+        const raw = await host.readFile(p);
+        if (!raw) continue;
+        const obj = JSON.parse(decodeTextBytes(raw));
+        if (obj && Array.isArray(obj.models) && obj.models.length > 0) {
+          controlPlaneParsed = obj;
+          if (typeof obj.updatedAt === "string") updatedAt = obj.updatedAt;
+          break;
+        }
+      } catch {}
+    }
+  }
+
+  if (controlPlaneParsed && Array.isArray(controlPlaneParsed.models)) {
+    const cpForceFree = Boolean(controlPlaneParsed?.policy?.forceFree);
+    const cpApproved: AgentModelOption[] = [];
+    for (const m of controlPlaneParsed.models) {
+      const mid = String(m?.model || "").trim();
+      if (!mid) continue;
+      const keyLower = mid.toLowerCase();
+      const shortId = String(mid.split("/").pop() || mid).trim().toLowerCase();
+      const evalApproved = Boolean(m.evalApproved);
+      const isOnline = Boolean(m.online);
+      const policyState = String(m.policyState || "auto");
+      const provider = String(m.provider || inferProviderForModel(mid)).trim();
+      const score = typeof m.evalScore === "number" ? m.evalScore : undefined;
+      const latencyMs = typeof m.latencyMs === "number" ? m.latencyMs : undefined;
+      const isFree = Boolean(m.isFree);
+
+      if (evalApproved) {
+        approvedModels.add(keyLower);
+        if (shortId) approvedModels.add(shortId);
+        const parts = [mid, "Eval ✓"];
+        if (typeof score === "number") parts.push(`${score.toFixed(1)}`);
+        const latStr = formatLatencyShort(latencyMs);
+        if (latStr) parts.push(latStr);
+        if (policyState === "vip") parts.push("VIP");
+        if (isFree) parts.push("FREE");
+        cpApproved.push({
+          provider,
+          model: mid,
+          label: parts.join(" · "),
+          group: "eval_approved",
+          isFree,
+          mode: policyState,
+          qualityScore: score,
+          rankingScore: score,
+          latencyMs,
+        });
+      } else if (!isOnline || policyState === "blocked") {
+        offlineModels.add(keyLower);
+        if (shortId) offlineModels.add(shortId);
+      }
+    }
+    if (cpApproved.length > 0) {
+      return {
+        hasLiveData: true,
+        approvedOptions: cpApproved,
+        onlineOtherOptions: [],
+        approvedModels,
+        offlineModels,
+        forceFree: cpForceFree,
+        updatedAt,
+      };
+    }
+  }
+
   return {
     hasLiveData: approvedOptions.length > 0 || onlineOtherOptions.length > 0 || benchByModel.size > 0,
     approvedOptions,
     onlineOtherOptions,
     approvedModels,
     offlineModels,
-    forceFree: Boolean(rankingParsed?.forceFree),
+    forceFree: Boolean(rankingParsed?.policy?.forceFree ?? rankingParsed?.forceFree),
     updatedAt,
   };
 }

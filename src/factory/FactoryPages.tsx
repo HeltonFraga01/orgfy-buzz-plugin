@@ -1249,6 +1249,11 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                 : evalFilter === "approved"
                 ? modelos.filter((m) => m.evalStatus === "approved")
                 : modelos;
+            const cp = status.modelControlPlane || null;
+            const cpSummary = cp?.summary || null;
+            const cpModels = Array.isArray(cp?.models) ? cp!.models : [];
+            const cpProviders = Array.isArray(cp?.providerHealth) ? cp!.providerHealth : [];
+            const fmtLat = (ms: number | null | undefined) => (typeof ms === "number" && ms > 0 ? (ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`) : "—");
             return h(
               "div",
               { style: { display: "flex", flexDirection: "column", gap: "12px" }, "data-eval-r51-view": "true" },
@@ -1256,9 +1261,9 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                 "div",
                 { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "10px" } },
                 [
-                  { label: "Aprovados no Eval (≥ 8/10)", val: `${approvedCount}/${modelos.length}`, tone: "done", sub: "tool call validado ao vivo (Gateway)" },
-                  { label: "Abaixo do mínimo / Offline", val: String(belowCount), tone: belowCount > 0 ? "failed" : "done", sub: belowCount > 0 ? "migração recomendada" : "nenhum agente crítico" },
-                  { label: "Fora do eval / Não testado", val: String(Math.max(0, attentionCount - belowCount)), tone: attentionCount - belowCount > 0 ? "waiting" : "done", sub: "modelo sem resultado no Eval atual" },
+                  { label: "Aprovados no Eval (≥ 8/10)", val: `${approvedCount}/${modelos.length}`, tone: "done", sub: cpSummary ? `${cpSummary.approvedCount}/${cpSummary.totalEvaluated} modelos no Hard Gate` : "tool call validado ao vivo (Gateway)" },
+                  { label: "Sucesso Real 24h (sessions.db)", val: typeof cpSummary?.prodSuccessRate24hPct === "number" ? `${cpSummary.prodSuccessRate24hPct.toFixed(1)}%` : `${belowCount} crítico(s)`, tone: (cpSummary?.prodSuccessRate24hPct ?? 100) >= 95 ? "done" : "waiting", sub: cpSummary ? `${cpSummary.prodTurns24h.toLocaleString("pt-BR")} turnos · ${cpSummary.prodErrors24h} erros` : "migração recomendada" },
+                  { label: "Agentes p/ Migrar", val: String(attentionCount), tone: attentionCount > 0 ? "waiting" : "done", sub: belowCount > 0 ? `${belowCount} abaixo do mínimo/offline` : "plantel alinhado ao Eval SOTA v2" },
                   { label: "Vencedores ao vivo (10/10)", val: `${liveWinners.length} modelo${liveWinners.length === 1 ? "" : "s"}`, tone: "done", sub: winnersSub },
                 ].map((k) =>
                   h(
@@ -1270,6 +1275,89 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                   )
                 )
               ),
+              cpModels.length > 0 &&
+                h(
+                  "div",
+                  { className: "of-grid-2", "data-orgfy-eval-sota-charts": "true" },
+                  h(
+                    "div",
+                    { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "8px" } },
+                    h(
+                      "div",
+                      { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+                      h("span", { style: { fontSize: "13px", fontWeight: 700 } }, "Eval SOTA v2 · Score × Latência × Prod 24h"),
+                      h("span", { className: "of-pill", "data-tone": "done", style: { fontSize: "10px" } }, `${cp?.toolsTested || 12} tools · Hard Gate`)
+                    ),
+                    h(
+                      "svg",
+                      { viewBox: "0 0 440 205", style: { width: "100%", height: "205px", display: "block" }, role: "img", "aria-label": "Gráfico Eval SOTA v2 por modelo" },
+                      cpModels.slice(0, 8).map((m, i) => {
+                        const y = 8 + i * 24;
+                        const sc = Math.max(0, Math.min(100, Number(m.evalScore || 0)));
+                        const w = Math.max(4, (sc / 100) * 185);
+                        const fill = !m.online
+                          ? "var(--status-failed)"
+                          : m.policyState === "blocked"
+                          ? "var(--status-waiting)"
+                          : m.policyState === "vip"
+                          ? "var(--chart-4, #c084fc)"
+                          : "var(--status-done)";
+                        const shortM = shortLabel(m.model);
+                        const prodPct = m.prod24h?.successRate24hPct;
+                        return h(
+                          "g",
+                          { key: m.model },
+                          h("text", { x: 0, y: y + 12, fill: "var(--muted-foreground)", fontSize: "10.5", fontFamily: "ui-monospace, monospace" }, shortM),
+                          h("rect", { x: 152, y: y + 2, width: 185, height: 12, rx: 4, fill: "var(--muted)" }),
+                          h("rect", { x: 152, y: y + 2, width: w, height: 12, rx: 4, fill }),
+                          h("text", { x: 344, y: y + 12, fill: "var(--foreground)", fontSize: "10", fontFamily: "ui-monospace, monospace" }, `${sc.toFixed(1)} · ${fmtLat(m.latencyMs)}${typeof prodPct === "number" ? ` · ${Math.round(prodPct)}%` : ""}`)
+                        );
+                      })
+                    )
+                  ),
+                  h(
+                    "div",
+                    { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+                    h(
+                      "div",
+                      { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+                      h("span", { style: { fontSize: "13px", fontWeight: 700 } }, "Saúde por Provedor & Política de Acesso"),
+                      h("span", { className: "of-pill", "data-tone": "done", style: { fontSize: "10px" } }, "Decision API + Eval-First")
+                    ),
+                    cpProviders.map((p) =>
+                      h(
+                        "div",
+                        { key: p.provider, style: { display: "flex", flexDirection: "column", gap: "4px" } },
+                        h(
+                          "div",
+                          { style: { display: "flex", justifyContent: "space-between", fontSize: "11.5px" } },
+                          h("span", { className: "of-mono", style: { fontWeight: 600 } }, p.provider.replace("nexusmind_", "")),
+                          h("span", { className: "of-mono of-muted", style: { fontSize: "10.5px" } }, `${p.approved}/${p.total} aprov. · ${fmtLat(p.avgLatencyMs)}`)
+                        ),
+                        h(
+                          "div",
+                          { className: "of-bar-track", style: { marginTop: 0, height: "6px" } },
+                          h("div", {
+                            className: "of-bar-fill",
+                            style: {
+                              width: `${Math.max(4, p.healthPct)}%`,
+                              background: p.healthPct >= 70 ? "var(--status-done)" : p.healthPct >= 40 ? "var(--status-waiting)" : "var(--status-failed)",
+                            },
+                          })
+                        )
+                      )
+                    ),
+                    cpSummary &&
+                      h(
+                        "div",
+                        { style: { display: "flex", gap: "6px", flexWrap: "wrap", marginTop: "auto", paddingTop: "6px", borderTop: "1px solid var(--border)" } },
+                        h("span", { className: "of-pill", "data-tone": "done" }, `Auto: ${cpSummary.autoEligibleCount}`),
+                        h("span", { className: "of-pill" }, `VIP: ${cpSummary.vipCount}`),
+                        h("span", { className: "of-pill", "data-tone": "failed" }, `Blocked: ${cpSummary.blockedCount}`),
+                        h("span", { className: "of-pill", "data-tone": "idle" }, `Free aprov.: ${cpSummary.freeApprovedCount}`)
+                      )
+                  )
+                ),
               h(
                 "div",
                 { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },

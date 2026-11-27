@@ -180,6 +180,54 @@ export interface FactoryStatusPayload {
   };
   modelos?: AgentModelEvalRow[];
   evalWinners?: Array<{ provider: string; model: string; score: string; scoreNum: number; latencyMs: number | null; costUsd: string | null }>;
+  modelControlPlane?: {
+    evalVersion?: string;
+    updatedAt?: string;
+    toolsTested?: number;
+    summary?: {
+      totalEvaluated: number;
+      onlineCount: number;
+      approvedCount: number;
+      autoEligibleCount: number;
+      vipCount: number;
+      blockedCount: number;
+      freeApprovedCount: number;
+      prodTurns24h: number;
+      prodErrors24h: number;
+      prodSuccessRate24hPct: number | null;
+    };
+    bestByTier?: Record<string, string | null>;
+    providerHealth?: Array<{
+      provider: string;
+      total: number;
+      online: number;
+      approved: number;
+      avgLatencyMs: number | null;
+      healthPct: number;
+    }>;
+    models?: Array<{
+      model: string;
+      provider: string;
+      online: boolean;
+      evalApproved: boolean;
+      eligibleForAuto: boolean;
+      evalScore: number;
+      toolCallRate: number;
+      toolCall10: string;
+      schemaFidelity: number;
+      latencyMs: number | null;
+      cost10CardsUsd: number;
+      isFree: boolean;
+      policyState: string;
+      prod24h?: {
+        sessions24h: number;
+        turns24h: number;
+        errorTurns24h: number;
+        successRate24hPct: number | null;
+      };
+      error?: string | null;
+    }>;
+  } | null;
   tenantManifest?: TenantManifestInfo;
   alcadasPolitica?: {
     modo?: string;
@@ -400,6 +448,22 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
     readOrgfyJson<any>(ctx, `.esteira/estado/licoes-dinamicas-${slug}.json`, null).catch(() => null),
     readOrgfyJson<any>(ctx, `.esteira/estado/digest-${slug}.json`, null).catch(() => null),
   ]);
+
+  let modelControlPlane: FactoryStatusPayload["modelControlPlane"] = null;
+  if (typeof host?.readFile === "function") {
+    for (const cpPath of ["~/.buzz/.scratch/model-control-plane.json", "/Users/heltonfraga/.buzz/.scratch/model-control-plane.json"]) {
+      try {
+        const rawCp = await host.readFile(cpPath);
+        if (!rawCp) continue;
+        const txtCp = rawCp instanceof Uint8Array ? new TextDecoder().decode(rawCp) : String(rawCp || "");
+        const parsedCp = JSON.parse(txtCp);
+        if (parsedCp && Array.isArray(parsedCp.models)) {
+          modelControlPlane = parsedCp;
+          break;
+        }
+      } catch {}
+    }
+  }
 
   let controle: Record<string, any> | null = null;
   try {
@@ -807,6 +871,7 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
     lastDigest: digestJson || null,
     ...(spotChecksJson ? { spotChecks: spotChecksJson } : {}),
     modelos,
+    modelControlPlane,
     evalWinners: (() => {
       const seenW = new Set<string>();
       const out: Array<{ provider: string; model: string; score: string; scoreNum: number; latencyMs: number | null; costUsd: string | null }> = [];

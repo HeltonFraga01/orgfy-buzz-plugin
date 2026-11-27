@@ -2072,7 +2072,7 @@ function formatLatencyShort(ms) {
   return ms >= 1e3 ? `${(ms / 1e3).toFixed(1)}s` : `${Math.round(ms)}ms`;
 }
 async function loadLiveGatewayModelCatalog(ctx) {
-  var _a, _b, _c, _d;
+  var _a, _b, _c, _d, _e, _f;
   const host = ctx == null ? void 0 : ctx.host;
   const approvedModels = /* @__PURE__ */ new Set();
   const offlineModels = /* @__PURE__ */ new Set();
@@ -2273,13 +2273,84 @@ async function loadLiveGatewayModelCatalog(ctx) {
       if (onlineOtherOptions.length >= 10) break;
     }
   }
+  let controlPlaneParsed = null;
+  if (typeof (host == null ? void 0 : host.readFile) === "function") {
+    for (const p of [
+      "~/.buzz/.scratch/model-control-plane.json",
+      "/Users/heltonfraga/.buzz/.scratch/model-control-plane.json"
+    ]) {
+      try {
+        const raw = await host.readFile(p);
+        if (!raw) continue;
+        const obj = JSON.parse(decodeTextBytes(raw));
+        if (obj && Array.isArray(obj.models) && obj.models.length > 0) {
+          controlPlaneParsed = obj;
+          if (typeof obj.updatedAt === "string") updatedAt = obj.updatedAt;
+          break;
+        }
+      } catch {
+      }
+    }
+  }
+  if (controlPlaneParsed && Array.isArray(controlPlaneParsed.models)) {
+    const cpForceFree = Boolean((_e = controlPlaneParsed == null ? void 0 : controlPlaneParsed.policy) == null ? void 0 : _e.forceFree);
+    const cpApproved = [];
+    for (const m of controlPlaneParsed.models) {
+      const mid = String((m == null ? void 0 : m.model) || "").trim();
+      if (!mid) continue;
+      const keyLower = mid.toLowerCase();
+      const shortId = String(mid.split("/").pop() || mid).trim().toLowerCase();
+      const evalApproved = Boolean(m.evalApproved);
+      const isOnline = Boolean(m.online);
+      const policyState = String(m.policyState || "auto");
+      const provider = String(m.provider || inferProviderForModel(mid)).trim();
+      const score = typeof m.evalScore === "number" ? m.evalScore : void 0;
+      const latencyMs = typeof m.latencyMs === "number" ? m.latencyMs : void 0;
+      const isFree = Boolean(m.isFree);
+      if (evalApproved) {
+        approvedModels.add(keyLower);
+        if (shortId) approvedModels.add(shortId);
+        const parts = [mid, "Eval ✓"];
+        if (typeof score === "number") parts.push(`${score.toFixed(1)}`);
+        const latStr = formatLatencyShort(latencyMs);
+        if (latStr) parts.push(latStr);
+        if (policyState === "vip") parts.push("VIP");
+        if (isFree) parts.push("FREE");
+        cpApproved.push({
+          provider,
+          model: mid,
+          label: parts.join(" · "),
+          group: "eval_approved",
+          isFree,
+          mode: policyState,
+          qualityScore: score,
+          rankingScore: score,
+          latencyMs
+        });
+      } else if (!isOnline || policyState === "blocked") {
+        offlineModels.add(keyLower);
+        if (shortId) offlineModels.add(shortId);
+      }
+    }
+    if (cpApproved.length > 0) {
+      return {
+        hasLiveData: true,
+        approvedOptions: cpApproved,
+        onlineOtherOptions: [],
+        approvedModels,
+        offlineModels,
+        forceFree: cpForceFree,
+        updatedAt
+      };
+    }
+  }
   return {
     hasLiveData: approvedOptions.length > 0 || onlineOtherOptions.length > 0 || benchByModel.size > 0,
     approvedOptions,
     onlineOtherOptions,
     approvedModels,
     offlineModels,
-    forceFree: Boolean(rankingParsed == null ? void 0 : rankingParsed.forceFree),
+    forceFree: Boolean(((_f = rankingParsed == null ? void 0 : rankingParsed.policy) == null ? void 0 : _f.forceFree) ?? (rankingParsed == null ? void 0 : rankingParsed.forceFree)),
     updatedAt
   };
 }
@@ -3149,6 +3220,10 @@ const NEXUSMIND_PROVIDERS = [
   }
 ];
 const DEFAULT_ORGFY_CHANNEL$2 = "e445491d-2fb3-4ebd-8e2e-f6813c33fb03";
+const SHARED_CONTROL_PLANE_PATHS = [
+  joinHome(".buzz", ".scratch", "model-control-plane.json"),
+  "~/.buzz/.scratch/model-control-plane.json"
+];
 const SHARED_RANKING_PATHS = [
   joinHome(".buzz", ".scratch", "nexusmind-model-ranking.json"),
   "~/.buzz/.scratch/nexusmind-model-ranking.json"
@@ -3281,10 +3356,50 @@ function getDisabledModelsFromLocalStorage() {
   }
 }
 async function loadSharedNexusMindRanking(ctx, excludeSet, preferFree) {
-  var _a, _b, _c;
+  var _a, _b, _c, _d;
   const disabled = getDisabledModelsFromLocalStorage();
   let parsed = null;
   const host = ctx == null ? void 0 : ctx.host;
+  if (typeof (host == null ? void 0 : host.readFile) === "function") {
+    for (const p of SHARED_CONTROL_PLANE_PATHS) {
+      try {
+        const raw = await host.readFile(p);
+        if (!raw) continue;
+        const cp = JSON.parse(decodeHostBytes$2(raw));
+        if (cp && Array.isArray(cp.models) && cp.models.length > 0) {
+          const cpPolicy = cp.policy && typeof cp.policy === "object" ? cp.policy : {};
+          const effectivePreferFree = preferFree || Boolean(cpPolicy.forceFree);
+          const cpCandidates = [];
+          for (const m of cp.models) {
+            const mid = String((m == null ? void 0 : m.model) || "").trim();
+            if (!mid || isUnsupportedAgentModel(mid) || disabled.has(mid) || excludeSet.has(mid.toLowerCase())) continue;
+            if (!m.online || !m.evalApproved) continue;
+            if (m.policyState === "blocked" || m.policyState === "vip") continue;
+            const free = Boolean(m.isFree) || isFreeModelId(mid);
+            if (effectivePreferFree && !free) continue;
+            if (!effectivePreferFree && free) continue;
+            const evalScore = Number(m.evalScore ?? estimateModelIntelligence(mid));
+            cpCandidates.push({
+              model: mid,
+              provider: String(m.provider || inferProviderId(mid)),
+              isFree: free,
+              intelligenceScore: evalScore,
+              latencyMs: typeof m.latencyMs === "number" ? m.latencyMs : null,
+              combinedScore: evalScore,
+              online: true,
+              calls: Number(((_a = m.prod24h) == null ? void 0 : _a.turns24h) || 0),
+              source: "nexusmind_ranking"
+            });
+          }
+          if (cpCandidates.length > 0) {
+            cpCandidates.sort((a, b) => b.combinedScore - a.combinedScore);
+            return cpCandidates;
+          }
+        }
+      } catch {
+      }
+    }
+  }
   if (typeof (host == null ? void 0 : host.readFile) === "function") {
     for (const p of SHARED_RANKING_PATHS) {
       try {
@@ -3302,7 +3417,7 @@ async function loadSharedNexusMindRanking(ctx, excludeSet, preferFree) {
   }
   if (!parsed) {
     try {
-      const raw = (_b = (_a = globalThis == null ? void 0 : globalThis.localStorage) == null ? void 0 : _a.getItem) == null ? void 0 : _b.call(_a, "nexusmind_model_ranking");
+      const raw = (_c = (_b = globalThis == null ? void 0 : globalThis.localStorage) == null ? void 0 : _b.getItem) == null ? void 0 : _c.call(_b, "nexusmind_model_ranking");
       if (raw) {
         const obj = JSON.parse(raw);
         if (obj && Array.isArray(obj.models) && obj.models.length > 0) {
@@ -3361,7 +3476,7 @@ async function loadSharedNexusMindRanking(ctx, excludeSet, preferFree) {
         if (byteLen > 12e6) continue;
         const txt = decodeHostBytes$2(raw);
         const obj = JSON.parse(txt);
-        const items = Array.isArray((_c = obj == null ? void 0 : obj.data) == null ? void 0 : _c.items) ? obj.data.items : Array.isArray(obj == null ? void 0 : obj.items) ? obj.items : [];
+        const items = Array.isArray((_d = obj == null ? void 0 : obj.data) == null ? void 0 : _d.items) ? obj.data.items : Array.isArray(obj == null ? void 0 : obj.items) ? obj.items : [];
         if (items.length === 0) continue;
         const acc = /* @__PURE__ */ new Map();
         for (const it of items) {
@@ -3541,7 +3656,7 @@ function findAgentInSnapshot(agentsApi, query, pubkey) {
   return pkLower && pool.find((a) => String(a.pubkey || "").toLowerCase() === pkLower) || qLower && pool.find((a) => String(a.key || "").toLowerCase() === qLower) || qLower && pool.find((a) => String(a.name || "").toLowerCase() === qLower) || (qLower ? pool.find((a) => String(a.name || "").toLowerCase().includes(qLower)) : void 0);
 }
 async function executeSmartModelFailover(ctx, input = {}) {
-  var _a, _b, _c;
+  var _a, _b, _c, _d;
   const preferFree = Boolean(input.prefer_free);
   const applyChange = Boolean(input.apply);
   const retrigger = input.retrigger !== false;
@@ -3653,7 +3768,21 @@ async function executeSmartModelFailover(ctx, input = {}) {
     }
   }
   const finalRanking = verifiedShared.some((v2) => v2.online) ? verifiedShared : probed.some((p) => p.online) ? probed : verifiedShared.length > 0 ? verifiedShared : sharedRanking.length > 0 ? sharedRanking : probed;
-  const winner = finalRanking.find((p) => p.online) || null;
+  const onlineCandidates = finalRanking.filter((p) => p.online);
+  let winner = onlineCandidates[0] || null;
+  if (winner && onlineCandidates.length >= 2 && typeof ((_a = ctx == null ? void 0 : ctx.decisions) == null ? void 0 : _a.decide) === "function") {
+    try {
+      const top3 = onlineCandidates.slice(0, 3);
+      const dec = await ctx.decisions.decide({
+        question: `Qual o melhor modelo Eval-aprovado para failover do agente ${(matchedAgent == null ? void 0 : matchedAgent.name) || input.agente || "worker"}?`,
+        options: top3.map((c) => `${c.model} (${c.provider}, score=${c.combinedScore}, lat=${c.latencyMs ?? "?"}ms)`)
+      });
+      const txt = String((dec == null ? void 0 : dec.choice) || (dec == null ? void 0 : dec.decision) || (dec == null ? void 0 : dec.option) || "").toLowerCase();
+      const chosen = top3.find((c) => txt.includes(c.model.toLowerCase()));
+      if (chosen) winner = chosen;
+    } catch {
+    }
+  }
   if (!winner) {
     return {
       ok: false,
@@ -3703,13 +3832,13 @@ async function executeSmartModelFailover(ctx, input = {}) {
       ts: Date.now()
     };
     try {
-      (_b = (_a = ctx == null ? void 0 : ctx.host) == null ? void 0 : _a.emit) == null ? void 0 : _b.call(_a, ORGFY_FAILOVER_REQUEST_EVENT, failoverPayload);
+      (_c = (_b = ctx == null ? void 0 : ctx.host) == null ? void 0 : _b.emit) == null ? void 0 : _c.call(_b, ORGFY_FAILOVER_REQUEST_EVENT, failoverPayload);
       if (typeof (globalThis == null ? void 0 : globalThis.dispatchEvent) === "function" && typeof (globalThis == null ? void 0 : globalThis.CustomEvent) === "function") {
         globalThis.dispatchEvent(new globalThis.CustomEvent(ORGFY_FAILOVER_REQUEST_EVENT, { detail: failoverPayload }));
       }
     } catch {
     }
-    const nexusDelegator = (_c = ctx == null ? void 0 : ctx.nexusmind) == null ? void 0 : _c.applyBestModel;
+    const nexusDelegator = (_d = ctx == null ? void 0 : ctx.nexusmind) == null ? void 0 : _d.applyBestModel;
     if (input.delegate_only || typeof nexusDelegator === "function") {
       if (typeof nexusDelegator === "function") {
         await nexusDelegator({
@@ -14648,6 +14777,22 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
     readOrgfyJson(ctx, `.esteira/estado/licoes-dinamicas-${slug}.json`, null).catch(() => null),
     readOrgfyJson(ctx, `.esteira/estado/digest-${slug}.json`, null).catch(() => null)
   ]);
+  let modelControlPlane = null;
+  if (typeof (host == null ? void 0 : host.readFile) === "function") {
+    for (const cpPath of ["~/.buzz/.scratch/model-control-plane.json", "/Users/heltonfraga/.buzz/.scratch/model-control-plane.json"]) {
+      try {
+        const rawCp = await host.readFile(cpPath);
+        if (!rawCp) continue;
+        const txtCp = rawCp instanceof Uint8Array ? new TextDecoder().decode(rawCp) : String(rawCp || "");
+        const parsedCp = JSON.parse(txtCp);
+        if (parsedCp && Array.isArray(parsedCp.models)) {
+          modelControlPlane = parsedCp;
+          break;
+        }
+      } catch {
+      }
+    }
+  }
   let controle = null;
   try {
     if (host == null ? void 0 : host.readFile) {
@@ -14968,6 +15113,7 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
     lastDigest: digestJson || null,
     ...spotChecksJson ? { spotChecks: spotChecksJson } : {},
     modelos,
+    modelControlPlane,
     evalWinners: (() => {
       const seenW = /* @__PURE__ */ new Set();
       const out = [];
@@ -64222,6 +64368,11 @@ function renderFactorySecondaryPage(props) {
         };
         const winnersSub = liveWinners.length > 0 ? liveWinners.slice(0, 2).map((w) => `${shortLabel(w.model)}${w.latencyMs ? ` (${(w.latencyMs / 1e3).toFixed(1)}s)` : ""}`).join(" · ") : "Rode o Eval no NexusMind Gateway";
         const filteredModelos = evalFilter === "attention" ? modelos.filter((m) => m.evalStatus !== "approved") : evalFilter === "approved" ? modelos.filter((m) => m.evalStatus === "approved") : modelos;
+        const cp = status.modelControlPlane || null;
+        const cpSummary = (cp == null ? void 0 : cp.summary) || null;
+        const cpModels = Array.isArray(cp == null ? void 0 : cp.models) ? cp.models : [];
+        const cpProviders = Array.isArray(cp == null ? void 0 : cp.providerHealth) ? cp.providerHealth : [];
+        const fmtLat = (ms) => typeof ms === "number" && ms > 0 ? ms >= 1e3 ? `${(ms / 1e3).toFixed(1)}s` : `${Math.round(ms)}ms` : "—";
         return h(
           "div",
           { style: { display: "flex", flexDirection: "column", gap: "12px" }, "data-eval-r51-view": "true" },
@@ -64229,9 +64380,9 @@ function renderFactorySecondaryPage(props) {
             "div",
             { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "10px" } },
             [
-              { label: "Aprovados no Eval (≥ 8/10)", val: `${approvedCount}/${modelos.length}`, tone: "done", sub: "tool call validado ao vivo (Gateway)" },
-              { label: "Abaixo do mínimo / Offline", val: String(belowCount), tone: belowCount > 0 ? "failed" : "done", sub: belowCount > 0 ? "migração recomendada" : "nenhum agente crítico" },
-              { label: "Fora do eval / Não testado", val: String(Math.max(0, attentionCount - belowCount)), tone: attentionCount - belowCount > 0 ? "waiting" : "done", sub: "modelo sem resultado no Eval atual" },
+              { label: "Aprovados no Eval (≥ 8/10)", val: `${approvedCount}/${modelos.length}`, tone: "done", sub: cpSummary ? `${cpSummary.approvedCount}/${cpSummary.totalEvaluated} modelos no Hard Gate` : "tool call validado ao vivo (Gateway)" },
+              { label: "Sucesso Real 24h (sessions.db)", val: typeof (cpSummary == null ? void 0 : cpSummary.prodSuccessRate24hPct) === "number" ? `${cpSummary.prodSuccessRate24hPct.toFixed(1)}%` : `${belowCount} crítico(s)`, tone: ((cpSummary == null ? void 0 : cpSummary.prodSuccessRate24hPct) ?? 100) >= 95 ? "done" : "waiting", sub: cpSummary ? `${cpSummary.prodTurns24h.toLocaleString("pt-BR")} turnos · ${cpSummary.prodErrors24h} erros` : "migração recomendada" },
+              { label: "Agentes p/ Migrar", val: String(attentionCount), tone: attentionCount > 0 ? "waiting" : "done", sub: belowCount > 0 ? `${belowCount} abaixo do mínimo/offline` : "plantel alinhado ao Eval SOTA v2" },
               { label: "Vencedores ao vivo (10/10)", val: `${liveWinners.length} modelo${liveWinners.length === 1 ? "" : "s"}`, tone: "done", sub: winnersSub }
             ].map(
               (k) => h(
@@ -64240,6 +64391,82 @@ function renderFactorySecondaryPage(props) {
                 h("div", { className: "of-meter-label" }, k.label),
                 h("div", { className: "of-num", style: { fontSize: "19px", fontWeight: 700, marginTop: "4px", color: k.tone === "failed" ? "var(--status-failed)" : k.tone === "waiting" ? "var(--status-waiting)" : "var(--foreground)" } }, k.val),
                 h("div", { className: "of-muted", style: { fontSize: "10.5px", marginTop: "2px" } }, k.sub)
+              )
+            )
+          ),
+          cpModels.length > 0 && h(
+            "div",
+            { className: "of-grid-2", "data-orgfy-eval-sota-charts": "true" },
+            h(
+              "div",
+              { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "8px" } },
+              h(
+                "div",
+                { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+                h("span", { style: { fontSize: "13px", fontWeight: 700 } }, "Eval SOTA v2 · Score × Latência × Prod 24h"),
+                h("span", { className: "of-pill", "data-tone": "done", style: { fontSize: "10px" } }, `${(cp == null ? void 0 : cp.toolsTested) || 12} tools · Hard Gate`)
+              ),
+              h(
+                "svg",
+                { viewBox: "0 0 440 205", style: { width: "100%", height: "205px", display: "block" }, role: "img", "aria-label": "Gráfico Eval SOTA v2 por modelo" },
+                cpModels.slice(0, 8).map((m, i) => {
+                  var _a2;
+                  const y = 8 + i * 24;
+                  const sc = Math.max(0, Math.min(100, Number(m.evalScore || 0)));
+                  const w = Math.max(4, sc / 100 * 185);
+                  const fill = !m.online ? "var(--status-failed)" : m.policyState === "blocked" ? "var(--status-waiting)" : m.policyState === "vip" ? "var(--chart-4, #c084fc)" : "var(--status-done)";
+                  const shortM = shortLabel(m.model);
+                  const prodPct = (_a2 = m.prod24h) == null ? void 0 : _a2.successRate24hPct;
+                  return h(
+                    "g",
+                    { key: m.model },
+                    h("text", { x: 0, y: y + 12, fill: "var(--muted-foreground)", fontSize: "10.5", fontFamily: "ui-monospace, monospace" }, shortM),
+                    h("rect", { x: 152, y: y + 2, width: 185, height: 12, rx: 4, fill: "var(--muted)" }),
+                    h("rect", { x: 152, y: y + 2, width: w, height: 12, rx: 4, fill }),
+                    h("text", { x: 344, y: y + 12, fill: "var(--foreground)", fontSize: "10", fontFamily: "ui-monospace, monospace" }, `${sc.toFixed(1)} · ${fmtLat(m.latencyMs)}${typeof prodPct === "number" ? ` · ${Math.round(prodPct)}%` : ""}`)
+                  );
+                })
+              )
+            ),
+            h(
+              "div",
+              { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+              h(
+                "div",
+                { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+                h("span", { style: { fontSize: "13px", fontWeight: 700 } }, "Saúde por Provedor & Política de Acesso"),
+                h("span", { className: "of-pill", "data-tone": "done", style: { fontSize: "10px" } }, "Decision API + Eval-First")
+              ),
+              cpProviders.map(
+                (p) => h(
+                  "div",
+                  { key: p.provider, style: { display: "flex", flexDirection: "column", gap: "4px" } },
+                  h(
+                    "div",
+                    { style: { display: "flex", justifyContent: "space-between", fontSize: "11.5px" } },
+                    h("span", { className: "of-mono", style: { fontWeight: 600 } }, p.provider.replace("nexusmind_", "")),
+                    h("span", { className: "of-mono of-muted", style: { fontSize: "10.5px" } }, `${p.approved}/${p.total} aprov. · ${fmtLat(p.avgLatencyMs)}`)
+                  ),
+                  h(
+                    "div",
+                    { className: "of-bar-track", style: { marginTop: 0, height: "6px" } },
+                    h("div", {
+                      className: "of-bar-fill",
+                      style: {
+                        width: `${Math.max(4, p.healthPct)}%`,
+                        background: p.healthPct >= 70 ? "var(--status-done)" : p.healthPct >= 40 ? "var(--status-waiting)" : "var(--status-failed)"
+                      }
+                    })
+                  )
+                )
+              ),
+              cpSummary && h(
+                "div",
+                { style: { display: "flex", gap: "6px", flexWrap: "wrap", marginTop: "auto", paddingTop: "6px", borderTop: "1px solid var(--border)" } },
+                h("span", { className: "of-pill", "data-tone": "done" }, `Auto: ${cpSummary.autoEligibleCount}`),
+                h("span", { className: "of-pill" }, `VIP: ${cpSummary.vipCount}`),
+                h("span", { className: "of-pill", "data-tone": "failed" }, `Blocked: ${cpSummary.blockedCount}`),
+                h("span", { className: "of-pill", "data-tone": "idle" }, `Free aprov.: ${cpSummary.freeApprovedCount}`)
               )
             )
           ),
@@ -66873,7 +67100,7 @@ const PINNED_HOST_COMMANDS = Object.freeze([
   {
     id: "orgfy-kpis",
     scriptPath: "ferramentas/esteira/gerar_kpis_esteira.py",
-    sha256: "ec21ca0b2835869c9baf5d18f27ddd1bb868be47a86aa6d9fb0884cee5ae534a"
+    sha256: "647f5e8ac766f0f26dc6159cd66956fda9caf5f2f66fc695503c3b858d5d96f0"
   },
   {
     id: "orgfy-controle-write",

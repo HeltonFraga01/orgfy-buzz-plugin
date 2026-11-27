@@ -132,6 +132,10 @@ const NEXUSMIND_PROVIDERS: ProviderGroupConfig[] = [
 ];
 
 const DEFAULT_ORGFY_CHANNEL = "e445491d-2fb3-4ebd-8e2e-f6813c33fb03";
+const SHARED_CONTROL_PLANE_PATHS = [
+  joinHome(".buzz", ".scratch", "model-control-plane.json"),
+  "~/.buzz/.scratch/model-control-plane.json",
+];
 const SHARED_RANKING_PATHS = [
   joinHome(".buzz", ".scratch", "nexusmind-model-ranking.json"),
   "~/.buzz/.scratch/nexusmind-model-ranking.json",
@@ -350,8 +354,49 @@ async function loadSharedNexusMindRanking(
   const disabled = getDisabledModelsFromLocalStorage();
   let parsed: any = null;
 
-  // 1. Snapshot em disco gravado pelo NexusMind Gateway (mais recente e cross-webview)
+  // 0. Prioridade máxima: Control Plane Único (model-control-plane.json) com Hard Gate Eval-First
   const host = (ctx as any)?.host;
+  if (typeof host?.readFile === "function") {
+    for (const p of SHARED_CONTROL_PLANE_PATHS) {
+      try {
+        const raw = await host.readFile(p);
+        if (!raw) continue;
+        const cp = JSON.parse(decodeHostBytes(raw));
+        if (cp && Array.isArray(cp.models) && cp.models.length > 0) {
+          const cpPolicy = cp.policy && typeof cp.policy === "object" ? cp.policy : {};
+          const effectivePreferFree = preferFree || Boolean(cpPolicy.forceFree);
+          const cpCandidates: ModelCandidateScore[] = [];
+          for (const m of cp.models) {
+            const mid = String(m?.model || "").trim();
+            if (!mid || isUnsupportedAgentModel(mid) || disabled.has(mid) || excludeSet.has(mid.toLowerCase())) continue;
+            if (!m.online || !m.evalApproved) continue;
+            if (m.policyState === "blocked" || m.policyState === "vip") continue;
+            const free = Boolean(m.isFree) || isFreeModelId(mid);
+            if (effectivePreferFree && !free) continue;
+            if (!effectivePreferFree && free) continue;
+            const evalScore = Number(m.evalScore ?? estimateModelIntelligence(mid));
+            cpCandidates.push({
+              model: mid,
+              provider: String(m.provider || inferProviderId(mid)),
+              isFree: free,
+              intelligenceScore: evalScore,
+              latencyMs: typeof m.latencyMs === "number" ? m.latencyMs : null,
+              combinedScore: evalScore,
+              online: true,
+              calls: Number(m.prod24h?.turns24h || 0),
+              source: "nexusmind_ranking",
+            });
+          }
+          if (cpCandidates.length > 0) {
+            cpCandidates.sort((a, b) => b.combinedScore - a.combinedScore);
+            return cpCandidates;
+          }
+        }
+      } catch {}
+    }
+  }
+
+  // 1. Snapshot em disco gravado pelo NexusMind Gateway (mais recente e cross-webview)
   if (typeof host?.readFile === "function") {
     for (const p of SHARED_RANKING_PATHS) {
       try {
@@ -821,7 +866,23 @@ export async function executeSmartModelFailover(
       : sharedRanking.length > 0
       ? sharedRanking
       : probed;
-  const winner = finalRanking.find((p) => p.online) || null;
+  const onlineCandidates = finalRanking.filter((p) => p.online);
+  let winner = onlineCandidates[0] || null;
+  // Tie-breaker via Buzz Decision Model API (ctx.decisions.decide) exclusivamente entre os top 3 candidatos Eval-aprovados
+  if (winner && onlineCandidates.length >= 2 && typeof (ctx as any)?.decisions?.decide === "function") {
+    try {
+      const top3 = onlineCandidates.slice(0, 3);
+      const dec = await (ctx as any).decisions.decide({
+        question: `Qual o melhor modelo Eval-aprovado para failover do agente ${matchedAgent?.name || input.agente || "worker"}?`,
+        options: top3.map((c) => `${c.model} (${c.provider}, score=${c.combinedScore}, lat=${c.latencyMs ?? "?"}ms)`),
+      });
+      const txt = String(dec?.choice || dec?.decision || dec?.option || "").toLowerCase();
+      const chosen = top3.find((c) => txt.includes(c.model.toLowerCase()));
+      if (chosen) winner = chosen;
+    } catch {
+      // Mantém o vencedor determinístico Eval-First
+    }
+  }
 
   if (!winner) {
     return {
