@@ -254,10 +254,6 @@ export function renderFactoryOverviewPanel(props: FactoryOverviewProps) {
               {
                 className: "of-now-cards",
                 "data-now-two-rows": "true",
-                style: {
-                  gridTemplateRows: nowCardsTotal > 2 ? "repeat(2, 82px)" : "82px",
-                  gridAutoColumns: "256px",
-                },
               },
               activeTurns.map((t) => {
                 const turnCrew = (props.liveCrew || []).find((c) => c.pubkey?.toLowerCase() === t.agentPubkey.toLowerCase());

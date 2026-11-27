@@ -16254,10 +16254,10 @@ const FACTORY_SHADOW_CSS = `
 .of-overview-stack {
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  gap: 20px;
   width: 100%;
-  max-width: 1180px;
-  margin: 0 auto;
+  max-width: 100%;
+  margin: 0;
   flex-shrink: 0;
   box-sizing: border-box;
 }
@@ -16289,13 +16289,13 @@ const FACTORY_SHADOW_CSS = `
 
 .of-now-next {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 310px;
+  grid-template-columns: minmax(0, 1.85fr) minmax(320px, 430px);
   gap: 16px;
   align-items: start;
   flex-shrink: 0;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 980px) {
   .of-now-next {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -16313,11 +16313,9 @@ const FACTORY_SHADOW_CSS = `
 
 .of-now-cards {
   display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: 256px;
-  gap: 8px;
-  overflow-x: auto;
-  padding: 2px 2px 6px;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+  padding: 2px;
   box-sizing: border-box;
 }
 
@@ -16769,14 +16767,16 @@ const FACTORY_SHADOW_CSS = `
 .of-pd-canvas {
   display: flex;
   align-items: stretch;
-  gap: 4px;
-  min-width: 900px;
+  gap: 6px;
+  width: 100%;
+  min-width: 960px;
 }
 
 .of-pd-group {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+  flex-shrink: 0;
 }
 
 .of-pd-arrow {
@@ -16787,7 +16787,7 @@ const FACTORY_SHADOW_CSS = `
 }
 
 .of-pd-arrow-line {
-  width: 12px;
+  width: 14px;
   height: 1px;
   background: rgba(156, 163, 175, 0.55);
 }
@@ -16800,7 +16800,7 @@ const FACTORY_SHADOW_CSS = `
 .of-pd-fan {
   position: relative;
   display: grid;
-  width: 24px;
+  width: 26px;
   flex-shrink: 0;
   grid-template-rows: repeat(3, 1fr);
   align-self: stretch;
@@ -16825,8 +16825,8 @@ const FACTORY_SHADOW_CSS = `
 .of-pd-lanes {
   display: grid;
   grid-template-rows: repeat(3, auto);
-  gap: 10px;
-  flex: 1;
+  gap: 12px;
+  flex: 1 1 0;
   min-width: 0;
 }
 
@@ -16834,8 +16834,8 @@ const FACTORY_SHADOW_CSS = `
   position: relative;
   display: flex;
   align-items: center;
-  gap: 4px;
-  border-radius: 9px;
+  gap: 6px;
+  border-radius: 10px;
   border: 1px solid var(--border);
   background: repeating-linear-gradient(
     135deg,
@@ -16844,18 +16844,19 @@ const FACTORY_SHADOW_CSS = `
     rgba(255, 255, 255, 0.025) 6px,
     rgba(255, 255, 255, 0.025) 7px
   );
-  padding: 20px 8px 10px;
+  padding: 28px 10px 12px;
 }
 
 .of-pd-lane-tag {
   position: absolute;
-  top: 4px;
-  left: 8px;
+  top: 6px;
+  left: 10px;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   font-family: var(--font-mono);
   font-size: 9.5px;
+  font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--muted-foreground);
@@ -16866,14 +16867,15 @@ const FACTORY_SHADOW_CSS = `
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  min-height: 68px;
+  min-height: 76px;
   min-width: 0;
-  flex: 1;
-  border-radius: 8px;
+  flex: 1 1 0;
+  border-radius: 9px;
   border: 1px solid var(--border);
   background: var(--card);
-  padding: 14px 8px 8px;
+  padding: 16px 10px 12px;
   text-align: center;
   box-sizing: border-box;
 }
@@ -17196,6 +17198,114 @@ const FACTORY_SHADOW_CSS = `
 .of-muted { color: var(--muted-foreground); font-size: 11.5px; }
 .of-mono { font-family: var(--font-mono); }
 .of-num { font-variant-numeric: tabular-nums; }
+.of-spend-grid { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+
+/* ── v18.9: Canvas / Visão Executive Workspace & Configurações Fluidas ── */
+.of-vision-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.of-vision-hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 16px 20px;
+  border-radius: 13px;
+  border: 1px solid var(--primary-border);
+  background:
+    radial-gradient(circle at 0% 0%, var(--primary-soft), transparent 52%),
+    var(--card);
+  box-sizing: border-box;
+}
+
+.of-vision-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(340px, 0.95fr);
+  gap: 16px;
+  align-items: start;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+@media (max-width: 1080px) {
+  .of-vision-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.of-vision-aside {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  position: sticky;
+  top: 0;
+}
+
+.of-toc-link {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.of-toc-link:hover {
+  background: var(--surface);
+  color: var(--foreground);
+}
+
+.of-settings-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.of-settings-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+  width: 100%;
+}
+
+.of-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
+  gap: 16px;
+  align-items: start;
+  width: 100%;
+}
+
+@media (max-width: 980px) {
+  .of-settings-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.of-preset-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
 `;
 function attachFactoryShadowStyles(hostEl) {
   if (!hostEl || typeof hostEl.attachShadow !== "function") return null;
@@ -17622,7 +17732,7 @@ Na fila aguardando agente livre`,
           title: poAgentName,
           help: PT_BR.pipelines.scoutHelp,
           items: [],
-          width: "116px",
+          width: "130px",
           footer: h(
             "span",
             { className: "of-muted", style: { fontSize: "10px" } },
@@ -17638,7 +17748,7 @@ Na fila aguardando agente livre`,
           help: PT_BR.pipelines.issueHelp,
           items: [],
           queued: status.backlog.filter((i) => i.step !== "intake").slice(0, 3),
-          width: "116px",
+          width: "132px",
           footer: h(
             "div",
             { style: { display: "flex", flexDirection: "column", alignItems: "center", fontSize: "10px" } },
@@ -17658,7 +17768,7 @@ Na fila aguardando agente livre`,
           title: PT_BR.pipelines.classifyLabel,
           help: PT_BR.pipelines.classifyHelp,
           items: status.backlog.filter((i) => i.step === "intake"),
-          width: "122px"
+          width: "138px"
         })
       ),
       Fan("out"),
@@ -17788,7 +17898,7 @@ Na fila aguardando agente livre`,
           title: PT_BR.pipelines.mergeLabel,
           help: "Após CI verde + Revisor L-01, o coordenador valida CI pós-merge sobre a main (com auto-revert se falhar) e integra. Se travar: L1 COO Bento → L2 CEO/Conselho → L3 Bestie OrgFy Iris.",
           items: mergeItems,
-          width: "130px",
+          width: "142px",
           footer: h(
             "span",
             { className: "of-muted", style: { fontSize: "10px" } },
@@ -18175,11 +18285,7 @@ function renderFactoryOverviewPanel(props) {
           "div",
           {
             className: "of-now-cards",
-            "data-now-two-rows": "true",
-            style: {
-              gridTemplateRows: nowCardsTotal > 2 ? "repeat(2, 82px)" : "82px",
-              gridAutoColumns: "256px"
-            }
+            "data-now-two-rows": "true"
           },
           activeTurns.map((t) => {
             const turnCrew = (props.liveCrew || []).find((c) => {
@@ -60087,6 +60193,27 @@ function createHoldingTower3DComponent(ctx) {
     );
   };
 }
+function extractCanvasHeadings(markdown) {
+  if (!markdown) return [];
+  const out = [];
+  const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+  let inFence = false;
+  for (const raw of lines) {
+    const trimmed = raw.trim();
+    if (trimmed.startsWith("```")) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    const m = /^(#{1,3})\s+(.+)$/.exec(trimmed);
+    if (m) {
+      const cleanText = m[2].replace(/[*_`]/g, "").trim();
+      const id = `canvas-sec-${out.length}-${cleanText.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 32)}`;
+      out.push({ id, level: m[1].length, text: cleanText });
+    }
+  }
+  return out;
+}
 function renderInlineMarkdown(h, text, onOpenBuzzLink) {
   const nodes = [];
   const regex = /(\[[^\]]+\]\([^)]+\)|`[^`]+`|\*\*[^*]+\*\*)/g;
@@ -60203,19 +60330,23 @@ function renderMarkdownBlocks(h, markdown, onOpenBuzzLink) {
     const headingMatch = /^(#{1,4})\s+(.+)$/.exec(trimmed);
     if (headingMatch) {
       const level = headingMatch[1].length;
-      const fontSize = level === 1 ? "20px" : level === 2 ? "15.5px" : level === 3 ? "13.5px" : "12.5px";
+      const fontSize = level === 1 ? "22px" : level === 2 ? "15.5px" : level === 3 ? "13.5px" : "12.5px";
       blocks.push(
         h(
           `h${level}`,
           {
             key: `h-${blockKey++}`,
             style: {
-              margin: level === 1 ? "4px 0 10px" : "14px 0 6px",
+              margin: level === 1 ? "2px 0 14px" : level === 2 ? "20px 0 8px" : "14px 0 6px",
+              paddingBottom: level === 1 ? "10px" : void 0,
+              borderBottom: level === 1 ? "1px solid var(--border)" : void 0,
+              paddingLeft: level === 2 ? "10px" : void 0,
+              borderLeft: level === 2 ? "3px solid var(--primary)" : void 0,
               fontSize,
               fontWeight: 700,
               lineHeight: 1.3,
               color: "var(--foreground)",
-              letterSpacing: level === 1 ? "-0.015em" : void 0
+              letterSpacing: level === 1 ? "-0.02em" : "-0.01em"
             }
           },
           ...renderInlineMarkdown(h, headingMatch[2], onOpenBuzzLink)
@@ -60343,15 +60474,18 @@ function renderBuzzCanvasViewer(props) {
   const { h, mode, onChangeMode, content, draft, onChangeDraft, writable, saving, onSave, onReload, history, resolveAuthor } = props;
   const effectiveContent = content || "";
   const isDirty = draft !== effectiveContent;
+  const wordCount = effectiveContent.trim() ? effectiveContent.trim().split(/\s+/).length : 0;
+  const readMinutes = Math.max(1, Math.ceil(wordCount / 180));
+  const headingsCount = extractCanvasHeadings(effectiveContent).length;
   return h(
     "section",
     {
-      className: "of-card-pad",
+      className: "of-card",
       "data-buzz-canvas-native": "true",
       "data-canvas-live-editor": "true",
-      style: { display: "flex", flexDirection: "column", gap: "12px" }
+      style: { display: "flex", flexDirection: "column" }
     },
-    // Barra superior estilo Buzz Canvas (View | Edit | History + ações)
+    // Barra superior estilo Executive Document (Documento | Editar Markdown | Histórico + métricas + ações)
     h(
       "div",
       {
@@ -60361,19 +60495,20 @@ function renderBuzzCanvasViewer(props) {
           alignItems: "center",
           justifyContent: "space-between",
           gap: "10px",
-          paddingBottom: "8px",
-          borderBottom: "1px solid var(--border)"
+          padding: "11px 18px",
+          borderBottom: "1px solid var(--border)",
+          background: "var(--panel)"
         }
       },
       h(
         "div",
-        { style: { display: "inline-flex", alignItems: "center", gap: "14px", flexWrap: "wrap" } },
+        { style: { display: "inline-flex", alignItems: "center", gap: "12px", flexWrap: "wrap" } },
         h(
           "div",
-          { style: { display: "inline-flex", alignItems: "center", gap: "14px" } },
+          { className: "of-segmented" },
           [
-            { id: "view", label: "Visualizar" },
-            { id: "edit", label: isDirty ? "Editar •" : "Editar" },
+            { id: "view", label: "Documento" },
+            { id: "edit", label: isDirty ? "Editar •" : "Editar Markdown" },
             { id: "history", label: `Histórico (${history.length})` }
           ].map(
             (t) => h(
@@ -60381,23 +60516,9 @@ function renderBuzzCanvasViewer(props) {
               {
                 key: t.id,
                 type: "button",
-                onClick: () => onChangeMode(t.id),
-                style: {
-                  background: "transparent",
-                  border: "none",
-                  borderRadius: 0,
-                  boxShadow: "none",
-                  outline: "none",
-                  appearance: "none",
-                  WebkitAppearance: "none",
-                  borderBottom: mode === t.id ? "2px solid var(--foreground)" : "2px solid transparent",
-                  color: mode === t.id ? "var(--foreground)" : "var(--muted-foreground)",
-                  fontWeight: mode === t.id ? 600 : 500,
-                  fontSize: "12.5px",
-                  padding: "4px 2px 8px",
-                  marginBottom: "-9px",
-                  cursor: "pointer"
-                }
+                className: "of-seg-btn",
+                "data-active": mode === t.id ? "true" : "false",
+                onClick: () => onChangeMode(t.id)
               },
               t.label
             )
@@ -60405,8 +60526,8 @@ function renderBuzzCanvasViewer(props) {
         ),
         h(
           "span",
-          { className: "of-mono of-muted", style: { fontSize: "10.5px" } },
-          `Canvas · #${props.channelName || props.tenant}${props.channelId ? ` (${props.channelId.slice(0, 8)}…)` : ""}`
+          { className: "of-mono of-muted", style: { fontSize: "11px" } },
+          `${headingsCount} seções · ${wordCount} palavras · ~${readMinutes} min`
         )
       ),
       h(
@@ -60414,8 +60535,8 @@ function renderBuzzCanvasViewer(props) {
         { style: { display: "inline-flex", alignItems: "center", gap: "6px", flexWrap: "wrap" } },
         onReload && h(
           "button",
-          { type: "button", className: "of-btn", style: { padding: "4px 9px", fontSize: "11px" }, onClick: onReload },
-          "Recarregar"
+          { type: "button", className: "of-btn", style: { padding: "4px 10px", fontSize: "11px" }, onClick: onReload },
+          "↻ Recarregar"
         ),
         mode === "edit" && writable && h(
           "button",
@@ -60424,7 +60545,7 @@ function renderBuzzCanvasViewer(props) {
             className: "of-btn",
             "data-variant": "primary",
             disabled: saving || !isDirty,
-            style: { padding: "4px 10px", fontSize: "11px" },
+            style: { padding: "4px 11px", fontSize: "11px" },
             onClick: onSave
           },
           saving ? "Salvando..." : "Salvar no Buzz"
@@ -60434,7 +60555,7 @@ function renderBuzzCanvasViewer(props) {
           {
             type: "button",
             className: "of-btn",
-            style: { padding: "4px 9px", fontSize: "11px" },
+            style: { padding: "4px 10px", fontSize: "11px" },
             onClick: props.onOpenChannelInBuzz
           },
           "Abrir no Buzz ↗"
@@ -60443,26 +60564,30 @@ function renderBuzzCanvasViewer(props) {
     ),
     // Conteúdo por modo
     mode === "view" ? effectiveContent.trim() ? h(
-      "div",
+      "article",
       {
         style: {
-          maxHeight: "520px",
-          overflowY: "auto",
-          padding: "4px 2px"
+          padding: "22px 26px 28px",
+          lineHeight: 1.65
         }
       },
       ...renderMarkdownBlocks(h, effectiveContent, props.onOpenBuzzLink)
     ) : h(
       "div",
-      { className: "of-surface", style: { padding: "18px", textAlign: "center" } },
-      h("div", { style: { fontSize: "13px", fontWeight: 600 } }, "Canvas vazio neste canal"),
-      h("div", { className: "of-muted", style: { marginTop: "4px", fontSize: "11.5px" } }, "Clique em Editar para criar o Canvas sincronizado diretamente no canal do Buzz.")
+      { style: { padding: "36px 24px", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" } },
+      h("div", { style: { fontSize: "14px", fontWeight: 700 } }, "Canvas vazio neste canal"),
+      h("div", { className: "of-muted", style: { fontSize: "12px", maxWidth: "420px" } }, "Crie a visão oficial do produto, objetivos e salvaguardas sincronizados diretamente no canal do Buzz."),
+      writable && h(
+        "button",
+        { type: "button", className: "of-btn", "data-variant": "primary", style: { marginTop: "4px" }, onClick: () => onChangeMode("edit") },
+        "Escrever Canvas agora"
+      )
     ) : mode === "edit" ? h(
       "div",
-      { style: { display: "flex", flexDirection: "column", gap: "8px" } },
+      { style: { padding: "16px 18px", display: "flex", flexDirection: "column", gap: "10px" } },
       h("textarea", {
         className: "of-textarea of-mono",
-        style: { minHeight: "340px", fontSize: "12px", lineHeight: 1.5, resize: "vertical" },
+        style: { minHeight: "440px", fontSize: "12.5px", lineHeight: 1.6, resize: "vertical", padding: "12px 14px" },
         placeholder: "Escreva o Markdown do Canvas do canal no Buzz...",
         value: draft,
         onChange: (e) => onChangeDraft(e.target.value)
@@ -64189,7 +64314,7 @@ function fmtTokens(n) {
   return String(n);
 }
 function renderFactorySecondaryPage(props) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x2, _y2, _z2, _A, _B, _C, _D, _E, _F;
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m2, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x2, _y2, _z2, _A, _B, _C, _D, _E, _F, _G, _H, _I, _J, _K;
   const {
     h,
     tab,
@@ -65756,217 +65881,291 @@ function renderFactorySecondaryPage(props) {
     const regras = (ov == null ? void 0 : ov.regrasProbatorias) || [];
     const papeis = Object.entries((ov == null ? void 0 : ov.papeis) || {});
     const ch = props.channelInfo;
+    const ws = props.workspaceDetails;
+    const companyLabel = (ws == null ? void 0 : ws.workspaceName) || ((_t = status.tenantManifest) == null ? void 0 : _t.nome) || tenant;
+    const headings = extractCanvasHeadings(props.channelCanvas);
+    const repoSummary = ((_u = ws == null ? void 0 : ws.folders) == null ? void 0 : _u.length) ? ws.folders[0] : ((_v = status.tenantManifest) == null ? void 0 : _v.repoId) || tenant;
+    const worktreeSummary = (ws == null ? void 0 : ws.worktree) ? `${ws.worktree.location} (${ws.worktree.baseBranch})` : "main";
     return h(
       "div",
-      { style: { display: "flex", flexDirection: "column", gap: "14px" } },
-      props.workspaceDetails && props.workspaceDraft && props.setWorkspaceDraft && h(
-        "section",
-        { className: "of-card-pad", "data-buzz-workspace-vision": "true", style: { display: "flex", flexDirection: "column", gap: "10px", borderColor: "var(--primary-border)" } },
+      { className: "of-vision-shell", "data-vision-redesign": "v18.9" },
+      // Hero Executive Bar
+      h(
+        "header",
+        { className: "of-vision-hero" },
         h(
           "div",
-          { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" } },
+          { style: { display: "flex", alignItems: "center", gap: "14px", minWidth: 0, flex: "1 1 360px" } },
+          h(
+            "span",
+            { className: "of-project-tile", style: { width: "40px", height: "40px", fontSize: "18px", borderRadius: "11px" } },
+            companyLabel.charAt(0).toUpperCase()
+          ),
           h(
             "div",
-            null,
-            h("div", { style: { fontSize: "14px", fontWeight: 700, display: "flex", alignItems: "center", gap: "7px" } }, `Workspace do Buzz · ${props.workspaceDetails.workspaceName}`, h("span", { className: "of-pill", "data-tone": "done", style: { fontSize: "10px" } }, "channelKit nativo")),
-            h("div", { className: "of-muted", style: { fontSize: "11.5px", marginTop: "2px" } }, "Repositórios, regra de Worktree e Instructions injetadas nativamente pelo Buzz em todos os agentes deste Workspace.")
+            { style: { minWidth: 0, display: "flex", flexDirection: "column", gap: "5px" } },
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
+              h("h1", { style: { margin: 0, fontSize: "17px", fontWeight: 700, letterSpacing: "-0.015em" } }, `${companyLabel} · Canvas & Visão`),
+              h("span", { className: "of-pill", "data-tone": "done", style: { fontSize: "10px" } }, ws ? "channelKit nativo" : "Canvas Buzz"),
+              (ch == null ? void 0 : ch.name) && h("span", { className: "of-pill of-mono", style: { fontSize: "10px" } }, `#${ch.name}`)
+            ),
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", fontSize: "11.5px" }, className: "of-muted" },
+              h("span", { className: "of-mono" }, `Repo: ${repoSummary}`),
+              h("span", null, "·"),
+              h("span", { className: "of-mono" }, `Worktree: ${worktreeSummary}`),
+              h("span", null, "·"),
+              h("span", null, `${invariantes.length} invariantes · ${papeis.length || (((_x2 = (_w = status.tenantManifest) == null ? void 0 : _w.agentes) == null ? void 0 : _x2.length) ?? 0)} papéis`)
+            )
+          )
+        ),
+        h(
+          "div",
+          { style: { display: "inline-flex", alignItems: "center", gap: "7px", flexWrap: "wrap" } },
+          props.onReloadCanvas && h("button", { type: "button", className: "of-btn", onClick: props.onReloadCanvas }, "↻ Recarregar"),
+          props.canvasWritable && props.setCanvasMode && h(
+            "button",
+            {
+              type: "button",
+              className: "of-btn",
+              "data-variant": props.canvasMode === "edit" ? "primary" : void 0,
+              onClick: () => props.setCanvasMode(props.canvasMode === "edit" ? "view" : "edit")
+            },
+            props.canvasMode === "edit" ? "Ver Documento" : "Editar Canvas"
           ),
-          props.workspaceDetails.writable && props.onSaveWorkspaceSettings && h(
+          (props.onOpenChannelFullPage || props.onOpenChannelInBuzz) && h(
             "button",
             {
               type: "button",
               className: "of-btn",
               "data-variant": "primary",
-              disabled: props.savingWorkspaceDetails,
-              onClick: props.onSaveWorkspaceSettings
+              onClick: () => {
+                var _a2;
+                return props.onOpenChannelFullPage ? props.onOpenChannelFullPage() : (_a2 = props.onOpenChannelInBuzz) == null ? void 0 : _a2.call(props);
+              }
             },
-            props.savingWorkspaceDetails ? "Salvando no Buzz..." : "Salvar no Workspace"
+            "Abrir no Buzz ↗"
           )
-        ),
+        )
+      ),
+      // Grid Principal 2 Colunas: Documento Editorial (esquerda) + Painel Contextual Workspace & Governança (direita)
+      h(
+        "div",
+        { className: "of-vision-grid" },
+        // Coluna Esquerda — Documento Vivo do Canvas
         h(
           "div",
-          { className: "of-grid-2" },
-          h(
-            "label",
-            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
-            "Repositórios / Folders (1 por linha)",
-            h("textarea", {
-              className: "of-textarea of-mono",
-              style: { minHeight: "68px", fontSize: "11.5px" },
-              placeholder: "~/.buzz/REPOS/lumen-iptv",
-              value: props.workspaceDraft.foldersText,
-              onChange: (e) => props.setWorkspaceDraft({ foldersText: e.target.value })
-            })
+          { style: { minWidth: 0, display: "flex", flexDirection: "column", gap: "14px" } },
+          renderBuzzCanvasViewer({
+            h,
+            channelName: (ch == null ? void 0 : ch.name) || ((_y2 = status.tenantManifest) == null ? void 0 : _y2.nome) || tenant,
+            channelId: (ch == null ? void 0 : ch.channelId) || ((_z2 = status.tenantManifest) == null ? void 0 : _z2.canal) || null,
+            content: props.channelCanvas ?? null,
+            draft: props.canvasDraft ?? props.channelCanvas ?? "",
+            onChangeDraft: (v2) => {
+              var _a2;
+              return (_a2 = props.setCanvasDraft) == null ? void 0 : _a2.call(props, v2);
+            },
+            writable: Boolean(props.canvasWritable),
+            saving: Boolean(props.canvasSaving),
+            onSave: () => {
+              var _a2;
+              return (_a2 = props.onSaveCanvas) == null ? void 0 : _a2.call(props);
+            },
+            onReload: props.onReloadCanvas,
+            history: props.canvasHistory || [],
+            resolveAuthor: props.resolveAuthor,
+            mode: props.canvasMode || "view",
+            onChangeMode: (m) => {
+              var _a2;
+              return (_a2 = props.setCanvasMode) == null ? void 0 : _a2.call(props, m);
+            },
+            onOpenBuzzLink: props.onOpenBuzzLink,
+            onOpenChannelInBuzz: () => {
+              var _a2;
+              return props.onOpenChannelFullPage ? props.onOpenChannelFullPage() : (_a2 = props.onOpenChannelInBuzz) == null ? void 0 : _a2.call(props);
+            }
+          })
+        ),
+        // Coluna Direita — Sumário + Workspace & Prompt + Governança Colapsável
+        h(
+          "aside",
+          { className: "of-vision-aside" },
+          // 1. Sumário do Documento (TOC)
+          headings.length > 0 && h(
+            "section",
+            { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "6px" } },
+            h("div", { className: "of-meter-label", style: { marginBottom: "2px" } }, `Estrutura do Canvas (${headings.length} seções)`),
+            headings.slice(0, 14).map(
+              (hd) => h(
+                "div",
+                {
+                  key: hd.id,
+                  className: "of-toc-link",
+                  style: {
+                    paddingLeft: hd.level === 1 ? "8px" : hd.level === 2 ? "16px" : "26px",
+                    fontWeight: hd.level === 1 ? 700 : hd.level === 2 ? 600 : 400,
+                    color: hd.level === 1 ? "var(--foreground)" : "var(--muted-foreground)",
+                    cursor: "default"
+                  }
+                },
+                h("span", { className: "of-dot", "data-tone": hd.level === 1 ? "done" : "idle", style: { width: "5px", height: "5px" } }),
+                h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, hd.text)
+              )
+            )
           ),
-          h(
-            "div",
-            { style: { display: "grid", gridTemplateColumns: "1fr 120px", gap: "8px", alignContent: "start" } },
+          // 2. Workspace do Buzz & Prompt dos Agentes (channelKit nativo)
+          ws && props.workspaceDraft && props.setWorkspaceDraft && h(
+            "section",
+            { className: "of-card-pad", "data-buzz-workspace-vision": "true", style: { display: "flex", flexDirection: "column", gap: "10px" } },
             h(
-              "label",
-              { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
-              "Worktree location",
-              h("input", {
-                className: "of-input of-mono",
-                value: props.workspaceDraft.worktreeLocation,
-                onChange: (e) => props.setWorkspaceDraft({ worktreeLocation: e.target.value })
-              })
+              "div",
+              { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" } },
+              h(
+                "div",
+                null,
+                h("div", { style: { fontSize: "13px", fontWeight: 700 } }, "Workspace & Prompt dos Agentes"),
+                h("div", { className: "of-muted", style: { fontSize: "11px" } }, "Injetado nativamente pelo Buzz em todos os agentes.")
+              ),
+              ws.writable && props.onSaveWorkspaceSettings && h(
+                "button",
+                {
+                  type: "button",
+                  className: "of-btn",
+                  "data-variant": "primary",
+                  style: { padding: "4px 10px", fontSize: "11px" },
+                  disabled: props.savingWorkspaceDetails,
+                  onClick: props.onSaveWorkspaceSettings
+                },
+                props.savingWorkspaceDetails ? "Salvando..." : "Salvar"
+              )
             ),
             h(
               "label",
-              { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
-              "Base branch",
-              h("input", {
-                className: "of-input of-mono",
-                value: props.workspaceDraft.worktreeBranch,
-                onChange: (e) => props.setWorkspaceDraft({ worktreeBranch: e.target.value })
+              { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11px" } },
+              "Repositórios / Folders (1 por linha)",
+              h("textarea", {
+                className: "of-textarea of-mono",
+                style: { minHeight: "52px", fontSize: "11px" },
+                placeholder: "~/.buzz/REPOS/lumen-iptv",
+                value: props.workspaceDraft.foldersText,
+                onChange: (e) => props.setWorkspaceDraft({ foldersText: e.target.value })
+              })
+            ),
+            h(
+              "div",
+              { style: { display: "grid", gridTemplateColumns: "1fr 96px", gap: "8px" } },
+              h(
+                "label",
+                { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11px" } },
+                "Worktree location",
+                h("input", {
+                  className: "of-input of-mono",
+                  style: { fontSize: "11px" },
+                  value: props.workspaceDraft.worktreeLocation,
+                  onChange: (e) => props.setWorkspaceDraft({ worktreeLocation: e.target.value })
+                })
+              ),
+              h(
+                "label",
+                { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11px" } },
+                "Base branch",
+                h("input", {
+                  className: "of-input of-mono",
+                  style: { fontSize: "11px" },
+                  value: props.workspaceDraft.worktreeBranch,
+                  onChange: (e) => props.setWorkspaceDraft({ worktreeBranch: e.target.value })
+                })
+              )
+            ),
+            h(
+              "label",
+              { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11px" } },
+              "Instructions / Visão injetada no prompt",
+              h("textarea", {
+                className: "of-textarea",
+                style: { minHeight: "120px", fontSize: "11.5px", lineHeight: 1.5 },
+                placeholder: "Descreva a visão, regras arquiteturais e direção do produto...",
+                value: props.workspaceDraft.instructions,
+                onChange: (e) => props.setWorkspaceDraft({ instructions: e.target.value })
               })
             )
-          )
-        ),
-        h(
-          "label",
-          { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
-          "Instructions / Visão da Empresa (injetada no prompt de todos os agentes do Workspace)",
-          h("textarea", {
-            className: "of-textarea",
-            style: { minHeight: "110px", fontSize: "12px", lineHeight: 1.5 },
-            placeholder: "Descreva a visão, regras arquiteturais e direção do produto...",
-            value: props.workspaceDraft.instructions,
-            onChange: (e) => props.setWorkspaceDraft({ instructions: e.target.value })
-          })
-        )
-      ),
-      renderBuzzCanvasViewer({
-        h,
-        tenant,
-        channelName: (ch == null ? void 0 : ch.name) || ((_t = status.tenantManifest) == null ? void 0 : _t.nome) || tenant,
-        channelId: (ch == null ? void 0 : ch.channelId) || ((_u = status.tenantManifest) == null ? void 0 : _u.canal) || null,
-        content: props.channelCanvas ?? null,
-        draft: props.canvasDraft ?? props.channelCanvas ?? "",
-        onChangeDraft: (v2) => {
-          var _a2;
-          return (_a2 = props.setCanvasDraft) == null ? void 0 : _a2.call(props, v2);
-        },
-        writable: Boolean(props.canvasWritable),
-        saving: Boolean(props.canvasSaving),
-        onSave: () => {
-          var _a2;
-          return (_a2 = props.onSaveCanvas) == null ? void 0 : _a2.call(props);
-        },
-        onReload: props.onReloadCanvas,
-        history: props.canvasHistory || [],
-        resolveAuthor: props.resolveAuthor,
-        mode: props.canvasMode || "view",
-        onChangeMode: (m) => {
-          var _a2;
-          return (_a2 = props.setCanvasMode) == null ? void 0 : _a2.call(props, m);
-        },
-        onOpenBuzzLink: props.onOpenBuzzLink,
-        onOpenChannelInBuzz: () => {
-          var _a2;
-          return props.onOpenChannelFullPage ? props.onOpenChannelFullPage() : (_a2 = props.onOpenChannelInBuzz) == null ? void 0 : _a2.call(props);
-        }
-      }),
-      h(
-        "div",
-        { className: "of-grid-2" },
-        h(
-          "section",
-          { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-          h("div", { className: "of-meter-label" }, "1. Visão da Holding / Conselho (empresas/board.json)"),
+          ),
+          // 3. Governança & Contexto da Holding (Acordeões limpos para não poluir o Canvas)
           h(
-            "div",
-            { style: { display: "flex", flexDirection: "column", gap: "6px" } },
-            h("strong", { style: { fontSize: "12.5px" } }, "Invariantes da Holding"),
-            invariantes.length === 0 ? h("div", { className: "of-muted" }, PT_BR.labels.unavailable) : invariantes.map(
-              (inv, idx) => h(
+            "section",
+            { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "8px" } },
+            h("div", { className: "of-meter-label" }, "Governança & Contexto Injetado"),
+            h(
+              "details",
+              { className: "of-surface", open: true },
+              h("summary", { style: { cursor: "pointer", padding: "8px 10px", fontSize: "12px", fontWeight: 600 } }, `Invariantes da Holding & Escalada (${invariantes.length})`),
+              h(
                 "div",
-                { key: idx, style: { display: "flex", alignItems: "flex-start", gap: "7px", fontSize: "12px" } },
-                h("span", { className: "of-dot", "data-tone": "done", style: { marginTop: "5px" } }),
-                h("span", null, inv)
+                { style: { borderTop: "1px solid var(--border)", padding: "9px 10px", display: "flex", flexDirection: "column", gap: "6px" } },
+                invariantes.length === 0 ? h("div", { className: "of-muted", style: { fontSize: "11.5px" } }, PT_BR.labels.unavailable) : invariantes.map(
+                  (inv, idx) => h(
+                    "div",
+                    { key: idx, style: { display: "flex", alignItems: "flex-start", gap: "7px", fontSize: "11.5px", lineHeight: 1.45 } },
+                    h("span", { className: "of-dot", "data-tone": "done", style: { marginTop: "5px" } }),
+                    h("span", null, inv)
+                  )
+                ),
+                cadeia.length > 0 && h(
+                  "div",
+                  { style: { paddingTop: "6px", borderTop: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: "3px" } },
+                  h("strong", { style: { fontSize: "11px" } }, "Cadeia de comando"),
+                  cadeia.map((c, idx) => h("div", { key: idx, className: "of-muted", style: { fontSize: "11px" } }, `${idx + 1}. ${c}`))
+                ),
+                escalada.length > 0 && h(
+                  "div",
+                  { style: { paddingTop: "6px", borderTop: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: "3px" } },
+                  h("strong", { style: { fontSize: "11px" } }, "Fluxo de escalada"),
+                  escalada.map(([k, v2]) => h("div", { key: k, className: "of-muted", style: { fontSize: "10.5px" } }, h("span", { className: "of-mono", style: { color: "var(--foreground)" } }, `${k}: `), String(v2)))
+                )
               )
-            )
-          ),
-          cadeia.length > 0 && h(
-            "div",
-            { style: { display: "flex", flexDirection: "column", gap: "4px", paddingTop: "8px", borderTop: "1px solid var(--border)" } },
-            h("strong", { style: { fontSize: "12px" } }, "Cadeia de comando"),
-            cadeia.map((c, idx) => h("div", { key: idx, className: "of-muted", style: { fontSize: "11.5px" } }, `${idx + 1}. ${c}`))
-          ),
-          escalada.length > 0 && h(
-            "div",
-            { style: { display: "flex", flexDirection: "column", gap: "4px", paddingTop: "8px", borderTop: "1px solid var(--border)" } },
-            h("strong", { style: { fontSize: "12px" } }, "Fluxo de escalada"),
-            escalada.map(([k, v2]) => h("div", { key: k, className: "of-muted", style: { fontSize: "11px" } }, h("span", { className: "of-mono", style: { color: "var(--foreground)" } }, `${k}: `), String(v2)))
-          )
-        ),
-        h(
-          "section",
-          { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-          h("div", { className: "of-meter-label" }, `2. Workspace & Arquivos de Contexto (${((_v = status.tenantManifest) == null ? void 0 : _v.nome) || tenant})`),
-          papeis.length > 0 && h(
-            "div",
-            { style: { display: "flex", flexWrap: "wrap", gap: "6px" } },
-            papeis.map(([papel, agente]) => h("span", { key: papel, className: "of-pill" }, `${papel}: ${agente}`))
-          ),
-          h(
-            "div",
-            { className: "of-surface", style: { padding: "10px 12px" } },
-            h("div", { className: "of-mono", style: { fontSize: "10.5px", color: "var(--primary)", marginBottom: "6px" } }, "PROJECT.md"),
+            ),
             h(
-              "pre",
-              { className: "of-muted", style: { margin: 0, whiteSpace: "pre-wrap", fontSize: "11px", maxHeight: "180px", overflowY: "auto", fontFamily: "inherit", lineHeight: 1.45 } },
-              (ov == null ? void 0 : ov.projectMd) || "PROJECT.md não encontrado no diretório raiz."
-            )
-          ),
-          h(
-            "div",
-            { className: "of-surface", style: { padding: "10px 12px" } },
-            h("div", { className: "of-mono", style: { fontSize: "10.5px", color: "var(--primary)", marginBottom: "6px" } }, "AGENTS.md"),
+              "details",
+              { className: "of-surface" },
+              h("summary", { style: { cursor: "pointer", padding: "8px 10px", fontSize: "12px", fontWeight: 600 } }, "Arquivos PROJECT.md & AGENTS.md"),
+              h(
+                "div",
+                { style: { borderTop: "1px solid var(--border)", padding: "9px 10px", display: "flex", flexDirection: "column", gap: "8px" } },
+                papeis.length > 0 && h(
+                  "div",
+                  { style: { display: "flex", flexWrap: "wrap", gap: "5px" } },
+                  papeis.map(([papel, agente]) => h("span", { key: papel, className: "of-pill", style: { fontSize: "10px" } }, `${papel}: ${agente}`))
+                ),
+                h("div", { className: "of-mono", style: { fontSize: "10px", color: "var(--primary)" } }, "PROJECT.md"),
+                h("pre", { className: "of-muted", style: { margin: 0, whiteSpace: "pre-wrap", fontSize: "10.5px", maxHeight: "150px", overflowY: "auto", fontFamily: "inherit", lineHeight: 1.45 } }, (ov == null ? void 0 : ov.projectMd) || "Não encontrado."),
+                h("div", { className: "of-mono", style: { fontSize: "10px", color: "var(--primary)" } }, "AGENTS.md"),
+                h("pre", { className: "of-muted", style: { margin: 0, whiteSpace: "pre-wrap", fontSize: "10.5px", maxHeight: "150px", overflowY: "auto", fontFamily: "inherit", lineHeight: 1.45 } }, (ov == null ? void 0 : ov.agentsMd) || "Não encontrado.")
+              )
+            ),
             h(
-              "pre",
-              { className: "of-muted", style: { margin: 0, whiteSpace: "pre-wrap", fontSize: "11px", maxHeight: "160px", overflowY: "auto", fontFamily: "inherit", lineHeight: 1.45 } },
-              (ov == null ? void 0 : ov.agentsMd) || "AGENTS.md não encontrado no diretório raiz."
-            )
-          )
-        )
-      ),
-      h(
-        "section",
-        { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-        h("div", { className: "of-meter-label" }, "3. Regras Probatórias (regras-probatorias.json) & Injeção nos Prompts (ctx.agents.addInstructions)"),
-        regras.length === 0 ? h("div", { className: "of-muted" }, "Nenhuma regra probatória pendente em .esteira/estado/regras-probatorias.json (invariantes permanentes ativos em licoes/ e <plugin-instructions>).") : h(
-          "table",
-          { className: "of-table" },
-          h("thead", null, h("tr", null, h("th", null, "Regra"), h("th", null, "Descrição"), h("th", null, "Janela"), h("th", null, "Status"))),
-          h(
-            "tbody",
-            null,
-            regras.map(
-              (r) => h(
-                "tr",
-                { key: r.id },
-                h("td", { className: "of-mono" }, r.id),
-                h("td", null, r.descricao),
-                h("td", { className: "of-mono" }, `${r.cardsAvaliados}/${r.janelaAlvo}`),
-                h("td", null, h("span", { className: "of-pill", "data-tone": "done" }, r.status))
+              "details",
+              { className: "of-surface" },
+              h("summary", { style: { cursor: "pointer", padding: "8px 10px", fontSize: "12px", fontWeight: 600 } }, `Regras Probatórias & Injeção (${regras.length})`),
+              h(
+                "div",
+                { style: { borderTop: "1px solid var(--border)", padding: "9px 10px", display: "flex", flexDirection: "column", gap: "6px", fontSize: "11px", lineHeight: 1.45 } },
+                regras.length === 0 ? h("div", { className: "of-muted" }, "Nenhuma regra probatória pendente (invariantes permanentes ativos em licoes/ e <plugin-instructions>).") : regras.map(
+                  (r) => h("div", { key: r.id, style: { display: "flex", justifyContent: "space-between", gap: "6px" } }, h("span", null, `${r.id}: ${r.descricao}`), h("span", { className: "of-mono of-muted" }, `${r.cardsAvaliados}/${r.janelaAlvo}`))
+                ),
+                h("div", { className: "of-muted", style: { paddingTop: "6px", borderTop: "1px solid var(--border)" } }, "• L-01 (Executor ≠ Revisor), L-22 (Aceite SHA-256), L-90 (Não-regressão) e Freio Anti-Loop injetados via ctx.agents.addInstructions.")
               )
             )
           )
-        ),
-        h(
-          "div",
-          { className: "of-surface", style: { padding: "10px 12px", fontSize: "11.5px", lineHeight: 1.5 } },
-          h("div", { className: "of-mono", style: { fontSize: "10.5px", color: "var(--primary)", marginBottom: "4px" } }, "Injetado automaticamente em todos os agentes via ctx.agents.addInstructions (orgfy-governance-v13-lean):"),
-          h("div", { className: "of-muted" }, "• Invariantes L-01 (Executor ≠ Revisor), L-22 (Aceite congelado por SHA-256), L-90 (Catraca de não-regressão) e Specsfy + TDD (Z2/Z3/Z4)."),
-          h("div", { className: "of-muted" }, "• Guarda de Identidade (@menção) + Freio Anti-Loop (máx. 12 shells sem commit / 2 falhas consecutivas -> BLOQUEADO)."),
-          h("div", { className: "of-muted" }, "• Regras específicas por papel: Executor (worktree isolado), Revisor (GATE objetivo), COO (roster_live + smart_dispatch + auto-cura) e CEO/Board (alvo fechado).")
         )
       )
     );
   }
   const chInfo = props.channelInfo;
-  const settingsTenantAgents = ((_w = status.tenantManifest) == null ? void 0 : _w.agentes) || [];
+  const settingsTenantAgents = ((_A = status.tenantManifest) == null ? void 0 : _A.agentes) || [];
   const resolvedMembers = ((chInfo == null ? void 0 : chInfo.memberPubkeys) || []).map((pk) => {
     var _a2, _b2;
     const pkLow = pk.toLowerCase();
@@ -65983,555 +66182,601 @@ function renderFactorySecondaryPage(props) {
   });
   const humanMembers = resolvedMembers.filter((m) => !m.isAgent);
   const agentMembers = resolvedMembers.filter((m) => m.isAgent);
+  const integritySummary = props.commandIntegrity;
   return h(
     "div",
-    {
-      "data-settings-grid-layout": "true",
-      style: {
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(460px, 1fr))",
-        gap: "16px",
-        alignItems: "start",
-        width: "100%",
-        maxWidth: "1440px"
-      }
-    },
+    { className: "of-settings-shell", "data-settings-v189": "true" },
+    // Faixa executiva de status rápido
     h(
       "div",
-      { style: { display: "flex", flexDirection: "column", gap: "14px", minWidth: 0 } },
-      h(
-        "div",
-        { className: "of-card-pad", "data-buzz-channel-settings": "true", style: { display: "flex", flexDirection: "column", gap: "12px" } },
-        h(
+      { className: "of-settings-strip" },
+      [
+        { label: "Modo ativo", val: PT_BR.modes[settingsForm.mode] || settingsForm.mode, tone: "done", sub: settingsForm.autoMerge ? "Auto-merge LIGADO" : "Merge com aprovação" },
+        { label: "Teto diário", val: `$${settingsForm.gastoDiaUsd}/dia`, tone: "idle", sub: `~ $${(settingsForm.gastoDiaUsd * 30).toLocaleString("pt-BR")}/mês máx.` },
+        { label: "Capacidade WIP", val: `${settingsForm.agentesMax} ag · ${settingsForm.prsAbertos} PRs`, tone: "running", sub: `${settingsForm.mergesDia} merges/dia · ${settingsForm.mergePolicy}` },
+        { label: "Time & Canal", val: (chInfo == null ? void 0 : chInfo.name) ? `#${chInfo.name}` : tenant, tone: props.tenantAgentsSource === "buzz_channel_live" ? "done" : "waiting", sub: `${agentMembers.length || settingsTenantAgents.length} agentes · ${humanMembers.length} humano(s)` },
+        { label: "Integridade SHA-256", val: integritySummary ? `${integritySummary.verified}/${integritySummary.total} OK` : "7 pinados", tone: (integritySummary == null ? void 0 : integritySummary.mismatches) ? "failed" : "done", sub: ((_B = props.focusState) == null ? void 0 : _B.active) ? "Modo Focus ativo" : "Focus inativo" }
+      ].map(
+        (kpi) => h(
           "div",
-          { style: { display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "8px" } },
-          h(
-            "div",
-            null,
-            h(
-              "div",
-              { style: { fontSize: "14px", fontWeight: 700, display: "flex", alignItems: "center", gap: "7px", flexWrap: "wrap" } },
-              `Workspace & Canal no Buzz · #${(chInfo == null ? void 0 : chInfo.name) || ((_x2 = status.tenantManifest) == null ? void 0 : _x2.nome) || tenant}`,
-              h(
-                "span",
-                { className: "of-pill", "data-tone": props.tenantAgentsSource === "buzz_channel_live" ? "done" : "waiting", style: { fontSize: "10px" } },
-                props.tenantAgentsSource === "buzz_channel_live" ? `Time vivo (${settingsTenantAgents.length})` : "Manifesto JSON"
-              )
-            ),
-            h(
-              "div",
-              { className: "of-muted", style: { marginTop: "2px" } },
-              (chInfo == null ? void 0 : chInfo.available) ? `Stream: ${chInfo.liveStatus} · Roster: ${chInfo.rosterTotalChannels} canais · Papel: ${chInfo.viewerRole || "member"}` : "Vincule um Workspace e o Canal Principal abaixo para sincronizar automaticamente time, repositório e Visão."
-            )
-          ),
-          h(
-            "div",
-            { style: { display: "inline-flex", gap: "6px", flexWrap: "wrap" } },
-            props.onOpenChannelFullPage && h(
-              "button",
-              { type: "button", className: "of-btn", "data-variant": "primary", onClick: () => props.onOpenChannelFullPage() },
-              "Abrir Canal no Buzz ↗"
-            ),
-            props.onOpenChannelFullPage && h(
-              "button",
-              { type: "button", className: "of-btn", onClick: () => props.onOpenChannelFullPage({ panel: "members" }) },
-              `Membros (${(chInfo == null ? void 0 : chInfo.memberCount) ?? 0})`
-            )
-          )
-        ),
-        ((_y2 = props.buzzCatalog) == null ? void 0 : _y2.available) && props.onLinkEnterpriseWorkspaceChannel && (() => {
-          const catalog = props.buzzCatalog;
-          const selectedWsId = props.linkedWorkspaceId || "";
-          const selectedChId = props.linkedChannelId || "";
-          const selectedWs = catalog.workspaces.find((w) => w.id === selectedWsId);
-          const channelOptions = selectedWs && selectedWs.channels.length > 0 ? selectedWs.channels : catalog.allChannels;
-          return h(
-            "div",
-            { className: "of-surface", "data-workspace-channel-linker": "true", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "8px" } },
-            h("div", { className: "of-meter-label" }, "Vínculo Nativo · Workspace (Repo/Visão) + Canal Principal (Time Vivo)"),
-            h(
-              "div",
-              { style: { display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: "8px", alignItems: "end" } },
-              h(
-                "label",
-                { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11px" } },
-                "Workspace do Buzz",
-                h(
-                  "select",
-                  {
-                    className: "of-tenant-select",
-                    value: selectedWsId,
-                    onChange: (e) => {
-                      var _a2;
-                      const nextWs = e.target.value;
-                      const wsObj = catalog.workspaces.find((w) => w.id === nextWs);
-                      const nextCh = ((_a2 = wsObj == null ? void 0 : wsObj.channels[0]) == null ? void 0 : _a2.id) || selectedChId;
-                      void props.onLinkEnterpriseWorkspaceChannel(nextWs, nextCh);
-                    }
-                  },
-                  h("option", { value: "" }, "— Selecionar Workspace —"),
-                  catalog.workspaces.map(
-                    (w) => h("option", { key: w.id, value: w.id }, `${w.icon ? `${w.icon} ` : ""}${w.name} (${w.channels.length} canal${w.channels.length === 1 ? "" : "is"})`)
-                  )
-                )
-              ),
-              h(
-                "label",
-                { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11px" } },
-                "Canal Principal (Time Vivo)",
-                h(
-                  "select",
-                  {
-                    className: "of-tenant-select",
-                    value: selectedChId,
-                    onChange: (e) => {
-                      const nextCh = e.target.value;
-                      const inferredWs = catalog.assignments[nextCh] || selectedWsId;
-                      void props.onLinkEnterpriseWorkspaceChannel(inferredWs, nextCh);
-                    }
-                  },
-                  h("option", { value: "" }, "— Selecionar Canal —"),
-                  channelOptions.map(
-                    (c) => h("option", { key: c.id, value: c.id }, `#${c.name} (${c.memberCount} membros)`)
-                  )
-                )
-              ),
-              h(
-                "button",
-                {
-                  type: "button",
-                  className: "of-btn",
-                  disabled: props.savingEnterpriseLink || !selectedWsId && !selectedChId,
-                  style: { height: "30px", fontSize: "11px", whiteSpace: "nowrap" },
-                  onClick: () => props.onLinkEnterpriseWorkspaceChannel(selectedWsId, selectedChId)
-                },
-                props.savingEnterpriseLink ? "Sincronizando..." : "↻ Sincronizar"
-              )
-            ),
-            props.workspaceDetails && h(
-              "div",
-              { className: "of-mono of-muted", style: { fontSize: "10.5px" } },
-              `Folders: ${props.workspaceDetails.folders.length > 0 ? props.workspaceDetails.folders.join(", ") : "nenhum"} · Worktree: ${props.workspaceDetails.worktree ? `${props.workspaceDetails.worktree.location} (${props.workspaceDetails.worktree.baseBranch})` : "desligado"}`
-            )
-          );
-        })(),
-        (chInfo == null ? void 0 : chInfo.available) && h(
-          "div",
-          { className: "of-grid-2" },
-          h(
-            "div",
-            { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
-            h(
-              "div",
-              { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
-              h("div", { className: "of-meter-label" }, "Descrição do Canal"),
-              chInfo.canEdit && props.setEditingChannelDetails && props.setChannelDetailsDraft && h(
-                "button",
-                {
-                  type: "button",
-                  className: "of-btn",
-                  "data-variant": "ghost",
-                  style: { padding: "2px 6px", fontSize: "10.5px" },
-                  onClick: () => {
-                    if (props.editingChannelDetails) {
-                      props.setEditingChannelDetails(false);
-                    } else {
-                      props.setChannelDetailsDraft({ name: chInfo.name, description: chInfo.description });
-                      props.setEditingChannelDetails(true);
-                    }
-                  }
-                },
-                props.editingChannelDetails ? "Cancelar" : "Editar"
-              )
-            ),
-            props.editingChannelDetails && props.channelDetailsDraft && props.setChannelDetailsDraft ? h(
-              "div",
-              { style: { display: "flex", flexDirection: "column", gap: "6px" } },
-              h("input", {
-                className: "of-input",
-                placeholder: "Nome do canal",
-                value: props.channelDetailsDraft.name,
-                onChange: (e) => props.setChannelDetailsDraft({ name: e.target.value })
-              }),
-              h("textarea", {
-                className: "of-textarea",
-                style: { minHeight: "68px", fontSize: "11.5px" },
-                placeholder: "Descrição oficial da empresa/canal no Buzz...",
-                value: props.channelDetailsDraft.description,
-                onChange: (e) => props.setChannelDetailsDraft({ description: e.target.value })
-              }),
-              h(
-                "button",
-                {
-                  type: "button",
-                  className: "of-btn",
-                  "data-variant": "primary",
-                  disabled: props.savingChannelDetails,
-                  style: { alignSelf: "flex-start", padding: "4px 10px", fontSize: "11px" },
-                  onClick: () => {
-                    var _a2;
-                    return (_a2 = props.onSaveChannelDetails) == null ? void 0 : _a2.call(props);
-                  }
-                },
-                props.savingChannelDetails ? "Salvando..." : "Salvar no Buzz (channelDetails.save)"
-              )
-            ) : h(
-              "div",
-              { style: { fontSize: "12px", color: chInfo.description ? "var(--foreground)" : "var(--muted-foreground)" } },
-              chInfo.description || "Sem descrição cadastrada no canal do Buzz."
-            )
-          ),
-          h(
-            "div",
-            { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
-            h("div", { className: "of-meter-label" }, "Acesso, ID & Leitura"),
-            h(
-              "div",
-              { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", fontSize: "12px" } },
-              h("span", { className: "of-pill", "data-tone": chInfo.visibility === "private" ? "waiting" : "done" }, chInfo.visibility === "private" ? "Privado" : chInfo.visibility === "public" ? "Público" : "Canal"),
-              h("span", { className: "of-pill" }, `${chInfo.memberCount} membros`),
-              typeof chInfo.unreadCount === "number" && h("span", { className: "of-pill", "data-tone": chInfo.unreadCount > 0 ? "running" : "idle" }, `${chInfo.unreadCount} não lida(s)`)
-            ),
-            h(
-              "div",
-              { style: { display: "flex", alignItems: "center", gap: "6px", marginTop: "2px" } },
-              h("code", { className: "of-mono of-muted", style: { fontSize: "10.5px", wordBreak: "break-all" } }, chInfo.channelId),
-              props.onCopyText && h(
-                "button",
-                {
-                  type: "button",
-                  className: "of-btn",
-                  "data-variant": "ghost",
-                  style: { padding: "2px 6px", fontSize: "10.5px" },
-                  onClick: () => props.onCopyText(chInfo.channelId, "Channel ID")
-                },
-                "Copiar"
-              )
-            )
-          )
-        ),
-        (chInfo == null ? void 0 : chInfo.available) && resolvedMembers.length > 0 && h(
-          "div",
-          { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "8px" } },
-          h(
-            "div",
-            { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px" } },
-            h("div", { className: "of-meter-label" }, `Membros no canal (${chInfo.memberCount})`),
-            h("span", { className: "of-muted", style: { fontSize: "10.5px" } }, `${humanMembers.length} humano(s) · ${agentMembers.length} agente(s)`)
-          ),
-          humanMembers.length > 0 && h(
-            "div",
-            { style: { display: "flex", flexWrap: "wrap", gap: "5px", alignItems: "center" } },
-            h("span", { className: "of-muted", style: { fontSize: "10px", marginRight: "2px" } }, "Humanos:"),
-            humanMembers.slice(0, 8).map(
-              (m) => h("span", { key: m.pk, className: "of-pill", "data-tone": "waiting", style: { fontSize: "10.5px" } }, m.name)
-            )
-          ),
-          agentMembers.length > 0 && h(
-            "div",
-            { style: { display: "flex", flexWrap: "wrap", gap: "5px", alignItems: "center" } },
-            h("span", { className: "of-muted", style: { fontSize: "10px", marginRight: "2px" } }, "Agentes:"),
-            agentMembers.slice(0, 20).map(
-              (m) => h(
-                "button",
-                {
-                  key: m.pk,
-                  type: "button",
-                  className: "of-pill",
-                  "data-tone": m.isWorking ? "running" : "idle",
-                  title: `Abrir perfil de ${m.name} na coluna lateral`,
-                  style: { fontSize: "10.5px", cursor: props.onOpenAgentProfile || onOpenAgentDm ? "pointer" : "default", display: "inline-flex", alignItems: "center", gap: "4px" },
-                  onClick: () => props.onOpenAgentProfile ? props.onOpenAgentProfile({ pubkey: m.pk, name: m.name }) : onOpenAgentDm == null ? void 0 : onOpenAgentDm({ pubkey: m.pk, name: m.name })
-                },
-                h("span", { className: "of-dot", "data-tone": m.isWorking ? "running" : "done" }),
-                m.name
-              )
-            )
-          )
-        ),
-        (chInfo == null ? void 0 : chInfo.available) && props.onChannelDiagnostic && h(
-          "div",
-          { style: { display: "flex", flexWrap: "wrap", gap: "6px", paddingTop: "4px", borderTop: "1px solid var(--border)" } },
-          h("button", { type: "button", className: "of-btn", style: { fontSize: "11px" }, onClick: () => props.onChannelDiagnostic("markRead") }, "Marcar como lido"),
-          h("button", { type: "button", className: "of-btn", style: { fontSize: "11px" }, onClick: () => props.onChannelDiagnostic("markUnread") }, "Marcar como não lido"),
-          h("button", { type: "button", className: "of-btn", style: { fontSize: "11px" }, onClick: () => props.onChannelDiagnostic("refresh") }, "Atualizar canais e roster")
-        )
-      ),
-      h(
-        "div",
-        { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-        h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Modo de autonomia · ${((_z2 = status.tenantManifest) == null ? void 0 : _z2.nome) || tenant}`),
-        h("div", { className: "of-muted" }, "Suba um degrau por vez. Áreas protegidas e regra L-01 sempre permanecem ativas."),
-        h(
-          "div",
-          { className: "of-grid-2" },
-          AUTONOMY_MODES.map(
-            (m) => h(
-              "button",
-              {
-                key: m.id,
-                type: "button",
-                className: "of-surface",
-                style: {
-                  padding: "12px",
-                  textAlign: "left",
-                  cursor: "pointer",
-                  color: "var(--foreground)",
-                  borderColor: settingsForm.mode === m.id ? "var(--primary)" : void 0,
-                  background: settingsForm.mode === m.id ? "var(--primary-soft)" : void 0
-                },
-                onClick: () => {
-                  onSelectModeQuick(m.id);
-                }
-              },
-              h(
-                "div",
-                { style: { display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", fontWeight: 600 } },
-                h("span", null, m.label),
-                m.experimental && h("span", { className: "of-exp-badge" }, "experimental"),
-                status.mode === m.id && h("span", { className: "of-muted", style: { marginLeft: "auto", fontSize: "10px" } }, "Atual")
-              ),
-              h("div", { className: "of-muted", style: { marginTop: "4px", lineHeight: 1.4 } }, m.summary),
-              h("div", { className: "of-muted", style: { marginTop: "6px", fontSize: "10.5px" } }, `Encontra: ${m.finds} · Merge: ${m.merges}`)
-            )
-          )
+          { key: kpi.label, className: "of-card-pad", style: { padding: "10px 13px" } },
+          h("div", { className: "of-meter-label" }, kpi.label),
+          h("div", { style: { fontSize: "14.5px", fontWeight: 700, marginTop: "3px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, kpi.val),
+          h("div", { className: "of-muted", style: { fontSize: "10.5px", marginTop: "2px" } }, kpi.sub)
         )
       )
     ),
     h(
       "div",
-      { style: { display: "flex", flexDirection: "column", gap: "14px", minWidth: 0 } },
+      {
+        "data-settings-grid-layout": "true",
+        className: "of-settings-grid"
+      },
       h(
         "div",
-        { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "12px" } },
-        h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Limites operacionais · controle-${tenant}.json`),
-        h(
-          "label",
-          {
-            className: "of-surface",
-            "data-automerge-setting": "true",
-            style: {
-              display: "flex",
-              alignItems: "flex-start",
-              gap: "10px",
-              padding: "10px 12px",
-              cursor: "pointer",
-              borderColor: settingsForm.autoMerge ? "var(--primary)" : void 0
-            }
-          },
-          h("input", {
-            type: "checkbox",
-            checked: Boolean(settingsForm.autoMerge),
-            disabled: settingsForm.mode === "manual" || settingsForm.mode === "assisted",
-            style: { marginTop: "2px" },
-            onChange: (e) => setSettingsForm({ autoMerge: Boolean(e.target.checked) })
-          }),
-          h(
-            "div",
-            { style: { display: "flex", flexDirection: "column", gap: "2px" } },
-            h(
-              "div",
-              { style: { fontSize: "12.5px", fontWeight: 600, display: "flex", alignItems: "center", gap: "6px" } },
-              "Auto-merge automático (Fábrica de Software / Dark Factory)",
-              h(
-                "span",
-                { className: "of-pill", "data-tone": settingsForm.autoMerge ? "done" : "idle", style: { fontSize: "10px" } },
-                settingsForm.autoMerge ? "LIGADO" : "DESLIGADO"
-              )
-            ),
-            h(
-              "div",
-              { className: "of-muted", style: { fontSize: "11px", lineHeight: 1.4 } },
-              settingsForm.mode === "manual" || settingsForm.mode === "assisted" ? "Disponível apenas nos modos Fábrica de Software e Dark Factory. Em Manual/Assistido todo merge exige GATE humano." : "Quando ligado, PRs com CI + Revisor L-01 verdes integram sozinhos na main. Áreas protegidas (CI/runner/segurança) continuam exigindo GATE humano."
-            )
-          )
-        ),
+        { style: { display: "flex", flexDirection: "column", gap: "14px", minWidth: 0 } },
         h(
           "div",
-          { className: "of-grid-3" },
-          h(
-            "label",
-            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
-            "Orçamento diário (USD)",
-            h("input", {
-              type: "number",
-              className: "of-input",
-              value: settingsForm.gastoDiaUsd,
-              onChange: (e) => setSettingsForm({ gastoDiaUsd: Number(e.target.value) })
-            })
-          ),
-          h(
-            "label",
-            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
-            "Merges por dia",
-            h("input", {
-              type: "number",
-              className: "of-input",
-              value: settingsForm.mergesDia,
-              onChange: (e) => setSettingsForm({ mergesDia: Number(e.target.value) })
-            })
-          ),
-          h(
-            "label",
-            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
-            "Agentes simultâneos",
-            h("input", {
-              type: "number",
-              className: "of-input",
-              value: settingsForm.agentesMax,
-              onChange: (e) => setSettingsForm({ agentesMax: Number(e.target.value) })
-            })
-          ),
-          h(
-            "label",
-            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
-            "PRs abertos no máximo (WIP)",
-            h("input", {
-              type: "number",
-              className: "of-input",
-              value: settingsForm.prsAbertos,
-              onChange: (e) => setSettingsForm({ prsAbertos: Number(e.target.value) })
-            })
-          ),
-          h(
-            "label",
-            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
-            "Pausar após falhas seguidas",
-            h("input", {
-              type: "number",
-              className: "of-input",
-              value: settingsForm.falhasSeguidas,
-              onChange: (e) => setSettingsForm({ falhasSeguidas: Number(e.target.value) })
-            })
-          ),
-          h(
-            "label",
-            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
-            "Política de merge",
-            h(
-              "select",
-              {
-                className: "of-tenant-select",
-                value: settingsForm.mergePolicy,
-                onChange: (e) => setSettingsForm({ mergePolicy: e.target.value })
-              },
-              h("option", { value: "strict" }, "Strict (re-testa na main)"),
-              h("option", { value: "fast" }, "Fast (CI próprio sem conflito)")
-            )
-          )
-        ),
-        h(
-          "div",
-          { style: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px", paddingTop: "6px", borderTop: "1px solid var(--border)" } },
-          h("span", { className: "of-muted" }, `Persistido diretamente em estado/controle-${tenant}.json e lido pelo coordenador.`),
-          h("button", { type: "button", className: "of-btn", "data-variant": "primary", onClick: onSaveSettings }, "Salvar configurações")
-        )
-      ),
-      // ── SEGURANÇA & GOVERNANÇA v17.7 (Holdout Sensor + SHA-256 host.commands + Modo Focus) ──
-      h(
-        "div",
-        { className: "of-card-pad", "data-orgfy-security-v177": "true", style: { display: "flex", flexDirection: "column", gap: "12px" } },
-        h("div", { style: { fontSize: "14px", fontWeight: 700 } }, "Segurança & Sensor Independente (Onda 3 · v17.7)"),
-        h(
-          "div",
-          { className: "of-grid-3" },
+          { className: "of-card-pad", "data-buzz-channel-settings": "true", style: { display: "flex", flexDirection: "column", gap: "12px" } },
           h(
             "div",
-            { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
-            h("div", { className: "of-meter-label" }, "Holdout Scenarios (fora do repo)"),
+            { style: { display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: "8px" } },
             h(
               "div",
-              { style: { display: "flex", alignItems: "center", gap: "6px" } },
-              h("span", { className: "of-pill", "data-tone": ((_A = status.holdoutStatus) == null ? void 0 : _A.status) === "pass" ? "done" : ((_B = status.holdoutStatus) == null ? void 0 : _B.status) === "fail" ? "failed" : "idle" }, status.holdoutStatus ? `${status.holdoutStatus.passed ?? 0}/${status.holdoutStatus.total ?? 0} ${status.holdoutStatus.status.toUpperCase()}` : "Não executado"),
-              ((_C = status.holdoutStatus) == null ? void 0 : _C.external_verified) && h("span", { className: "of-muted", style: { fontSize: "10.5px" } }, `sha:${status.holdoutStatus.suite_sha256 || "ok"}`)
-            ),
-            props.onRunHoldoutNow && h("button", { type: "button", className: "of-btn", disabled: props.runningHoldout, style: { alignSelf: "flex-start", padding: "3px 9px", fontSize: "11px" }, onClick: props.onRunHoldoutNow }, props.runningHoldout ? "Rodando..." : "▶ Rodar Holdout")
-          ),
-          h(
-            "div",
-            { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
-            h("div", { className: "of-meter-label" }, "Pinagem SHA-256 (host.commands)"),
-            h(
-              "div",
-              { style: { display: "flex", alignItems: "center", gap: "6px" } },
-              h(
-                "span",
-                { className: "of-pill", "data-tone": props.commandIntegrity ? props.commandIntegrity.mismatches > 0 ? "failed" : props.commandIntegrity.verified > 0 ? "done" : "idle" : "idle" },
-                props.commandIntegrity ? `${props.commandIntegrity.verified}/${props.commandIntegrity.total} íntegros` : "Aguardando auditoria"
-              )
-            ),
-            props.onAuditCommandIntegrity && h("button", { type: "button", className: "of-btn", style: { alignSelf: "flex-start", padding: "3px 9px", fontSize: "11px" }, onClick: props.onAuditCommandIntegrity }, "Auditar SHA-256")
-          ),
-          h(
-            "div",
-            { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
-            h("div", { className: "of-meter-label" }, "Modo Focus do Fundador (Buzz)"),
-            h(
-              "div",
-              { style: { fontSize: "12px", fontWeight: 600 } },
-              ((_D = props.focusState) == null ? void 0 : _D.active) ? `🔭 Focus ativo até ${props.focusState.untilFormatted}` : "Focus inativo"
-            ),
-            h("div", { className: "of-muted", style: { fontSize: "10.5px" } }, "Notificações não críticas são silenciadas durante o modo Focus; apenas alertas P0/Kill Switch atravessam.")
-          )
-        )
-      ),
-      // ── MOTOR DE CONFIANÇA & ESCAPE RATE (Autonomia Graduada · Onda 4 / v18) ──
-      h(
-        "div",
-        { className: "of-card-pad", "data-orgfy-trust-engine": "true", style: { display: "flex", flexDirection: "column", gap: "12px" } },
-        h(
-          "div",
-          { style: { display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" } },
-          h(
-            "div",
-            null,
-            h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Motor de Confiança & Escape Rate (Autonomia Graduada · v18)`),
-            h(
-              "div",
-              { className: "of-muted", style: { fontSize: "11.5px", marginTop: "2px" } },
-              status.trustEngine ? `Amostra: ${status.trustEngine.sampleSize} entregas · Escape Rate global: ${status.trustEngine.globalEscapeRatePct.toFixed(1)}% · ${status.trustEngine.darkCategoriesCount}/${status.trustEngine.totalCategoriesCount} categorias em Dark Auto-Merge` : "Clique em Recalcular para medir a Escape Rate real e habilitar auto-promoção por categoria."
-            )
-          ),
-          props.onEvaluateTrustEngine && h(
-            "button",
-            { type: "button", className: "of-btn", disabled: props.evaluatingTrust, style: { fontSize: "11px", padding: "4px 10px" }, onClick: () => props.onEvaluateTrustEngine() },
-            props.evaluatingTrust ? "Calculando..." : "↻ Recalcular Escape Rate"
-          )
-        ),
-        ((_F = (_E = status.trustEngine) == null ? void 0 : _E.categories) == null ? void 0 : _F.length) && h(
-          "div",
-          { style: { display: "flex", flexDirection: "column", gap: "8px" } },
-          status.trustEngine.categories.map(
-            (cat) => h(
-              "div",
-              { key: cat.id, className: "of-surface", style: { padding: "9px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
+              null,
               h(
                 "div",
-                { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" } },
+                { style: { fontSize: "14px", fontWeight: 700, display: "flex", alignItems: "center", gap: "7px", flexWrap: "wrap" } },
+                `Workspace & Canal no Buzz · #${(chInfo == null ? void 0 : chInfo.name) || ((_C = status.tenantManifest) == null ? void 0 : _C.nome) || tenant}`,
                 h(
-                  "div",
-                  { style: { display: "inline-flex", alignItems: "center", gap: "8px" } },
-                  h("strong", { style: { fontSize: "12.5px" } }, cat.label),
-                  h(
-                    "span",
-                    { className: "of-pill", "data-tone": cat.mode === "dark_auto_merge" ? "done" : cat.locked ? "failed" : "waiting" },
-                    cat.mode === "dark_auto_merge" ? "DARK AUTO-MERGE" : cat.locked ? "GATE HUMANO 🔒" : "ASSISTIDO"
-                  ),
-                  h("span", { className: "of-mono of-muted", style: { fontSize: "11px" } }, `Escape: ${cat.escapeRatePct.toFixed(1)}% (máx ${cat.maxEscapeRatePct}%) · Limpas seguidas: ${cat.consecutiveClean}${cat.locked ? "" : `/${cat.targetConsecutiveClean}`}`)
-                ),
-                !cat.locked && props.onEvaluateTrustEngine && h(
-                  "div",
-                  { style: { display: "inline-flex", gap: "5px" } },
-                  cat.mode !== "dark_auto_merge" ? h("button", { type: "button", className: "of-btn", style: { padding: "2px 8px", fontSize: "10.5px" }, onClick: () => props.onEvaluateTrustEngine({ category: cat.id, mode: "dark_auto_merge" }) }, "Promover Dark") : h("button", { type: "button", className: "of-btn", style: { padding: "2px 8px", fontSize: "10.5px" }, onClick: () => props.onEvaluateTrustEngine({ category: cat.id, mode: "assisted" }) }, "Rebaixar Assistido"),
-                  cat.manualOverride && h("button", { type: "button", className: "of-btn", "data-variant": "ghost", style: { padding: "2px 7px", fontSize: "10.5px" }, onClick: () => props.onEvaluateTrustEngine({ category: cat.id, mode: "auto" }) }, "Auto")
+                  "span",
+                  { className: "of-pill", "data-tone": props.tenantAgentsSource === "buzz_channel_live" ? "done" : "waiting", style: { fontSize: "10px" } },
+                  props.tenantAgentsSource === "buzz_channel_live" ? `Time vivo (${settingsTenantAgents.length})` : "Manifesto JSON"
                 )
               ),
-              !cat.locked && h(
+              h(
                 "div",
-                { className: "of-bar-track", style: { marginTop: 0, height: "5px" } },
-                h("div", { className: "of-bar-fill", style: { width: `${cat.progressPct}%`, background: cat.mode === "dark_auto_merge" ? "var(--status-done)" : "var(--primary)" } })
+                { className: "of-muted", style: { marginTop: "2px" } },
+                (chInfo == null ? void 0 : chInfo.available) ? `Stream: ${chInfo.liveStatus} · Roster: ${chInfo.rosterTotalChannels} canais · Papel: ${chInfo.viewerRole || "member"}` : "Vincule um Workspace e o Canal Principal abaixo para sincronizar automaticamente time, repositório e Visão."
+              )
+            ),
+            h(
+              "div",
+              { style: { display: "inline-flex", gap: "6px", flexWrap: "wrap" } },
+              props.onOpenChannelFullPage && h(
+                "button",
+                { type: "button", className: "of-btn", "data-variant": "primary", onClick: () => props.onOpenChannelFullPage() },
+                "Abrir Canal no Buzz ↗"
               ),
-              h("div", { className: "of-muted", style: { fontSize: "11px" } }, cat.reason)
+              props.onOpenChannelFullPage && h(
+                "button",
+                { type: "button", className: "of-btn", onClick: () => props.onOpenChannelFullPage({ panel: "members" }) },
+                `Membros (${(chInfo == null ? void 0 : chInfo.memberCount) ?? 0})`
+              )
+            )
+          ),
+          ((_D = props.buzzCatalog) == null ? void 0 : _D.available) && props.onLinkEnterpriseWorkspaceChannel && (() => {
+            var _a2, _b2;
+            const catalog = props.buzzCatalog;
+            const selectedChId = props.linkedChannelId || (chInfo == null ? void 0 : chInfo.channelId) || ((_a2 = status.tenantManifest) == null ? void 0 : _a2.canal) || "";
+            const selectedWsId = props.linkedWorkspaceId || (selectedChId ? catalog.assignments[selectedChId] || "" : "");
+            const selectedWs = catalog.workspaces.find((w) => w.id === selectedWsId);
+            const baseChannelOptions = selectedWs && selectedWs.channels.length > 0 ? selectedWs.channels : catalog.allChannels;
+            const channelOptions = selectedChId && !baseChannelOptions.some((c) => c.id === selectedChId) ? [{ id: selectedChId, name: (chInfo == null ? void 0 : chInfo.name) || ((_b2 = status.tenantManifest) == null ? void 0 : _b2.nome) || selectedChId.slice(0, 8), memberCount: (chInfo == null ? void 0 : chInfo.memberCount) ?? 0 }, ...baseChannelOptions] : baseChannelOptions;
+            return h(
+              "div",
+              { className: "of-surface", "data-workspace-channel-linker": "true", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "8px" } },
+              h("div", { className: "of-meter-label" }, "Vínculo Nativo · Workspace (Repo/Visão) + Canal Principal (Time Vivo)"),
+              h(
+                "div",
+                { style: { display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: "8px", alignItems: "end" } },
+                h(
+                  "label",
+                  { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11px" } },
+                  "Workspace do Buzz",
+                  h(
+                    "select",
+                    {
+                      className: "of-tenant-select",
+                      value: selectedWsId,
+                      onChange: (e) => {
+                        var _a3;
+                        const nextWs = e.target.value;
+                        const wsObj = catalog.workspaces.find((w) => w.id === nextWs);
+                        const nextCh = ((_a3 = wsObj == null ? void 0 : wsObj.channels[0]) == null ? void 0 : _a3.id) || selectedChId;
+                        void props.onLinkEnterpriseWorkspaceChannel(nextWs, nextCh);
+                      }
+                    },
+                    h("option", { value: "" }, "— Selecionar Workspace —"),
+                    catalog.workspaces.map(
+                      (w) => h("option", { key: w.id, value: w.id }, `${w.icon ? `${w.icon} ` : ""}${w.name} (${w.channels.length} canal${w.channels.length === 1 ? "" : "is"})`)
+                    )
+                  )
+                ),
+                h(
+                  "label",
+                  { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11px" } },
+                  "Canal Principal (Time Vivo)",
+                  h(
+                    "select",
+                    {
+                      className: "of-tenant-select",
+                      value: selectedChId,
+                      onChange: (e) => {
+                        const nextCh = e.target.value;
+                        const inferredWs = catalog.assignments[nextCh] || selectedWsId;
+                        void props.onLinkEnterpriseWorkspaceChannel(inferredWs, nextCh);
+                      }
+                    },
+                    h("option", { value: "" }, "— Selecionar Canal —"),
+                    channelOptions.map(
+                      (c) => h("option", { key: c.id, value: c.id }, `#${c.name} (${c.memberCount} membros)`)
+                    )
+                  )
+                ),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "of-btn",
+                    disabled: props.savingEnterpriseLink || !selectedWsId && !selectedChId,
+                    style: { height: "30px", fontSize: "11px", whiteSpace: "nowrap" },
+                    onClick: () => props.onLinkEnterpriseWorkspaceChannel(selectedWsId, selectedChId)
+                  },
+                  props.savingEnterpriseLink ? "Sincronizando..." : "↻ Sincronizar"
+                )
+              ),
+              props.workspaceDetails && h(
+                "div",
+                { className: "of-mono of-muted", style: { fontSize: "10.5px" } },
+                `Folders: ${props.workspaceDetails.folders.length > 0 ? props.workspaceDetails.folders.join(", ") : "nenhum"} · Worktree: ${props.workspaceDetails.worktree ? `${props.workspaceDetails.worktree.location} (${props.workspaceDetails.worktree.baseBranch})` : "desligado"}`
+              )
+            );
+          })(),
+          (chInfo == null ? void 0 : chInfo.available) && h(
+            "div",
+            { className: "of-grid-2" },
+            h(
+              "div",
+              { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
+                h("div", { className: "of-meter-label" }, "Descrição do Canal"),
+                chInfo.canEdit && props.setEditingChannelDetails && props.setChannelDetailsDraft && h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "of-btn",
+                    "data-variant": "ghost",
+                    style: { padding: "2px 6px", fontSize: "10.5px" },
+                    onClick: () => {
+                      if (props.editingChannelDetails) {
+                        props.setEditingChannelDetails(false);
+                      } else {
+                        props.setChannelDetailsDraft({ name: chInfo.name, description: chInfo.description });
+                        props.setEditingChannelDetails(true);
+                      }
+                    }
+                  },
+                  props.editingChannelDetails ? "Cancelar" : "Editar"
+                )
+              ),
+              props.editingChannelDetails && props.channelDetailsDraft && props.setChannelDetailsDraft ? h(
+                "div",
+                { style: { display: "flex", flexDirection: "column", gap: "6px" } },
+                h("input", {
+                  className: "of-input",
+                  placeholder: "Nome do canal",
+                  value: props.channelDetailsDraft.name,
+                  onChange: (e) => props.setChannelDetailsDraft({ name: e.target.value })
+                }),
+                h("textarea", {
+                  className: "of-textarea",
+                  style: { minHeight: "68px", fontSize: "11.5px" },
+                  placeholder: "Descrição oficial da empresa/canal no Buzz...",
+                  value: props.channelDetailsDraft.description,
+                  onChange: (e) => props.setChannelDetailsDraft({ description: e.target.value })
+                }),
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "of-btn",
+                    "data-variant": "primary",
+                    disabled: props.savingChannelDetails,
+                    style: { alignSelf: "flex-start", padding: "4px 10px", fontSize: "11px" },
+                    onClick: () => {
+                      var _a2;
+                      return (_a2 = props.onSaveChannelDetails) == null ? void 0 : _a2.call(props);
+                    }
+                  },
+                  props.savingChannelDetails ? "Salvando..." : "Salvar no Buzz (channelDetails.save)"
+                )
+              ) : h(
+                "div",
+                { style: { fontSize: "12px", color: chInfo.description ? "var(--foreground)" : "var(--muted-foreground)" } },
+                chInfo.description || "Sem descrição cadastrada no canal do Buzz."
+              )
+            ),
+            h(
+              "div",
+              { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
+              h("div", { className: "of-meter-label" }, "Acesso, ID & Leitura"),
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", fontSize: "12px" } },
+                h("span", { className: "of-pill", "data-tone": chInfo.visibility === "private" ? "waiting" : "done" }, chInfo.visibility === "private" ? "Privado" : chInfo.visibility === "public" ? "Público" : "Canal"),
+                h("span", { className: "of-pill" }, `${chInfo.memberCount} membros`),
+                typeof chInfo.unreadCount === "number" && h("span", { className: "of-pill", "data-tone": chInfo.unreadCount > 0 ? "running" : "idle" }, `${chInfo.unreadCount} não lida(s)`)
+              ),
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", gap: "6px", marginTop: "2px" } },
+                h("code", { className: "of-mono of-muted", style: { fontSize: "10.5px", wordBreak: "break-all" } }, chInfo.channelId),
+                props.onCopyText && h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "of-btn",
+                    "data-variant": "ghost",
+                    style: { padding: "2px 6px", fontSize: "10.5px" },
+                    onClick: () => props.onCopyText(chInfo.channelId, "Channel ID")
+                  },
+                  "Copiar"
+                )
+              )
+            )
+          ),
+          (chInfo == null ? void 0 : chInfo.available) && resolvedMembers.length > 0 && h(
+            "div",
+            { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "8px" } },
+            h(
+              "div",
+              { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "6px" } },
+              h("div", { className: "of-meter-label" }, `Membros no canal (${chInfo.memberCount})`),
+              h("span", { className: "of-muted", style: { fontSize: "10.5px" } }, `${humanMembers.length} humano(s) · ${agentMembers.length} agente(s)`)
+            ),
+            humanMembers.length > 0 && h(
+              "div",
+              { style: { display: "flex", flexWrap: "wrap", gap: "5px", alignItems: "center" } },
+              h("span", { className: "of-muted", style: { fontSize: "10px", marginRight: "2px" } }, "Humanos:"),
+              humanMembers.slice(0, 8).map(
+                (m) => h("span", { key: m.pk, className: "of-pill", "data-tone": "waiting", style: { fontSize: "10.5px" } }, m.name)
+              )
+            ),
+            agentMembers.length > 0 && h(
+              "div",
+              { style: { display: "flex", flexWrap: "wrap", gap: "5px", alignItems: "center" } },
+              h("span", { className: "of-muted", style: { fontSize: "10px", marginRight: "2px" } }, "Agentes:"),
+              agentMembers.slice(0, 20).map(
+                (m) => h(
+                  "button",
+                  {
+                    key: m.pk,
+                    type: "button",
+                    className: "of-pill",
+                    "data-tone": m.isWorking ? "running" : "idle",
+                    title: `Abrir perfil de ${m.name} na coluna lateral`,
+                    style: { fontSize: "10.5px", cursor: props.onOpenAgentProfile || onOpenAgentDm ? "pointer" : "default", display: "inline-flex", alignItems: "center", gap: "4px" },
+                    onClick: () => props.onOpenAgentProfile ? props.onOpenAgentProfile({ pubkey: m.pk, name: m.name }) : onOpenAgentDm == null ? void 0 : onOpenAgentDm({ pubkey: m.pk, name: m.name })
+                  },
+                  h("span", { className: "of-dot", "data-tone": m.isWorking ? "running" : "done" }),
+                  m.name
+                )
+              )
+            )
+          ),
+          (chInfo == null ? void 0 : chInfo.available) && props.onChannelDiagnostic && h(
+            "div",
+            { style: { display: "flex", flexWrap: "wrap", gap: "6px", paddingTop: "4px", borderTop: "1px solid var(--border)" } },
+            h("button", { type: "button", className: "of-btn", style: { fontSize: "11px" }, onClick: () => props.onChannelDiagnostic("markRead") }, "Marcar como lido"),
+            h("button", { type: "button", className: "of-btn", style: { fontSize: "11px" }, onClick: () => props.onChannelDiagnostic("markUnread") }, "Marcar como não lido"),
+            h("button", { type: "button", className: "of-btn", style: { fontSize: "11px" }, onClick: () => props.onChannelDiagnostic("refresh") }, "Atualizar canais e roster")
+          )
+        ),
+        h(
+          "div",
+          { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
+          h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Modo de autonomia · ${((_E = status.tenantManifest) == null ? void 0 : _E.nome) || tenant}`),
+          h("div", { className: "of-muted" }, "Suba um degrau por vez. Áreas protegidas e regra L-01 sempre permanecem ativas."),
+          h(
+            "div",
+            { className: "of-grid-2" },
+            AUTONOMY_MODES.map(
+              (m) => h(
+                "button",
+                {
+                  key: m.id,
+                  type: "button",
+                  className: "of-surface",
+                  style: {
+                    padding: "12px",
+                    textAlign: "left",
+                    cursor: "pointer",
+                    color: "var(--foreground)",
+                    borderColor: settingsForm.mode === m.id ? "var(--primary)" : void 0,
+                    background: settingsForm.mode === m.id ? "var(--primary-soft)" : void 0
+                  },
+                  onClick: () => {
+                    onSelectModeQuick(m.id);
+                  }
+                },
+                h(
+                  "div",
+                  { style: { display: "flex", alignItems: "center", gap: "6px", fontSize: "13px", fontWeight: 600 } },
+                  h("span", null, m.label),
+                  m.experimental && h("span", { className: "of-exp-badge" }, "experimental"),
+                  status.mode === m.id && h("span", { className: "of-muted", style: { marginLeft: "auto", fontSize: "10px" } }, "Atual")
+                ),
+                h("div", { className: "of-muted", style: { marginTop: "4px", lineHeight: 1.4 } }, m.summary),
+                h("div", { className: "of-muted", style: { marginTop: "6px", fontSize: "10.5px" } }, `Encontra: ${m.finds} · Merge: ${m.merges}`)
+              )
+            )
+          )
+        )
+      ),
+      h(
+        "div",
+        { style: { display: "flex", flexDirection: "column", gap: "14px", minWidth: 0 } },
+        h(
+          "div",
+          { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "12px" } },
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" } },
+            h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Limites operacionais · controle-${tenant}.json`),
+            h(
+              "div",
+              { className: "of-preset-bar" },
+              h("span", { className: "of-muted", style: { fontSize: "10.5px" } }, "Presets:"),
+              [
+                { id: "conservador", label: "Conservador", patch: { gastoDiaUsd: 40, mergesDia: 15, agentesMax: 3, prsAbertos: 10, falhasSeguidas: 3, mergePolicy: "strict" } },
+                { id: "balanceado", label: "Balanceado", patch: { gastoDiaUsd: 100, mergesDia: 40, agentesMax: 5, prsAbertos: 20, falhasSeguidas: 5, mergePolicy: "strict" } },
+                { id: "turbo", label: "Dark Turbo", patch: { gastoDiaUsd: 150, mergesDia: 60, agentesMax: 6, prsAbertos: 30, falhasSeguidas: 6, mergePolicy: "fast" } }
+              ].map(
+                (pr) => h(
+                  "button",
+                  {
+                    key: pr.id,
+                    type: "button",
+                    className: "of-btn",
+                    style: { padding: "2px 8px", fontSize: "10.5px" },
+                    onClick: () => setSettingsForm(pr.patch)
+                  },
+                  pr.label
+                )
+              )
+            )
+          ),
+          h(
+            "label",
+            {
+              className: "of-surface",
+              "data-automerge-setting": "true",
+              style: {
+                display: "flex",
+                alignItems: "flex-start",
+                gap: "10px",
+                padding: "10px 12px",
+                cursor: "pointer",
+                borderColor: settingsForm.autoMerge ? "var(--primary)" : void 0
+              }
+            },
+            h("input", {
+              type: "checkbox",
+              checked: Boolean(settingsForm.autoMerge),
+              disabled: settingsForm.mode === "manual" || settingsForm.mode === "assisted",
+              style: { marginTop: "2px" },
+              onChange: (e) => setSettingsForm({ autoMerge: Boolean(e.target.checked) })
+            }),
+            h(
+              "div",
+              { style: { display: "flex", flexDirection: "column", gap: "2px" } },
+              h(
+                "div",
+                { style: { fontSize: "12.5px", fontWeight: 600, display: "flex", alignItems: "center", gap: "6px" } },
+                "Auto-merge automático (Fábrica de Software / Dark Factory)",
+                h(
+                  "span",
+                  { className: "of-pill", "data-tone": settingsForm.autoMerge ? "done" : "idle", style: { fontSize: "10px" } },
+                  settingsForm.autoMerge ? "LIGADO" : "DESLIGADO"
+                )
+              ),
+              h(
+                "div",
+                { className: "of-muted", style: { fontSize: "11px", lineHeight: 1.4 } },
+                settingsForm.mode === "manual" || settingsForm.mode === "assisted" ? "Disponível apenas nos modos Fábrica de Software e Dark Factory. Em Manual/Assistido todo merge exige GATE humano." : "Quando ligado, PRs com CI + Revisor L-01 verdes integram sozinhos na main. Áreas protegidas (CI/runner/segurança) continuam exigindo GATE humano."
+              )
+            )
+          ),
+          h(
+            "div",
+            { className: "of-grid-3" },
+            h(
+              "label",
+              { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+              "Orçamento diário (USD)",
+              h("input", {
+                type: "number",
+                className: "of-input",
+                value: settingsForm.gastoDiaUsd,
+                onChange: (e) => setSettingsForm({ gastoDiaUsd: Number(e.target.value) })
+              })
+            ),
+            h(
+              "label",
+              { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+              "Merges por dia",
+              h("input", {
+                type: "number",
+                className: "of-input",
+                value: settingsForm.mergesDia,
+                onChange: (e) => setSettingsForm({ mergesDia: Number(e.target.value) })
+              })
+            ),
+            h(
+              "label",
+              { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+              "Agentes simultâneos",
+              h("input", {
+                type: "number",
+                className: "of-input",
+                value: settingsForm.agentesMax,
+                onChange: (e) => setSettingsForm({ agentesMax: Number(e.target.value) })
+              })
+            ),
+            h(
+              "label",
+              { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+              "PRs abertos no máximo (WIP)",
+              h("input", {
+                type: "number",
+                className: "of-input",
+                value: settingsForm.prsAbertos,
+                onChange: (e) => setSettingsForm({ prsAbertos: Number(e.target.value) })
+              })
+            ),
+            h(
+              "label",
+              { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+              "Pausar após falhas seguidas",
+              h("input", {
+                type: "number",
+                className: "of-input",
+                value: settingsForm.falhasSeguidas,
+                onChange: (e) => setSettingsForm({ falhasSeguidas: Number(e.target.value) })
+              })
+            ),
+            h(
+              "label",
+              { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
+              "Política de merge",
+              h(
+                "select",
+                {
+                  className: "of-tenant-select",
+                  value: settingsForm.mergePolicy,
+                  onChange: (e) => setSettingsForm({ mergePolicy: e.target.value })
+                },
+                h("option", { value: "strict" }, "Strict (re-testa na main)"),
+                h("option", { value: "fast" }, "Fast (CI próprio sem conflito)")
+              )
+            )
+          ),
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px", paddingTop: "6px", borderTop: "1px solid var(--border)" } },
+            h("span", { className: "of-muted" }, `Persistido diretamente em estado/controle-${tenant}.json e lido pelo coordenador.`),
+            h("button", { type: "button", className: "of-btn", "data-variant": "primary", onClick: onSaveSettings }, "Salvar configurações")
+          )
+        ),
+        // ── SEGURANÇA & GOVERNANÇA v17.7 (Holdout Sensor + SHA-256 host.commands + Modo Focus) ──
+        h(
+          "div",
+          { className: "of-card-pad", "data-orgfy-security-v177": "true", style: { display: "flex", flexDirection: "column", gap: "12px" } },
+          h("div", { style: { fontSize: "14px", fontWeight: 700 } }, "Segurança & Sensor Independente (Onda 3 · v17.7)"),
+          h(
+            "div",
+            { className: "of-grid-3" },
+            h(
+              "div",
+              { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
+              h("div", { className: "of-meter-label" }, "Holdout Scenarios (fora do repo)"),
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", gap: "6px" } },
+                h("span", { className: "of-pill", "data-tone": ((_F = status.holdoutStatus) == null ? void 0 : _F.status) === "pass" ? "done" : ((_G = status.holdoutStatus) == null ? void 0 : _G.status) === "fail" ? "failed" : "idle" }, status.holdoutStatus ? `${status.holdoutStatus.passed ?? 0}/${status.holdoutStatus.total ?? 0} ${status.holdoutStatus.status.toUpperCase()}` : "Não executado"),
+                ((_H = status.holdoutStatus) == null ? void 0 : _H.external_verified) && h("span", { className: "of-muted", style: { fontSize: "10.5px" } }, `sha:${status.holdoutStatus.suite_sha256 || "ok"}`)
+              ),
+              props.onRunHoldoutNow && h("button", { type: "button", className: "of-btn", disabled: props.runningHoldout, style: { alignSelf: "flex-start", padding: "3px 9px", fontSize: "11px" }, onClick: props.onRunHoldoutNow }, props.runningHoldout ? "Rodando..." : "▶ Rodar Holdout")
+            ),
+            h(
+              "div",
+              { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
+              h("div", { className: "of-meter-label" }, "Pinagem SHA-256 (host.commands)"),
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", gap: "6px" } },
+                h(
+                  "span",
+                  { className: "of-pill", "data-tone": props.commandIntegrity ? props.commandIntegrity.mismatches > 0 ? "failed" : props.commandIntegrity.verified > 0 ? "done" : "idle" : "idle" },
+                  props.commandIntegrity ? `${props.commandIntegrity.verified}/${props.commandIntegrity.total} íntegros` : "Aguardando auditoria"
+                )
+              ),
+              props.onAuditCommandIntegrity && h("button", { type: "button", className: "of-btn", style: { alignSelf: "flex-start", padding: "3px 9px", fontSize: "11px" }, onClick: props.onAuditCommandIntegrity }, "Auditar SHA-256")
+            ),
+            h(
+              "div",
+              { className: "of-surface", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
+              h("div", { className: "of-meter-label" }, "Modo Focus do Fundador (Buzz)"),
+              h(
+                "div",
+                { style: { fontSize: "12px", fontWeight: 600 } },
+                ((_I = props.focusState) == null ? void 0 : _I.active) ? `🔭 Focus ativo até ${props.focusState.untilFormatted}` : "Focus inativo"
+              ),
+              h("div", { className: "of-muted", style: { fontSize: "10.5px" } }, "Notificações não críticas são silenciadas durante o modo Focus; apenas alertas P0/Kill Switch atravessam.")
+            )
+          )
+        ),
+        // ── MOTOR DE CONFIANÇA & ESCAPE RATE (Autonomia Graduada · Onda 4 / v18) ──
+        h(
+          "div",
+          { className: "of-card-pad", "data-orgfy-trust-engine": "true", style: { display: "flex", flexDirection: "column", gap: "12px" } },
+          h(
+            "div",
+            { style: { display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" } },
+            h(
+              "div",
+              null,
+              h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Motor de Confiança & Escape Rate (Autonomia Graduada · v18)`),
+              h(
+                "div",
+                { className: "of-muted", style: { fontSize: "11.5px", marginTop: "2px" } },
+                status.trustEngine ? `Amostra: ${status.trustEngine.sampleSize} entregas · Escape Rate global: ${status.trustEngine.globalEscapeRatePct.toFixed(1)}% · ${status.trustEngine.darkCategoriesCount}/${status.trustEngine.totalCategoriesCount} categorias em Dark Auto-Merge` : "Clique em Recalcular para medir a Escape Rate real e habilitar auto-promoção por categoria."
+              )
+            ),
+            props.onEvaluateTrustEngine && h(
+              "button",
+              { type: "button", className: "of-btn", disabled: props.evaluatingTrust, style: { fontSize: "11px", padding: "4px 10px" }, onClick: () => props.onEvaluateTrustEngine() },
+              props.evaluatingTrust ? "Calculando..." : "↻ Recalcular Escape Rate"
+            )
+          ),
+          ((_K = (_J = status.trustEngine) == null ? void 0 : _J.categories) == null ? void 0 : _K.length) && h(
+            "div",
+            { style: { display: "flex", flexDirection: "column", gap: "8px" } },
+            status.trustEngine.categories.map(
+              (cat) => h(
+                "div",
+                { key: cat.id, className: "of-surface", style: { padding: "9px 12px", display: "flex", flexDirection: "column", gap: "6px" } },
+                h(
+                  "div",
+                  { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" } },
+                  h(
+                    "div",
+                    { style: { display: "inline-flex", alignItems: "center", gap: "8px" } },
+                    h("strong", { style: { fontSize: "12.5px" } }, cat.label),
+                    h(
+                      "span",
+                      { className: "of-pill", "data-tone": cat.mode === "dark_auto_merge" ? "done" : cat.locked ? "failed" : "waiting" },
+                      cat.mode === "dark_auto_merge" ? "DARK AUTO-MERGE" : cat.locked ? "GATE HUMANO 🔒" : "ASSISTIDO"
+                    ),
+                    h("span", { className: "of-mono of-muted", style: { fontSize: "11px" } }, `Escape: ${cat.escapeRatePct.toFixed(1)}% (máx ${cat.maxEscapeRatePct}%) · Limpas seguidas: ${cat.consecutiveClean}${cat.locked ? "" : `/${cat.targetConsecutiveClean}`}`)
+                  ),
+                  !cat.locked && props.onEvaluateTrustEngine && h(
+                    "div",
+                    { style: { display: "inline-flex", gap: "5px" } },
+                    cat.mode !== "dark_auto_merge" ? h("button", { type: "button", className: "of-btn", style: { padding: "2px 8px", fontSize: "10.5px" }, onClick: () => props.onEvaluateTrustEngine({ category: cat.id, mode: "dark_auto_merge" }) }, "Promover Dark") : h("button", { type: "button", className: "of-btn", style: { padding: "2px 8px", fontSize: "10.5px" }, onClick: () => props.onEvaluateTrustEngine({ category: cat.id, mode: "assisted" }) }, "Rebaixar Assistido"),
+                    cat.manualOverride && h("button", { type: "button", className: "of-btn", "data-variant": "ghost", style: { padding: "2px 7px", fontSize: "10.5px" }, onClick: () => props.onEvaluateTrustEngine({ category: cat.id, mode: "auto" }) }, "Auto")
+                  )
+                ),
+                !cat.locked && h(
+                  "div",
+                  { className: "of-bar-track", style: { marginTop: 0, height: "5px" } },
+                  h("div", { className: "of-bar-fill", style: { width: `${cat.progressPct}%`, background: cat.mode === "dark_auto_merge" ? "var(--status-done)" : "var(--primary)" } })
+                ),
+                h("div", { className: "of-muted", style: { fontSize: "11px" } }, cat.reason)
+              )
             )
           )
         )

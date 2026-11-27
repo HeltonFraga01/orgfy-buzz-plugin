@@ -25,6 +25,31 @@ export interface BuzzCanvasViewerProps {
   onOpenChannelInBuzz?: () => void;
 }
 
+export interface CanvasHeadingItem {
+  id: string;
+  level: number;
+  text: string;
+}
+
+export function extractCanvasHeadings(markdown: string | null | undefined): CanvasHeadingItem[] {
+  if (!markdown) return [];
+  const out: CanvasHeadingItem[] = [];
+  const lines = markdown.replace(/\r\n/g, "\n").split("\n");
+  let inFence = false;
+  for (const raw of lines) {
+    const trimmed = raw.trim();
+    if (trimmed.startsWith("```")) { inFence = !inFence; continue; }
+    if (inFence) continue;
+    const m = /^(#{1,3})\s+(.+)$/.exec(trimmed);
+    if (m) {
+      const cleanText = m[2].replace(/[*_`]/g, "").trim();
+      const id = `canvas-sec-${out.length}-${cleanText.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 32)}`;
+      out.push({ id, level: m[1].length, text: cleanText });
+    }
+  }
+  return out;
+}
+
 function renderInlineMarkdown(h: any, text: string, onOpenBuzzLink?: (href: string) => void): any[] {
   const nodes: any[] = [];
   // Tokeniza links [label](url), inline code `code` e bold **text**
@@ -151,19 +176,23 @@ function renderMarkdownBlocks(h: any, markdown: string, onOpenBuzzLink?: (href: 
     const headingMatch = /^(#{1,4})\s+(.+)$/.exec(trimmed);
     if (headingMatch) {
       const level = headingMatch[1].length;
-      const fontSize = level === 1 ? "20px" : level === 2 ? "15.5px" : level === 3 ? "13.5px" : "12.5px";
+      const fontSize = level === 1 ? "22px" : level === 2 ? "15.5px" : level === 3 ? "13.5px" : "12.5px";
       blocks.push(
         h(
           `h${level}`,
           {
             key: `h-${blockKey++}`,
             style: {
-              margin: level === 1 ? "4px 0 10px" : "14px 0 6px",
+              margin: level === 1 ? "2px 0 14px" : level === 2 ? "20px 0 8px" : "14px 0 6px",
+              paddingBottom: level === 1 ? "10px" : undefined,
+              borderBottom: level === 1 ? "1px solid var(--border)" : undefined,
+              paddingLeft: level === 2 ? "10px" : undefined,
+              borderLeft: level === 2 ? "3px solid var(--primary)" : undefined,
               fontSize,
               fontWeight: 700,
               lineHeight: 1.3,
               color: "var(--foreground)",
-              letterSpacing: level === 1 ? "-0.015em" : undefined,
+              letterSpacing: level === 1 ? "-0.02em" : "-0.01em",
             },
           },
           ...renderInlineMarkdown(h, headingMatch[2], onOpenBuzzLink)
@@ -314,16 +343,19 @@ export function renderBuzzCanvasViewer(props: BuzzCanvasViewerProps) {
   const { h, mode, onChangeMode, content, draft, onChangeDraft, writable, saving, onSave, onReload, history, resolveAuthor } = props;
   const effectiveContent = content || "";
   const isDirty = draft !== effectiveContent;
+  const wordCount = effectiveContent.trim() ? effectiveContent.trim().split(/\s+/).length : 0;
+  const readMinutes = Math.max(1, Math.ceil(wordCount / 180));
+  const headingsCount = extractCanvasHeadings(effectiveContent).length;
 
   return h(
     "section",
     {
-      className: "of-card-pad",
+      className: "of-card",
       "data-buzz-canvas-native": "true",
       "data-canvas-live-editor": "true",
-      style: { display: "flex", flexDirection: "column", gap: "12px" },
+      style: { display: "flex", flexDirection: "column" },
     },
-    // Barra superior estilo Buzz Canvas (View | Edit | History + ações)
+    // Barra superior estilo Executive Document (Documento | Editar Markdown | Histórico + métricas + ações)
     h(
       "div",
       {
@@ -333,19 +365,20 @@ export function renderBuzzCanvasViewer(props: BuzzCanvasViewerProps) {
           alignItems: "center",
           justifyContent: "space-between",
           gap: "10px",
-          paddingBottom: "8px",
+          padding: "11px 18px",
           borderBottom: "1px solid var(--border)",
+          background: "var(--panel)",
         },
       },
       h(
         "div",
-        { style: { display: "inline-flex", alignItems: "center", gap: "14px", flexWrap: "wrap" } },
+        { style: { display: "inline-flex", alignItems: "center", gap: "12px", flexWrap: "wrap" } },
         h(
           "div",
-          { style: { display: "inline-flex", alignItems: "center", gap: "14px" } },
+          { className: "of-segmented" },
           ([
-            { id: "view", label: "Visualizar" },
-            { id: "edit", label: isDirty ? "Editar •" : "Editar" },
+            { id: "view", label: "Documento" },
+            { id: "edit", label: isDirty ? "Editar •" : "Editar Markdown" },
             { id: "history", label: `Histórico (${history.length})` },
           ] as const).map((t) =>
             h(
@@ -353,23 +386,9 @@ export function renderBuzzCanvasViewer(props: BuzzCanvasViewerProps) {
               {
                 key: t.id,
                 type: "button",
+                className: "of-seg-btn",
+                "data-active": mode === t.id ? "true" : "false",
                 onClick: () => onChangeMode(t.id),
-                style: {
-                  background: "transparent",
-                  border: "none",
-                  borderRadius: 0,
-                  boxShadow: "none",
-                  outline: "none",
-                  appearance: "none",
-                  WebkitAppearance: "none",
-                  borderBottom: mode === t.id ? "2px solid var(--foreground)" : "2px solid transparent",
-                  color: mode === t.id ? "var(--foreground)" : "var(--muted-foreground)",
-                  fontWeight: mode === t.id ? 600 : 500,
-                  fontSize: "12.5px",
-                  padding: "4px 2px 8px",
-                  marginBottom: "-9px",
-                  cursor: "pointer",
-                },
               },
               t.label
             )
@@ -377,8 +396,8 @@ export function renderBuzzCanvasViewer(props: BuzzCanvasViewerProps) {
         ),
         h(
           "span",
-          { className: "of-mono of-muted", style: { fontSize: "10.5px" } },
-          `Canvas · #${props.channelName || props.tenant}${props.channelId ? ` (${props.channelId.slice(0, 8)}…)` : ""}`
+          { className: "of-mono of-muted", style: { fontSize: "11px" } },
+          `${headingsCount} seções · ${wordCount} palavras · ~${readMinutes} min`
         )
       ),
       h(
@@ -387,8 +406,8 @@ export function renderBuzzCanvasViewer(props: BuzzCanvasViewerProps) {
         onReload &&
           h(
             "button",
-            { type: "button", className: "of-btn", style: { padding: "4px 9px", fontSize: "11px" }, onClick: onReload },
-            "Recarregar"
+            { type: "button", className: "of-btn", style: { padding: "4px 10px", fontSize: "11px" }, onClick: onReload },
+            "↻ Recarregar"
           ),
         mode === "edit" &&
           writable &&
@@ -399,7 +418,7 @@ export function renderBuzzCanvasViewer(props: BuzzCanvasViewerProps) {
               className: "of-btn",
               "data-variant": "primary",
               disabled: saving || !isDirty,
-              style: { padding: "4px 10px", fontSize: "11px" },
+              style: { padding: "4px 11px", fontSize: "11px" },
               onClick: onSave,
             },
             saving ? "Salvando..." : "Salvar no Buzz"
@@ -410,7 +429,7 @@ export function renderBuzzCanvasViewer(props: BuzzCanvasViewerProps) {
             {
               type: "button",
               className: "of-btn",
-              style: { padding: "4px 9px", fontSize: "11px" },
+              style: { padding: "4px 10px", fontSize: "11px" },
               onClick: props.onOpenChannelInBuzz,
             },
             "Abrir no Buzz ↗"
@@ -422,29 +441,34 @@ export function renderBuzzCanvasViewer(props: BuzzCanvasViewerProps) {
     mode === "view"
       ? effectiveContent.trim()
         ? h(
-            "div",
+            "article",
             {
               style: {
-                maxHeight: "520px",
-                overflowY: "auto",
-                padding: "4px 2px",
+                padding: "22px 26px 28px",
+                lineHeight: 1.65,
               },
             },
             ...renderMarkdownBlocks(h, effectiveContent, props.onOpenBuzzLink)
           )
         : h(
             "div",
-            { className: "of-surface", style: { padding: "18px", textAlign: "center" } },
-            h("div", { style: { fontSize: "13px", fontWeight: 600 } }, "Canvas vazio neste canal"),
-            h("div", { className: "of-muted", style: { marginTop: "4px", fontSize: "11.5px" } }, "Clique em Editar para criar o Canvas sincronizado diretamente no canal do Buzz.")
+            { style: { padding: "36px 24px", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" } },
+            h("div", { style: { fontSize: "14px", fontWeight: 700 } }, "Canvas vazio neste canal"),
+            h("div", { className: "of-muted", style: { fontSize: "12px", maxWidth: "420px" } }, "Crie a visão oficial do produto, objetivos e salvaguardas sincronizados diretamente no canal do Buzz."),
+            writable &&
+              h(
+                "button",
+                { type: "button", className: "of-btn", "data-variant": "primary", style: { marginTop: "4px" }, onClick: () => onChangeMode("edit") },
+                "Escrever Canvas agora"
+              )
           )
       : mode === "edit"
       ? h(
           "div",
-          { style: { display: "flex", flexDirection: "column", gap: "8px" } },
+          { style: { padding: "16px 18px", display: "flex", flexDirection: "column", gap: "10px" } },
           h("textarea", {
             className: "of-textarea of-mono",
-            style: { minHeight: "340px", fontSize: "12px", lineHeight: 1.5, resize: "vertical" },
+            style: { minHeight: "440px", fontSize: "12.5px", lineHeight: 1.6, resize: "vertical", padding: "12px 14px" },
             placeholder: "Escreva o Markdown do Canvas do canal no Buzz...",
             value: draft,
             onChange: (e: any) => onChangeDraft(e.target.value),

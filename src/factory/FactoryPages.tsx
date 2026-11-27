@@ -7,7 +7,7 @@ import type { LiveCrewAgent } from "./FactoryBoardAndFloor";
 import type { HoldingControlPlaneSnapshot } from "../services/holding-service";
 import type { BuzzChannelLiveInfo } from "../services/buzz-channel-live";
 import type { BuzzWorkspaceDetails, BuzzWorkspacesCatalog } from "../services/buzz-workspace-live";
-import { renderBuzzCanvasViewer } from "../components/BuzzCanvasViewer";
+import { extractCanvasHeadings, renderBuzzCanvasViewer } from "../components/BuzzCanvasViewer";
 import { renderAutomationEditor, type OrgfyAutomation } from "./AutomationEditor";
 import type {
   CrdtBackendInfo,
@@ -1860,7 +1860,7 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
     );
   }
 
-  // ── 6. CANVAS / VISÃO & REGRAS INJETADAS (Canvas nativo Visualizar/Editar/Histórico + Canal + Board + Regras) ──
+  // ── 6. CANVAS / VISÃO — EXECUTIVE WORKSPACE v18.9 (Hero + Documento Editorial + Sidebar Contextual de Workspace & Governança) ──
   if (tab === "vision") {
     const ov = status.orgfyVision;
     const invariantes = ov?.invariantes || [];
@@ -1869,214 +1869,295 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
     const regras = ov?.regrasProbatorias || [];
     const papeis = Object.entries(ov?.papeis || {});
     const ch = props.channelInfo;
+    const ws = props.workspaceDetails;
+    const companyLabel = ws?.workspaceName || status.tenantManifest?.nome || tenant;
+    const headings = extractCanvasHeadings(props.channelCanvas);
+    const repoSummary = ws?.folders?.length ? ws.folders[0] : (status.tenantManifest?.repoId || tenant);
+    const worktreeSummary = ws?.worktree ? `${ws.worktree.location} (${ws.worktree.baseBranch})` : "main";
+
     return h(
       "div",
-      { style: { display: "flex", flexDirection: "column", gap: "14px" } },
-      props.workspaceDetails && props.workspaceDraft && props.setWorkspaceDraft &&
+      { className: "of-vision-shell", "data-vision-redesign": "v18.9" },
+      // Hero Executive Bar
+      h(
+        "header",
+        { className: "of-vision-hero" },
         h(
-          "section",
-          { className: "of-card-pad", "data-buzz-workspace-vision": "true", style: { display: "flex", flexDirection: "column", gap: "10px", borderColor: "var(--primary-border)" } },
+          "div",
+          { style: { display: "flex", alignItems: "center", gap: "14px", minWidth: 0, flex: "1 1 360px" } },
           h(
-            "div",
-            { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" } },
-            h(
-              "div",
-              null,
-              h("div", { style: { fontSize: "14px", fontWeight: 700, display: "flex", alignItems: "center", gap: "7px" } }, `Workspace do Buzz · ${props.workspaceDetails.workspaceName}`, h("span", { className: "of-pill", "data-tone": "done", style: { fontSize: "10px" } }, "channelKit nativo")),
-              h("div", { className: "of-muted", style: { fontSize: "11.5px", marginTop: "2px" } }, "Repositórios, regra de Worktree e Instructions injetadas nativamente pelo Buzz em todos os agentes deste Workspace.")
-            ),
-            props.workspaceDetails.writable && props.onSaveWorkspaceSettings &&
-              h(
-                "button",
-                {
-                  type: "button",
-                  className: "of-btn",
-                  "data-variant": "primary",
-                  disabled: props.savingWorkspaceDetails,
-                  onClick: props.onSaveWorkspaceSettings,
-                },
-                props.savingWorkspaceDetails ? "Salvando no Buzz..." : "Salvar no Workspace"
-              )
+            "span",
+            { className: "of-project-tile", style: { width: "40px", height: "40px", fontSize: "18px", borderRadius: "11px" } },
+            companyLabel.charAt(0).toUpperCase()
           ),
           h(
             "div",
-            { className: "of-grid-2" },
+            { style: { minWidth: 0, display: "flex", flexDirection: "column", gap: "5px" } },
             h(
-              "label",
-              { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
-              "Repositórios / Folders (1 por linha)",
-              h("textarea", {
-                className: "of-textarea of-mono",
-                style: { minHeight: "68px", fontSize: "11.5px" },
-                placeholder: "~/.buzz/REPOS/lumen-iptv",
-                value: props.workspaceDraft.foldersText,
-                onChange: (e: any) => props.setWorkspaceDraft!({ foldersText: e.target.value }),
-              })
+              "div",
+              { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" } },
+              h("h1", { style: { margin: 0, fontSize: "17px", fontWeight: 700, letterSpacing: "-0.015em" } }, `${companyLabel} · Canvas & Visão`),
+              h("span", { className: "of-pill", "data-tone": "done", style: { fontSize: "10px" } }, ws ? "channelKit nativo" : "Canvas Buzz"),
+              ch?.name && h("span", { className: "of-pill of-mono", style: { fontSize: "10px" } }, `#${ch.name}`)
             ),
             h(
               "div",
-              { style: { display: "grid", gridTemplateColumns: "1fr 120px", gap: "8px", alignContent: "start" } },
+              { style: { display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", fontSize: "11.5px" }, className: "of-muted" },
+              h("span", { className: "of-mono" }, `Repo: ${repoSummary}`),
+              h("span", null, "·"),
+              h("span", { className: "of-mono" }, `Worktree: ${worktreeSummary}`),
+              h("span", null, "·"),
+              h("span", null, `${invariantes.length} invariantes · ${papeis.length || (status.tenantManifest?.agentes?.length ?? 0)} papéis`)
+            )
+          )
+        ),
+        h(
+          "div",
+          { style: { display: "inline-flex", alignItems: "center", gap: "7px", flexWrap: "wrap" } },
+          props.onReloadCanvas &&
+            h("button", { type: "button", className: "of-btn", onClick: props.onReloadCanvas }, "↻ Recarregar"),
+          props.canvasWritable && props.setCanvasMode &&
+            h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                "data-variant": props.canvasMode === "edit" ? "primary" : undefined,
+                onClick: () => props.setCanvasMode!(props.canvasMode === "edit" ? "view" : "edit"),
+              },
+              props.canvasMode === "edit" ? "Ver Documento" : "Editar Canvas"
+            ),
+          (props.onOpenChannelFullPage || props.onOpenChannelInBuzz) &&
+            h(
+              "button",
+              {
+                type: "button",
+                className: "of-btn",
+                "data-variant": "primary",
+                onClick: () => (props.onOpenChannelFullPage ? props.onOpenChannelFullPage() : props.onOpenChannelInBuzz?.()),
+              },
+              "Abrir no Buzz ↗"
+            )
+        )
+      ),
+
+      // Grid Principal 2 Colunas: Documento Editorial (esquerda) + Painel Contextual Workspace & Governança (direita)
+      h(
+        "div",
+        { className: "of-vision-grid" },
+        // Coluna Esquerda — Documento Vivo do Canvas
+        h(
+          "div",
+          { style: { minWidth: 0, display: "flex", flexDirection: "column", gap: "14px" } },
+          renderBuzzCanvasViewer({
+            h,
+            tenant,
+            channelName: ch?.name || status.tenantManifest?.nome || tenant,
+            channelId: ch?.channelId || status.tenantManifest?.canal || null,
+            content: props.channelCanvas ?? null,
+            draft: props.canvasDraft ?? props.channelCanvas ?? "",
+            onChangeDraft: (v: string) => props.setCanvasDraft?.(v),
+            writable: Boolean(props.canvasWritable),
+            saving: Boolean(props.canvasSaving),
+            onSave: () => props.onSaveCanvas?.(),
+            onReload: props.onReloadCanvas,
+            history: props.canvasHistory || [],
+            resolveAuthor: props.resolveAuthor,
+            mode: props.canvasMode || "view",
+            onChangeMode: (m) => props.setCanvasMode?.(m),
+            onOpenBuzzLink: props.onOpenBuzzLink,
+            onOpenChannelInBuzz: () => (props.onOpenChannelFullPage ? props.onOpenChannelFullPage() : props.onOpenChannelInBuzz?.()),
+          })
+        ),
+
+        // Coluna Direita — Sumário + Workspace & Prompt + Governança Colapsável
+        h(
+          "aside",
+          { className: "of-vision-aside" },
+          // 1. Sumário do Documento (TOC)
+          headings.length > 0 &&
+            h(
+              "section",
+              { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "6px" } },
+              h("div", { className: "of-meter-label", style: { marginBottom: "2px" } }, `Estrutura do Canvas (${headings.length} seções)`),
+              headings.slice(0, 14).map((hd) =>
+                h(
+                  "div",
+                  {
+                    key: hd.id,
+                    className: "of-toc-link",
+                    style: {
+                      paddingLeft: hd.level === 1 ? "8px" : hd.level === 2 ? "16px" : "26px",
+                      fontWeight: hd.level === 1 ? 700 : hd.level === 2 ? 600 : 400,
+                      color: hd.level === 1 ? "var(--foreground)" : "var(--muted-foreground)",
+                      cursor: "default",
+                    },
+                  },
+                  h("span", { className: "of-dot", "data-tone": hd.level === 1 ? "done" : "idle", style: { width: "5px", height: "5px" } }),
+                  h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, hd.text)
+                )
+              )
+            ),
+
+          // 2. Workspace do Buzz & Prompt dos Agentes (channelKit nativo)
+          ws && props.workspaceDraft && props.setWorkspaceDraft &&
+            h(
+              "section",
+              { className: "of-card-pad", "data-buzz-workspace-vision": "true", style: { display: "flex", flexDirection: "column", gap: "10px" } },
               h(
-                "label",
-                { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
-                "Worktree location",
-                h("input", {
-                  className: "of-input of-mono",
-                  value: props.workspaceDraft.worktreeLocation,
-                  onChange: (e: any) => props.setWorkspaceDraft!({ worktreeLocation: e.target.value }),
-                })
+                "div",
+                { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" } },
+                h(
+                  "div",
+                  null,
+                  h("div", { style: { fontSize: "13px", fontWeight: 700 } }, "Workspace & Prompt dos Agentes"),
+                  h("div", { className: "of-muted", style: { fontSize: "11px" } }, "Injetado nativamente pelo Buzz em todos os agentes.")
+                ),
+                ws.writable && props.onSaveWorkspaceSettings &&
+                  h(
+                    "button",
+                    {
+                      type: "button",
+                      className: "of-btn",
+                      "data-variant": "primary",
+                      style: { padding: "4px 10px", fontSize: "11px" },
+                      disabled: props.savingWorkspaceDetails,
+                      onClick: props.onSaveWorkspaceSettings,
+                    },
+                    props.savingWorkspaceDetails ? "Salvando..." : "Salvar"
+                  )
               ),
               h(
                 "label",
-                { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
-                "Base branch",
-                h("input", {
-                  className: "of-input of-mono",
-                  value: props.workspaceDraft.worktreeBranch,
-                  onChange: (e: any) => props.setWorkspaceDraft!({ worktreeBranch: e.target.value }),
+                { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11px" } },
+                "Repositórios / Folders (1 por linha)",
+                h("textarea", {
+                  className: "of-textarea of-mono",
+                  style: { minHeight: "52px", fontSize: "11px" },
+                  placeholder: "~/.buzz/REPOS/lumen-iptv",
+                  value: props.workspaceDraft.foldersText,
+                  onChange: (e: any) => props.setWorkspaceDraft!({ foldersText: e.target.value }),
+                })
+              ),
+              h(
+                "div",
+                { style: { display: "grid", gridTemplateColumns: "1fr 96px", gap: "8px" } },
+                h(
+                  "label",
+                  { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11px" } },
+                  "Worktree location",
+                  h("input", {
+                    className: "of-input of-mono",
+                    style: { fontSize: "11px" },
+                    value: props.workspaceDraft.worktreeLocation,
+                    onChange: (e: any) => props.setWorkspaceDraft!({ worktreeLocation: e.target.value }),
+                  })
+                ),
+                h(
+                  "label",
+                  { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11px" } },
+                  "Base branch",
+                  h("input", {
+                    className: "of-input of-mono",
+                    style: { fontSize: "11px" },
+                    value: props.workspaceDraft.worktreeBranch,
+                    onChange: (e: any) => props.setWorkspaceDraft!({ worktreeBranch: e.target.value }),
+                  })
+                )
+              ),
+              h(
+                "label",
+                { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11px" } },
+                "Instructions / Visão injetada no prompt",
+                h("textarea", {
+                  className: "of-textarea",
+                  style: { minHeight: "120px", fontSize: "11.5px", lineHeight: 1.5 },
+                  placeholder: "Descreva a visão, regras arquiteturais e direção do produto...",
+                  value: props.workspaceDraft.instructions,
+                  onChange: (e: any) => props.setWorkspaceDraft!({ instructions: e.target.value }),
                 })
               )
-            )
-          ),
+            ),
+
+          // 3. Governança & Contexto da Holding (Acordeões limpos para não poluir o Canvas)
           h(
-            "label",
-            { style: { display: "flex", flexDirection: "column", gap: "4px", fontSize: "11.5px" } },
-            "Instructions / Visão da Empresa (injetada no prompt de todos os agentes do Workspace)",
-            h("textarea", {
-              className: "of-textarea",
-              style: { minHeight: "110px", fontSize: "12px", lineHeight: 1.5 },
-              placeholder: "Descreva a visão, regras arquiteturais e direção do produto...",
-              value: props.workspaceDraft.instructions,
-              onChange: (e: any) => props.setWorkspaceDraft!({ instructions: e.target.value }),
-            })
-          )
-        ),
-      renderBuzzCanvasViewer({
-        h,
-        tenant,
-        channelName: ch?.name || status.tenantManifest?.nome || tenant,
-        channelId: ch?.channelId || status.tenantManifest?.canal || null,
-        content: props.channelCanvas ?? null,
-        draft: props.canvasDraft ?? props.channelCanvas ?? "",
-        onChangeDraft: (v: string) => props.setCanvasDraft?.(v),
-        writable: Boolean(props.canvasWritable),
-        saving: Boolean(props.canvasSaving),
-        onSave: () => props.onSaveCanvas?.(),
-        onReload: props.onReloadCanvas,
-        history: props.canvasHistory || [],
-        resolveAuthor: props.resolveAuthor,
-        mode: props.canvasMode || "view",
-        onChangeMode: (m) => props.setCanvasMode?.(m),
-        onOpenBuzzLink: props.onOpenBuzzLink,
-        onOpenChannelInBuzz: () => (props.onOpenChannelFullPage ? props.onOpenChannelFullPage() : props.onOpenChannelInBuzz?.()),
-      }),
-      h(
-        "div",
-        { className: "of-grid-2" },
-        h(
-          "section",
-          { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-          h("div", { className: "of-meter-label" }, "1. Visão da Holding / Conselho (empresas/board.json)"),
-          h(
-            "div",
-            { style: { display: "flex", flexDirection: "column", gap: "6px" } },
-            h("strong", { style: { fontSize: "12.5px" } }, "Invariantes da Holding"),
-            invariantes.length === 0
-              ? h("div", { className: "of-muted" }, PT_BR.labels.unavailable)
-              : invariantes.map((inv, idx) =>
+            "section",
+            { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "8px" } },
+            h("div", { className: "of-meter-label" }, "Governança & Contexto Injetado"),
+            h(
+              "details",
+              { className: "of-surface", open: true },
+              h("summary", { style: { cursor: "pointer", padding: "8px 10px", fontSize: "12px", fontWeight: 600 } }, `Invariantes da Holding & Escalada (${invariantes.length})`),
+              h(
+                "div",
+                { style: { borderTop: "1px solid var(--border)", padding: "9px 10px", display: "flex", flexDirection: "column", gap: "6px" } },
+                invariantes.length === 0
+                  ? h("div", { className: "of-muted", style: { fontSize: "11.5px" } }, PT_BR.labels.unavailable)
+                  : invariantes.map((inv, idx) =>
+                      h(
+                        "div",
+                        { key: idx, style: { display: "flex", alignItems: "flex-start", gap: "7px", fontSize: "11.5px", lineHeight: 1.45 } },
+                        h("span", { className: "of-dot", "data-tone": "done", style: { marginTop: "5px" } }),
+                        h("span", null, inv)
+                      )
+                    ),
+                cadeia.length > 0 &&
                   h(
                     "div",
-                    { key: idx, style: { display: "flex", alignItems: "flex-start", gap: "7px", fontSize: "12px" } },
-                    h("span", { className: "of-dot", "data-tone": "done", style: { marginTop: "5px" } }),
-                    h("span", null, inv)
-                  )
-                )
-          ),
-          cadeia.length > 0 &&
-            h(
-              "div",
-              { style: { display: "flex", flexDirection: "column", gap: "4px", paddingTop: "8px", borderTop: "1px solid var(--border)" } },
-              h("strong", { style: { fontSize: "12px" } }, "Cadeia de comando"),
-              cadeia.map((c, idx) => h("div", { key: idx, className: "of-muted", style: { fontSize: "11.5px" } }, `${idx + 1}. ${c}`))
-            ),
-          escalada.length > 0 &&
-            h(
-              "div",
-              { style: { display: "flex", flexDirection: "column", gap: "4px", paddingTop: "8px", borderTop: "1px solid var(--border)" } },
-              h("strong", { style: { fontSize: "12px" } }, "Fluxo de escalada"),
-              escalada.map(([k, v]) => h("div", { key: k, className: "of-muted", style: { fontSize: "11px" } }, h("span", { className: "of-mono", style: { color: "var(--foreground)" } }, `${k}: `), String(v)))
-            )
-        ),
-        h(
-          "section",
-          { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-          h("div", { className: "of-meter-label" }, `2. Workspace & Arquivos de Contexto (${status.tenantManifest?.nome || tenant})`),
-          papeis.length > 0 &&
-            h(
-              "div",
-              { style: { display: "flex", flexWrap: "wrap", gap: "6px" } },
-              papeis.map(([papel, agente]) => h("span", { key: papel, className: "of-pill" }, `${papel}: ${agente}`))
-            ),
-          h(
-            "div",
-            { className: "of-surface", style: { padding: "10px 12px" } },
-            h("div", { className: "of-mono", style: { fontSize: "10.5px", color: "var(--primary)", marginBottom: "6px" } }, "PROJECT.md"),
-            h(
-              "pre",
-              { className: "of-muted", style: { margin: 0, whiteSpace: "pre-wrap", fontSize: "11px", maxHeight: "180px", overflowY: "auto", fontFamily: "inherit", lineHeight: 1.45 } },
-              ov?.projectMd || "PROJECT.md não encontrado no diretório raiz."
-            )
-          ),
-          h(
-            "div",
-            { className: "of-surface", style: { padding: "10px 12px" } },
-            h("div", { className: "of-mono", style: { fontSize: "10.5px", color: "var(--primary)", marginBottom: "6px" } }, "AGENTS.md"),
-            h(
-              "pre",
-              { className: "of-muted", style: { margin: 0, whiteSpace: "pre-wrap", fontSize: "11px", maxHeight: "160px", overflowY: "auto", fontFamily: "inherit", lineHeight: 1.45 } },
-              ov?.agentsMd || "AGENTS.md não encontrado no diretório raiz."
-            )
-          )
-        )
-      ),
-      h(
-        "section",
-        { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "10px" } },
-        h("div", { className: "of-meter-label" }, "3. Regras Probatórias (regras-probatorias.json) & Injeção nos Prompts (ctx.agents.addInstructions)"),
-        regras.length === 0
-          ? h("div", { className: "of-muted" }, "Nenhuma regra probatória pendente em .esteira/estado/regras-probatorias.json (invariantes permanentes ativos em licoes/ e <plugin-instructions>).")
-          : h(
-              "table",
-              { className: "of-table" },
-              h("thead", null, h("tr", null, h("th", null, "Regra"), h("th", null, "Descrição"), h("th", null, "Janela"), h("th", null, "Status"))),
-              h(
-                "tbody",
-                null,
-                regras.map((r) =>
+                    { style: { paddingTop: "6px", borderTop: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: "3px" } },
+                    h("strong", { style: { fontSize: "11px" } }, "Cadeia de comando"),
+                    cadeia.map((c, idx) => h("div", { key: idx, className: "of-muted", style: { fontSize: "11px" } }, `${idx + 1}. ${c}`))
+                  ),
+                escalada.length > 0 &&
                   h(
-                    "tr",
-                    { key: r.id },
-                    h("td", { className: "of-mono" }, r.id),
-                    h("td", null, r.descricao),
-                    h("td", { className: "of-mono" }, `${r.cardsAvaliados}/${r.janelaAlvo}`),
-                    h("td", null, h("span", { className: "of-pill", "data-tone": "done" }, r.status))
+                    "div",
+                    { style: { paddingTop: "6px", borderTop: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: "3px" } },
+                    h("strong", { style: { fontSize: "11px" } }, "Fluxo de escalada"),
+                    escalada.map(([k, v]) => h("div", { key: k, className: "of-muted", style: { fontSize: "10.5px" } }, h("span", { className: "of-mono", style: { color: "var(--foreground)" } }, `${k}: `), String(v)))
                   )
-                )
               )
             ),
-        h(
-          "div",
-          { className: "of-surface", style: { padding: "10px 12px", fontSize: "11.5px", lineHeight: 1.5 } },
-          h("div", { className: "of-mono", style: { fontSize: "10.5px", color: "var(--primary)", marginBottom: "4px" } }, "Injetado automaticamente em todos os agentes via ctx.agents.addInstructions (orgfy-governance-v13-lean):"),
-          h("div", { className: "of-muted" }, "• Invariantes L-01 (Executor ≠ Revisor), L-22 (Aceite congelado por SHA-256), L-90 (Catraca de não-regressão) e Specsfy + TDD (Z2/Z3/Z4)."),
-          h("div", { className: "of-muted" }, "• Guarda de Identidade (@menção) + Freio Anti-Loop (máx. 12 shells sem commit / 2 falhas consecutivas -> BLOQUEADO)."),
-          h("div", { className: "of-muted" }, "• Regras específicas por papel: Executor (worktree isolado), Revisor (GATE objetivo), COO (roster_live + smart_dispatch + auto-cura) e CEO/Board (alvo fechado).")
+            h(
+              "details",
+              { className: "of-surface" },
+              h("summary", { style: { cursor: "pointer", padding: "8px 10px", fontSize: "12px", fontWeight: 600 } }, "Arquivos PROJECT.md & AGENTS.md"),
+              h(
+                "div",
+                { style: { borderTop: "1px solid var(--border)", padding: "9px 10px", display: "flex", flexDirection: "column", gap: "8px" } },
+                papeis.length > 0 &&
+                  h(
+                    "div",
+                    { style: { display: "flex", flexWrap: "wrap", gap: "5px" } },
+                    papeis.map(([papel, agente]) => h("span", { key: papel, className: "of-pill", style: { fontSize: "10px" } }, `${papel}: ${agente}`))
+                  ),
+                h("div", { className: "of-mono", style: { fontSize: "10px", color: "var(--primary)" } }, "PROJECT.md"),
+                h("pre", { className: "of-muted", style: { margin: 0, whiteSpace: "pre-wrap", fontSize: "10.5px", maxHeight: "150px", overflowY: "auto", fontFamily: "inherit", lineHeight: 1.45 } }, ov?.projectMd || "Não encontrado."),
+                h("div", { className: "of-mono", style: { fontSize: "10px", color: "var(--primary)" } }, "AGENTS.md"),
+                h("pre", { className: "of-muted", style: { margin: 0, whiteSpace: "pre-wrap", fontSize: "10.5px", maxHeight: "150px", overflowY: "auto", fontFamily: "inherit", lineHeight: 1.45 } }, ov?.agentsMd || "Não encontrado.")
+              )
+            ),
+            h(
+              "details",
+              { className: "of-surface" },
+              h("summary", { style: { cursor: "pointer", padding: "8px 10px", fontSize: "12px", fontWeight: 600 } }, `Regras Probatórias & Injeção (${regras.length})`),
+              h(
+                "div",
+                { style: { borderTop: "1px solid var(--border)", padding: "9px 10px", display: "flex", flexDirection: "column", gap: "6px", fontSize: "11px", lineHeight: 1.45 } },
+                regras.length === 0
+                  ? h("div", { className: "of-muted" }, "Nenhuma regra probatória pendente (invariantes permanentes ativos em licoes/ e <plugin-instructions>).")
+                  : regras.map((r) =>
+                      h("div", { key: r.id, style: { display: "flex", justifyContent: "space-between", gap: "6px" } }, h("span", null, `${r.id}: ${r.descricao}`), h("span", { className: "of-mono of-muted" }, `${r.cardsAvaliados}/${r.janelaAlvo}`))
+                    ),
+                h("div", { className: "of-muted", style: { paddingTop: "6px", borderTop: "1px solid var(--border)" } }, "• L-01 (Executor ≠ Revisor), L-22 (Aceite SHA-256), L-90 (Não-regressão) e Freio Anti-Loop injetados via ctx.agents.addInstructions.")
+              )
+            )
+          )
         )
       )
     );
   }
 
-  // ── 7. CONFIGURAÇÕES (Layout 2 colunas equilibrado + Canal Buzz com humanos/agentes + Autonomia + Limites + Trust Engine + Segurança) ──
+  // ── 7. CONFIGURAÇÕES v18.9 (Tela cheia responsiva + Faixa de Resumo + Vínculo Nativo corrigido + Presets 1-Clique) ──
   const chInfo = props.channelInfo;
   const settingsTenantAgents = status.tenantManifest?.agentes || [];
   const resolvedMembers = (chInfo?.memberPubkeys || []).map((pk) => {
@@ -2088,18 +2169,35 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
   });
   const humanMembers = resolvedMembers.filter((m) => !m.isAgent);
   const agentMembers = resolvedMembers.filter((m) => m.isAgent);
+  const integritySummary = props.commandIntegrity;
   return h(
+    "div",
+    { className: "of-settings-shell", "data-settings-v189": "true" },
+    // Faixa executiva de status rápido
+    h(
+      "div",
+      { className: "of-settings-strip" },
+      [
+        { label: "Modo ativo", val: PT_BR.modes[settingsForm.mode] || settingsForm.mode, tone: "done", sub: settingsForm.autoMerge ? "Auto-merge LIGADO" : "Merge com aprovação" },
+        { label: "Teto diário", val: `$${settingsForm.gastoDiaUsd}/dia`, tone: "idle", sub: `~ $${(settingsForm.gastoDiaUsd * 30).toLocaleString("pt-BR")}/mês máx.` },
+        { label: "Capacidade WIP", val: `${settingsForm.agentesMax} ag · ${settingsForm.prsAbertos} PRs`, tone: "running", sub: `${settingsForm.mergesDia} merges/dia · ${settingsForm.mergePolicy}` },
+        { label: "Time & Canal", val: chInfo?.name ? `#${chInfo.name}` : tenant, tone: props.tenantAgentsSource === "buzz_channel_live" ? "done" : "waiting", sub: `${agentMembers.length || settingsTenantAgents.length} agentes · ${humanMembers.length} humano(s)` },
+        { label: "Integridade SHA-256", val: integritySummary ? `${integritySummary.verified}/${integritySummary.total} OK` : "7 pinados", tone: integritySummary?.mismatches ? "failed" : "done", sub: props.focusState?.active ? "Modo Focus ativo" : "Focus inativo" },
+      ].map((kpi) =>
+        h(
+          "div",
+          { key: kpi.label, className: "of-card-pad", style: { padding: "10px 13px" } },
+          h("div", { className: "of-meter-label" }, kpi.label),
+          h("div", { style: { fontSize: "14.5px", fontWeight: 700, marginTop: "3px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, kpi.val),
+          h("div", { className: "of-muted", style: { fontSize: "10.5px", marginTop: "2px" } }, kpi.sub)
+        )
+      )
+    ),
+    h(
     "div",
     {
       "data-settings-grid-layout": "true",
-      style: {
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(460px, 1fr))",
-        gap: "16px",
-        alignItems: "start",
-        width: "100%",
-        maxWidth: "1440px",
-      },
+      className: "of-settings-grid",
     },
     h(
       "div",
@@ -2151,10 +2249,13 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
       props.buzzCatalog?.available && props.onLinkEnterpriseWorkspaceChannel &&
         (() => {
           const catalog = props.buzzCatalog!;
-          const selectedWsId = props.linkedWorkspaceId || "";
-          const selectedChId = props.linkedChannelId || "";
+          const selectedChId = props.linkedChannelId || chInfo?.channelId || status.tenantManifest?.canal || "";
+          const selectedWsId = props.linkedWorkspaceId || (selectedChId ? catalog.assignments[selectedChId] || "" : "");
           const selectedWs = catalog.workspaces.find((w) => w.id === selectedWsId);
-          const channelOptions = selectedWs && selectedWs.channels.length > 0 ? selectedWs.channels : catalog.allChannels;
+          const baseChannelOptions = selectedWs && selectedWs.channels.length > 0 ? selectedWs.channels : catalog.allChannels;
+          const channelOptions = selectedChId && !baseChannelOptions.some((c) => c.id === selectedChId)
+            ? [{ id: selectedChId, name: chInfo?.name || status.tenantManifest?.nome || selectedChId.slice(0, 8), memberCount: chInfo?.memberCount ?? 0 }, ...baseChannelOptions]
+            : baseChannelOptions;
           return h(
             "div",
             { className: "of-surface", "data-workspace-channel-linker": "true", style: { padding: "10px 12px", display: "flex", flexDirection: "column", gap: "8px" } },
@@ -2424,7 +2525,33 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
     h(
       "div",
       { className: "of-card-pad", style: { display: "flex", flexDirection: "column", gap: "12px" } },
-      h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Limites operacionais · controle-${tenant}.json`),
+      h(
+        "div",
+        { style: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" } },
+        h("div", { style: { fontSize: "14px", fontWeight: 700 } }, `Limites operacionais · controle-${tenant}.json`),
+        h(
+          "div",
+          { className: "of-preset-bar" },
+          h("span", { className: "of-muted", style: { fontSize: "10.5px" } }, "Presets:"),
+          [
+            { id: "conservador", label: "Conservador", patch: { gastoDiaUsd: 40, mergesDia: 15, agentesMax: 3, prsAbertos: 10, falhasSeguidas: 3, mergePolicy: "strict" as const } },
+            { id: "balanceado", label: "Balanceado", patch: { gastoDiaUsd: 100, mergesDia: 40, agentesMax: 5, prsAbertos: 20, falhasSeguidas: 5, mergePolicy: "strict" as const } },
+            { id: "turbo", label: "Dark Turbo", patch: { gastoDiaUsd: 150, mergesDia: 60, agentesMax: 6, prsAbertos: 30, falhasSeguidas: 6, mergePolicy: "fast" as const } },
+          ].map((pr) =>
+            h(
+              "button",
+              {
+                key: pr.id,
+                type: "button",
+                className: "of-btn",
+                style: { padding: "2px 8px", fontSize: "10.5px" },
+                onClick: () => setSettingsForm(pr.patch),
+              },
+              pr.label
+            )
+          )
+        )
+      ),
       h(
         "label",
         {
@@ -2668,6 +2795,7 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
             )
           )
         )
+    )
     )
     )
   );

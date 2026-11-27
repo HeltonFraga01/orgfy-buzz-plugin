@@ -461,7 +461,7 @@ export function renderPipelineDiagram(props: PipelineDiagramProps) {
           title: poAgentName,
           help: PT_BR.pipelines.scoutHelp,
           items: [],
-          width: "116px",
+          width: "130px",
           footer: h(
             "span",
             { className: "of-muted", style: { fontSize: "10px" } },
@@ -477,7 +477,7 @@ export function renderPipelineDiagram(props: PipelineDiagramProps) {
           help: PT_BR.pipelines.issueHelp,
           items: [],
           queued: status.backlog.filter((i) => i.step !== "intake").slice(0, 3),
-          width: "116px",
+          width: "132px",
           footer: h(
             "div",
             { style: { display: "flex", flexDirection: "column", alignItems: "center", fontSize: "10px" } },
@@ -497,7 +497,7 @@ export function renderPipelineDiagram(props: PipelineDiagramProps) {
           title: PT_BR.pipelines.classifyLabel,
           help: PT_BR.pipelines.classifyHelp,
           items: status.backlog.filter((i) => i.step === "intake"),
-          width: "122px",
+          width: "138px",
         })
       ),
 
@@ -633,7 +633,7 @@ export function renderPipelineDiagram(props: PipelineDiagramProps) {
           title: PT_BR.pipelines.mergeLabel,
           help: "Após CI verde + Revisor L-01, o coordenador valida CI pós-merge sobre a main (com auto-revert se falhar) e integra. Se travar: L1 COO Bento → L2 CEO/Conselho → L3 Bestie OrgFy Iris.",
           items: mergeItems,
-          width: "130px",
+          width: "142px",
           footer: h(
             "span",
             { className: "of-muted", style: { fontSize: "10px" } },
