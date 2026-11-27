@@ -29674,6 +29674,529 @@ class BufferGeometry extends EventDispatcher {
     this.dispatchEvent({ type: "dispose" });
   }
 }
+class InterleavedBuffer {
+  /**
+   * Constructs a new interleaved buffer.
+   *
+   * @param {TypedArray} array - A typed array with a shared buffer storing attribute data.
+   * @param {number} stride - The number of typed-array elements per vertex.
+   */
+  constructor(array, stride) {
+    this.isInterleavedBuffer = true;
+    this.array = array;
+    this.stride = stride;
+    this.count = array !== void 0 ? array.length / stride : 0;
+    this.usage = StaticDrawUsage;
+    this.updateRanges = [];
+    this.version = 0;
+    this.uuid = generateUUID();
+  }
+  /**
+   * A callback function that is executed after the renderer has transferred the attribute array
+   * data to the GPU.
+   */
+  onUploadCallback() {
+  }
+  /**
+   * Flag to indicate that this attribute has changed and should be re-sent to
+   * the GPU. Set this to `true` when you modify the value of the array.
+   *
+   * @type {number}
+   * @default false
+   * @param {boolean} value
+   */
+  set needsUpdate(value) {
+    if (value === true) this.version++;
+  }
+  /**
+   * Sets the usage of this interleaved buffer.
+   *
+   * @param {(StaticDrawUsage|DynamicDrawUsage|StreamDrawUsage|StaticReadUsage|DynamicReadUsage|StreamReadUsage|StaticCopyUsage|DynamicCopyUsage|StreamCopyUsage)} value - The usage to set.
+   * @return {InterleavedBuffer} A reference to this interleaved buffer.
+   */
+  setUsage(value) {
+    this.usage = value;
+    return this;
+  }
+  /**
+   * Adds a range of data in the data array to be updated on the GPU.
+   *
+   * @param {number} start - Position at which to start update.
+   * @param {number} count - The number of components to update.
+   */
+  addUpdateRange(start, count) {
+    this.updateRanges.push({ start, count });
+  }
+  /**
+   * Clears the update ranges.
+   */
+  clearUpdateRanges() {
+    this.updateRanges.length = 0;
+  }
+  /**
+   * Copies the values of the given interleaved buffer to this instance.
+   *
+   * @param {InterleavedBuffer} source - The interleaved buffer to copy.
+   * @return {InterleavedBuffer} A reference to this instance.
+   */
+  copy(source) {
+    this.array = new source.array.constructor(source.array);
+    this.count = source.count;
+    this.stride = source.stride;
+    this.usage = source.usage;
+    return this;
+  }
+  /**
+   * Copies a vector from the given interleaved buffer to this one. The start
+   * and destination position in the attribute buffers are represented by the
+   * given indices.
+   *
+   * @param {number} index1 - The destination index into this interleaved buffer.
+   * @param {InterleavedBuffer} interleavedBuffer - The interleaved buffer to copy from.
+   * @param {number} index2 - The source index into the given interleaved buffer.
+   * @return {InterleavedBuffer} A reference to this instance.
+   */
+  copyAt(index1, interleavedBuffer, index2) {
+    index1 *= this.stride;
+    index2 *= interleavedBuffer.stride;
+    for (let i = 0, l = this.stride; i < l; i++) {
+      this.array[index1 + i] = interleavedBuffer.array[index2 + i];
+    }
+    return this;
+  }
+  /**
+   * Sets the given array data in the interleaved buffer.
+   *
+   * @param {(TypedArray|Array)} value - The array data to set.
+   * @param {number} [offset=0] - The offset in this interleaved buffer's array.
+   * @return {InterleavedBuffer} A reference to this instance.
+   */
+  set(value, offset2 = 0) {
+    this.array.set(value, offset2);
+    return this;
+  }
+  /**
+   * Returns a new interleaved buffer with copied values from this instance.
+   *
+   * @param {Object} [data] - An object with shared array buffers that allows to retain shared structures.
+   * @return {InterleavedBuffer} A clone of this instance.
+   */
+  clone(data) {
+    if (data.arrayBuffers === void 0) {
+      data.arrayBuffers = {};
+    }
+    const key = getArrayKey(this.array);
+    if (data.arrayBuffers[key] === void 0) {
+      data.arrayBuffers[key] = this.array.slice(0).buffer;
+    }
+    const array = new this.array.constructor(data.arrayBuffers[key]);
+    const ib = new this.constructor(array, this.stride);
+    ib.setUsage(this.usage);
+    return ib;
+  }
+  /**
+   * Sets the given callback function that is executed after the Renderer has transferred
+   * the array data to the GPU. Can be used to perform clean-up operations after
+   * the upload when data are not needed anymore on the CPU side.
+   *
+   * @param {Function} callback - The `onUpload()` callback.
+   * @return {InterleavedBuffer} A reference to this instance.
+   */
+  onUpload(callback) {
+    this.onUploadCallback = callback;
+    return this;
+  }
+  /**
+   * Serializes the interleaved buffer into JSON.
+   *
+   * @param {Object} [data] - An optional value holding meta information about the serialization.
+   * @return {Object} A JSON object representing the serialized interleaved buffer.
+   */
+  toJSON(data) {
+    if (data.arrayBuffers === void 0) {
+      data.arrayBuffers = {};
+    }
+    const key = getArrayKey(this.array);
+    if (data.arrayBuffers[key] === void 0) {
+      data.arrayBuffers[key] = Array.from(new Uint32Array(this.array.slice(0).buffer));
+    }
+    const json = {
+      uuid: this.uuid,
+      buffer: key,
+      type: this.array.constructor.name,
+      stride: this.stride
+    };
+    json.usage = this.usage;
+    return json;
+  }
+}
+function getArrayKey(array) {
+  if (array.buffer._uuid === void 0) {
+    array.buffer._uuid = generateUUID();
+  }
+  if (array.byteOffset === 0 && array.byteLength === array.buffer.byteLength) return array.buffer._uuid;
+  return array.buffer._uuid + ":" + array.byteOffset + ":" + array.byteLength;
+}
+const _vector$8 = /* @__PURE__ */ new Vector3();
+class InterleavedBufferAttribute {
+  /**
+   * Constructs a new interleaved buffer attribute.
+   *
+   * @param {InterleavedBuffer} interleavedBuffer - The buffer holding the interleaved data.
+   * @param {number} itemSize - The item size.
+   * @param {number} offset - The attribute offset into the buffer.
+   * @param {boolean} [normalized=false] - Whether the data are normalized or not.
+   */
+  constructor(interleavedBuffer, itemSize, offset2, normalized = false) {
+    this.isInterleavedBufferAttribute = true;
+    this.name = "";
+    this.data = interleavedBuffer;
+    this.itemSize = itemSize;
+    this.offset = offset2;
+    this.normalized = normalized;
+    this._normalizationScale = interleavedBuffer !== void 0 ? getNormalizationScale(interleavedBuffer.array) : void 0;
+  }
+  /**
+   * The item count of this buffer attribute.
+   *
+   * @type {number}
+   * @readonly
+   */
+  get count() {
+    return this.data.count;
+  }
+  /**
+   * The array holding the interleaved buffer attribute data.
+   *
+   * @type {TypedArray}
+   */
+  get array() {
+    return this.data.array;
+  }
+  /**
+   * Flag to indicate that this attribute has changed and should be re-sent to
+   * the GPU. Set this to `true` when you modify the value of the array.
+   *
+   * @type {number}
+   * @default false
+   * @param {boolean} value
+   */
+  set needsUpdate(value) {
+    this.data.needsUpdate = value;
+  }
+  /**
+   * Applies the given 4x4 matrix to the given attribute. Only works with
+   * item size `3`.
+   *
+   * @param {Matrix4} m - The matrix to apply.
+   * @return {InterleavedBufferAttribute} A reference to this instance.
+   */
+  applyMatrix4(m) {
+    for (let i = 0, l = this.data.count; i < l; i++) {
+      _vector$8.fromBufferAttribute(this, i);
+      _vector$8.applyMatrix4(m);
+      this.setXYZ(i, _vector$8.x, _vector$8.y, _vector$8.z);
+    }
+    return this;
+  }
+  /**
+   * Applies the given 3x3 normal matrix to the given attribute. Only works with
+   * item size `3`.
+   *
+   * @param {Matrix3} m - The normal matrix to apply.
+   * @return {InterleavedBufferAttribute} A reference to this instance.
+   */
+  applyNormalMatrix(m) {
+    for (let i = 0, l = this.count; i < l; i++) {
+      _vector$8.fromBufferAttribute(this, i);
+      _vector$8.applyNormalMatrix(m);
+      this.setXYZ(i, _vector$8.x, _vector$8.y, _vector$8.z);
+    }
+    return this;
+  }
+  /**
+   * Applies the given 4x4 matrix to the given attribute. Only works with
+   * item size `3` and with direction vectors.
+   *
+   * @param {Matrix4} m - The matrix to apply.
+   * @return {InterleavedBufferAttribute} A reference to this instance.
+   */
+  transformDirection(m) {
+    for (let i = 0, l = this.count; i < l; i++) {
+      _vector$8.fromBufferAttribute(this, i);
+      _vector$8.transformDirection(m);
+      this.setXYZ(i, _vector$8.x, _vector$8.y, _vector$8.z);
+    }
+    return this;
+  }
+  /**
+   * Returns the given component of the vector at the given index.
+   *
+   * @param {number} index - The index into the buffer attribute.
+   * @param {number} component - The component index.
+   * @return {number} The returned value.
+   */
+  getComponent(index, component) {
+    let value = this.array[index * this.data.stride + this.offset + component];
+    if (this.normalized) value = this._denormalize(value);
+    return value;
+  }
+  /**
+   * Sets the given value to the given component of the vector at the given index.
+   *
+   * @param {number} index - The index into the buffer attribute.
+   * @param {number} component - The component index.
+   * @param {number} value - The value to set.
+   * @return {InterleavedBufferAttribute} A reference to this instance.
+   */
+  setComponent(index, component, value) {
+    if (this.normalized) value = this._normalize(value);
+    this.data.array[index * this.data.stride + this.offset + component] = value;
+    return this;
+  }
+  /**
+   * Sets the x component of the vector at the given index.
+   *
+   * @param {number} index - The index into the buffer attribute.
+   * @param {number} x - The value to set.
+   * @return {InterleavedBufferAttribute} A reference to this instance.
+   */
+  setX(index, x) {
+    if (this.normalized) x = this._normalize(x);
+    this.data.array[index * this.data.stride + this.offset] = x;
+    return this;
+  }
+  /**
+   * Sets the y component of the vector at the given index.
+   *
+   * @param {number} index - The index into the buffer attribute.
+   * @param {number} y - The value to set.
+   * @return {InterleavedBufferAttribute} A reference to this instance.
+   */
+  setY(index, y) {
+    if (this.normalized) y = this._normalize(y);
+    this.data.array[index * this.data.stride + this.offset + 1] = y;
+    return this;
+  }
+  /**
+   * Sets the z component of the vector at the given index.
+   *
+   * @param {number} index - The index into the buffer attribute.
+   * @param {number} z - The value to set.
+   * @return {InterleavedBufferAttribute} A reference to this instance.
+   */
+  setZ(index, z) {
+    if (this.normalized) z = this._normalize(z);
+    this.data.array[index * this.data.stride + this.offset + 2] = z;
+    return this;
+  }
+  /**
+   * Sets the w component of the vector at the given index.
+   *
+   * @param {number} index - The index into the buffer attribute.
+   * @param {number} w - The value to set.
+   * @return {InterleavedBufferAttribute} A reference to this instance.
+   */
+  setW(index, w) {
+    if (this.normalized) w = this._normalize(w);
+    this.data.array[index * this.data.stride + this.offset + 3] = w;
+    return this;
+  }
+  /**
+   * Returns the x component of the vector at the given index.
+   *
+   * @param {number} index - The index into the buffer attribute.
+   * @return {number} The x component.
+   */
+  getX(index) {
+    let x = this.data.array[index * this.data.stride + this.offset];
+    if (this.normalized) x = this._denormalize(x);
+    return x;
+  }
+  /**
+   * Returns the y component of the vector at the given index.
+   *
+   * @param {number} index - The index into the buffer attribute.
+   * @return {number} The y component.
+   */
+  getY(index) {
+    let y = this.data.array[index * this.data.stride + this.offset + 1];
+    if (this.normalized) y = this._denormalize(y);
+    return y;
+  }
+  /**
+   * Returns the z component of the vector at the given index.
+   *
+   * @param {number} index - The index into the buffer attribute.
+   * @return {number} The z component.
+   */
+  getZ(index) {
+    let z = this.data.array[index * this.data.stride + this.offset + 2];
+    if (this.normalized) z = this._denormalize(z);
+    return z;
+  }
+  /**
+   * Returns the w component of the vector at the given index.
+   *
+   * @param {number} index - The index into the buffer attribute.
+   * @return {number} The w component.
+   */
+  getW(index) {
+    let w = this.data.array[index * this.data.stride + this.offset + 3];
+    if (this.normalized) w = this._denormalize(w);
+    return w;
+  }
+  /**
+   * Sets the x and y component of the vector at the given index.
+   *
+   * @param {number} index - The index into the buffer attribute.
+   * @param {number} x - The value for the x component to set.
+   * @param {number} y - The value for the y component to set.
+   * @return {InterleavedBufferAttribute} A reference to this instance.
+   */
+  setXY(index, x, y) {
+    index = index * this.data.stride + this.offset;
+    if (this.normalized) {
+      x = this._normalize(x);
+      y = this._normalize(y);
+    }
+    this.data.array[index + 0] = x;
+    this.data.array[index + 1] = y;
+    return this;
+  }
+  /**
+   * Sets the x, y and z component of the vector at the given index.
+   *
+   * @param {number} index - The index into the buffer attribute.
+   * @param {number} x - The value for the x component to set.
+   * @param {number} y - The value for the y component to set.
+   * @param {number} z - The value for the z component to set.
+   * @return {InterleavedBufferAttribute} A reference to this instance.
+   */
+  setXYZ(index, x, y, z) {
+    index = index * this.data.stride + this.offset;
+    if (this.normalized) {
+      x = this._normalize(x);
+      y = this._normalize(y);
+      z = this._normalize(z);
+    }
+    this.data.array[index + 0] = x;
+    this.data.array[index + 1] = y;
+    this.data.array[index + 2] = z;
+    return this;
+  }
+  /**
+   * Sets the x, y, z and w component of the vector at the given index.
+   *
+   * @param {number} index - The index into the buffer attribute.
+   * @param {number} x - The value for the x component to set.
+   * @param {number} y - The value for the y component to set.
+   * @param {number} z - The value for the z component to set.
+   * @param {number} w - The value for the w component to set.
+   * @return {InterleavedBufferAttribute} A reference to this instance.
+   */
+  setXYZW(index, x, y, z, w) {
+    index = index * this.data.stride + this.offset;
+    if (this.normalized) {
+      x = this._normalize(x);
+      y = this._normalize(y);
+      z = this._normalize(z);
+      w = this._normalize(w);
+    }
+    this.data.array[index + 0] = x;
+    this.data.array[index + 1] = y;
+    this.data.array[index + 2] = z;
+    this.data.array[index + 3] = w;
+    return this;
+  }
+  /**
+   * Returns a new buffer attribute with copied values from this instance.
+   *
+   * If no parameter is provided, cloning an interleaved buffer attribute will de-interleave buffer data.
+   *
+   * @param {Object} [data] - An object with interleaved buffers that allows to retain the interleaved property.
+   * @return {BufferAttribute|InterleavedBufferAttribute} A clone of this instance.
+   */
+  clone(data) {
+    if (data === void 0) {
+      log("InterleavedBufferAttribute.clone(): Cloning an interleaved buffer attribute will de-interleave buffer data.");
+      const array = [];
+      for (let i = 0; i < this.count; i++) {
+        const index = i * this.data.stride + this.offset;
+        for (let j = 0; j < this.itemSize; j++) {
+          array.push(this.data.array[index + j]);
+        }
+      }
+      return new BufferAttribute(new this.array.constructor(array), this.itemSize, this.normalized);
+    } else {
+      if (data.interleavedBuffers === void 0) {
+        data.interleavedBuffers = {};
+      }
+      if (data.interleavedBuffers[this.data.uuid] === void 0) {
+        data.interleavedBuffers[this.data.uuid] = this.data.clone(data);
+      }
+      return new InterleavedBufferAttribute(data.interleavedBuffers[this.data.uuid], this.itemSize, this.offset, this.normalized);
+    }
+  }
+  /**
+   * Serializes the buffer attribute into JSON.
+   *
+   * If no parameter is provided, cloning an interleaved buffer attribute will de-interleave buffer data.
+   *
+   * @param {Object} [data] - An optional value holding meta information about the serialization.
+   * @return {Object} A JSON object representing the serialized buffer attribute.
+   */
+  toJSON(data) {
+    if (data === void 0) {
+      log("InterleavedBufferAttribute.toJSON(): Serializing an interleaved buffer attribute will de-interleave buffer data.");
+      const array = [];
+      for (let i = 0; i < this.count; i++) {
+        const index = i * this.data.stride + this.offset;
+        for (let j = 0; j < this.itemSize; j++) {
+          array.push(this.data.array[index + j]);
+        }
+      }
+      return {
+        itemSize: this.itemSize,
+        type: this.array.constructor.name,
+        array,
+        normalized: this.normalized
+      };
+    } else {
+      if (data.interleavedBuffers === void 0) {
+        data.interleavedBuffers = {};
+      }
+      if (data.interleavedBuffers[this.data.uuid] === void 0) {
+        data.interleavedBuffers[this.data.uuid] = this.data.toJSON(data);
+      }
+      return {
+        isInterleavedBufferAttribute: true,
+        itemSize: this.itemSize,
+        data: this.data.uuid,
+        offset: this.offset,
+        normalized: this.normalized
+      };
+    }
+  }
+  /**
+   * Denormalizes the value using cached normalization factor.
+   *
+   * @private
+   */
+  _denormalize(value) {
+    const scale = this._normalizationScale;
+    return scale !== void 0 ? Math.max(value / scale, -1) : denormalize(value, this.data.array);
+  }
+  /**
+   * Normalizes the value using cached normalization factor.
+   *
+   * @private
+   */
+  _normalize(value) {
+    const scale = this._normalizationScale;
+    return scale !== void 0 ? Math.round(value * scale) : normalize(value, this.data.array);
+  }
+}
 const _vector1 = /* @__PURE__ */ new Vector3();
 const _vector2 = /* @__PURE__ */ new Vector3();
 const _normalMatrix = /* @__PURE__ */ new Matrix3();
@@ -30525,6 +31048,180 @@ class Material extends EventDispatcher {
   set needsUpdate(value) {
     if (value === true) this.version++;
   }
+}
+class SpriteMaterial extends Material {
+  /**
+   * Constructs a new sprite material.
+   *
+   * @param {Object} [parameters] - An object with one or more properties
+   * defining the material's appearance. Any property of the material
+   * (including any property from inherited materials) can be passed
+   * in here. Color values can be passed any type of value accepted
+   * by {@link Color#set}.
+   */
+  constructor(parameters) {
+    super();
+    this.isSpriteMaterial = true;
+    this.type = "SpriteMaterial";
+    this.color = new Color(16777215);
+    this.map = null;
+    this.alphaMap = null;
+    this.rotation = 0;
+    this.sizeAttenuation = true;
+    this.transparent = true;
+    this.fog = true;
+    this.setValues(parameters);
+  }
+  copy(source) {
+    super.copy(source);
+    this.color.copy(source.color);
+    this.map = source.map;
+    this.alphaMap = source.alphaMap;
+    this.rotation = source.rotation;
+    this.sizeAttenuation = source.sizeAttenuation;
+    this.fog = source.fog;
+    return this;
+  }
+}
+let _geometry;
+const _intersectPoint = /* @__PURE__ */ new Vector3();
+const _worldScale = /* @__PURE__ */ new Vector3();
+const _mvPosition = /* @__PURE__ */ new Vector3();
+const _alignedPosition = /* @__PURE__ */ new Vector2();
+const _rotatedPosition = /* @__PURE__ */ new Vector2();
+const _viewWorldMatrix = /* @__PURE__ */ new Matrix4();
+const _vA$1 = /* @__PURE__ */ new Vector3();
+const _vB$1 = /* @__PURE__ */ new Vector3();
+const _vC$1 = /* @__PURE__ */ new Vector3();
+const _uvA = /* @__PURE__ */ new Vector2();
+const _uvB = /* @__PURE__ */ new Vector2();
+const _uvC = /* @__PURE__ */ new Vector2();
+class Sprite extends Object3D {
+  /**
+   * Constructs a new sprite.
+   *
+   * @param {(SpriteMaterial|SpriteNodeMaterial)} [material] - The sprite material.
+   */
+  constructor(material = new SpriteMaterial()) {
+    super();
+    this.isSprite = true;
+    this.type = "Sprite";
+    if (_geometry === void 0) {
+      _geometry = new BufferGeometry();
+      const float32Array = new Float32Array([
+        -0.5,
+        -0.5,
+        0,
+        0,
+        0,
+        0.5,
+        -0.5,
+        0,
+        1,
+        0,
+        0.5,
+        0.5,
+        0,
+        1,
+        1,
+        -0.5,
+        0.5,
+        0,
+        0,
+        1
+      ]);
+      const interleavedBuffer = new InterleavedBuffer(float32Array, 5);
+      _geometry.setIndex([0, 1, 2, 0, 2, 3]);
+      _geometry.setAttribute("position", new InterleavedBufferAttribute(interleavedBuffer, 3, 0, false));
+      _geometry.setAttribute("uv", new InterleavedBufferAttribute(interleavedBuffer, 2, 3, false));
+    }
+    this.geometry = _geometry;
+    this.material = material;
+    this.center = new Vector2(0.5, 0.5);
+    this.count = 1;
+  }
+  /**
+   * Returns `true` if this sprite intersects the given frustum.
+   *
+   * @param {Frustum|FrustumArray} frustum - The frustum to test.
+   * @return {boolean} Whether this sprite intersects the given frustum or not.
+   */
+  intersectsFrustum(frustum) {
+    return frustum.intersectsSprite(this);
+  }
+  /**
+   * Computes intersection points between a casted ray and this sprite.
+   *
+   * @param {Raycaster} raycaster - The raycaster.
+   * @param {Array<Object>} intersects - The target array that holds the intersection points.
+   */
+  raycast(raycaster, intersects) {
+    if (raycaster.camera === null) {
+      error('Sprite: "Raycaster.camera" needs to be set in order to raycast against sprites.');
+    }
+    _worldScale.setFromMatrixScale(this.matrixWorld);
+    _viewWorldMatrix.copy(raycaster.camera.matrixWorld);
+    this.modelViewMatrix.multiplyMatrices(raycaster.camera.matrixWorldInverse, this.matrixWorld);
+    _mvPosition.setFromMatrixPosition(this.modelViewMatrix);
+    if (raycaster.camera.isPerspectiveCamera && this.material.sizeAttenuation === false) {
+      _worldScale.multiplyScalar(-_mvPosition.z);
+    }
+    const rotation = this.material.rotation;
+    let sin, cos;
+    if (rotation !== 0) {
+      cos = Math.cos(rotation);
+      sin = Math.sin(rotation);
+    }
+    const center = this.center;
+    transformVertex(_vA$1.set(-0.5, -0.5, 0), _mvPosition, center, _worldScale, sin, cos);
+    transformVertex(_vB$1.set(0.5, -0.5, 0), _mvPosition, center, _worldScale, sin, cos);
+    transformVertex(_vC$1.set(0.5, 0.5, 0), _mvPosition, center, _worldScale, sin, cos);
+    _uvA.set(0, 0);
+    _uvB.set(1, 0);
+    _uvC.set(1, 1);
+    let intersect2 = raycaster.ray.intersectTriangle(_vA$1, _vB$1, _vC$1, false, _intersectPoint);
+    if (intersect2 === null) {
+      transformVertex(_vB$1.set(-0.5, 0.5, 0), _mvPosition, center, _worldScale, sin, cos);
+      _uvB.set(0, 1);
+      intersect2 = raycaster.ray.intersectTriangle(_vA$1, _vC$1, _vB$1, false, _intersectPoint);
+      if (intersect2 === null) {
+        return;
+      }
+    }
+    const distance = raycaster.ray.origin.distanceTo(_intersectPoint);
+    if (distance < raycaster.near || distance > raycaster.far) return;
+    intersects.push({
+      distance,
+      point: _intersectPoint.clone(),
+      uv: Triangle.getInterpolation(_intersectPoint, _vA$1, _vB$1, _vC$1, _uvA, _uvB, _uvC, new Vector2()),
+      face: null,
+      object: this
+    });
+  }
+  copy(source, recursive) {
+    super.copy(source, recursive);
+    if (source.center !== void 0) this.center.copy(source.center);
+    this.material = source.material;
+    return this;
+  }
+  toJSON(meta) {
+    const data = super.toJSON(meta);
+    data.object.center = this.center.toArray();
+    return data;
+  }
+}
+function transformVertex(vertexPosition, mvPosition, center, scale, sin, cos) {
+  _alignedPosition.subVectors(vertexPosition, center).addScalar(0.5).multiply(scale);
+  if (sin !== void 0) {
+    _rotatedPosition.x = cos * _alignedPosition.x - sin * _alignedPosition.y;
+    _rotatedPosition.y = sin * _alignedPosition.x + cos * _alignedPosition.y;
+  } else {
+    _rotatedPosition.copy(_alignedPosition);
+  }
+  vertexPosition.copy(mvPosition);
+  vertexPosition.x += _rotatedPosition.x;
+  vertexPosition.y += _rotatedPosition.y;
+  vertexPosition.applyMatrix4(_viewWorldMatrix);
 }
 const _vector$7 = /* @__PURE__ */ new Vector3();
 const _segCenter = /* @__PURE__ */ new Vector3();
@@ -55613,6 +56310,54 @@ function makeDeskScreenTexture(kit, accent, seed, maxAnisotropy = 8) {
   }
   return sharpenCanvasTexture(kit.canvasTexture(c), maxAnisotropy);
 }
+function makeThinkingBubbleTexture(kit, kind, maxAnisotropy = 8) {
+  const logicalW = 96;
+  const logicalH = 66;
+  const c = canvasOf(logicalW * 2, logicalH * 2);
+  const g = c.getContext("2d");
+  g.scale(2, 2);
+  const isErr = kind === "error";
+  const fill = isErr ? "rgba(239, 68, 68, 0.92)" : "rgba(59, 130, 246, 0.92)";
+  const stroke = isErr ? "#fca5a5" : "#93c5fd";
+  const x = 10;
+  const y = 8;
+  const w = 76;
+  const h = 42;
+  const r = 16;
+  g.beginPath();
+  g.moveTo(x + r, y);
+  g.lineTo(x + w - r, y);
+  g.quadraticCurveTo(x + w, y, x + w, y + r);
+  g.lineTo(x + w, y + h - r);
+  g.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  g.lineTo(x + w * 0.56, y + h);
+  g.lineTo(x + w * 0.46, y + h + 11);
+  g.lineTo(x + w * 0.39, y + h);
+  g.lineTo(x + r, y + h);
+  g.quadraticCurveTo(x, y + h, x, y + h - r);
+  g.lineTo(x, y + r);
+  g.quadraticCurveTo(x, y, x + r, y);
+  g.closePath();
+  g.fillStyle = fill;
+  g.fill();
+  g.strokeStyle = stroke;
+  g.lineWidth = 2.5;
+  g.stroke();
+  g.fillStyle = "#ffffff";
+  if (isErr) {
+    g.font = "800 26px -apple-system, BlinkMacSystemFont, sans-serif";
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.fillText("!", x + w / 2, y + h / 2 + 1);
+  } else {
+    for (const dx of [-15, 0, 15]) {
+      g.beginPath();
+      g.arc(x + w / 2 + dx, y + h / 2, 4.4, 0, Math.PI * 2);
+      g.fill();
+    }
+  }
+  return sharpenCanvasTexture(kit.canvasTexture(c), maxAnisotropy);
+}
 function buildVoxelPlantProp(kit, p, matSteel) {
   const g = new Group();
   const pot = new Mesh(kit.own(new BoxGeometry(0.42, 0.36, 0.42)), matSteel);
@@ -55741,16 +56486,41 @@ function createHoldingTower3DComponent(ctx) {
       const subsidiaryFloors = empresas.map((emp) => {
         var _a2, _b2, _c, _d;
         const slugLower = String(emp.slug || "").toLowerCase();
-        const matchingCrew = crew.filter((a) => {
+        const empCanal = String(emp.canal || "").trim().toLowerCase();
+        const manifestAgents = Array.isArray(emp.agentes) ? emp.agentes : [];
+        let workingCount = 0;
+        let errorCount = 0;
+        const resolvedAgents = manifestAgents.length > 0 ? manifestAgents.map((ma) => {
+          const maName = String(ma.name || "Agente");
+          const maPk = String(ma.pubkey || "").trim().toLowerCase();
+          const liveMatch = crew.find(
+            (c) => maPk && c.pubkey && c.pubkey.toLowerCase() === maPk || c.name.toLowerCase() === maName.toLowerCase()
+          );
+          const pk = ((liveMatch == null ? void 0 : liveMatch.pubkey) || maPk || "").toLowerCase();
+          const rawTurn = pk ? byPk[pk] : void 0;
+          const turn = rawTurn && (!empCanal || !rawTurn.channelId || rawTurn.channelId.toLowerCase() === empCanal) ? rawTurn : void 0;
+          const isErr = (turn == null ? void 0 : turn.state) === "error";
+          const isWork = Boolean(turn && !isErr);
+          if (isErr) errorCount += 1;
+          if (isWork) workingCount += 1;
+          return {
+            key: liveMatch == null ? void 0 : liveMatch.key,
+            pubkey: pk || void 0,
+            name: maName,
+            role: String(ma.papel || (liveMatch == null ? void 0 : liveMatch.model) || ma.model || "agente"),
+            picture: liveMatch == null ? void 0 : liveMatch.picture,
+            stepLabel: turn == null ? void 0 : turn.stepLabel,
+            turn,
+            status: isErr ? "error" : isWork ? "working" : liveMatch ? "active" : "planned"
+          };
+        }) : crew.filter((a) => {
           const n = a.name.toLowerCase();
           if (slugLower === "orgfy") return n.startsWith("orgfy") && !n.includes("iris");
           if (slugLower.includes("lumen")) return n.includes("lumen");
           return n.includes(slugLower);
-        });
-        let workingCount = 0;
-        let errorCount = 0;
-        const agents = matchingCrew.slice(0, 6).map((a) => {
-          const turn = a.pubkey ? byPk[a.pubkey.toLowerCase()] : void 0;
+        }).map((a) => {
+          const rawTurn = a.pubkey ? byPk[a.pubkey.toLowerCase()] : void 0;
+          const turn = rawTurn && (!empCanal || !rawTurn.channelId || rawTurn.channelId.toLowerCase() === empCanal) ? rawTurn : void 0;
           const isErr = (turn == null ? void 0 : turn.state) === "error";
           const isWork = Boolean(turn && !isErr);
           if (isErr) errorCount += 1;
@@ -55766,6 +56536,7 @@ function createHoldingTower3DComponent(ctx) {
             status: isErr ? "error" : isWork ? "working" : "active"
           };
         });
+        const agents = resolvedAgents;
         const packets = [];
         if (slugLower === String(props.activeTenant || "").toLowerCase()) {
           for (const it of activeItems.slice(0, 6)) {
@@ -55798,7 +56569,7 @@ function createHoldingTower3DComponent(ctx) {
           slug: emp.slug,
           nome: emp.nome || emp.slug,
           estagio: emp.estagio || "operacional",
-          agentesCount: matchingCrew.length || emp.agentesTotal || 0,
+          agentesCount: agents.length || emp.agentesTotal || 0,
           workingCount,
           errorCount,
           openPrsCount,
@@ -56106,6 +56877,29 @@ function createHoldingTower3DComponent(ctx) {
       }
       const floorEntries = [];
       const avatars = [];
+      const thinkingSprites = [];
+      const thinkingMatWorking = kit.own(
+        new SpriteMaterial({
+          map: makeThinkingBubbleTexture(kit, "working", maxAniso),
+          transparent: true,
+          depthWrite: false
+        })
+      );
+      const thinkingMatError = kit.own(
+        new SpriteMaterial({
+          map: makeThinkingBubbleTexture(kit, "error", maxAniso),
+          transparent: true,
+          depthWrite: false
+        })
+      );
+      const attachThinkingBubble = (parent, x, y, z, kind, phase) => {
+        const sprite = new Sprite(kind === "error" ? thinkingMatError : thinkingMatWorking);
+        sprite.position.set(x, y, z);
+        sprite.scale.set(0.68, 0.46, 1);
+        sprite.renderOrder = 10;
+        parent.add(sprite);
+        thinkingSprites.push({ sprite, baseY: y, phase });
+      };
       const conveyorPackets = [];
       const warningBeacons = [];
       const rackLeds = [];
@@ -56285,6 +57079,9 @@ function createHoldingTower3DComponent(ctx) {
               );
               floorGroup.add(beam);
             }
+            if (ag.status === "working" || ag.status === "error") {
+              attachThinkingBubble(floorGroup, slot.pos[0], 1.78, slot.pos[2], ag.status, idx * 1.15);
+            }
             const aHit = new Mesh(kit.own(new BoxGeometry(0.85, 1.35, 0.85)), kit.own(new MeshBasicMaterial({ visible: false })));
             aHit.position.set(0, 0.68, 0);
             seatWrap.add(aHit);
@@ -56295,7 +57092,7 @@ function createHoldingTower3DComponent(ctx) {
             });
             avatars.push({ handle: av, phase: idx * 0.95, working: ag.status === "working", error: ag.status === "error" });
           });
-        } else if (floor.estagio === "planejado") {
+        } else if (floor.estagio === "planejado" && floor.agents.length <= 2) {
           const blueprintFloor = new Mesh(
             kit.own(new BoxGeometry(8.8, 0.025, 4.8)),
             kit.matte(darkFactoryMode ? [0.12, 0.17, 0.28] : [0.76, 0.83, 0.94], { roughness: 0.9 })
@@ -56390,9 +57187,22 @@ function createHoldingTower3DComponent(ctx) {
           });
           const screenMatA = kit.own(new MeshBasicMaterial({ map: makeDeskScreenTexture(kit, floorAccent, fIdx * 7 + 1, maxAniso) }));
           const screenMatB = kit.own(new MeshBasicMaterial({ map: makeDeskScreenTexture(kit, palette.accent.reviewer, fIdx * 7 + 2, maxAniso) }));
-          floor.agents.slice(0, 6).forEach((ag, idx) => {
-            const dx = -2.65 + idx * 1.46;
-            const dz = -1.05;
+          const floorAgents = floor.agents.slice(0, 16);
+          const totalAg = floorAgents.length;
+          const useTwoRows = totalAg > 6;
+          const backRowCount = useTwoRows ? Math.ceil(totalAg / 2) : totalAg;
+          const frontRowCount = useTwoRows ? totalAg - backRowCount : 0;
+          const unitScale = useTwoRows ? 0.76 : 0.94;
+          const avatarScale = useTwoRows ? 0.76 : 0.92;
+          floorAgents.forEach((ag, idx) => {
+            const isFrontRow = useTwoRows && idx >= backRowCount;
+            const rowCount = isFrontRow ? frontRowCount : backRowCount;
+            const colIdx = isFrontRow ? idx - backRowCount : idx;
+            const xMin = -3.35;
+            const xMax = 4.65;
+            const span = xMax - xMin;
+            const dx = rowCount === 1 ? 0.65 : xMin + colIdx / Math.max(1, rowCount - 1) * span;
+            const dz = useTwoRows ? isFrontRow ? -0.22 : -1.78 : -1.05;
             const station = buildWorkstationUnit(
               kit,
               matWood,
@@ -56402,13 +57212,17 @@ function createHoldingTower3DComponent(ctx) {
               matPaper,
               idx % 2 === 0 ? screenMatA : screenMatB
             );
+            station.scale.setScalar(unitScale);
             station.position.set(dx, 0, dz);
             floorGroup.add(station);
-            const av = buildCustomAvatar3D(kit, palette, ag, { seatHeight: 0.38, scale: 0.92 });
-            av.root.position.set(dx, 0, dz - 0.14);
+            const av = buildCustomAvatar3D(kit, palette, ag, { seatHeight: 0.38 * unitScale, scale: avatarScale });
+            av.root.position.set(dx, 0, dz - 0.14 * unitScale);
             floorGroup.add(av.root);
-            const aHit = new Mesh(kit.own(new BoxGeometry(0.85, 1.35, 0.85)), kit.own(new MeshBasicMaterial({ visible: false })));
-            aHit.position.set(dx, 0.68, dz - 0.14);
+            if (ag.status === "working" || ag.status === "error") {
+              attachThinkingBubble(floorGroup, dx, 1.72 * (useTwoRows ? 0.88 : 1), dz - 0.14 * unitScale, ag.status, fIdx * 1.9 + idx * 0.7);
+            }
+            const aHit = new Mesh(kit.own(new BoxGeometry(0.8, 1.35, 0.8)), kit.own(new MeshBasicMaterial({ visible: false })));
+            aHit.position.set(dx, 0.68, dz - 0.14 * unitScale);
             floorGroup.add(aHit);
             hitTargets.push(aHit);
             selectionByHit.set(aHit, {
@@ -56458,6 +57272,7 @@ function createHoldingTower3DComponent(ctx) {
         desiredPhiRef.current = null;
         renderer.domElement.style.cursor = dragMode === "pan" ? "move" : "grabbing";
       };
+      const getEffectiveTotalH = () => floors.length * FLOOR_H + (explodedRef.current ? Math.max(0, floors.length - 1) * 1.95 : 0);
       const onMove = (e) => {
         if (dragMode !== "none") {
           const dx = e.clientX - lastX;
@@ -56475,9 +57290,9 @@ function createHoldingTower3DComponent(ctx) {
             const up = new Vector3(0, 1, 0);
             target.addScaledVector(right, -dx * unitsPerPx);
             target.addScaledVector(up, dy * unitsPerPx);
-            target.x = Math.max(-9, Math.min(9, target.x));
-            target.z = Math.max(-7, Math.min(7, target.z));
-            target.y = Math.max(-0.5, Math.min(totalH + 2, target.y));
+            target.x = Math.max(-12, Math.min(12, target.x));
+            target.z = Math.max(-9, Math.min(9, target.z));
+            target.y = Math.max(-1, Math.min(getEffectiveTotalH() + 4, target.y));
             desiredTargetRef.current.copy(target);
           }
           updateCamera();
@@ -56492,12 +57307,15 @@ function createHoldingTower3DComponent(ctx) {
           const hit2 = pickTarget(e);
           if (hit2) {
             setSelection(hit2.sel);
-            desiredTargetRef.current.copy(hit2.focusPos);
+            const stepH = FLOOR_H + (explodedRef.current ? 1.95 : 0);
+            const fIdx = Math.max(0, floors.findIndex((fl) => fl.slug === hit2.sel.floor.slug));
+            desiredTargetRef.current.set(hit2.focusPos.x, fIdx * stepH + 1, hit2.focusPos.z);
             desiredFrustumRef.current = hit2.sel.kind === "floor" ? 8.2 : 4.6;
           } else {
             setSelection(null);
-            desiredTargetRef.current.set(0, defaultCenterY, 0);
-            desiredFrustumRef.current = defaultFrustum;
+            const effH = getEffectiveTotalH();
+            desiredTargetRef.current.set(0, Math.max(2.6, effH * 0.48), 0);
+            desiredFrustumRef.current = Math.max(14.5, effH * 1.18);
           }
         }
         dragMode = "none";
@@ -56514,13 +57332,13 @@ function createHoldingTower3DComponent(ctx) {
         const ny = -((e.clientY - rect.top) / rect.height) * 2 + 1;
         const prevFrustum = frustum;
         const factor = e.deltaY > 0 ? 1.1 : 0.91;
-        const nextF = Math.max(2, Math.min(26, frustum * factor));
+        const nextF = Math.max(2, Math.min(48, frustum * factor));
         const deltaF = prevFrustum - nextF;
         if (deltaF > 0) {
           const asp = rect.width / Math.max(1, rect.height);
           const right = new Vector3(Math.cos(theta), 0, -Math.sin(theta));
           target.addScaledVector(right, nx * deltaF * asp * 0.25);
-          target.y = Math.max(-0.5, Math.min(totalH + 2, target.y + ny * deltaF * 0.25));
+          target.y = Math.max(-1, Math.min(getEffectiveTotalH() + 4, target.y + ny * deltaF * 0.25));
           desiredTargetRef.current.copy(target);
         }
         frustum = nextF;
@@ -56537,8 +57355,8 @@ function createHoldingTower3DComponent(ctx) {
         else if (e.key === "s" || e.key === "S" || e.key === "ArrowDown") desiredTargetRef.current.addScaledVector(forward, -step);
         else if (e.key === "a" || e.key === "A" || e.key === "ArrowLeft") desiredTargetRef.current.addScaledVector(right, -step);
         else if (e.key === "d" || e.key === "D" || e.key === "ArrowRight") desiredTargetRef.current.addScaledVector(right, step);
-        else if (e.key === "e" || e.key === "E") desiredTargetRef.current.y = Math.min(totalH + 1, desiredTargetRef.current.y + step);
-        else if (e.key === "q" || e.key === "Q") desiredTargetRef.current.y = Math.max(0, desiredTargetRef.current.y - step);
+        else if (e.key === "e" || e.key === "E") desiredTargetRef.current.y = Math.min(getEffectiveTotalH() + 4, desiredTargetRef.current.y + step);
+        else if (e.key === "q" || e.key === "Q") desiredTargetRef.current.y = Math.max(-1, desiredTargetRef.current.y - step);
         else handled = false;
         if (handled) e.preventDefault();
       };
@@ -56614,6 +57432,11 @@ function createHoldingTower3DComponent(ctx) {
         for (const b of warningBeacons) {
           b.mesh.scale.setScalar(1 + Math.sin(t * 7 + b.phase) * 0.14);
         }
+        for (const sp of thinkingSprites) {
+          sp.sprite.position.y = sp.baseY + Math.sin(t * 3.4 + sp.phase) * 0.065;
+          const pulse = 1 + Math.sin(t * 4.6 + sp.phase) * 0.07;
+          sp.sprite.scale.set(0.68 * pulse, 0.46 * pulse, 1);
+        }
         renderer.render(scene, camera);
       };
       animate();
@@ -56644,23 +57467,36 @@ function createHoldingTower3DComponent(ctx) {
     const selectedSlug = (selection == null ? void 0 : selection.floor.slug) || null;
     const activeFloorCard = (selection == null ? void 0 : selection.floor) || floors.find((f) => f.slug === hoveredSlug) || null;
     const focusFloorBySlug = (slug) => {
+      const stepH = 3.65 + (explodedRef.current ? 1.95 : 0);
       if (!slug) {
         setSelection(null);
-        setFitTick((n) => n + 1);
+        const effH = floors.length * 3.65 + (explodedRef.current ? (floors.length - 1) * 1.95 : 0);
+        desiredTargetRef.current.set(0, Math.max(2.6, effH * 0.48), 0);
+        desiredFrustumRef.current = Math.max(14.5, effH * 1.18);
         return;
       }
       const idx = floors.findIndex((f) => f.slug === slug);
       if (idx >= 0) {
         setSelection({ kind: "floor", floor: floors[idx] });
-        desiredTargetRef.current.set(0, idx * 3.65 + 1, 0);
+        desiredTargetRef.current.set(0, idx * stepH + 1, 0);
         desiredFrustumRef.current = 6.8;
       }
     };
     const handleEyeLevelView = () => {
       const idx = selectedSlug ? Math.max(0, floors.findIndex((f) => f.slug === selectedSlug)) : 0;
-      desiredTargetRef.current.set(0, idx * 3.65 + 0.85, 0);
+      const stepH = 3.65 + (explodedRef.current ? 1.95 : 0);
+      desiredTargetRef.current.set(0, idx * stepH + 0.85, 0);
       desiredFrustumRef.current = 4.4;
       desiredPhiRef.current = 1.42;
+    };
+    const handleToggleExploded = () => {
+      setExplodedView((prev) => {
+        const next = !prev;
+        const effH = floors.length * 3.65 + (next ? (floors.length - 1) * 1.95 : 0);
+        desiredTargetRef.current.set(0, Math.max(2.6, effH * 0.48), 0);
+        desiredFrustumRef.current = Math.max(14.5, effH * 1.18);
+        return next;
+      });
     };
     const totalLivePackets = floors.reduce((sum, f) => sum + f.packets.length, 0);
     return h(
@@ -56879,7 +57715,7 @@ function createHoldingTower3DComponent(ctx) {
               "data-tower-exploded-btn": "true",
               "data-variant": explodedView ? "primary" : void 0,
               style: { background: explodedView ? void 0 : "rgba(18, 20, 26, 0.88)" },
-              onClick: () => setExplodedView((v2) => !v2),
+              onClick: handleToggleExploded,
               title: "Separar os andares verticalmente para inspecionar cada camada (Vista Explodida)"
             },
             explodedView ? "⊟ Compactar" : "⊞ Explodir"
@@ -56995,8 +57831,10 @@ function createHoldingTower3DComponent(ctx) {
               style: { background: "rgba(18, 20, 26, 0.88)" },
               onClick: () => {
                 setSelection(null);
+                const effH = floors.length * 3.65 + (explodedRef.current ? (floors.length - 1) * 1.95 : 0);
+                desiredTargetRef.current.set(0, Math.max(2.6, effH * 0.48), 0);
+                desiredFrustumRef.current = Math.max(14.5, effH * 1.18);
                 desiredPhiRef.current = 1.02;
-                setFitTick((n) => n + 1);
               }
             },
             "⤢ Fit"

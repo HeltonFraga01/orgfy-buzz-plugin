@@ -229,6 +229,66 @@ function makeDeskScreenTexture(kit: Kit, accent: Rgb, seed: number, maxAnisotrop
   return sharpenCanvasTexture(kit.canvasTexture(c), maxAnisotropy);
 }
 
+/** Balãozinho minimalista de "pensando / conversando" (• • • azul ou ! vermelho), sem texto poluindo a torre. */
+function makeThinkingBubbleTexture(
+  kit: Kit,
+  kind: "working" | "error",
+  maxAnisotropy = 8
+): THREE.CanvasTexture {
+  const logicalW = 96;
+  const logicalH = 66;
+  const c = canvasOf(logicalW * 2, logicalH * 2);
+  const g = c.getContext("2d")!;
+  g.scale(2, 2);
+
+  const isErr = kind === "error";
+  const fill = isErr ? "rgba(239, 68, 68, 0.92)" : "rgba(59, 130, 246, 0.92)";
+  const stroke = isErr ? "#fca5a5" : "#93c5fd";
+
+  const x = 10;
+  const y = 8;
+  const w = 76;
+  const h = 42;
+  const r = 16;
+
+  g.beginPath();
+  g.moveTo(x + r, y);
+  g.lineTo(x + w - r, y);
+  g.quadraticCurveTo(x + w, y, x + w, y + r);
+  g.lineTo(x + w, y + h - r);
+  g.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  g.lineTo(x + w * 0.56, y + h);
+  g.lineTo(x + w * 0.46, y + h + 11);
+  g.lineTo(x + w * 0.39, y + h);
+  g.lineTo(x + r, y + h);
+  g.quadraticCurveTo(x, y + h, x, y + h - r);
+  g.lineTo(x, y + r);
+  g.quadraticCurveTo(x, y, x + r, y);
+  g.closePath();
+
+  g.fillStyle = fill;
+  g.fill();
+  g.strokeStyle = stroke;
+  g.lineWidth = 2.5;
+  g.stroke();
+
+  g.fillStyle = "#ffffff";
+  if (isErr) {
+    g.font = "800 26px -apple-system, BlinkMacSystemFont, sans-serif";
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.fillText("!", x + w / 2, y + h / 2 + 1);
+  } else {
+    for (const dx of [-15, 0, 15]) {
+      g.beginPath();
+      g.arc(x + w / 2 + dx, y + h / 2, 4.4, 0, Math.PI * 2);
+      g.fill();
+    }
+  }
+
+  return sharpenCanvasTexture(kit.canvasTexture(c), maxAnisotropy);
+}
+
 /** Planta estilo LEGO / Voxel em blocos empilhados. */
 function buildVoxelPlantProp(kit: Kit, p: FloorPalette, matSteel: THREE.Material): THREE.Group {
   const g = new THREE.Group();
@@ -397,32 +457,78 @@ export function createHoldingTower3DComponent(ctx: Context) {
 
       const subsidiaryFloors: HoldingTowerFloorInfo[] = empresas.map((emp: any) => {
         const slugLower = String(emp.slug || "").toLowerCase();
-        const matchingCrew = crew.filter((a) => {
-          const n = a.name.toLowerCase();
-          if (slugLower === "orgfy") return n.startsWith("orgfy") && !n.includes("iris");
-          if (slugLower.includes("lumen")) return n.includes("lumen");
-          return n.includes(slugLower);
-        });
+        const empCanal = String(emp.canal || "").trim().toLowerCase();
+        const manifestAgents: any[] = Array.isArray(emp.agentes) ? emp.agentes : [];
 
+        // Resolve cada agente a partir do manifesto real da empresa (1:1 com empresas/<slug>.json), cruzando com liveCrew
         let workingCount = 0;
         let errorCount = 0;
-        const agents = matchingCrew.slice(0, 6).map((a) => {
-          const turn = a.pubkey ? byPk[a.pubkey.toLowerCase()] : undefined;
-          const isErr = turn?.state === "error";
-          const isWork = Boolean(turn && !isErr);
-          if (isErr) errorCount += 1;
-          if (isWork) workingCount += 1;
-          return {
-            key: a.key,
-            pubkey: a.pubkey,
-            name: a.name,
-            role: a.model,
-            picture: a.picture,
-            stepLabel: turn?.stepLabel,
-            turn,
-            status: (isErr ? "error" : isWork ? "working" : "active") as "active" | "working" | "planned" | "error",
-          };
-        });
+        const resolvedAgents =
+          manifestAgents.length > 0
+            ? manifestAgents.map((ma: any) => {
+                const maName = String(ma.name || "Agente");
+                const maPk = String(ma.pubkey || "").trim().toLowerCase();
+                const liveMatch = crew.find(
+                  (c) =>
+                    (maPk && c.pubkey && c.pubkey.toLowerCase() === maPk) ||
+                    c.name.toLowerCase() === maName.toLowerCase()
+                );
+                const pk = (liveMatch?.pubkey || maPk || "").toLowerCase();
+                const rawTurn = pk ? byPk[pk] : undefined;
+                // Isolamento por canal: agentes compartilhados (COO/CEO) só acendem balão no andar do canal daquele turno
+                const turn =
+                  rawTurn && (!empCanal || !rawTurn.channelId || rawTurn.channelId.toLowerCase() === empCanal)
+                    ? rawTurn
+                    : undefined;
+                const isErr = turn?.state === "error";
+                const isWork = Boolean(turn && !isErr);
+                if (isErr) errorCount += 1;
+                if (isWork) workingCount += 1;
+                return {
+                  key: liveMatch?.key,
+                  pubkey: pk || undefined,
+                  name: maName,
+                  role: String(ma.papel || liveMatch?.model || ma.model || "agente"),
+                  picture: liveMatch?.picture,
+                  stepLabel: turn?.stepLabel,
+                  turn,
+                  status: (isErr ? "error" : isWork ? "working" : liveMatch ? "active" : "planned") as
+                    | "active"
+                    | "working"
+                    | "planned"
+                    | "error",
+                };
+              })
+            : crew
+                .filter((a) => {
+                  const n = a.name.toLowerCase();
+                  if (slugLower === "orgfy") return n.startsWith("orgfy") && !n.includes("iris");
+                  if (slugLower.includes("lumen")) return n.includes("lumen");
+                  return n.includes(slugLower);
+                })
+                .map((a) => {
+                  const rawTurn = a.pubkey ? byPk[a.pubkey.toLowerCase()] : undefined;
+                  const turn =
+                    rawTurn && (!empCanal || !rawTurn.channelId || rawTurn.channelId.toLowerCase() === empCanal)
+                      ? rawTurn
+                      : undefined;
+                  const isErr = turn?.state === "error";
+                  const isWork = Boolean(turn && !isErr);
+                  if (isErr) errorCount += 1;
+                  if (isWork) workingCount += 1;
+                  return {
+                    key: a.key,
+                    pubkey: a.pubkey,
+                    name: a.name,
+                    role: a.model,
+                    picture: a.picture,
+                    stepLabel: turn?.stepLabel,
+                    turn,
+                    status: (isErr ? "error" : isWork ? "working" : "active") as "active" | "working" | "planned" | "error",
+                  };
+                });
+
+        const agents = resolvedAgents;
 
         const packets: TowerLivePacket[] = [];
         if (slugLower === String(props.activeTenant || "").toLowerCase()) {
@@ -473,7 +579,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
           slug: emp.slug,
           nome: emp.nome || emp.slug,
           estagio: emp.estagio || "operacional",
-          agentesCount: matchingCrew.length || emp.agentesTotal || 0,
+          agentesCount: agents.length || emp.agentesTotal || 0,
           workingCount,
           errorCount,
           openPrsCount,
@@ -841,6 +947,36 @@ export function createHoldingTower3DComponent(ctx: Context) {
         edgeMat: THREE.LineBasicMaterial;
       }> = [];
       const avatars: Array<{ handle: Avatar3DHandle; phase: number; working: boolean; error: boolean }> = [];
+      const thinkingSprites: Array<{ sprite: THREE.Sprite; baseY: number; phase: number }> = [];
+      const thinkingMatWorking = kit.own(
+        new THREE.SpriteMaterial({
+          map: makeThinkingBubbleTexture(kit, "working", maxAniso),
+          transparent: true,
+          depthWrite: false,
+        })
+      );
+      const thinkingMatError = kit.own(
+        new THREE.SpriteMaterial({
+          map: makeThinkingBubbleTexture(kit, "error", maxAniso),
+          transparent: true,
+          depthWrite: false,
+        })
+      );
+      const attachThinkingBubble = (
+        parent: THREE.Object3D,
+        x: number,
+        y: number,
+        z: number,
+        kind: "working" | "error",
+        phase: number
+      ) => {
+        const sprite = new THREE.Sprite(kind === "error" ? thinkingMatError : thinkingMatWorking);
+        sprite.position.set(x, y, z);
+        sprite.scale.set(0.68, 0.46, 1);
+        sprite.renderOrder = 10;
+        parent.add(sprite);
+        thinkingSprites.push({ sprite, baseY: y, phase });
+      };
       const conveyorPackets: Array<{ mesh: THREE.Group; y: number; z: number; speed: number; offset: number }> = [];
       const warningBeacons: Array<{ mesh: THREE.Mesh; phase: number }> = [];
       const rackLeds: THREE.Mesh[] = [];
@@ -1061,6 +1197,10 @@ export function createHoldingTower3DComponent(ctx: Context) {
               floorGroup.add(beam);
             }
 
+            if (ag.status === "working" || ag.status === "error") {
+              attachThinkingBubble(floorGroup, slot.pos[0], 1.78, slot.pos[2], ag.status, idx * 1.15);
+            }
+
             const aHit = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.85, 1.35, 0.85)), kit.own(new THREE.MeshBasicMaterial({ visible: false })));
             aHit.position.set(0, 0.68, 0);
             seatWrap.add(aHit);
@@ -1072,7 +1212,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
 
             avatars.push({ handle: av, phase: idx * 0.95, working: ag.status === "working", error: ag.status === "error" });
           });
-        } else if (floor.estagio === "planejado") {
+        } else if (floor.estagio === "planejado" && floor.agents.length <= 2) {
           const blueprintFloor = new THREE.Mesh(
             kit.own(new THREE.BoxGeometry(8.8, 0.025, 4.8)),
             kit.matte(darkFactoryMode ? [0.12, 0.17, 0.28] : [0.76, 0.83, 0.94], { roughness: 0.9 })
@@ -1181,9 +1321,25 @@ export function createHoldingTower3DComponent(ctx: Context) {
           const screenMatA = kit.own(new THREE.MeshBasicMaterial({ map: makeDeskScreenTexture(kit, floorAccent, fIdx * 7 + 1, maxAniso) }));
           const screenMatB = kit.own(new THREE.MeshBasicMaterial({ map: makeDeskScreenTexture(kit, palette.accent.reviewer, fIdx * 7 + 2, maxAniso) }));
 
-          floor.agents.slice(0, 6).forEach((ag, idx) => {
-            const dx = -2.65 + idx * 1.46;
-            const dz = -1.05;
+          // Renderiza TODOS os agentes correspondentes da empresa (1 fileira até 6; 2 fileiras organizadas de 7 a 16)
+          const floorAgents = floor.agents.slice(0, 16);
+          const totalAg = floorAgents.length;
+          const useTwoRows = totalAg > 6;
+          const backRowCount = useTwoRows ? Math.ceil(totalAg / 2) : totalAg;
+          const frontRowCount = useTwoRows ? totalAg - backRowCount : 0;
+          const unitScale = useTwoRows ? 0.76 : 0.94;
+          const avatarScale = useTwoRows ? 0.76 : 0.92;
+
+          floorAgents.forEach((ag, idx) => {
+            const isFrontRow = useTwoRows && idx >= backRowCount;
+            const rowCount = isFrontRow ? frontRowCount : backRowCount;
+            const colIdx = isFrontRow ? idx - backRowCount : idx;
+            const xMin = -3.35;
+            const xMax = 4.65;
+            const span = xMax - xMin;
+            const dx = rowCount === 1 ? 0.65 : xMin + (colIdx / Math.max(1, rowCount - 1)) * span;
+            const dz = useTwoRows ? (isFrontRow ? -0.22 : -1.78) : -1.05;
+
             const station = buildWorkstationUnit(
               kit,
               matWood,
@@ -1193,15 +1349,20 @@ export function createHoldingTower3DComponent(ctx: Context) {
               matPaper,
               idx % 2 === 0 ? screenMatA : screenMatB
             );
+            station.scale.setScalar(unitScale);
             station.position.set(dx, 0, dz);
             floorGroup.add(station);
 
-            const av = buildCustomAvatar3D(kit, palette, ag, { seatHeight: 0.38, scale: 0.92, showPortraitMedallion: false });
-            av.root.position.set(dx, 0, dz - 0.14);
+            const av = buildCustomAvatar3D(kit, palette, ag, { seatHeight: 0.38 * unitScale, scale: avatarScale, showPortraitMedallion: false });
+            av.root.position.set(dx, 0, dz - 0.14 * unitScale);
             floorGroup.add(av.root);
 
-            const aHit = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.85, 1.35, 0.85)), kit.own(new THREE.MeshBasicMaterial({ visible: false })));
-            aHit.position.set(dx, 0.68, dz - 0.14);
+            if (ag.status === "working" || ag.status === "error") {
+              attachThinkingBubble(floorGroup, dx, 1.72 * (useTwoRows ? 0.88 : 1), dz - 0.14 * unitScale, ag.status, fIdx * 1.9 + idx * 0.7);
+            }
+
+            const aHit = new THREE.Mesh(kit.own(new THREE.BoxGeometry(0.8, 1.35, 0.8)), kit.own(new THREE.MeshBasicMaterial({ visible: false })));
+            aHit.position.set(dx, 0.68, dz - 0.14 * unitScale);
             floorGroup.add(aHit);
             hitTargets.push(aHit);
             selectionByHit.set(aHit, {
@@ -1259,6 +1420,9 @@ export function createHoldingTower3DComponent(ctx: Context) {
         renderer.domElement.style.cursor = dragMode === "pan" ? "move" : "grabbing";
       };
 
+      const getEffectiveTotalH = () =>
+        floors.length * FLOOR_H + (explodedRef.current ? Math.max(0, floors.length - 1) * 1.95 : 0);
+
       const onMove = (e: MouseEvent) => {
         if (dragMode !== "none") {
           const dx = e.clientX - lastX;
@@ -1272,16 +1436,16 @@ export function createHoldingTower3DComponent(ctx: Context) {
             // Ângulo phi ampliado até 1.50 rad (~86°): permite abaixar quase até o nível do piso!
             phi = Math.max(0.18, Math.min(1.5, phi - dy * 0.007));
           } else {
-            // Pan 3D proporcional ao nível de zoom atual
+            // Pan 3D proporcional ao nível de zoom atual (cobre toda a altura da torre mesmo explodida)
             const rect = renderer.domElement.getBoundingClientRect();
             const unitsPerPx = frustum / Math.max(200, rect.height);
             const right = new THREE.Vector3(Math.cos(theta), 0, -Math.sin(theta));
             const up = new THREE.Vector3(0, 1, 0);
             target.addScaledVector(right, -dx * unitsPerPx);
             target.addScaledVector(up, dy * unitsPerPx);
-            target.x = Math.max(-9, Math.min(9, target.x));
-            target.z = Math.max(-7, Math.min(7, target.z));
-            target.y = Math.max(-0.5, Math.min(totalH + 2, target.y));
+            target.x = Math.max(-12, Math.min(12, target.x));
+            target.z = Math.max(-9, Math.min(9, target.z));
+            target.y = Math.max(-1.0, Math.min(getEffectiveTotalH() + 4, target.y));
             desiredTargetRef.current.copy(target);
           }
           updateCamera();
@@ -1297,12 +1461,15 @@ export function createHoldingTower3DComponent(ctx: Context) {
           const hit = pickTarget(e);
           if (hit) {
             setSelection(hit.sel);
-            desiredTargetRef.current.copy(hit.focusPos);
+            const stepH = FLOOR_H + (explodedRef.current ? 1.95 : 0);
+            const fIdx = Math.max(0, floors.findIndex((fl) => fl.slug === hit.sel.floor.slug));
+            desiredTargetRef.current.set(hit.focusPos.x, fIdx * stepH + 1.0, hit.focusPos.z);
             desiredFrustumRef.current = hit.sel.kind === "floor" ? 8.2 : 4.6;
           } else {
             setSelection(null);
-            desiredTargetRef.current.set(0, defaultCenterY, 0);
-            desiredFrustumRef.current = defaultFrustum;
+            const effH = getEffectiveTotalH();
+            desiredTargetRef.current.set(0, Math.max(2.6, effH * 0.48), 0);
+            desiredFrustumRef.current = Math.max(14.5, effH * 1.18);
           }
         }
         dragMode = "none";
@@ -1320,9 +1487,9 @@ export function createHoldingTower3DComponent(ctx: Context) {
         const nx = ((e.clientX - rect.left) / rect.width) * 2 - 1;
         const ny = -((e.clientY - rect.top) / rect.height) * 2 + 1;
         const prevFrustum = frustum;
-        // Zoom profundo: de 26 (torre inteira) até 2.0 (close-up de uma mesa/personagem!)
+        // Zoom amplo: de 48 (torre inteira explodida com folga) até 2.0 (close-up de uma mesa/personagem!)
         const factor = e.deltaY > 0 ? 1.1 : 0.91;
-        const nextF = Math.max(2.0, Math.min(26, frustum * factor));
+        const nextF = Math.max(2.0, Math.min(48, frustum * factor));
         const deltaF = prevFrustum - nextF;
 
         // Desloca suavemente o alvo na direção do cursor ao aproximar o zoom
@@ -1330,7 +1497,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
           const asp = rect.width / Math.max(1, rect.height);
           const right = new THREE.Vector3(Math.cos(theta), 0, -Math.sin(theta));
           target.addScaledVector(right, nx * deltaF * asp * 0.25);
-          target.y = Math.max(-0.5, Math.min(totalH + 2, target.y + ny * deltaF * 0.25));
+          target.y = Math.max(-1.0, Math.min(getEffectiveTotalH() + 4, target.y + ny * deltaF * 0.25));
           desiredTargetRef.current.copy(target);
         }
         frustum = nextF;
@@ -1348,8 +1515,8 @@ export function createHoldingTower3DComponent(ctx: Context) {
         else if (e.key === "s" || e.key === "S" || e.key === "ArrowDown") desiredTargetRef.current.addScaledVector(forward, -step);
         else if (e.key === "a" || e.key === "A" || e.key === "ArrowLeft") desiredTargetRef.current.addScaledVector(right, -step);
         else if (e.key === "d" || e.key === "D" || e.key === "ArrowRight") desiredTargetRef.current.addScaledVector(right, step);
-        else if (e.key === "e" || e.key === "E") desiredTargetRef.current.y = Math.min(totalH + 1, desiredTargetRef.current.y + step);
-        else if (e.key === "q" || e.key === "Q") desiredTargetRef.current.y = Math.max(0, desiredTargetRef.current.y - step);
+        else if (e.key === "e" || e.key === "E") desiredTargetRef.current.y = Math.min(getEffectiveTotalH() + 4, desiredTargetRef.current.y + step);
+        else if (e.key === "q" || e.key === "Q") desiredTargetRef.current.y = Math.max(-1, desiredTargetRef.current.y - step);
         else handled = false;
         if (handled) e.preventDefault();
       };
@@ -1433,6 +1600,12 @@ export function createHoldingTower3DComponent(ctx: Context) {
           b.mesh.scale.setScalar(1 + Math.sin(t * 7 + b.phase) * 0.14);
         }
 
+        for (const sp of thinkingSprites) {
+          sp.sprite.position.y = sp.baseY + Math.sin(t * 3.4 + sp.phase) * 0.065;
+          const pulse = 1 + Math.sin(t * 4.6 + sp.phase) * 0.07;
+          sp.sprite.scale.set(0.68 * pulse, 0.46 * pulse, 1);
+        }
+
         renderer.render(scene, camera);
       };
       animate();
@@ -1470,24 +1643,38 @@ export function createHoldingTower3DComponent(ctx: Context) {
     const activeFloorCard = selection?.floor || floors.find((f) => f.slug === hoveredSlug) || null;
 
     const focusFloorBySlug = (slug: string | null) => {
+      const stepH = 3.65 + (explodedRef.current ? 1.95 : 0);
       if (!slug) {
         setSelection(null);
-        setFitTick((n) => n + 1);
+        const effH = floors.length * 3.65 + (explodedRef.current ? (floors.length - 1) * 1.95 : 0);
+        desiredTargetRef.current.set(0, Math.max(2.6, effH * 0.48), 0);
+        desiredFrustumRef.current = Math.max(14.5, effH * 1.18);
         return;
       }
       const idx = floors.findIndex((f) => f.slug === slug);
       if (idx >= 0) {
         setSelection({ kind: "floor", floor: floors[idx] });
-        desiredTargetRef.current.set(0, idx * 3.65 + 1.0, 0);
+        desiredTargetRef.current.set(0, idx * stepH + 1.0, 0);
         desiredFrustumRef.current = 6.8;
       }
     };
 
     const handleEyeLevelView = () => {
       const idx = selectedSlug ? Math.max(0, floors.findIndex((f) => f.slug === selectedSlug)) : 0;
-      desiredTargetRef.current.set(0, idx * 3.65 + 0.85, 0);
+      const stepH = 3.65 + (explodedRef.current ? 1.95 : 0);
+      desiredTargetRef.current.set(0, idx * stepH + 0.85, 0);
       desiredFrustumRef.current = 4.4;
       desiredPhiRef.current = 1.42; // ângulo bem baixo, quase no nível do piso!
+    };
+
+    const handleToggleExploded = () => {
+      setExplodedView((prev) => {
+        const next = !prev;
+        const effH = floors.length * 3.65 + (next ? (floors.length - 1) * 1.95 : 0);
+        desiredTargetRef.current.set(0, Math.max(2.6, effH * 0.48), 0);
+        desiredFrustumRef.current = Math.max(14.5, effH * 1.18);
+        return next;
+      });
     };
 
     const totalLivePackets = floors.reduce((sum, f) => sum + f.packets.length, 0);
@@ -1720,7 +1907,7 @@ export function createHoldingTower3DComponent(ctx: Context) {
               "data-tower-exploded-btn": "true",
               "data-variant": explodedView ? "primary" : undefined,
               style: { background: explodedView ? undefined : "rgba(18, 20, 26, 0.88)" },
-              onClick: () => setExplodedView((v) => !v),
+              onClick: handleToggleExploded,
               title: "Separar os andares verticalmente para inspecionar cada camada (Vista Explodida)",
             },
             explodedView ? "⊟ Compactar" : "⊞ Explodir"
@@ -1834,8 +2021,10 @@ export function createHoldingTower3DComponent(ctx: Context) {
               style: { background: "rgba(18, 20, 26, 0.88)" },
               onClick: () => {
                 setSelection(null);
+                const effH = floors.length * 3.65 + (explodedRef.current ? (floors.length - 1) * 1.95 : 0);
+                desiredTargetRef.current.set(0, Math.max(2.6, effH * 0.48), 0);
+                desiredFrustumRef.current = Math.max(14.5, effH * 1.18);
                 desiredPhiRef.current = 1.02;
-                setFitTick((n) => n + 1);
               },
             },
             "⤢ Fit"
