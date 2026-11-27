@@ -64101,7 +64101,7 @@ const PINNED_HOST_COMMANDS = Object.freeze([
   {
     id: "orgfy-holding-scaffold",
     scriptPath: "ferramentas/esteira/holding_scaffold.py",
-    sha256: "d3ccfc264be3a9e0457f79d7b61d8aba2971ee9d60d76a3b397c8d3b83a0ab7c"
+    sha256: "0bbbca3675731a32a5c4aa36efa49b279e157cc6c65c2b1da6bedb0cf05884d7"
   }
 ]);
 async function computeUtf8Sha256(content) {
