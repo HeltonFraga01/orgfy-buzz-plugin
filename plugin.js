@@ -10416,20 +10416,41 @@ function createCodeDenInspectorDrawer(React) {
                   )
                 )
               ),
-              showLiveThread && EmbeddedThread && threadChannelId && relaySession && typeof relayScope === "string" && relayScope.length > 0 && h(
-                "div",
-                {
-                  "data-embedded-buzz-thread": "true",
-                  style: { marginBottom: "10px", padding: "8px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)", minHeight: "180px" }
-                },
-                h(EmbeddedThread, {
-                  session: relaySession,
-                  scope: relayScope,
-                  channelId: threadChannelId,
-                  channelName: tenant,
-                  messageId: item.id
-                })
-              ),
+              showLiveThread && EmbeddedThread && threadChannelId && relaySession && typeof relayScope === "string" && relayScope.length > 0 && (() => {
+                var _a2, _b2, _c2, _d2, _e2, _f;
+                let resolvedThreadMsgId = null;
+                try {
+                  const rows = (typeof ((_a2 = relaySession.channels) == null ? void 0 : _a2.window) === "function" ? (_b2 = relaySession.channels.window(threadChannelId)) == null ? void 0 : _b2.rows : null) || (typeof ((_c2 = relaySession.messages) == null ? void 0 : _c2.snapshot) === "function" ? (_d2 = relaySession.messages.snapshot(threadChannelId)) == null ? void 0 : _d2.messages : null) || (typeof ((_e2 = relaySession.messages) == null ? void 0 : _e2.list) === "function" ? (_f = relaySession.messages.list(threadChannelId)) == null ? void 0 : _f.messages : null) || [];
+                  const fullLow = String(item.id || "").toLowerCase();
+                  const shortLow = fullLow.slice(0, 8);
+                  const matched = rows.find((m) => {
+                    const mid = String((m == null ? void 0 : m.id) || "").toLowerCase();
+                    if (mid === fullLow) return true;
+                    const txt = String((m == null ? void 0 : m.content) || "").toLowerCase();
+                    return Boolean(fullLow.length === 64 && txt.includes(fullLow) || shortLow.length === 8 && txt.includes(shortLow));
+                  });
+                  if (matched == null ? void 0 : matched.id) resolvedThreadMsgId = String(matched.id);
+                } catch {
+                }
+                return h(
+                  "div",
+                  {
+                    "data-embedded-buzz-thread": "true",
+                    style: { marginBottom: "10px", padding: "8px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)", minHeight: resolvedThreadMsgId ? "180px" : void 0 }
+                  },
+                  resolvedThreadMsgId ? h(EmbeddedThread, {
+                    session: relaySession,
+                    scope: relayScope,
+                    channelId: threadChannelId,
+                    channelName: tenant,
+                    messageId: resolvedThreadMsgId
+                  }) : h(
+                    "div",
+                    { className: "of-muted", style: { padding: "10px 6px", fontSize: "11.5px", lineHeight: 1.5 } },
+                    `Nenhuma mensagem de despacho ou thread aberta no canal de ${tenant} para #${item.id.slice(0, 8)} ainda.`
+                  )
+                );
+              })(),
               !repoDetail || repoDetail.comments.length === 0 ? h("div", { className: "of-muted", style: { fontSize: "12px" } }, "Nenhuma revisão ou comentário NIP-34 registrado ainda.") : h(
                 "div",
                 { style: { display: "flex", flexDirection: "column", gap: "8px" } },

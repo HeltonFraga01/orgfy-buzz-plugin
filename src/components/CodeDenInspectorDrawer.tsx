@@ -1734,20 +1734,54 @@ export function createCodeDenInspectorDrawer(React: Context["react"]) {
                   relaySession &&
                   typeof relayScope === "string" &&
                   relayScope.length > 0 &&
-                  h(
-                    "div",
-                    {
-                      "data-embedded-buzz-thread": "true",
-                      style: { marginBottom: "10px", padding: "8px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)", minHeight: "180px" },
-                    },
-                    h(EmbeddedThread, {
-                      session: relaySession,
-                      scope: relayScope,
-                      channelId: threadChannelId,
-                      channelName: tenant,
-                      messageId: item.id,
-                    })
-                  ),
+                  (() => {
+                    // Resolve o ID real de uma mensagem Kind 9 no canal que referencia esta issue/PR
+                    // (passar item.id NIP-34 kind:1621/1618 direto em EmbeddedThread causa "Original message unavailable")
+                    let resolvedThreadMsgId: string | null = null;
+                    try {
+                      const rows: any[] =
+                        (typeof relaySession.channels?.window === "function"
+                          ? relaySession.channels.window(threadChannelId)?.rows
+                          : null) ||
+                        (typeof relaySession.messages?.snapshot === "function"
+                          ? relaySession.messages.snapshot(threadChannelId)?.messages
+                          : null) ||
+                        (typeof relaySession.messages?.list === "function"
+                          ? relaySession.messages.list(threadChannelId)?.messages
+                          : null) ||
+                        [];
+                      const fullLow = String(item.id || "").toLowerCase();
+                      const shortLow = fullLow.slice(0, 8);
+                      const matched = rows.find((m: any) => {
+                        const mid = String(m?.id || "").toLowerCase();
+                        if (mid === fullLow) return true;
+                        const txt = String(m?.content || "").toLowerCase();
+                        return Boolean((fullLow.length === 64 && txt.includes(fullLow)) || (shortLow.length === 8 && txt.includes(shortLow)));
+                      });
+                      if (matched?.id) resolvedThreadMsgId = String(matched.id);
+                    } catch {}
+
+                    return h(
+                      "div",
+                      {
+                        "data-embedded-buzz-thread": "true",
+                        style: { marginBottom: "10px", padding: "8px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--card)", minHeight: resolvedThreadMsgId ? "180px" : undefined },
+                      },
+                      resolvedThreadMsgId
+                        ? h(EmbeddedThread, {
+                            session: relaySession,
+                            scope: relayScope,
+                            channelId: threadChannelId,
+                            channelName: tenant,
+                            messageId: resolvedThreadMsgId,
+                          })
+                        : h(
+                            "div",
+                            { className: "of-muted", style: { padding: "10px 6px", fontSize: "11.5px", lineHeight: 1.5 } },
+                            `Nenhuma mensagem de despacho ou thread aberta no canal de ${tenant} para #${item.id.slice(0, 8)} ainda.`
+                          )
+                    );
+                  })(),
                 !repoDetail || repoDetail.comments.length === 0
                   ? h("div", { className: "of-muted", style: { fontSize: "12px" } }, "Nenhuma revisão ou comentário NIP-34 registrado ainda.")
                   : h(
