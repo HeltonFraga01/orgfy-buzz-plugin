@@ -622,7 +622,7 @@ export function renderPipelineDiagram(props: PipelineDiagramProps) {
 
       Fan("in"),
 
-      // Merge & Escada de Escalada (L0 -> COO Bento -> Conselho -> Bestie Iris)
+      // Merge & Pós-Merge / Spot-Check 10% (Iris)
       h(
         "div",
         { className: "of-pd-group" },
@@ -631,19 +631,61 @@ export function renderPipelineDiagram(props: PipelineDiagramProps) {
           kind: status.limits.autoMerge ? "auto" : "workspace",
           badge: status.limits.autoMerge ? "Auto-merge" : "COO · GATE",
           title: PT_BR.pipelines.mergeLabel,
-          help: "Após CI verde + Revisor L-01, o coordenador integra na main. Se travar ou falhar: L1 COO Bento (auto-cura/DLQ) → L2 CEO/Conselho → L3 Bestie OrgFy Iris (única ponte para o Fundador).",
+          help: "Após CI verde + Revisor L-01, o coordenador valida CI pós-merge sobre a main (com auto-revert se falhar) e integra. Se travar: L1 COO Bento → L2 CEO/Conselho → L3 Bestie OrgFy Iris.",
           items: mergeItems,
-          width: "136px",
+          width: "130px",
           footer: h(
             "span",
             { className: "of-muted", style: { fontSize: "10px" } },
             mergeItems.length > 0
               ? status.limits.autoMerge
-                ? "quando checks passam"
+                ? "CI pós-merge + push"
                 : "Bento → Conselho → Iris"
               : "fila de merge vazia"
           ),
-        })
+        }),
+        Arrow(true),
+        (() => {
+          const scItems = Array.isArray(status.spotChecks?.items) ? status.spotChecks!.items! : [];
+          const pendingSc = scItems.filter((s) => s.status === "pending_iris");
+          const evaluatedSc = scItems.filter((s) => s.status === "evaluated" && typeof s.score === "number");
+          const avgScore =
+            evaluatedSc.length > 0
+              ? (evaluatedSc.reduce((acc, s) => acc + Number(s.score || 0), 0) / evaluatedSc.length).toFixed(1)
+              : null;
+          const scWorkItems: FactoryWorkItem[] = pendingSc.map((s) => ({
+            id: String(s.issue_id || s.pr_id || s.id),
+            title: `Spot-check 10% · PR #${String(s.pr_id || s.id).slice(0, 8)} (${s.executor || "Executor"})`,
+            workKey: `spotcheck:${s.id}`,
+            stage: "watching",
+            step: "spot_check",
+            type: "feature",
+            attempts: 1,
+            sessionId: null,
+            activeSessionId: null,
+            reason: "Aguardando auditoria 0–10 da CEO OrgFy Iris",
+            note: `Auditor: ${s.auditor || "OrgFy Iris"} · Commit ${String(s.merge_commit || s.sha || "").slice(0, 7)}`,
+            updatedAt: s.merged_at ? Date.parse(s.merged_at) || Date.now() : Date.now(),
+          }));
+          return Node({
+            keyId: "ship-spot-check",
+            kind: "llm",
+            badge: `SHIP · ${status.spotChecks?.percent ?? 10}%`,
+            title: "Auditoria Iris",
+            help: "Pós-merge real: após integrar na main (e liberar o executor automaticamente), 10% dos merges vão direto para OrgFy Iris auditar (nota 0–10 + lições recursivas).",
+            items: scWorkItems,
+            width: "128px",
+            footer: h(
+              "span",
+              { className: "of-muted", style: { fontSize: "10px" } },
+              pendingSc.length > 0
+                ? `${pendingSc.length} aguardando Iris`
+                : avgScore
+                ? `média ${avgScore}/10 · em dia`
+                : "10% → Iris · em dia"
+            ),
+          });
+        })()
       )
     )
   );

@@ -70,6 +70,8 @@ type TowerSelection =
   | { kind: "packet"; packet: TowerLivePacket; floor: HoldingTowerFloorInfo }
   | { kind: "agent"; agent: HoldingTowerFloorInfo["agents"][number]; floor: HoldingTowerFloorInfo };
 
+const TOWER_FLOOR_H = 4.35;
+const TOWER_EXPLODE_GAP = 1.95;
 const TOWER_DEMO_STEP_MS = [4400, 5000, 4800, 5000, 4600];
 
 function towerDemoLabel(phase: number, floorName: string): string {
@@ -720,7 +722,16 @@ export function createHoldingTower3DComponent(ctx: Context) {
         agents: boardAgents,
       };
 
-      return [...subsidiaryFloors, penthouse];
+      // Ordem de importância (de cima para baixo): Conselho (topo) -> OrgFy Core -> subsidiárias operacionais -> planejadas
+      const floorPriority = (f: HoldingTowerFloorInfo): number => {
+        const s = f.slug.toLowerCase();
+        if (s === "orgfy") return 100;
+        if (f.estagio === "operacional") return 20;
+        return 0;
+      };
+      const orderedSubsidiaries = [...subsidiaryFloors].sort((a, b) => floorPriority(a) - floorPriority(b));
+
+      return [...orderedSubsidiaries, penthouse];
     }, [props.holding, props.status, props.liveCrew, props.telemetry, props.activeTenant]);
 
     const demoTargetFloorIdx = React.useMemo(() => {
@@ -793,13 +804,13 @@ export function createHoldingTower3DComponent(ctx: Context) {
       const width = Math.max(320, container.clientWidth || 780);
       const height = Math.max(320, container.clientHeight || 540);
 
-      const bgHex = darkFactoryMode ? 0x090c12 : 0xeef2f7;
+      const bgHex = darkFactoryMode ? 0x0a0b0f : 0xeef2f7;
       const scene = new THREE.Scene();
       scene.background = new THREE.Color(bgHex);
       // Profundidade atmosférica sutil de maquete física de estúdio
-      scene.fog = new THREE.FogExp2(bgHex, 0.0075);
+      scene.fog = new THREE.FogExp2(bgHex, 0.0065);
 
-      const FLOOR_H = 3.65;
+      const FLOOR_H = TOWER_FLOOR_H;
       const totalH = floors.length * FLOOR_H;
       const defaultCenterY = Math.max(2.6, totalH * 0.46);
       const defaultFrustum = Math.max(14.0, totalH * 1.12);
@@ -869,13 +880,13 @@ export function createHoldingTower3DComponent(ctx: Context) {
       const envScene = new RoomEnvironment();
       const envRT = pmremGenerator.fromScene(envScene, 0.04);
       scene.environment = envRT.texture;
-      (scene as any).environmentIntensity = darkFactoryMode ? 0.5 : 0.8;
+      (scene as any).environmentIntensity = darkFactoryMode ? 0.32 : 0.8;
       envScene.dispose();
 
       const lights = new Lights();
       scene.add(lights.hemi, lights.sun, lights.sun.target);
       lights.set([{ x0: -7.5, x1: 7.5, y0: 0, y1: totalH + 2, z0: -5, z1: 5 }], palette, false);
-      lights.hemi.intensity = darkFactoryMode ? 0.95 : 1.1;
+      lights.hemi.intensity = darkFactoryMode ? 0.88 : 1.1;
       lights.sun.shadow.bias = -0.0005;
       lights.sun.shadow.normalBias = 0.02;
 
@@ -884,16 +895,19 @@ export function createHoldingTower3DComponent(ctx: Context) {
         dayFill.position.set(-10, 20, 12);
         scene.add(dayFill);
       } else {
-        const frontFill = new THREE.DirectionalLight(0xdbeafe, 0.52);
+        const frontFill = new THREE.DirectionalLight(0xf1f5f9, 0.28);
         frontFill.position.set(12, totalH * 0.55, 16);
         scene.add(frontFill);
       }
 
-      const matPodium = kit.matte(darkFactoryMode ? [0.1, 0.12, 0.16] : [0.72, 0.75, 0.8], { roughness: 0.85 });
-      const matSlab = kit.matte(darkFactoryMode ? [0.15, 0.17, 0.22] : [0.83, 0.85, 0.89], { roughness: 0.8 });
-      const matFloorWood = kit.matte(darkFactoryMode ? [0.28, 0.22, 0.17] : [0.68, 0.57, 0.44], { roughness: 0.72 });
-      const matFloorSlate = kit.matte(darkFactoryMode ? [0.12, 0.14, 0.19] : [0.46, 0.49, 0.54], { roughness: 0.86 });
-      const matWall = kit.matte(darkFactoryMode ? [0.18, 0.2, 0.26] : [0.89, 0.91, 0.94], { roughness: 0.84 });
+      // Mesma paleta grafite/carvão da Fábrica 3D (palette.wall / palette.floor) para identidade visual unificada
+      const factoryWallRgb: Rgb = darkFactoryMode ? palette.wall : [0.89, 0.91, 0.94];
+      const factoryFloorRgb: Rgb = darkFactoryMode ? palette.floor : [0.46, 0.49, 0.54];
+      const matPodium = kit.matte(darkFactoryMode ? [0.08, 0.085, 0.095] : [0.72, 0.75, 0.8], { roughness: 0.88 });
+      const matSlab = kit.matte(darkFactoryMode ? factoryFloorRgb : [0.83, 0.85, 0.89], { roughness: 0.84 });
+      const matFloorWood = kit.matte(darkFactoryMode ? [0.24, 0.2, 0.16] : [0.68, 0.57, 0.44], { roughness: 0.74 });
+      const matFloorSlate = kit.matte(factoryFloorRgb, { roughness: 0.88 });
+      const matWall = kit.matte(factoryWallRgb, { roughness: 0.88 });
       const matSteel = kit.matte(palette.steel, { roughness: 0.36, metalness: 0.55 });
       const matChrome = kit.matte(palette.chrome, { roughness: 0.18, metalness: 0.82 });
       const matWood = kit.matte(palette.wood, { roughness: 0.55 });
@@ -1201,17 +1215,19 @@ export function createHoldingTower3DComponent(ctx: Context) {
         badgeMesh.position.set(floorW / 2 - 0.14, wallH - 0.38, floorD / 2 - 0.05);
         floorGroup.add(badgeMesh);
 
-        const screenBezel = new THREE.Mesh(kit.own(new THREE.BoxGeometry(4.6, 1.38, 0.1)), kit.matte(palette.sign, { roughness: 0.45 }));
-        screenBezel.position.set(0.95, wallH - 1.05, -floorD / 2 + 0.22);
+        // Posiciona o telão com folga generosa abaixo da laje do andar superior (sem corte na vista isométrica)
+        const screenY = Math.min(2.12, wallH - 1.85);
+        const screenBezel = new THREE.Mesh(kit.own(new THREE.BoxGeometry(4.35, 1.2, 0.1)), kit.matte(palette.sign, { roughness: 0.45 }));
+        screenBezel.position.set(0.95, screenY, -floorD / 2 + 0.22);
         screenBezel.castShadow = true;
         floorGroup.add(screenBezel);
 
         const screenTex = makeFloorWallScreenTexture(kit, fIdx + 1, floor, floorAccent, props.status, maxAniso);
         const screenPlane = new THREE.Mesh(
-          kit.own(new THREE.PlaneGeometry(4.42, 1.24)),
+          kit.own(new THREE.PlaneGeometry(4.18, 1.08)),
           kit.own(new THREE.MeshBasicMaterial({ map: screenTex }))
         );
-        screenPlane.position.set(0.95, wallH - 1.05, -floorD / 2 + 0.275);
+        screenPlane.position.set(0.95, screenY, -floorD / 2 + 0.275);
         floorGroup.add(screenPlane);
 
         if (floor.errorCount > 0) {
@@ -1934,36 +1950,36 @@ export function createHoldingTower3DComponent(ctx: Context) {
     const activeFloorCard = selection?.floor || floors.find((f) => f.slug === hoveredSlug) || null;
 
     const focusFloorBySlug = (slug: string | null) => {
-      const stepH = 3.65 + (explodedRef.current ? 1.95 : 0);
+      const stepH = TOWER_FLOOR_H + (explodedRef.current ? TOWER_EXPLODE_GAP : 0);
       if (!slug) {
         setSelection(null);
-        const effH = floors.length * 3.65 + (explodedRef.current ? (floors.length - 1) * 1.95 : 0);
+        const effH = floors.length * TOWER_FLOOR_H + (explodedRef.current ? (floors.length - 1) * TOWER_EXPLODE_GAP : 0);
         desiredTargetRef.current.set(0, Math.max(2.6, effH * 0.48), 0);
-        desiredFrustumRef.current = Math.max(14.5, effH * 1.18);
+        desiredFrustumRef.current = Math.max(15.5, effH * 1.14);
         return;
       }
       const idx = floors.findIndex((f) => f.slug === slug);
       if (idx >= 0) {
         setSelection({ kind: "floor", floor: floors[idx] });
-        desiredTargetRef.current.set(0, idx * stepH + 1.0, 0);
-        desiredFrustumRef.current = 6.8;
+        desiredTargetRef.current.set(0, idx * stepH + 1.15, 0);
+        desiredFrustumRef.current = 7.4;
       }
     };
 
     const handleEyeLevelView = () => {
       const idx = selectedSlug ? Math.max(0, floors.findIndex((f) => f.slug === selectedSlug)) : 0;
-      const stepH = 3.65 + (explodedRef.current ? 1.95 : 0);
-      desiredTargetRef.current.set(0, idx * stepH + 0.85, 0);
-      desiredFrustumRef.current = 4.4;
+      const stepH = TOWER_FLOOR_H + (explodedRef.current ? TOWER_EXPLODE_GAP : 0);
+      desiredTargetRef.current.set(0, idx * stepH + 0.95, 0);
+      desiredFrustumRef.current = 4.6;
       desiredPhiRef.current = 1.42;
     };
 
     const handleToggleExploded = () => {
       setExplodedView((prev) => {
         const next = !prev;
-        const effH = floors.length * 3.65 + (next ? (floors.length - 1) * 1.95 : 0);
+        const effH = floors.length * TOWER_FLOOR_H + (next ? (floors.length - 1) * TOWER_EXPLODE_GAP : 0);
         desiredTargetRef.current.set(0, Math.max(2.6, effH * 0.48), 0);
-        desiredFrustumRef.current = Math.max(14.5, effH * 1.18);
+        desiredFrustumRef.current = Math.max(15.5, effH * 1.14);
         return next;
       });
     };
@@ -2261,9 +2277,9 @@ export function createHoldingTower3DComponent(ctx: Context) {
               onClick: () => {
                 setDemoPhase((cur) => {
                   if (cur !== null) return null;
-                  const effH = floors.length * 3.65 + (explodedRef.current ? (floors.length - 1) * 1.95 : 0);
+                  const effH = floors.length * TOWER_FLOOR_H + (explodedRef.current ? (floors.length - 1) * TOWER_EXPLODE_GAP : 0);
                   desiredTargetRef.current.set(0, Math.max(2.6, effH * 0.48), 0);
-                  desiredFrustumRef.current = Math.max(14.5, effH * 1.18);
+                  desiredFrustumRef.current = Math.max(15.5, effH * 1.14);
                   desiredPhiRef.current = 1.02;
                   return 1;
                 });
@@ -2301,8 +2317,8 @@ export function createHoldingTower3DComponent(ctx: Context) {
                     const activeIdx = Math.max(0, floors.findIndex((f) => f.slug === props.activeTenant));
                     if (floors[activeIdx]) {
                       setSelection({ kind: "floor", floor: floors[activeIdx] });
-                      desiredTargetRef.current.set(0, activeIdx * (3.65 + (explodedRef.current ? 1.95 : 0)) + 1.0, 0);
-                      desiredFrustumRef.current = 6.8;
+                      desiredTargetRef.current.set(0, activeIdx * (TOWER_FLOOR_H + (explodedRef.current ? TOWER_EXPLODE_GAP : 0)) + 1.15, 0);
+                      desiredFrustumRef.current = 7.4;
                     }
                   }
                   return next;
@@ -2323,9 +2339,9 @@ export function createHoldingTower3DComponent(ctx: Context) {
               style: { padding: "4px 8px", fontSize: "11px" },
               onClick: () => {
                 const idx = selectedSlug ? Math.max(0, floors.findIndex((f) => f.slug === selectedSlug)) : 0;
-                const stepH = 3.65 + (explodedRef.current ? 1.95 : 0);
+                const stepH = TOWER_FLOOR_H + (explodedRef.current ? TOWER_EXPLODE_GAP : 0);
                 desiredTargetRef.current.set(0, idx * stepH + 0.6, 0);
-                desiredFrustumRef.current = 7.4;
+                desiredFrustumRef.current = 7.8;
                 desiredPhiRef.current = 0.34;
               },
               title: "Vista superior de planta baixa",
@@ -2353,9 +2369,9 @@ export function createHoldingTower3DComponent(ctx: Context) {
               style: { padding: "4px 8px", fontSize: "11px" },
               onClick: () => {
                 setSelection(null);
-                const effH = floors.length * 3.65 + (explodedRef.current ? (floors.length - 1) * 1.95 : 0);
+                const effH = floors.length * TOWER_FLOOR_H + (explodedRef.current ? (floors.length - 1) * TOWER_EXPLODE_GAP : 0);
                 desiredTargetRef.current.set(0, Math.max(2.6, effH * 0.48), 0);
-                desiredFrustumRef.current = Math.max(14.5, effH * 1.18);
+                desiredFrustumRef.current = Math.max(15.5, effH * 1.14);
                 desiredPhiRef.current = 1.02;
               },
               title: "Enquadrar toda a torre",

@@ -17670,7 +17670,7 @@ Na fila aguardando agente livre`,
         )
       ),
       Fan("in"),
-      // Merge & Escada de Escalada (L0 -> COO Bento -> Conselho -> Bestie Iris)
+      // Merge & Pós-Merge / Spot-Check 10% (Iris)
       h(
         "div",
         { className: "of-pd-group" },
@@ -17679,15 +17679,51 @@ Na fila aguardando agente livre`,
           kind: status.limits.autoMerge ? "auto" : "workspace",
           badge: status.limits.autoMerge ? "Auto-merge" : "COO · GATE",
           title: PT_BR.pipelines.mergeLabel,
-          help: "Após CI verde + Revisor L-01, o coordenador integra na main. Se travar ou falhar: L1 COO Bento (auto-cura/DLQ) → L2 CEO/Conselho → L3 Bestie OrgFy Iris (única ponte para o Fundador).",
+          help: "Após CI verde + Revisor L-01, o coordenador valida CI pós-merge sobre a main (com auto-revert se falhar) e integra. Se travar: L1 COO Bento → L2 CEO/Conselho → L3 Bestie OrgFy Iris.",
           items: mergeItems,
-          width: "136px",
+          width: "130px",
           footer: h(
             "span",
             { className: "of-muted", style: { fontSize: "10px" } },
-            mergeItems.length > 0 ? status.limits.autoMerge ? "quando checks passam" : "Bento → Conselho → Iris" : "fila de merge vazia"
+            mergeItems.length > 0 ? status.limits.autoMerge ? "CI pós-merge + push" : "Bento → Conselho → Iris" : "fila de merge vazia"
           )
-        })
+        }),
+        Arrow(true),
+        (() => {
+          var _a2, _b2;
+          const scItems = Array.isArray((_a2 = status.spotChecks) == null ? void 0 : _a2.items) ? status.spotChecks.items : [];
+          const pendingSc = scItems.filter((s) => s.status === "pending_iris");
+          const evaluatedSc = scItems.filter((s) => s.status === "evaluated" && typeof s.score === "number");
+          const avgScore = evaluatedSc.length > 0 ? (evaluatedSc.reduce((acc, s) => acc + Number(s.score || 0), 0) / evaluatedSc.length).toFixed(1) : null;
+          const scWorkItems = pendingSc.map((s) => ({
+            id: String(s.issue_id || s.pr_id || s.id),
+            title: `Spot-check 10% · PR #${String(s.pr_id || s.id).slice(0, 8)} (${s.executor || "Executor"})`,
+            workKey: `spotcheck:${s.id}`,
+            stage: "watching",
+            step: "spot_check",
+            type: "feature",
+            attempts: 1,
+            sessionId: null,
+            activeSessionId: null,
+            reason: "Aguardando auditoria 0–10 da CEO OrgFy Iris",
+            note: `Auditor: ${s.auditor || "OrgFy Iris"} · Commit ${String(s.merge_commit || s.sha || "").slice(0, 7)}`,
+            updatedAt: s.merged_at ? Date.parse(s.merged_at) || Date.now() : Date.now()
+          }));
+          return Node({
+            keyId: "ship-spot-check",
+            kind: "llm",
+            badge: `SHIP · ${((_b2 = status.spotChecks) == null ? void 0 : _b2.percent) ?? 10}%`,
+            title: "Auditoria Iris",
+            help: "Pós-merge real: após integrar na main (e liberar o executor automaticamente), 10% dos merges vão direto para OrgFy Iris auditar (nota 0–10 + lições recursivas).",
+            items: scWorkItems,
+            width: "128px",
+            footer: h(
+              "span",
+              { className: "of-muted", style: { fontSize: "10px" } },
+              pendingSc.length > 0 ? `${pendingSc.length} aguardando Iris` : avgScore ? `média ${avgScore}/10 · em dia` : "10% → Iris · em dia"
+            )
+          });
+        })()
       )
     )
   );
@@ -55844,7 +55880,12 @@ function createFloor3DComponent(ctx) {
       h(
         "div",
         { className: "of-muted", style: { textAlign: "center", fontSize: "11px" } },
-        `Fábrica ${empresaNome} (${tenant}) · ${inBuzzCount}/${tenantAgents.length} no Buzz · ${workingNowCount} respondendo agora · ${sceneSummary(scene)}`
+        (() => {
+          var _a2;
+          const pendingIris = Array.isArray((_a2 = status.spotChecks) == null ? void 0 : _a2.items) ? status.spotChecks.items.filter((s) => s.status === "pending_iris").length : 0;
+          const scSuffix = pendingIris > 0 ? ` · ${pendingIris} em spot-check Iris (10%)` : "";
+          return `Fábrica ${empresaNome} (${tenant}) · ${inBuzzCount}/${tenantAgents.length} no Buzz · ${workingNowCount} respondendo agora · ${sceneSummary(scene)}${scSuffix}`;
+        })()
       )
     );
   };
@@ -57907,6 +57948,8 @@ function createAreaLightMaterial(intensity) {
   });
   return material;
 }
+const TOWER_FLOOR_H = 4.35;
+const TOWER_EXPLODE_GAP = 1.95;
 const TOWER_DEMO_STEP_MS = [4400, 5e3, 4800, 5e3, 4600];
 function towerDemoLabel(phase, floorName) {
   if (phase === 1) return `1/5 · Diretriz descendo do 4F Conselho pelo elevador para ${floorName}`;
@@ -58417,7 +58460,14 @@ function createHoldingTower3DComponent(ctx) {
         packets: [],
         agents: boardAgents
       };
-      return [...subsidiaryFloors, penthouse];
+      const floorPriority = (f) => {
+        const s = f.slug.toLowerCase();
+        if (s === "orgfy") return 100;
+        if (f.estagio === "operacional") return 20;
+        return 0;
+      };
+      const orderedSubsidiaries = [...subsidiaryFloors].sort((a, b) => floorPriority(a) - floorPriority(b));
+      return [...orderedSubsidiaries, penthouse];
     }, [props.holding, props.status, props.liveCrew, props.telemetry, props.activeTenant]);
     const demoTargetFloorIdx = React.useMemo(() => {
       const byActive = floors.findIndex((f) => !f.isBoard && f.slug.toLowerCase() === String(props.activeTenant || "").toLowerCase());
@@ -58480,11 +58530,11 @@ function createHoldingTower3DComponent(ctx) {
       const kit = new Kit();
       const width = Math.max(320, container.clientWidth || 780);
       const height = Math.max(320, container.clientHeight || 540);
-      const bgHex = darkFactoryMode ? 592914 : 15659767;
+      const bgHex = darkFactoryMode ? 658191 : 15659767;
       const scene = new Scene();
       scene.background = new Color(bgHex);
-      scene.fog = new FogExp2(bgHex, 75e-4);
-      const FLOOR_H = 3.65;
+      scene.fog = new FogExp2(bgHex, 65e-4);
+      const FLOOR_H = TOWER_FLOOR_H;
       const totalH = floors.length * FLOOR_H;
       const defaultCenterY = Math.max(2.6, totalH * 0.46);
       const defaultFrustum = Math.max(14, totalH * 1.12);
@@ -58549,12 +58599,12 @@ function createHoldingTower3DComponent(ctx) {
       const envScene = new RoomEnvironment();
       const envRT = pmremGenerator.fromScene(envScene, 0.04);
       scene.environment = envRT.texture;
-      scene.environmentIntensity = darkFactoryMode ? 0.5 : 0.8;
+      scene.environmentIntensity = darkFactoryMode ? 0.32 : 0.8;
       envScene.dispose();
       const lights = new Lights();
       scene.add(lights.hemi, lights.sun, lights.sun.target);
       lights.set([{ x0: -7.5, x1: 7.5, y0: 0, y1: totalH + 2, z0: -5, z1: 5 }], palette, false);
-      lights.hemi.intensity = darkFactoryMode ? 0.95 : 1.1;
+      lights.hemi.intensity = darkFactoryMode ? 0.88 : 1.1;
       lights.sun.shadow.bias = -5e-4;
       lights.sun.shadow.normalBias = 0.02;
       if (!darkFactoryMode) {
@@ -58562,15 +58612,17 @@ function createHoldingTower3DComponent(ctx) {
         dayFill.position.set(-10, 20, 12);
         scene.add(dayFill);
       } else {
-        const frontFill = new DirectionalLight(14412542, 0.52);
+        const frontFill = new DirectionalLight(15857145, 0.28);
         frontFill.position.set(12, totalH * 0.55, 16);
         scene.add(frontFill);
       }
-      const matPodium = kit.matte(darkFactoryMode ? [0.1, 0.12, 0.16] : [0.72, 0.75, 0.8], { roughness: 0.85 });
-      const matSlab = kit.matte(darkFactoryMode ? [0.15, 0.17, 0.22] : [0.83, 0.85, 0.89], { roughness: 0.8 });
-      const matFloorWood = kit.matte(darkFactoryMode ? [0.28, 0.22, 0.17] : [0.68, 0.57, 0.44], { roughness: 0.72 });
-      const matFloorSlate = kit.matte(darkFactoryMode ? [0.12, 0.14, 0.19] : [0.46, 0.49, 0.54], { roughness: 0.86 });
-      const matWall = kit.matte(darkFactoryMode ? [0.18, 0.2, 0.26] : [0.89, 0.91, 0.94], { roughness: 0.84 });
+      const factoryWallRgb = darkFactoryMode ? palette.wall : [0.89, 0.91, 0.94];
+      const factoryFloorRgb = darkFactoryMode ? palette.floor : [0.46, 0.49, 0.54];
+      const matPodium = kit.matte(darkFactoryMode ? [0.08, 0.085, 0.095] : [0.72, 0.75, 0.8], { roughness: 0.88 });
+      const matSlab = kit.matte(darkFactoryMode ? factoryFloorRgb : [0.83, 0.85, 0.89], { roughness: 0.84 });
+      const matFloorWood = kit.matte(darkFactoryMode ? [0.24, 0.2, 0.16] : [0.68, 0.57, 0.44], { roughness: 0.74 });
+      const matFloorSlate = kit.matte(factoryFloorRgb, { roughness: 0.88 });
+      const matWall = kit.matte(factoryWallRgb, { roughness: 0.88 });
       const matSteel = kit.matte(palette.steel, { roughness: 0.36, metalness: 0.55 });
       const matChrome = kit.matte(palette.chrome, { roughness: 0.18, metalness: 0.82 });
       const matWood = kit.matte(palette.wood, { roughness: 0.55 });
@@ -58808,16 +58860,17 @@ function createHoldingTower3DComponent(ctx) {
         );
         badgeMesh.position.set(floorW / 2 - 0.14, wallH - 0.38, floorD / 2 - 0.05);
         floorGroup.add(badgeMesh);
-        const screenBezel = new Mesh(kit.own(new BoxGeometry(4.6, 1.38, 0.1)), kit.matte(palette.sign, { roughness: 0.45 }));
-        screenBezel.position.set(0.95, wallH - 1.05, -floorD / 2 + 0.22);
+        const screenY = Math.min(2.12, wallH - 1.85);
+        const screenBezel = new Mesh(kit.own(new BoxGeometry(4.35, 1.2, 0.1)), kit.matte(palette.sign, { roughness: 0.45 }));
+        screenBezel.position.set(0.95, screenY, -floorD / 2 + 0.22);
         screenBezel.castShadow = true;
         floorGroup.add(screenBezel);
         const screenTex = makeFloorWallScreenTexture(kit, fIdx + 1, floor, floorAccent, props.status, maxAniso);
         const screenPlane = new Mesh(
-          kit.own(new PlaneGeometry(4.42, 1.24)),
+          kit.own(new PlaneGeometry(4.18, 1.08)),
           kit.own(new MeshBasicMaterial({ map: screenTex }))
         );
-        screenPlane.position.set(0.95, wallH - 1.05, -floorD / 2 + 0.275);
+        screenPlane.position.set(0.95, screenY, -floorD / 2 + 0.275);
         floorGroup.add(screenPlane);
         if (floor.errorCount > 0) {
           const beacon = new Mesh(
@@ -59452,34 +59505,34 @@ function createHoldingTower3DComponent(ctx) {
     const selectedSlug = (selection == null ? void 0 : selection.floor.slug) || null;
     const activeFloorCard = (selection == null ? void 0 : selection.floor) || floors.find((f) => f.slug === hoveredSlug) || null;
     const focusFloorBySlug = (slug) => {
-      const stepH = 3.65 + (explodedRef.current ? 1.95 : 0);
+      const stepH = TOWER_FLOOR_H + (explodedRef.current ? TOWER_EXPLODE_GAP : 0);
       if (!slug) {
         setSelection(null);
-        const effH = floors.length * 3.65 + (explodedRef.current ? (floors.length - 1) * 1.95 : 0);
+        const effH = floors.length * TOWER_FLOOR_H + (explodedRef.current ? (floors.length - 1) * TOWER_EXPLODE_GAP : 0);
         desiredTargetRef.current.set(0, Math.max(2.6, effH * 0.48), 0);
-        desiredFrustumRef.current = Math.max(14.5, effH * 1.18);
+        desiredFrustumRef.current = Math.max(15.5, effH * 1.14);
         return;
       }
       const idx = floors.findIndex((f) => f.slug === slug);
       if (idx >= 0) {
         setSelection({ kind: "floor", floor: floors[idx] });
-        desiredTargetRef.current.set(0, idx * stepH + 1, 0);
-        desiredFrustumRef.current = 6.8;
+        desiredTargetRef.current.set(0, idx * stepH + 1.15, 0);
+        desiredFrustumRef.current = 7.4;
       }
     };
     const handleEyeLevelView = () => {
       const idx = selectedSlug ? Math.max(0, floors.findIndex((f) => f.slug === selectedSlug)) : 0;
-      const stepH = 3.65 + (explodedRef.current ? 1.95 : 0);
-      desiredTargetRef.current.set(0, idx * stepH + 0.85, 0);
-      desiredFrustumRef.current = 4.4;
+      const stepH = TOWER_FLOOR_H + (explodedRef.current ? TOWER_EXPLODE_GAP : 0);
+      desiredTargetRef.current.set(0, idx * stepH + 0.95, 0);
+      desiredFrustumRef.current = 4.6;
       desiredPhiRef.current = 1.42;
     };
     const handleToggleExploded = () => {
       setExplodedView((prev) => {
         const next = !prev;
-        const effH = floors.length * 3.65 + (next ? (floors.length - 1) * 1.95 : 0);
+        const effH = floors.length * TOWER_FLOOR_H + (next ? (floors.length - 1) * TOWER_EXPLODE_GAP : 0);
         desiredTargetRef.current.set(0, Math.max(2.6, effH * 0.48), 0);
-        desiredFrustumRef.current = Math.max(14.5, effH * 1.18);
+        desiredFrustumRef.current = Math.max(15.5, effH * 1.14);
         return next;
       });
     };
@@ -59761,9 +59814,9 @@ function createHoldingTower3DComponent(ctx) {
               onClick: () => {
                 setDemoPhase((cur) => {
                   if (cur !== null) return null;
-                  const effH = floors.length * 3.65 + (explodedRef.current ? (floors.length - 1) * 1.95 : 0);
+                  const effH = floors.length * TOWER_FLOOR_H + (explodedRef.current ? (floors.length - 1) * TOWER_EXPLODE_GAP : 0);
                   desiredTargetRef.current.set(0, Math.max(2.6, effH * 0.48), 0);
-                  desiredFrustumRef.current = Math.max(14.5, effH * 1.18);
+                  desiredFrustumRef.current = Math.max(15.5, effH * 1.14);
                   desiredPhiRef.current = 1.02;
                   return 1;
                 });
@@ -59801,8 +59854,8 @@ function createHoldingTower3DComponent(ctx) {
                     const activeIdx = Math.max(0, floors.findIndex((f) => f.slug === props.activeTenant));
                     if (floors[activeIdx]) {
                       setSelection({ kind: "floor", floor: floors[activeIdx] });
-                      desiredTargetRef.current.set(0, activeIdx * (3.65 + (explodedRef.current ? 1.95 : 0)) + 1, 0);
-                      desiredFrustumRef.current = 6.8;
+                      desiredTargetRef.current.set(0, activeIdx * (TOWER_FLOOR_H + (explodedRef.current ? TOWER_EXPLODE_GAP : 0)) + 1.15, 0);
+                      desiredFrustumRef.current = 7.4;
                     }
                   }
                   return next;
@@ -59823,9 +59876,9 @@ function createHoldingTower3DComponent(ctx) {
               style: { padding: "4px 8px", fontSize: "11px" },
               onClick: () => {
                 const idx = selectedSlug ? Math.max(0, floors.findIndex((f) => f.slug === selectedSlug)) : 0;
-                const stepH = 3.65 + (explodedRef.current ? 1.95 : 0);
+                const stepH = TOWER_FLOOR_H + (explodedRef.current ? TOWER_EXPLODE_GAP : 0);
                 desiredTargetRef.current.set(0, idx * stepH + 0.6, 0);
-                desiredFrustumRef.current = 7.4;
+                desiredFrustumRef.current = 7.8;
                 desiredPhiRef.current = 0.34;
               },
               title: "Vista superior de planta baixa"
@@ -59853,9 +59906,9 @@ function createHoldingTower3DComponent(ctx) {
               style: { padding: "4px 8px", fontSize: "11px" },
               onClick: () => {
                 setSelection(null);
-                const effH = floors.length * 3.65 + (explodedRef.current ? (floors.length - 1) * 1.95 : 0);
+                const effH = floors.length * TOWER_FLOOR_H + (explodedRef.current ? (floors.length - 1) * TOWER_EXPLODE_GAP : 0);
                 desiredTargetRef.current.set(0, Math.max(2.6, effH * 0.48), 0);
-                desiredFrustumRef.current = Math.max(14.5, effH * 1.18);
+                desiredFrustumRef.current = Math.max(15.5, effH * 1.14);
                 desiredPhiRef.current = 1.02;
               },
               title: "Enquadrar toda a torre"

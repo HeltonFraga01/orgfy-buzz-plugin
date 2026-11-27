@@ -245,6 +245,27 @@ export interface FactoryStatusPayload {
     papeis: Record<string, string>;
   };
   ciBySha?: Record<string, { status: "ok" | "falha"; exitCode?: number; durationSeconds?: number; finishedAt?: number; log?: string }>;
+  spotChecks?: {
+    tenant?: string;
+    auditor?: string;
+    percent?: number;
+    items?: Array<{
+      id: string;
+      pr_id: string;
+      issue_id?: string;
+      sha?: string;
+      merge_commit?: string;
+      executor?: string;
+      reviewer?: string;
+      auditor?: string;
+      status: string;
+      score?: number | null;
+      verdict?: string | null;
+      notes?: string;
+      merged_at?: string;
+      evaluated_at?: string | null;
+    }>;
+  } | null;
   indisponivel: string[];
 }
 

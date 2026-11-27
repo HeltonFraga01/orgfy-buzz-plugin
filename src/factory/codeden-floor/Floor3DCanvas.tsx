@@ -1749,7 +1749,13 @@ export function createFloor3DComponent(ctx: Context) {
       h(
         "div",
         { className: "of-muted", style: { textAlign: "center", fontSize: "11px" } },
-        `Fábrica ${empresaNome} (${tenant}) · ${inBuzzCount}/${tenantAgents.length} no Buzz · ${workingNowCount} respondendo agora · ${sceneSummary(scene)}`
+        (() => {
+          const pendingIris = Array.isArray(status.spotChecks?.items)
+            ? status.spotChecks!.items!.filter((s) => s.status === "pending_iris").length
+            : 0;
+          const scSuffix = pendingIris > 0 ? ` · ${pendingIris} em spot-check Iris (10%)` : "";
+          return `Fábrica ${empresaNome} (${tenant}) · ${inBuzzCount}/${tenantAgents.length} no Buzz · ${workingNowCount} respondendo agora · ${sceneSummary(scene)}${scSuffix}`;
+        })()
       )
     );
   };
