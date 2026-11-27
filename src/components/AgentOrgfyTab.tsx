@@ -28,45 +28,48 @@ import {
 import { fetchGooseLoopRadar, type GooseLoopSession } from "../services/kpi-service";
 import { getTelemetrySnapshot, subscribeTelemetry, type TelemetrySnapshot } from "../services/telemetry-otel";
 
-const EVAL_R51_WINNERS = new Set(["claude-sonnet-5-5", "claude-sonnet-4-6", "gemini-2.5-flash"]);
+const FALLBACK_EVAL_WINNERS = new Set(["gemini-2.5-flash", "gpt-6.1-terra", "claude-opus-4-6-thinking"]);
 
 export interface AgentModelOption {
   provider: string;
   model: string;
   label: string;
-  group: "curated" | "nexusmind";
+  group: "eval_approved" | "nexusmind_online" | "fallback";
+  isFree?: boolean;
+  mode?: string;
+  qualityScore?: number;
+  rankingScore?: number;
+  latencyMs?: number;
 }
 
-const AGENT_MODEL_PRESETS: AgentModelOption[] = [
-  {
-    provider: "nexusmind_anthropic",
-    model: "claude-sonnet-4-6",
-    label: "claude-sonnet-4-6 · Eval R5.1 (Qualidade)",
-    group: "curated",
-  },
-  {
-    provider: "nexusmind_anthropic",
-    model: "claude-sonnet-5-5",
-    label: "claude-sonnet-5-5 · Eval R5.1 (Liderança)",
-    group: "curated",
-  },
+export interface LiveGatewayModelCatalog {
+  hasLiveData: boolean;
+  approvedOptions: AgentModelOption[];
+  onlineOtherOptions: AgentModelOption[];
+  approvedModels: Set<string>;
+  offlineModels: Set<string>;
+  forceFree: boolean;
+  updatedAt?: string;
+}
+
+const FALLBACK_MODEL_PRESETS: AgentModelOption[] = [
   {
     provider: "nexusmind_antigravity",
     model: "gemini-2.5-flash",
-    label: "gemini-2.5-flash · Eval R5.1 (Rápido)",
-    group: "curated",
+    label: "gemini-2.5-flash · Fallback (Rápido)",
+    group: "fallback",
+  },
+  {
+    provider: "nexusmind_openai",
+    model: "gpt-6.1-terra",
+    label: "gpt-6.1-terra · Fallback (Qualidade)",
+    group: "fallback",
   },
   {
     provider: "nexusmind_antigravity",
     model: "claude-opus-4-6-thinking",
-    label: "claude-opus-4-6-thinking · Thinking (Complexo)",
-    group: "curated",
-  },
-  {
-    provider: "nexusmind_grok",
-    model: "grok-4.1-fast",
-    label: "grok-4.1-fast · Alternativo (Rápido)",
-    group: "curated",
+    label: "claude-opus-4-6-thinking · Fallback (Complexo)",
+    group: "fallback",
   },
 ];
 
@@ -76,6 +79,7 @@ function modelOptionKey(provider: string, model: string): string {
 
 function inferProviderForModel(modelId: string): string {
   const m = String(modelId || "").toLowerCase();
+  if (m.includes("/") || m.includes(":free")) return "nexusmind_openai";
   if (m.includes("grok")) return "nexusmind_grok";
   if (m.includes("gemini") || m.includes("antigravity") || m.includes("thinking")) return "nexusmind_antigravity";
   if (m.includes("claude")) return "nexusmind_anthropic";
@@ -92,22 +96,41 @@ function decodeTextBytes(raw: unknown): string {
   return String(raw ?? "");
 }
 
-async function loadGatewayEvalAndRanking(
-  ctx: Context
-): Promise<{ extras: AgentModelOption[]; approvedModels: Set<string> }> {
+function formatLatencyShort(ms?: number): string {
+  if (typeof ms !== "number" || !Number.isFinite(ms) || ms <= 0) return "";
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
+}
+
+export async function loadLiveGatewayModelCatalog(ctx: Context): Promise<LiveGatewayModelCatalog> {
   const host = (ctx as any)?.host;
   const approvedModels = new Set<string>();
-  const benchByModel = new Map<string, { toolCallOk?: boolean; online?: boolean; qualityScore?: number; group?: string }>();
+  const offlineModels = new Set<string>();
+  const benchByModel = new Map<
+    string,
+    {
+      model: string;
+      toolCallOk: boolean;
+      online: boolean;
+      qualityScore?: number;
+      latencyMs?: number;
+      group?: string;
+    }
+  >();
 
   // 1. Lê resultados do Eval manual do Gateway (nexusmind-quality-bench.json)
   let benchParsed: any = null;
+  let updatedAt: string | undefined;
   if (typeof host?.readFile === "function") {
-    for (const p of ["~/.buzz/.scratch/nexusmind-quality-bench.json", "/Users/heltonfraga/.buzz/.scratch/nexusmind-quality-bench.json"]) {
+    for (const p of [
+      "~/.buzz/.scratch/nexusmind-quality-bench.json",
+      "/Users/heltonfraga/.buzz/.scratch/nexusmind-quality-bench.json",
+    ]) {
       try {
         const raw = await host.readFile(p);
         if (!raw) continue;
         const obj = JSON.parse(decodeTextBytes(raw));
         if (obj && typeof obj === "object") {
+          if (typeof obj.updatedAt === "string") updatedAt = obj.updatedAt;
           benchParsed = obj.results && typeof obj.results === "object" ? obj.results : obj;
           break;
         }
@@ -117,83 +140,247 @@ async function loadGatewayEvalAndRanking(
   if (!benchParsed) {
     try {
       const raw = (globalThis as any)?.localStorage?.getItem?.("nexusmind_quality_bench_v1");
-      if (raw) benchParsed = JSON.parse(raw);
+      if (raw) {
+        const obj = JSON.parse(raw);
+        benchParsed = obj?.results && typeof obj.results === "object" ? obj.results : obj;
+      }
     } catch {}
   }
   if (benchParsed && typeof benchParsed === "object") {
     for (const [mid, rec] of Object.entries(benchParsed as Record<string, any>)) {
       if (!rec || typeof rec !== "object") continue;
-      benchByModel.set(mid.toLowerCase(), {
-        toolCallOk: Boolean(rec.toolCallOk),
-        online: Boolean(rec.online),
+      const online = Boolean(rec.online);
+      const toolCallOk = Boolean(rec.toolCallOk);
+      const keyLower = mid.toLowerCase();
+      const shortId = String(mid.split("/").pop() || mid).trim().toLowerCase();
+      const latencyMs =
+        typeof rec.avgLatencyMs === "number"
+          ? rec.avgLatencyMs
+          : typeof rec.latencyMs === "number"
+          ? rec.latencyMs
+          : undefined;
+      benchByModel.set(keyLower, {
+        model: mid,
+        toolCallOk,
+        online,
         qualityScore: typeof rec.qualityScore === "number" ? rec.qualityScore : undefined,
+        latencyMs,
         group: typeof rec.group === "string" ? rec.group : undefined,
       });
-      if (rec.online && rec.toolCallOk) {
-        approvedModels.add(mid.toLowerCase());
-        const shortId = String(mid.split("/").pop() || mid).trim().toLowerCase();
+      if (online && toolCallOk) {
+        approvedModels.add(keyLower);
         if (shortId) approvedModels.add(shortId);
+      } else {
+        offlineModels.add(keyLower);
+        if (shortId) offlineModels.add(shortId);
       }
     }
   }
 
   // 2. Lê o Ranking do Gateway (nexusmind-model-ranking.json)
-  let parsed: any = null;
+  let rankingParsed: any = null;
   if (typeof host?.readFile === "function") {
-    for (const p of ["~/.buzz/.scratch/nexusmind-model-ranking.json", "/Users/heltonfraga/.buzz/.scratch/nexusmind-model-ranking.json"]) {
+    for (const p of [
+      "~/.buzz/.scratch/nexusmind-model-ranking.json",
+      "/Users/heltonfraga/.buzz/.scratch/nexusmind-model-ranking.json",
+    ]) {
       try {
         const raw = await host.readFile(p);
         if (!raw) continue;
         const obj = JSON.parse(decodeTextBytes(raw));
         if (obj && Array.isArray(obj.models) && obj.models.length > 0) {
-          parsed = obj;
+          rankingParsed = obj;
+          if (!updatedAt && typeof obj.updatedAt === "string") updatedAt = obj.updatedAt;
           break;
         }
       } catch {}
     }
   }
-  if (!parsed) {
+  if (!rankingParsed) {
     try {
       const raw = (globalThis as any)?.localStorage?.getItem?.("nexusmind_model_ranking");
-      if (raw) parsed = JSON.parse(raw);
+      if (raw) rankingParsed = JSON.parse(raw);
     } catch {}
   }
 
-  const seen = new Set(AGENT_MODEL_PRESETS.map((o) => o.model.toLowerCase()));
-  const extras: AgentModelOption[] = [];
-
-  if (parsed && Array.isArray(parsed.models)) {
-    const sorted = [...parsed.models].sort((a: any, b: any) => {
-      const aTc = a?.toolCallOk === true || benchByModel.get(String(a?.model || "").toLowerCase())?.toolCallOk === true;
-      const bTc = b?.toolCallOk === true || benchByModel.get(String(b?.model || "").toLowerCase())?.toolCallOk === true;
-      if (aTc !== bTc) return aTc ? -1 : 1;
-      return Number(b?.score || 0) - Number(a?.score || 0);
-    });
-    for (const m of sorted) {
+  const rankingByModel = new Map<string, any>();
+  if (rankingParsed && Array.isArray(rankingParsed.models)) {
+    for (const m of rankingParsed.models) {
       const mid = String(m?.model || "").trim();
-      if (!mid || seen.has(mid.toLowerCase()) || m?.isDisabled || m?.online === false) continue;
-      const bench = benchByModel.get(mid.toLowerCase());
-      const tcOk = m?.toolCallOk === true || bench?.toolCallOk === true;
-      if (tcOk && m?.online !== false) {
-        approvedModels.add(mid.toLowerCase());
-        const shortId = String(mid.split("/").pop() || mid).trim().toLowerCase();
-        if (shortId) approvedModels.add(shortId);
-      }
-      const provider = String(m?.group || bench?.group || inferProviderForModel(mid)).trim() || inferProviderForModel(mid);
-      seen.add(mid.toLowerCase());
-      const tcTag = tcOk ? " · TC ✓" : "";
-      const scoreTxt = typeof m?.score === "number" ? ` · score ${m.score.toFixed(1)}` : "";
-      extras.push({
-        provider,
-        model: mid,
-        label: `${mid}${tcTag}${scoreTxt}`,
-        group: "nexusmind",
-      });
-      if (extras.length >= 8) break;
+      if (mid) rankingByModel.set(mid.toLowerCase(), m);
     }
   }
 
-  return { extras, approvedModels };
+  const approvedOptions: AgentModelOption[] = [];
+  const onlineOtherOptions: AgentModelOption[] = [];
+  const seen = new Set<string>();
+
+  // 2a. Primeiro: todos os modelos online + TC ✓ (Eval ao vivo + Ranking)
+  const candidateApproved = new Map<
+    string,
+    {
+      model: string;
+      provider: string;
+      qualityScore?: number;
+      rankingScore?: number;
+      latencyMs?: number;
+      mode?: string;
+      isFree: boolean;
+    }
+  >();
+
+  for (const [keyLower, b] of benchByModel.entries()) {
+    if (!b.online || !b.toolCallOk) continue;
+    const rankRec = rankingByModel.get(keyLower);
+    if (rankRec?.isDisabled) continue;
+    const provider = String(rankRec?.group || b.group || inferProviderForModel(b.model)).trim() || inferProviderForModel(b.model);
+    candidateApproved.set(keyLower, {
+      model: b.model,
+      provider,
+      qualityScore: b.qualityScore,
+      rankingScore: typeof rankRec?.score === "number" ? rankRec.score : undefined,
+      latencyMs: b.latencyMs ?? (typeof rankRec?.latencyMs === "number" ? rankRec.latencyMs : undefined),
+      mode: typeof rankRec?.mode === "string" ? rankRec.mode : undefined,
+      isFree: b.model.toLowerCase().includes(":free") || Boolean(rankRec?.isFree),
+    });
+  }
+
+  if (rankingParsed && Array.isArray(rankingParsed.models)) {
+    for (const m of rankingParsed.models) {
+      const mid = String(m?.model || "").trim();
+      if (!mid || m?.isDisabled) continue;
+      const keyLower = mid.toLowerCase();
+      const bench = benchByModel.get(keyLower);
+      if (bench && (!bench.online || !bench.toolCallOk)) continue;
+      if (m?.online === false) continue;
+
+      const tcOk = m?.toolCallOk === true || bench?.toolCallOk === true;
+      const provider = String(m?.group || bench?.group || inferProviderForModel(mid)).trim() || inferProviderForModel(mid);
+      const isFree = mid.toLowerCase().includes(":free") || Boolean(m?.isFree);
+      const latencyMs = bench?.latencyMs ?? (typeof m?.latencyMs === "number" ? m.latencyMs : undefined);
+
+      if (tcOk) {
+        approvedModels.add(keyLower);
+        const shortId = String(mid.split("/").pop() || mid).trim().toLowerCase();
+        if (shortId) approvedModels.add(shortId);
+        if (!candidateApproved.has(keyLower)) {
+          candidateApproved.set(keyLower, {
+            model: mid,
+            provider,
+            qualityScore: bench?.qualityScore,
+            rankingScore: typeof m?.score === "number" ? m.score : undefined,
+            latencyMs,
+            mode: typeof m?.mode === "string" ? m.mode : undefined,
+            isFree,
+          });
+        }
+      }
+    }
+  }
+
+  const sortedApproved = Array.from(candidateApproved.values()).sort((a, b) => {
+    const aQ = a.qualityScore ?? -1;
+    const bQ = b.qualityScore ?? -1;
+    if (aQ !== bQ) return bQ - aQ;
+    const aS = a.rankingScore ?? -1;
+    const bS = b.rankingScore ?? -1;
+    if (aS !== bS) return bS - aS;
+    return (a.latencyMs ?? 999999) - (b.latencyMs ?? 999999);
+  });
+
+  for (const item of sortedApproved) {
+    const keyLower = item.model.toLowerCase();
+    if (seen.has(keyLower)) continue;
+    seen.add(keyLower);
+    const parts = [item.model, "TC ✓"];
+    if (typeof item.qualityScore === "number") parts.push(`Q${Math.round(item.qualityScore)}`);
+    else if (typeof item.rankingScore === "number") parts.push(`score ${item.rankingScore.toFixed(1)}`);
+    const latStr = formatLatencyShort(item.latencyMs);
+    if (latStr) parts.push(latStr);
+    if (item.isFree) parts.push("FREE");
+    else if (item.mode === "vip") parts.push("VIP");
+    approvedOptions.push({
+      provider: item.provider,
+      model: item.model,
+      label: parts.join(" · "),
+      group: "eval_approved",
+      isFree: item.isFree,
+      mode: item.mode,
+      qualityScore: item.qualityScore,
+      rankingScore: item.rankingScore,
+      latencyMs: item.latencyMs,
+    });
+    if (approvedOptions.length >= 20) break;
+  }
+
+  // 2b. Demais modelos online no Ranking (não reprovados no Eval)
+  if (rankingParsed && Array.isArray(rankingParsed.models)) {
+    const sortedOther = [...rankingParsed.models].sort(
+      (a: any, b: any) => Number(b?.score || 0) - Number(a?.score || 0)
+    );
+    for (const m of sortedOther) {
+      const mid = String(m?.model || "").trim();
+      if (!mid || m?.isDisabled || m?.online === false) continue;
+      const keyLower = mid.toLowerCase();
+      if (seen.has(keyLower)) continue;
+      const bench = benchByModel.get(keyLower);
+      if (bench && (!bench.online || !bench.toolCallOk)) continue;
+      seen.add(keyLower);
+      const provider = String(m?.group || inferProviderForModel(mid)).trim() || inferProviderForModel(mid);
+      const scoreTxt = typeof m?.score === "number" ? ` · score ${m.score.toFixed(1)}` : "";
+      onlineOtherOptions.push({
+        provider,
+        model: mid,
+        label: `${mid}${scoreTxt}`,
+        group: "nexusmind_online",
+        isFree: mid.toLowerCase().includes(":free") || Boolean(m?.isFree),
+        mode: typeof m?.mode === "string" ? m.mode : undefined,
+        rankingScore: typeof m?.score === "number" ? m.score : undefined,
+      });
+      if (onlineOtherOptions.length >= 10) break;
+    }
+  }
+
+  return {
+    hasLiveData: approvedOptions.length > 0 || onlineOtherOptions.length > 0 || benchByModel.size > 0,
+    approvedOptions,
+    onlineOtherOptions,
+    approvedModels,
+    offlineModels,
+    forceFree: Boolean(rankingParsed?.forceFree),
+    updatedAt,
+  };
+}
+
+export function pickLiveRecommendedModel(
+  roleOrName: string,
+  catalog: LiveGatewayModelCatalog | null
+): { provider: string; model: string; tierLabel: string } {
+  const lower = normName(roleOrName);
+  const isTier1 = /(iris|bento|arquit|teo|vera|hugo|lara|ceo|coo|revis|qa|segur|secur|oraculo|conselho|board)/.test(lower);
+  const tierLabel = isTier1 ? "Tier 1 (Liderança/Revisão)" : "Tier 2 (Execução/Rápido)";
+
+  if (catalog && catalog.approvedOptions.length > 0) {
+    const pool = catalog.approvedOptions;
+    if (isTier1) {
+      const preferredPaid =
+        pool.find((o) => !o.isFree && o.mode === "vip") ||
+        pool.find((o) => !o.isFree && /(gpt-6\.1|claude-opus|gemini-4-hydrogen|gemini-2\.5-flash|auto\/reasoning)/.test(o.model.toLowerCase())) ||
+        pool.find((o) => !o.isFree) ||
+        pool[0];
+      return { provider: preferredPaid.provider, model: preferredPaid.model, tierLabel };
+    }
+    const preferredFast =
+      (catalog.forceFree ? pool.find((o) => o.isFree && o.mode !== "blocked") : null) ||
+      pool.find((o) => o.mode !== "blocked" && o.model.toLowerCase() === "gemini-2.5-flash") ||
+      pool.find((o) => o.mode !== "blocked") ||
+      pool[0];
+    return { provider: preferredFast.provider, model: preferredFast.model, tierLabel };
+  }
+
+  return isTier1
+    ? { provider: "nexusmind_openai", model: "gpt-6.1-terra", tierLabel }
+    : { provider: "nexusmind_antigravity", model: "gemini-2.5-flash", tierLabel };
 }
 
 const SURFACE_BG = "var(--affordance-subtle, rgba(255, 255, 255, 0.035))";
@@ -208,15 +395,6 @@ const RED = "var(--red-11, #f87171)";
 
 function normName(s: string | null | undefined): string {
   return String(s || "").trim().toLowerCase();
-}
-
-function recommendedModelForAgent(name: string): { provider: string; model: string; tierLabel: string } {
-  const lower = normName(name);
-  const isTier1 = /(iris|bento|arquit|teo|vera|hugo|lara|ceo|coo|revis|qa|segur|oraculo)/.test(lower);
-  if (isTier1) {
-    return { provider: "nexusmind_anthropic", model: "claude-sonnet-5-5", tierLabel: "Tier 1 (Liderança/Revisão)" };
-  }
-  return { provider: "nexusmind_anthropic", model: "claude-sonnet-4-6", tierLabel: "Tier 2 (Qualidade/Execução)" };
 }
 
 export function createAgentOrgfyTabComponent(ctx: Context) {
@@ -238,8 +416,7 @@ export function createAgentOrgfyTabComponent(ctx: Context) {
     const [loading, setLoading] = React.useState<boolean>(true);
     const [busyAction, setBusyAction] = React.useState<string | null>(null);
     const [statusBanner, setStatusBanner] = React.useState<{ ok: boolean; text: string } | null>(null);
-    const [extraModels, setExtraModels] = React.useState<AgentModelOption[]>([]);
-    const [gatewayApprovedModels, setGatewayApprovedModels] = React.useState<Set<string>>(() => new Set());
+    const [gatewayCatalog, setGatewayCatalog] = React.useState<LiveGatewayModelCatalog | null>(null);
 
     const agentName = String(agent?.name || agent?.key || "Agente");
     const agentKey = String(agent?.key || "");
@@ -249,15 +426,25 @@ export function createAgentOrgfyTabComponent(ctx: Context) {
     const currentProvider = String(agentCfg.provider || agent?.provider || "padrão");
     const currentHarness = String(agentCfg.harness || agent?.harness || agent?.type || "goose");
     const shortModel = String(currentModel.split("/").pop() || currentModel).trim();
-    const isCompliantR51 =
-      EVAL_R51_WINNERS.has(shortModel) ||
-      gatewayApprovedModels.has(currentModel.toLowerCase()) ||
-      gatewayApprovedModels.has(shortModel.toLowerCase());
-    const recommended = recommendedModelForAgent(agentName);
+    const isCurrentOffline = Boolean(
+      gatewayCatalog?.offlineModels.has(currentModel.toLowerCase()) ||
+        gatewayCatalog?.offlineModels.has(shortModel.toLowerCase())
+    );
+    const isCompliantR51 = gatewayCatalog?.hasLiveData
+      ? gatewayCatalog.approvedModels.has(currentModel.toLowerCase()) ||
+        gatewayCatalog.approvedModels.has(shortModel.toLowerCase())
+      : FALLBACK_EVAL_WINNERS.has(shortModel);
+    const recommended = React.useMemo(
+      () => pickLiveRecommendedModel(agentName, gatewayCatalog),
+      [agentName, gatewayCatalog]
+    );
 
     const modelOptions = React.useMemo<AgentModelOption[]>(() => {
-      return [...AGENT_MODEL_PRESETS, ...extraModels];
-    }, [extraModels]);
+      if (gatewayCatalog?.hasLiveData && (gatewayCatalog.approvedOptions.length > 0 || gatewayCatalog.onlineOtherOptions.length > 0)) {
+        return [...gatewayCatalog.approvedOptions, ...gatewayCatalog.onlineOtherOptions];
+      }
+      return FALLBACK_MODEL_PRESETS;
+    }, [gatewayCatalog]);
 
     const resolveDefaultModelKey = React.useCallback(() => {
       const exactMatch = modelOptions.find(
@@ -275,19 +462,16 @@ export function createAgentOrgfyTabComponent(ctx: Context) {
       setSelectedModelKey(resolveDefaultModelKey());
     }, [agentKey, currentModel, currentProvider, resolveDefaultModelKey]);
 
-    React.useEffect(() => {
-      let cancelled = false;
-      loadGatewayEvalAndRanking(ctx)
-        .then(({ extras, approvedModels }) => {
-          if (cancelled) return;
-          if (extras.length > 0) setExtraModels(extras);
-          if (approvedModels.size > 0) setGatewayApprovedModels(approvedModels);
-        })
-        .catch(() => {});
-      return () => {
-        cancelled = true;
-      };
+    const refreshGatewayCatalog = React.useCallback(async () => {
+      try {
+        const cat = await loadLiveGatewayModelCatalog(ctx);
+        setGatewayCatalog(cat);
+      } catch {}
     }, []);
+
+    React.useEffect(() => {
+      void refreshGatewayCatalog();
+    }, [refreshGatewayCatalog]);
 
     // Assina telemetria ao vivo nativa do Buzz (session.agentActivity)
     React.useEffect(() => {
@@ -323,6 +507,7 @@ export function createAgentOrgfyTabComponent(ctx: Context) {
           fetchLiveKanbanCards(ctx, { empresa: "all" }).catch(() => [] as PipelineCard[]),
           fetchGooseLoopRadar(ctx).catch(() => null),
           loadLiveRepoSnapshot(ctx, { dtag: "orgfy" }).catch(() => null),
+          refreshGatewayCatalog(),
         ]);
 
         const targetName = normName(agentName);
@@ -376,7 +561,7 @@ export function createAgentOrgfyTabComponent(ctx: Context) {
           provider: recommended.provider,
           model: recommended.model,
           label: `${recommended.model} (${recommended.tierLabel})`,
-          group: "curated" as const,
+          group: "fallback" as const,
         }
       );
     }, [modelOptions, selectedModelKey, recommended.provider, recommended.model, recommended.tierLabel]);
@@ -565,7 +750,7 @@ export function createAgentOrgfyTabComponent(ctx: Context) {
                     color: RED,
                   },
                 },
-                "Fora do Eval R5.1"
+                isCurrentOffline ? "Modelo offline no Gateway" : "Fora do Eval"
               ),
             agentMetric?.retryCascadeRisk &&
               h(
@@ -666,29 +851,44 @@ export function createAgentOrgfyTabComponent(ctx: Context) {
                 cursor: "pointer",
               },
             },
-            h(
-              "optgroup",
-              { label: "Modelos Validados (OrgFy)" },
-              AGENT_MODEL_PRESETS.map((opt) =>
-                h(
-                  "option",
-                  { key: modelOptionKey(opt.provider, opt.model), value: modelOptionKey(opt.provider, opt.model) },
-                  opt.label
-                )
-              )
-            ),
-            extraModels.length > 0 &&
-              h(
-                "optgroup",
-                { label: "NexusMind Ranking" },
-                extraModels.map((opt) =>
-                  h(
-                    "option",
-                    { key: modelOptionKey(opt.provider, opt.model), value: modelOptionKey(opt.provider, opt.model) },
-                    opt.label
+            gatewayCatalog?.hasLiveData && (gatewayCatalog.approvedOptions.length > 0 || gatewayCatalog.onlineOtherOptions.length > 0)
+              ? [
+                  gatewayCatalog.approvedOptions.length > 0 &&
+                    h(
+                      "optgroup",
+                      { key: "eval-approved", label: "Aprovados no Eval (NexusMind)" },
+                      gatewayCatalog.approvedOptions.map((opt) =>
+                        h(
+                          "option",
+                          { key: modelOptionKey(opt.provider, opt.model), value: modelOptionKey(opt.provider, opt.model) },
+                          opt.label
+                        )
+                      )
+                    ),
+                  gatewayCatalog.onlineOtherOptions.length > 0 &&
+                    h(
+                      "optgroup",
+                      { key: "nexusmind-online", label: "Ranking NexusMind (Online)" },
+                      gatewayCatalog.onlineOtherOptions.map((opt) =>
+                        h(
+                          "option",
+                          { key: modelOptionKey(opt.provider, opt.model), value: modelOptionKey(opt.provider, opt.model) },
+                          opt.label
+                        )
+                      )
+                    ),
+                ]
+              : h(
+                  "optgroup",
+                  { label: "Fallback (sem Eval ao vivo)" },
+                  FALLBACK_MODEL_PRESETS.map((opt) =>
+                    h(
+                      "option",
+                      { key: modelOptionKey(opt.provider, opt.model), value: modelOptionKey(opt.provider, opt.model) },
+                      opt.label
+                    )
                   )
                 )
-              )
           ),
           h(
             "button",

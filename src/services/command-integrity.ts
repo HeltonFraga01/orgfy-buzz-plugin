@@ -42,7 +42,7 @@ export const PINNED_HOST_COMMANDS: readonly PinnedHostCommandSpec[] = Object.fre
   {
     id: "orgfy-kpis",
     scriptPath: "ferramentas/esteira/gerar_kpis_esteira.py",
-    sha256: "174ed76e353db11e6aae4c94140234adc5adfa43606141be82f5618ea9867f46",
+    sha256: "ec21ca0b2835869c9baf5d18f27ddd1bb868be47a86aa6d9fb0884cee5ae534a",
   },
   {
     id: "orgfy-controle-write",

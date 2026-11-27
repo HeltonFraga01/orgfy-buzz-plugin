@@ -179,6 +179,7 @@ export interface FactoryStatusPayload {
     higiene?: Record<string, any> | null;
   };
   modelos?: AgentModelEvalRow[];
+  evalWinners?: Array<{ provider: string; model: string; score: string; scoreNum: number; latencyMs: number | null; costUsd: string | null }>;
   tenantManifest?: TenantManifestInfo;
   alcadasPolitica?: {
     modo?: string;
@@ -276,57 +277,69 @@ export interface ParsedEvalEntry {
   abaixo: boolean;
   latencyMs: number | null;
   costUsd: string | null;
+  provider?: string | null;
+  model?: string;
 }
 
-// Baseline verificada de docs/eval-modelos-onda5.md (10 cards reais R5.1), sobrescrita pelo arquivo ao vivo quando legível.
+// Baseline de fallback quando docs/eval-modelos-onda5.md ainda não existe; sempre substituída pelo arquivo ao vivo quando legível.
 const VERIFIED_R51_BASELINE: Record<string, ParsedEvalEntry> = {
-  "claude-sonnet-4-6": { score: "10/10", scoreNum: 10, abaixo: false, latencyMs: 4064, costUsd: "$0.0815" },
-  "gemini-2.5-flash": { score: "10/10", scoreNum: 10, abaixo: false, latencyMs: 2045, costUsd: "$0.0022" },
-  "claude-sonnet-5-5": { score: "9/10", scoreNum: 9, abaixo: false, latencyMs: 5143, costUsd: "$0.0715" },
-  "claude-haiku-5-5": { score: "3/10", scoreNum: 3, abaixo: true, latencyMs: 3738, costUsd: "$0.0219" },
-  "gemini-3.8-flash-medium": { score: "0/10", scoreNum: 0, abaixo: true, latencyMs: 4956, costUsd: "$0.0046" },
+  "claude-sonnet-4-6": { score: "10/10", scoreNum: 10, abaixo: false, latencyMs: 4064, costUsd: "$0.0815", provider: "nexusmind_anthropic", model: "claude-sonnet-4-6" },
+  "gemini-2.5-flash": { score: "10/10", scoreNum: 10, abaixo: false, latencyMs: 2045, costUsd: "$0.0022", provider: "nexusmind_antigravity", model: "gemini-2.5-flash" },
+  "claude-sonnet-5-5": { score: "9/10", scoreNum: 9, abaixo: false, latencyMs: 5143, costUsd: "$0.0715", provider: "nexusmind_anthropic", model: "claude-sonnet-5-5" },
+  "claude-haiku-5-5": { score: "3/10", scoreNum: 3, abaixo: true, latencyMs: 3738, costUsd: "$0.0219", provider: "nexusmind_anthropic", model: "claude-haiku-5-5" },
+  "gemini-3.8-flash-medium": { score: "0/10", scoreNum: 0, abaixo: true, latencyMs: 4956, costUsd: "$0.0046", provider: "nexusmind_antigravity", model: "gemini-3.8-flash-medium" },
 };
 
 export function parseEvalTable(md: string | null): Map<string, ParsedEvalEntry> {
-  const map = new Map<string, ParsedEvalEntry>();
-  for (const [k, v] of Object.entries(VERIFIED_R51_BASELINE)) {
-    map.set(k.toLowerCase(), v);
-  }
-  if (!md) return map;
-  let modelColIdx = 0;
-  for (const line of md.split("\n")) {
-    if (!line.trim().startsWith("|")) continue;
-    const cols = line.split("|").map((c) => c.trim()).filter(Boolean);
-    if (cols.length < 3) continue;
-    if (cols.every((c) => /^:?-+:?$/.test(c))) continue;
-    const lowerCols = cols.map((c) => c.toLowerCase());
-    const headerModelIdx = lowerCols.findIndex((c) => c === "model" || c === "modelo");
-    if (headerModelIdx >= 0) {
-      modelColIdx = headerModelIdx;
-      continue;
-    }
-    const model = (cols[modelColIdx] || cols[0] || "").replace(/`/g, "").trim();
-    const m = line.match(/(\d+)\s*\/\s*10/g);
-    if (model && m && m.length >= 1) {
-      const toolStr = m.length >= 2 ? m[1] : m[0];
-      const num = parseInt(toolStr.split("/")[0], 10);
-      if (!Number.isNaN(num)) {
-        const latCol = cols.find((c) => /^\d{3,6}$/.test(c));
-        const costCol = cols.find((c) => /^\$\d/.test(c));
-        const entry: ParsedEvalEntry = {
-          score: `${num}/10`,
-          scoreNum: num,
-          abaixo: num < 8,
-          latencyMs: latCol ? parseInt(latCol, 10) : null,
-          costUsd: costCol || null,
-        };
-        const shortName = model.includes("/") ? model.split("/").pop()! : model;
-        map.set(model.toLowerCase(), entry);
-        map.set(shortName.toLowerCase(), entry);
+  const liveMap = new Map<string, ParsedEvalEntry>();
+  if (md) {
+    let modelColIdx = 0;
+    let providerColIdx = -1;
+    for (const line of md.split("\n")) {
+      if (!line.trim().startsWith("|")) continue;
+      const cols = line.split("|").map((c) => c.trim()).filter(Boolean);
+      if (cols.length < 3) continue;
+      if (cols.every((c) => /^:?-+:?$/.test(c))) continue;
+      const lowerCols = cols.map((c) => c.toLowerCase());
+      const headerModelIdx = lowerCols.findIndex((c) => c === "model" || c === "modelo");
+      if (headerModelIdx >= 0) {
+        modelColIdx = headerModelIdx;
+        providerColIdx = lowerCols.findIndex((c) => c === "provider" || c === "provedor");
+        continue;
+      }
+      const model = (cols[modelColIdx] || cols[0] || "").replace(/`/g, "").trim();
+      const provider = providerColIdx >= 0 ? (cols[providerColIdx] || "").replace(/`/g, "").trim() : null;
+      const m = line.match(/(\d+)\s*\/\s*10(?!\d)/g);
+      if (model && m && m.length >= 1) {
+        const toolStr = m.length >= 2 ? m[1] : m[0];
+        const num = parseInt(toolStr.split("/")[0], 10);
+        if (!Number.isNaN(num)) {
+          const latCol = cols.find((c) => /^\d{2,6}$/.test(c));
+          const costCol = cols.find((c) => /^\$\d/.test(c));
+          const entry: ParsedEvalEntry = {
+            score: `${num}/10`,
+            scoreNum: num,
+            abaixo: num < 8,
+            latencyMs: latCol ? parseInt(latCol, 10) : null,
+            costUsd: costCol || null,
+            provider: provider || null,
+            model,
+          };
+          const shortName = model.includes("/") ? model.split("/").pop()! : model;
+          liveMap.set(model.toLowerCase(), entry);
+          if (!liveMap.has(shortName.toLowerCase())) {
+            liveMap.set(shortName.toLowerCase(), entry);
+          }
+        }
       }
     }
   }
-  return map;
+  if (liveMap.size > 0) return liveMap;
+  const fallbackMap = new Map<string, ParsedEvalEntry>();
+  for (const [k, v] of Object.entries(VERIFIED_R51_BASELINE)) {
+    fallbackMap.set(k.toLowerCase(), v);
+  }
+  return fallbackMap;
 }
 
 function describeOrgfyRole(papelRaw: string | null | undefined): {
@@ -491,7 +504,7 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
       modelo,
       provider,
       toolcall_eval: ev?.score || null,
-      abaixo_minimo: Boolean(ev?.abaixo || isUnsupported),
+      abaixo_minimo: ev ? ev.abaixo : isUnsupported,
       scoreNum: ev ? ev.scoreNum : null,
       latencyMs: ev ? ev.latencyMs : null,
       costUsd: ev ? ev.costUsd : null,
@@ -793,6 +806,25 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
     lastDigest: digestJson || null,
     ...(spotChecksJson ? { spotChecks: spotChecksJson } : {}),
     modelos,
+    evalWinners: (() => {
+      const seenW = new Set<string>();
+      const out: Array<{ provider: string; model: string; score: string; scoreNum: number; latencyMs: number | null; costUsd: string | null }> = [];
+      for (const entry of evalMap.values()) {
+        if (entry.abaixo || !entry.model) continue;
+        const key = entry.model.toLowerCase();
+        if (seenW.has(key)) continue;
+        seenW.add(key);
+        out.push({
+          provider: entry.provider || (entry.model.includes("/") || entry.model.includes(":free") ? "nexusmind_openai" : "nexusmind_antigravity"),
+          model: entry.model,
+          score: entry.score,
+          scoreNum: entry.scoreNum,
+          latencyMs: entry.latencyMs,
+          costUsd: entry.costUsd,
+        });
+      }
+      return out;
+    })(),
     indisponivel: [
       ...(!kpis ? ["kpis-esteira.json"] : []),
       ...(!digestJson ? ["lastDigest"] : []),

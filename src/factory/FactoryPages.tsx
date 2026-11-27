@@ -1222,6 +1222,27 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
             const approvedCount = modelos.filter((m) => m.evalStatus === "approved").length;
             const belowCount = modelos.filter((m) => m.evalStatus === "below_min").length;
             const attentionCount = modelos.filter((m) => m.evalStatus !== "approved").length;
+            const liveWinners = status.evalWinners || [];
+            const topTier1Winner =
+              liveWinners.find((w) => !w.model.includes(":free") && /(gpt-6\.1|claude-opus|gemini-4-hydrogen|gemini-2\.5-flash|auto\/reasoning)/i.test(w.model)) ||
+              liveWinners.find((w) => !w.model.includes(":free")) ||
+              liveWinners[0] ||
+              { provider: "nexusmind_openai", model: "gpt-6.1-terra", latencyMs: null, costUsd: null };
+            const topTier2Winner =
+              liveWinners.find((w) => w.model.toLowerCase() === "gemini-2.5-flash") ||
+              liveWinners[0] ||
+              { provider: "nexusmind_antigravity", model: "gemini-2.5-flash", latencyMs: null, costUsd: null };
+            const shortLabel = (mid: string) => {
+              const s = String(mid.split("/").pop() || mid);
+              return s.length > 22 ? s.slice(0, 20) + "…" : s;
+            };
+            const winnersSub =
+              liveWinners.length > 0
+                ? liveWinners
+                    .slice(0, 2)
+                    .map((w) => `${shortLabel(w.model)}${w.latencyMs ? ` (${(w.latencyMs / 1000).toFixed(1)}s)` : ""}`)
+                    .join(" · ")
+                : "Rode o Eval no NexusMind Gateway";
             const filteredModelos =
               evalFilter === "attention"
                 ? modelos.filter((m) => m.evalStatus !== "approved")
@@ -1235,10 +1256,10 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                 "div",
                 { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "10px" } },
                 [
-                  { label: "Aprovados R5.1 (≥ 8/10)", val: `${approvedCount}/${modelos.length}`, tone: "done", sub: "tool call validado em 10 cards" },
-                  { label: "Abaixo do mínimo (< 8/10)", val: String(belowCount), tone: belowCount > 0 ? "failed" : "done", sub: belowCount > 0 ? "migração recomendada" : "nenhum agente crítico" },
-                  { label: "Fora do eval / Timeout", val: String(Math.max(0, attentionCount - belowCount)), tone: attentionCount - belowCount > 0 ? "waiting" : "done", sub: "mistral-large (>20s) ou não testado" },
-                  { label: "Vencedores R5.1 (10/10)", val: "2 modelos", tone: "done", sub: "gemini-2.5-flash (2.0s) · sonnet-4-6 (4.1s)" },
+                  { label: "Aprovados no Eval (≥ 8/10)", val: `${approvedCount}/${modelos.length}`, tone: "done", sub: "tool call validado ao vivo (Gateway)" },
+                  { label: "Abaixo do mínimo / Offline", val: String(belowCount), tone: belowCount > 0 ? "failed" : "done", sub: belowCount > 0 ? "migração recomendada" : "nenhum agente crítico" },
+                  { label: "Fora do eval / Não testado", val: String(Math.max(0, attentionCount - belowCount)), tone: attentionCount - belowCount > 0 ? "waiting" : "done", sub: "modelo sem resultado no Eval atual" },
+                  { label: "Vencedores ao vivo (10/10)", val: `${liveWinners.length} modelo${liveWinners.length === 1 ? "" : "s"}`, tone: "done", sub: winnersSub },
                 ].map((k) =>
                   h(
                     "div",
@@ -1259,7 +1280,7 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                     "div",
                     null,
                     h("div", { style: { fontSize: "14px", fontWeight: 700 } }, PT_BR.labels.modelsTitle),
-                    h("div", { className: "of-muted", style: { fontSize: "11.5px", marginTop: "2px" } }, "Fonte: docs/eval-modelos-onda5.md (10 cards reais). Modelos < 8/10 ou com timeout >20s ficam sinalizados para migração em 1 clique via ctx.agents.save().")
+                    h("div", { className: "of-muted", style: { fontSize: "11.5px", marginTop: "2px" } }, "Fonte: docs/eval-modelos-onda5.md (sincronizado pelo NexusMind Gateway). Modelos offline ou < 8/10 ficam sinalizados para migração em 1 clique via ctx.agents.save().")
                   ),
                   props.setEvalFilter &&
                     h(
@@ -1292,7 +1313,7 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                       h(
                         "thead",
                         null,
-                        h("tr", null, h("th", null, "Agente"), h("th", null, "Papel"), h("th", null, "Modelo & Provider"), h("th", null, "Tool call (R5.1)"), h("th", null, "Latência / Custo"), h("th", null, "Ação (Buzz API)"))
+                        h("tr", null, h("th", null, "Agente"), h("th", null, "Papel"), h("th", null, "Modelo & Provider"), h("th", null, "Tool call (Eval)"), h("th", null, "Latência / Custo"), h("th", null, "Ação (Buzz API)"))
                       ),
                       h(
                         "tbody",
@@ -1300,9 +1321,12 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                         filteredModelos.map((m) => {
                           const agSpec = tenantAgents.find((a) => a.name === m.agente);
                           const isTier1 = /(ceo|coo|revis|arquit|segur|secur|qa|oraculo|conselho|board)/i.test(String(m.papel || ""));
-                          const recTarget = isTier1
-                            ? { provider: "nexusmind_anthropic", model: "claude-sonnet-4-6", label: "Sonnet 4.6" }
-                            : { provider: "nexusmind_antigravity", model: "gemini-2.5-flash", label: "Flash 2.5" };
+                          const chosen = isTier1 ? topTier1Winner : topTier2Winner;
+                          const recTarget = {
+                            provider: chosen.provider,
+                            model: chosen.model,
+                            label: shortLabel(chosen.model),
+                          };
                           const scorePct = typeof m.scoreNum === "number" ? Math.max(4, m.scoreNum * 10) : 0;
                           const tone =
                             m.evalStatus === "approved"

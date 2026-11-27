@@ -79,6 +79,7 @@ import { collectBuzzNativeUsage, type BuzzNativeUsageSnapshot } from "../service
 import { notifyRespectingFocus, readBuzzFocusState, subscribeBuzzFocus, type BuzzFocusState } from "../services/buzz-focus";
 import { auditAllHostCommandsIntegrity, type CommandIntegrityAuditSummary } from "../services/command-integrity";
 import { buildUnifiedOrgfyTools } from "../tools/registry";
+import { loadLiveGatewayModelCatalog, pickLiveRecommendedModel } from "../components/AgentOrgfyTab";
 
 type FactoryTab =
   | "holding"
@@ -1089,26 +1090,40 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         notify("API ctx.agents.save indisponível nesta versão do Buzz.");
         return;
       }
-      const winners = new Set([
-        "claude-sonnet-5-5",
-        "claude-sonnet-4-6",
-        "gemini-2.5-flash",
-      ]);
-      const targets = tenantAgents.filter(
-        (a) => a.inBuzz && a.agentKey && !winners.has(String(a.model || "").split("/").pop() || "")
-      );
+      const catalog = await loadLiveGatewayModelCatalog(ctx).catch(() => null);
+      const liveWinners = new Set<string>();
+      if (catalog?.hasLiveData && catalog.approvedModels.size > 0) {
+        for (const m of catalog.approvedModels) liveWinners.add(m);
+      } else if (Array.isArray(status.evalWinners) && status.evalWinners.length > 0) {
+        for (const w of status.evalWinners) {
+          liveWinners.add(w.model.toLowerCase());
+          const shortW = String(w.model.split("/").pop() || w.model).toLowerCase();
+          if (shortW) liveWinners.add(shortW);
+        }
+      } else {
+        liveWinners.add("gemini-2.5-flash");
+        liveWinners.add("gpt-6.1-terra");
+      }
+
+      const targets = tenantAgents.filter((a) => {
+        if (!a.inBuzz || !a.agentKey) return false;
+        const full = String(a.model || "").trim().toLowerCase();
+        const short = String(full.split("/").pop() || full).trim();
+        if (catalog?.offlineModels.has(full) || catalog?.offlineModels.has(short)) return true;
+        return !liveWinners.has(full) && !liveWinners.has(short);
+      });
       if (targets.length === 0) {
-        notify("Todos os agentes provisionados já estão em modelos aprovados no Eval R5.1.");
+        notify("Todos os agentes provisionados já estão em modelos online aprovados no Eval.");
         return;
       }
       const freshAgents = ((agentsApi.snapshot?.()?.agents || []) as any[]);
       let updated = 0;
       let firstError = "";
+      const assignedModels = new Set<string>();
       for (const ag of targets) {
-        const papel = String(ag.papel || "").toLowerCase();
-        const isTier1 = /(ceo|coo|revis|arquit|segur|secur|qa|oraculo|conselho|board)/.test(papel);
-        const provider = isTier1 ? "nexusmind_anthropic" : "nexusmind_antigravity";
-        const model = isTier1 ? "claude-sonnet-5-5" : "gemini-2.5-flash";
+        const rec = pickLiveRecommendedModel(`${ag.papel || ""} ${ag.name || ""}`, catalog);
+        const provider = rec.provider;
+        const model = rec.model;
         const fresh = freshAgents.find((c: any) => c?.key === ag.agentKey) || liveCrew.find((c) => c.key === ag.agentKey);
         const baseCfg = fresh?.config && typeof fresh.config === "object" ? fresh.config : {};
         try {
@@ -1118,17 +1133,18 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
             config: { ...baseCfg, provider, model },
           });
           updated += 1;
+          assignedModels.add(model);
         } catch (err: any) {
           if (!firstError) firstError = err?.message || String(err);
         }
       }
       notify(
         updated > 0
-          ? `${updated}/${targets.length} agente(s) reconciliado(s) para os vencedores do Eval R5.1 via ctx.agents.save().`
+          ? `${updated}/${targets.length} agente(s) reconciliado(s) para ${Array.from(assignedModels).join(", ")} (Eval ao vivo) ✓`
           : `Nenhum agente pôde ser atualizado${firstError ? `: ${firstError}` : " via ctx.agents.save()."}`
       );
       await refresh(tenant);
-    }, [tenantAgents, liveCrew, tenant, notify, refresh]);
+    }, [tenantAgents, liveCrew, status.evalWinners, tenant, notify, refresh]);
 
     const handleSaveAgentProfile = React.useCallback(
       async (agentKey: string, patch: { provider: string; model: string; instructions?: string }) => {

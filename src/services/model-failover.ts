@@ -1,5 +1,6 @@
 import { joinHome } from "../config";
 import type { Context } from "@buzz/author";
+import { loadLiveGatewayModelCatalog, pickLiveRecommendedModel } from "../components/AgentOrgfyTab";
 
 export interface ModelCandidateScore {
   model: string;
@@ -54,22 +55,39 @@ export async function reconcileAgentsViaBuzzApi(
   const agentsApi = (ctx as any)?.agents;
   const snap = typeof agentsApi?.snapshot === "function" ? agentsApi.snapshot() : null;
   const list: any[] = Array.isArray(snap?.agents) ? snap.agents : [];
+  const catalog = await loadLiveGatewayModelCatalog(ctx).catch(() => null);
+  const hasLiveCatalog = Boolean(catalog?.hasLiveData && catalog.approvedOptions.length > 0);
   const updated: Array<{ key: string; from: string; to: string }> = [];
   for (const ag of list) {
     const cfg = ag?.config && typeof ag.config === "object" ? { ...ag.config } : {};
     const prov = cfg.provider || ag?.provider || null;
     const model = cfg.model || ag?.model || null;
     const mlow = String(model || "").trim().toLowerCase();
+    const shortM = String(mlow.split("/").pop() || mlow).trim();
+    const isOfflineInGateway = Boolean(
+      hasLiveCatalog && (catalog?.offlineModels.has(mlow) || catalog?.offlineModels.has(shortM))
+    );
+    const isApprovedInGateway = Boolean(
+      hasLiveCatalog && (catalog?.approvedModels.has(mlow) || catalog?.approvedModels.has(shortM))
+    );
     const needsFix =
       !prov ||
       !model ||
-      isFreeModelId(mlow) ||
-      isUnsupportedAgentModel(mlow) ||
+      isOfflineInGateway ||
+      (!isApprovedInGateway && (isFreeModelId(mlow) || isUnsupportedAgentModel(mlow))) ||
       (prov === "nexusmind_openai" && mlow.startsWith("antigravity/"));
     if (!needsFix) continue;
-    const isFastTarget = mlow.includes("flash") || mlow.includes("haiku");
-    const nextModel = isFastTarget ? "gemini-2.5-flash" : "claude-sonnet-4-6";
-    const nextProv = isFastTarget ? "nexusmind_antigravity" : "nexusmind_anthropic";
+    let nextModel: string;
+    let nextProv: string;
+    if (hasLiveCatalog) {
+      const rec = pickLiveRecommendedModel(String(ag?.name || ag?.key || ""), catalog);
+      nextModel = rec.model;
+      nextProv = rec.provider;
+    } else {
+      const isFastTarget = mlow.includes("flash") || mlow.includes("haiku");
+      nextModel = isFastTarget ? "gemini-2.5-flash" : "claude-sonnet-4-6";
+      nextProv = isFastTarget ? "nexusmind_antigravity" : "nexusmind_anthropic";
+    }
     if (!opts.dryRun && typeof agentsApi?.save === "function") {
       await agentsApi.save(ag.key, { config: { ...cfg, provider: nextProv, model: nextModel } });
     }

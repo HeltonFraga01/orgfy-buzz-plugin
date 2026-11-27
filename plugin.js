@@ -1201,22 +1201,1899 @@ function filterGooseLoopRadar(payload, opts) {
     ]
   };
 }
+const DEFAULT_ORGFY_REPO_OWNER = "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20";
+function resolveBuzzNavigationScope$1(ctx) {
+  var _a, _b, _c, _d;
+  try {
+    const navSnap = typeof ((_a = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a.snapshot) === "function" ? ctx.navigation.snapshot() : null;
+    const navScope = (_c = (_b = navSnap == null ? void 0 : navSnap.entry) == null ? void 0 : _b.target) == null ? void 0 : _c.scope;
+    if ((navScope == null ? void 0 : navScope.viewer) && (navScope == null ? void 0 : navScope.communityOrigin)) {
+      return {
+        viewer: String(navScope.viewer),
+        communityOrigin: String(navScope.communityOrigin)
+      };
+    }
+  } catch {
+  }
+  try {
+    const relaySnap = typeof ((_d = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _d.snapshot) === "function" ? ctx.relay.snapshot() : null;
+    const viewer = (relaySnap == null ? void 0 : relaySnap.viewer) ? String(relaySnap.viewer) : "";
+    let communityOrigin = (relaySnap == null ? void 0 : relaySnap.origin) ? String(relaySnap.origin) : "";
+    if (!communityOrigin && viewer && typeof (relaySnap == null ? void 0 : relaySnap.scope) === "string" && relaySnap.scope.endsWith(`:${viewer}`)) {
+      communityOrigin = relaySnap.scope.slice(0, -(viewer.length + 1));
+    }
+    if (viewer && communityOrigin) {
+      return { viewer, communityOrigin };
+    }
+  } catch {
+  }
+  return null;
+}
+async function openBuzzRepoEntity(ctx, route) {
+  var _a, _b, _c, _d, _e, _f;
+  const scope = resolveBuzzNavigationScope$1(ctx);
+  if (!scope || typeof ((_a = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a.open) !== "function") {
+    return false;
+  }
+  let normalizedRoute = "id" in route ? {
+    type: route.type,
+    owner: route.owner.toLowerCase().trim(),
+    dtag: route.dtag.trim(),
+    id: route.id.toLowerCase().replace(/^#/, "").trim()
+  } : {
+    type: "repo",
+    owner: route.owner.toLowerCase().trim(),
+    dtag: route.dtag.trim(),
+    ...route.tab ? { tab: route.tab } : {},
+    ...route.commit ? { commit: route.commit.toLowerCase().trim() } : {}
+  };
+  const session = typeof ((_b = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _b.snapshot) === "function" ? (_c = ctx.relay.snapshot()) == null ? void 0 : _c.session : null;
+  if ("id" in normalizedRoute && (session == null ? void 0 : session.repositories) && typeof session.repositories.load === "function") {
+    const tryLoad = async (cand) => {
+      const ac = new AbortController();
+      const t = setTimeout(() => ac.abort(), 3e3);
+      try {
+        const det = await session.repositories.load(cand, ac.signal);
+        return Boolean(det == null ? void 0 : det.item);
+      } catch {
+        return false;
+      } finally {
+        clearTimeout(t);
+      }
+    };
+    const okDirect = await tryLoad(normalizedRoute);
+    if (!okDirect) {
+      let resolved = null;
+      try {
+        const navSnap = typeof ((_d = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _d.snapshot) === "function" ? ctx.navigation.snapshot() : null;
+        const activeCh = ((_f = (_e = navSnap == null ? void 0 : navSnap.entry) == null ? void 0 : _e.target) == null ? void 0 : _f.kind) === "conversation" ? navSnap.entry.target.channelId : null;
+        if (activeCh && typeof session.repositories.home === "function") {
+          const acH = new AbortController();
+          const tH = setTimeout(() => acH.abort(), 2500);
+          try {
+            const home = await session.repositories.home(activeCh, acH.signal);
+            const repos = (home == null ? void 0 : home.status) === "home" && Array.isArray(home.repositories) ? home.repositories : [];
+            for (const r of repos) {
+              if (!(r == null ? void 0 : r.owner) || !(r == null ? void 0 : r.dtag)) continue;
+              const cand = { ...normalizedRoute, owner: String(r.owner).toLowerCase(), dtag: String(r.dtag) };
+              if (await tryLoad(cand)) {
+                resolved = cand;
+                break;
+              }
+            }
+          } finally {
+            clearTimeout(tH);
+          }
+        }
+      } catch {
+      }
+      if (!resolved && normalizedRoute.dtag !== "orgfy") {
+        const orgfyCand = { ...normalizedRoute, owner: DEFAULT_ORGFY_REPO_OWNER, dtag: "orgfy" };
+        if (await tryLoad(orgfyCand)) {
+          resolved = orgfyCand;
+        }
+      }
+      if (resolved) {
+        normalizedRoute = resolved;
+      } else {
+        return false;
+      }
+    }
+  } else if ("id" in normalizedRoute) {
+    return false;
+  }
+  try {
+    const res = await ctx.navigation.open({
+      version: 1,
+      kind: "page",
+      pluginId: "buzz.repos",
+      pageId: "repos",
+      scope,
+      route: {
+        version: 1,
+        params: normalizedRoute
+      }
+    });
+    if (res && typeof res === "object" && "status" in res && res.status !== "opened") {
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn("[OrgFy BuzzRepos] ctx.navigation.open falhou:", err);
+    return false;
+  }
+}
+async function openPrInBuzz(ctx, pr) {
+  const id = String(pr.id || "").toLowerCase().replace(/^#/, "").trim();
+  if (!/^[0-9a-f]{64}$/i.test(id)) return false;
+  const owner = /^[0-9a-f]{64}$/i.test(String(pr.owner || "")) ? String(pr.owner).toLowerCase() : DEFAULT_ORGFY_REPO_OWNER;
+  const dtag = String(pr.dtag || "orgfy").trim() || "orgfy";
+  return openBuzzRepoEntity(ctx, { type: "pr", owner, dtag, id });
+}
+async function openRepoTabInBuzz(ctx, opts) {
+  const owner = /^[0-9a-f]{64}$/i.test(String(opts.owner || "")) ? String(opts.owner).toLowerCase() : DEFAULT_ORGFY_REPO_OWNER;
+  const dtag = String(opts.dtag || "orgfy").trim() || "orgfy";
+  return openBuzzRepoEntity(ctx, {
+    type: "repo",
+    owner,
+    dtag,
+    ...opts.tab ? { tab: opts.tab } : {},
+    ...opts.commit ? { tab: "commits", commit: opts.commit } : {}
+  });
+}
+function tagValue(event, name) {
+  const tags = Array.isArray(event == null ? void 0 : event.tags) ? event.tags : [];
+  const found = tags.find((t) => Array.isArray(t) && t[0] === name && typeof t[1] === "string");
+  return found ? String(found[1]) : void 0;
+}
+async function loadLiveRepoSnapshot(ctx, opts) {
+  var _a, _b, _c, _d;
+  const fallbackOwner = /^[0-9a-f]{64}$/i.test(String(opts.owner || "")) ? String(opts.owner).toLowerCase() : DEFAULT_ORGFY_REPO_OWNER;
+  const fallbackDtag = String(opts.dtag || "orgfy").trim() || "orgfy";
+  const session = typeof ((_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) === "function" ? (_b = ctx.relay.snapshot()) == null ? void 0 : _b.session : null;
+  if (!(session == null ? void 0 : session.repositories) || typeof session.repositories.load !== "function") {
+    return { available: false, owner: fallbackOwner, dtag: fallbackDtag, issues: [], prs: [] };
+  }
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 8e3);
+  try {
+    let owner = fallbackOwner;
+    let dtag = fallbackDtag;
+    let name;
+    if (opts.channelId && typeof session.repositories.home === "function") {
+      try {
+        const home = await session.repositories.home(opts.channelId, ac.signal);
+        if ((home == null ? void 0 : home.status) === "home" && Array.isArray(home.repositories) && home.repositories.length > 0) {
+          const picked = home.repositories.find((r) => String(r.dtag || "").toLowerCase() === fallbackDtag.toLowerCase()) || home.repositories[0];
+          if ((picked == null ? void 0 : picked.owner) && (picked == null ? void 0 : picked.dtag)) {
+            owner = String(picked.owner).toLowerCase();
+            dtag = String(picked.dtag);
+            name = typeof picked.name === "string" ? picked.name : dtag;
+          }
+        }
+      } catch {
+      }
+    }
+    const [issuesDetail, prsDetail] = await Promise.all([
+      session.repositories.load({ type: "repo", owner, dtag, tab: "issues" }, ac.signal).catch(() => null),
+      session.repositories.load({ type: "repo", owner, dtag, tab: "prs" }, ac.signal).catch(() => null)
+    ]);
+    const mapItems = (detail, kind) => {
+      const items = Array.isArray(detail == null ? void 0 : detail.items) ? detail.items : [];
+      return items.map((ev) => {
+        var _a2;
+        const content = String((ev == null ? void 0 : ev.content) || "");
+        const title = tagValue(ev, "subject") || ((_a2 = content.split("\n").find((l) => l.trim())) == null ? void 0 : _a2.replace(/^#+\s*/, "").slice(0, 120)) || `${kind.toUpperCase()} #${String((ev == null ? void 0 : ev.id) || "").slice(0, 8)}`;
+        return {
+          id: String((ev == null ? void 0 : ev.id) || ""),
+          kind,
+          owner,
+          dtag,
+          title,
+          authorPubkey: String((ev == null ? void 0 : ev.pubkey) || "").toLowerCase(),
+          createdAt: Number((ev == null ? void 0 : ev.created_at) || 0) * 1e3,
+          content
+        };
+      });
+    };
+    return {
+      available: Boolean(issuesDetail || prsDetail),
+      owner,
+      dtag,
+      name: name || ((_c = issuesDetail == null ? void 0 : issuesDetail.entity) == null ? void 0 : _c.name) || ((_d = prsDetail == null ? void 0 : prsDetail.entity) == null ? void 0 : _d.name) || dtag,
+      issues: mapItems(issuesDetail, "issue"),
+      prs: mapItems(prsDetail, "pr")
+    };
+  } catch {
+    return { available: false, owner: fallbackOwner, dtag: fallbackDtag, issues: [], prs: [] };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+async function loadLiveRepoEntityDetail(ctx, route) {
+  var _a, _b, _c;
+  const id = String(route.id || "").toLowerCase().replace(/^#/, "").trim();
+  if (!/^[0-9a-f]{64}$/i.test(id)) return null;
+  const session = typeof ((_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) === "function" ? (_b = ctx.relay.snapshot()) == null ? void 0 : _b.session : null;
+  if (!(session == null ? void 0 : session.repositories) || typeof session.repositories.load !== "function") return null;
+  const owner = /^[0-9a-f]{64}$/i.test(String(route.owner)) ? String(route.owner).toLowerCase() : DEFAULT_ORGFY_REPO_OWNER;
+  const dtag = String(route.dtag || "orgfy").trim() || "orgfy";
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 8e3);
+  try {
+    const fullRoute = { type: route.type, owner, dtag, id };
+    const detail = await session.repositories.load(fullRoute, ac.signal);
+    if (!(detail == null ? void 0 : detail.item)) return null;
+    let commitDiff = null;
+    if (detail.commit && session.projectGit && typeof session.projectGit.read === "function") {
+      try {
+        const git = await session.projectGit.read({ owner, dtag, commit: detail.commit }, ac.signal);
+        if (git && typeof git.diff === "string") {
+          commitDiff = git.diff.slice(0, 12e3);
+        }
+      } catch {
+      }
+    }
+    const content = String(detail.item.content || "");
+    const title = tagValue(detail.item, "subject") || ((_c = content.split("\n").find((l) => l.trim())) == null ? void 0 : _c.replace(/^#+\s*/, "").slice(0, 140)) || `#${id.slice(0, 8)}`;
+    const activity = Array.isArray(detail.activity) ? detail.activity : [];
+    return {
+      route: fullRoute,
+      title,
+      content,
+      status: String(detail.status || "Open"),
+      authorPubkey: String(detail.item.pubkey || "").toLowerCase(),
+      createdAt: Number(detail.item.created_at || 0) * 1e3,
+      commit: detail.commit ? String(detail.commit) : void 0,
+      commitDiff,
+      channels: Array.isArray(detail.channels) ? detail.channels.map(String) : [],
+      comments: activity.map((ev) => ({
+        id: String((ev == null ? void 0 : ev.id) || ""),
+        authorPubkey: String((ev == null ? void 0 : ev.pubkey) || "").toLowerCase(),
+        createdAt: Number((ev == null ? void 0 : ev.created_at) || 0) * 1e3,
+        content: String((ev == null ? void 0 : ev.content) || "")
+      }))
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+function resolveBuzzIdentityName(ctx, pubkey, fallbackMap) {
+  var _a, _b;
+  const pk = String(pubkey || "").trim().toLowerCase();
+  if (!pk) return "Desconhecido";
+  try {
+    const session = typeof ((_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) === "function" ? (_b = ctx.relay.snapshot()) == null ? void 0 : _b.session : null;
+    const idView = (session == null ? void 0 : session.identityNames) || (ctx == null ? void 0 : ctx.identityNames);
+    if (typeof (idView == null ? void 0 : idView.resolve) === "function") {
+      const resolved = idView.resolve(pk);
+      if (resolved && typeof resolved === "string" && resolved.trim()) return resolved.trim();
+    }
+    if (typeof (idView == null ? void 0 : idView.lookup) === "function") {
+      const looked = idView.lookup(pk);
+      if (looked == null ? void 0 : looked.name) return String(looked.name);
+    }
+  } catch {
+  }
+  if (fallbackMap == null ? void 0 : fallbackMap.has(pk)) return fallbackMap.get(pk);
+  return /^[0-9a-f]{64}$/i.test(pk) ? `#${pk.slice(0, 8)}` : pk;
+}
+async function readBuzzProjectGit(ctx, opts) {
+  var _a, _b;
+  const session = typeof ((_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) === "function" ? (_b = ctx.relay.snapshot()) == null ? void 0 : _b.session : null;
+  if (!(session == null ? void 0 : session.projectGit) || typeof session.projectGit.read !== "function") return null;
+  const owner = /^[0-9a-f]{64}$/i.test(String(opts.owner || "")) ? String(opts.owner).toLowerCase() : DEFAULT_ORGFY_REPO_OWNER;
+  const dtag = String(opts.dtag || "orgfy").trim() || "orgfy";
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 9e3);
+  try {
+    const input = { owner, dtag };
+    if (opts.commit && /^[0-9a-f]{7,40}$/i.test(opts.commit)) input.commit = opts.commit.toLowerCase();
+    if (opts.path && opts.path.trim()) input.path = opts.path.trim();
+    const res = await session.projectGit.read(input, ac.signal);
+    if (!res || typeof res !== "object") return null;
+    return {
+      head: typeof res.head === "string" ? res.head : null,
+      commits: Array.isArray(res.commits) ? res.commits : [],
+      files: Array.isArray(res.files) ? res.files : [],
+      readme: typeof res.readme === "string" ? res.readme : null,
+      file: res.file && typeof res.file === "object" ? res.file : null,
+      diff: typeof res.diff === "string" ? res.diff : null
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+function parseUnifiedDiff(rawDiff) {
+  if (!rawDiff || !rawDiff.trim()) return [];
+  const lines = rawDiff.replace(/\r\n/g, "\n").split("\n");
+  const files = [];
+  let current = null;
+  let currentHunk = null;
+  let oldNum = 0;
+  let newNum = 0;
+  for (const line of lines) {
+    if (line.startsWith("diff --git ")) {
+      if (current) files.push(current);
+      const match = /^diff --git a\/(.+?) b\/(.+)$/.exec(line);
+      const aPath = match ? match[1] : "arquivo";
+      const bPath = match ? match[2] : aPath;
+      current = {
+        path: bPath,
+        previousPath: aPath !== bPath ? aPath : void 0,
+        status: aPath !== bPath ? "renamed" : "modified",
+        additions: 0,
+        deletions: 0,
+        hunks: []
+      };
+      currentHunk = null;
+      continue;
+    }
+    if (!current) {
+      if (line.startsWith("+++ b/")) {
+        current = {
+          path: line.slice(6).trim() || "patch",
+          status: "modified",
+          additions: 0,
+          deletions: 0,
+          hunks: []
+        };
+      }
+      continue;
+    }
+    if (line.startsWith("new file mode")) {
+      current.status = "added";
+      continue;
+    }
+    if (line.startsWith("deleted file mode")) {
+      current.status = "deleted";
+      continue;
+    }
+    if (line.startsWith("rename from ")) {
+      current.previousPath = line.slice(12).trim();
+      current.status = "renamed";
+      continue;
+    }
+    if (line.startsWith("rename to ")) {
+      current.path = line.slice(10).trim();
+      current.status = "renamed";
+      continue;
+    }
+    if (line.startsWith("--- ") || line.startsWith("+++ ") || line.startsWith("index ")) {
+      continue;
+    }
+    if (line.startsWith("@@ ")) {
+      const m = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+      oldNum = m ? Number(m[1]) : 1;
+      newNum = m ? Number(m[2]) : 1;
+      currentHunk = { header: line, lines: [] };
+      current.hunks.push(currentHunk);
+      continue;
+    }
+    if (currentHunk) {
+      if (line.startsWith("+")) {
+        current.additions += 1;
+        currentHunk.lines.push({ type: "add", oldLine: null, newLine: newNum++, text: line.slice(1) });
+      } else if (line.startsWith("-")) {
+        current.deletions += 1;
+        currentHunk.lines.push({ type: "del", oldLine: oldNum++, newLine: null, text: line.slice(1) });
+      } else if (line.startsWith(" ") || line === "") {
+        currentHunk.lines.push({
+          type: "ctx",
+          oldLine: oldNum++,
+          newLine: newNum++,
+          text: line.startsWith(" ") ? line.slice(1) : ""
+        });
+      }
+    }
+  }
+  if (current) files.push(current);
+  return files;
+}
+const EMPTY_TELEMETRY = {
+  connected: false,
+  activityStatus: "unavailable",
+  activeTurns: [],
+  byPubkey: {},
+  turnsByPubkey: {},
+  presenceByPubkey: {},
+  unreadByChannel: {}
+};
+const ERROR_TURN_TTL_MS = 15 * 60 * 1e3;
+const DISMISSED_ERRORS_STORAGE_KEY = "orgfy_dismissed_error_turns_v1";
+function buildErrorTurnKey(turn) {
+  return `${turn.agentPubkey}:${turn.channelId}:${turn.threadRootId || ""}:${turn.messageId || ""}:${turn.startedAt || 0}`;
+}
+function readDismissedErrorKeys() {
+  try {
+    if (typeof localStorage === "undefined") return /* @__PURE__ */ new Set();
+    const raw = localStorage.getItem(DISMISSED_ERRORS_STORAGE_KEY);
+    if (!raw) return /* @__PURE__ */ new Set();
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? new Set(parsed.map((v2) => String(v2))) : /* @__PURE__ */ new Set();
+  } catch {
+    return /* @__PURE__ */ new Set();
+  }
+}
+function dismissErrorTurn(turn) {
+  try {
+    if (typeof localStorage === "undefined") return;
+    const keys = Array.from(readDismissedErrorKeys());
+    const key = buildErrorTurnKey(turn);
+    if (!keys.includes(key)) {
+      keys.push(key);
+      localStorage.setItem(DISMISSED_ERRORS_STORAGE_KEY, JSON.stringify(keys.slice(-250)));
+    }
+  } catch {
+  }
+}
+function readBuzzLiveTelemetry(ctx, nameByPubkey) {
+  var _a, _b, _c, _d, _e, _f, _g, _h;
+  try {
+    const relaySnap = typeof ((_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) === "function" ? ctx.relay.snapshot() : null;
+    const session = relaySnap == null ? void 0 : relaySnap.session;
+    if (!session) return EMPTY_TELEMETRY;
+    const actSnap = (_c = (_b = session.agentActivity) == null ? void 0 : _b.snapshot) == null ? void 0 : _c.call(_b);
+    const now = Date.now();
+    const dismissedErrorKeys = readDismissedErrorKeys();
+    const byPubkey = {};
+    const turnsByPubkey = {};
+    const seenSessionKey = /* @__PURE__ */ new Set();
+    const turns = [];
+    const pushTurn = (item) => {
+      const sk = `${item.agentPubkey}:${item.channelId}:${item.threadRootId || item.messageId || ""}`;
+      if (seenSessionKey.has(sk)) return;
+      seenSessionKey.add(sk);
+      turns.push(item);
+      if (!turnsByPubkey[item.agentPubkey]) turnsByPubkey[item.agentPubkey] = [];
+      turnsByPubkey[item.agentPubkey].push(item);
+      if (!byPubkey[item.agentPubkey] || item.startedAt >= byPubkey[item.agentPubkey].startedAt) {
+        byPubkey[item.agentPubkey] = item;
+      }
+    };
+    const localList = Array.isArray(actSnap == null ? void 0 : actSnap.local) ? actSnap.local : [];
+    for (const row of localList) {
+      if (!row || row.dismissed) continue;
+      if (row.state !== "working" && row.state !== "waiting" && row.state !== "error") continue;
+      const pk = String(row.agent || "").toLowerCase();
+      if (!pk) continue;
+      const startedAt = Number(row.startedAt || now);
+      const channelId = String(row.channelId || "");
+      const threadRootId = row.threadRootId ? String(row.threadRootId) : void 0;
+      const messageId = row.messageId ? String(row.messageId) : void 0;
+      if (row.state === "error") {
+        if (now - startedAt > ERROR_TURN_TTL_MS) continue;
+        if (dismissedErrorKeys.has(buildErrorTurnKey({ agentPubkey: pk, channelId, threadRootId, messageId, startedAt }))) {
+          continue;
+        }
+      }
+      const stepTool = ((_d = row.step) == null ? void 0 : _d.tool) ? String(row.step.tool) : void 0;
+      const stepTarget = ((_e = row.step) == null ? void 0 : _e.target) ? String(row.step.target) : void 0;
+      const stepLabel = row.state === "error" ? `Erro: ${String(row.error || "falha no turno").slice(0, 72)}` : stepTool ? `${stepTool}${stepTarget ? ` · ${stepTarget.slice(0, 40)}` : ""}` : row.state === "waiting" ? "Iniciando turno..." : "Pensando...";
+      pushTurn({
+        agentPubkey: pk,
+        agentName: nameByPubkey.get(pk) || `Agente #${pk.slice(0, 8)}`,
+        channelId,
+        threadRootId,
+        messageId,
+        state: row.state === "error" ? "error" : row.state === "waiting" ? "waiting" : "working",
+        stepLabel,
+        toolName: stepTool,
+        toolTarget: stepTarget,
+        startedAt,
+        error: row.error ? String(row.error) : void 0,
+        stoppable: Boolean(row.stoppable)
+      });
+    }
+    const typingList = Array.isArray(actSnap == null ? void 0 : actSnap.typing) ? actSnap.typing : [];
+    for (const t of typingList) {
+      if (!t || !t.working) continue;
+      if (typeof t.expiresAt === "number" && t.expiresAt < now) continue;
+      const pk = String(t.agent || "").toLowerCase();
+      if (!pk) continue;
+      pushTurn({
+        agentPubkey: pk,
+        agentName: nameByPubkey.get(pk) || `Agente #${pk.slice(0, 8)}`,
+        channelId: String(t.channelId || ""),
+        threadRootId: t.threadRootId ? String(t.threadRootId) : void 0,
+        state: "typing",
+        stepLabel: "Respondendo no Buzz...",
+        startedAt: Number(t.startedAt || t.timestamp || now),
+        stoppable: false
+      });
+    }
+    const remoteTurns = Array.isArray(actSnap == null ? void 0 : actSnap.turns) ? actSnap.turns : [];
+    for (const rt of remoteTurns) {
+      if (!rt || rt.state !== "working") continue;
+      const pk = String(rt.agent || "").toLowerCase();
+      if (!pk) continue;
+      const firstReq = Array.isArray(rt.requests) ? rt.requests[0] : null;
+      pushTurn({
+        agentPubkey: pk,
+        agentName: nameByPubkey.get(pk) || `Agente #${pk.slice(0, 8)}`,
+        channelId: String(rt.channelId || ""),
+        threadRootId: (firstReq == null ? void 0 : firstReq.threadRootId) ? String(firstReq.threadRootId) : void 0,
+        messageId: (firstReq == null ? void 0 : firstReq.messageId) ? String(firstReq.messageId) : void 0,
+        state: "working",
+        stepLabel: "Executando turno...",
+        startedAt: Number(rt.timestamp || now),
+        stoppable: false
+      });
+    }
+    const presenceByPubkey = {};
+    if (typeof ((_f = session.presence) == null ? void 0 : _f.status) === "function") {
+      for (const pk of nameByPubkey.keys()) {
+        try {
+          const st = session.presence.status(pk);
+          if (st === "online" || st === "away" || st === "offline" || st === "unknown") {
+            presenceByPubkey[pk] = st;
+          }
+        } catch {
+        }
+      }
+    }
+    const unreadByChannel = {};
+    try {
+      const uSnap = (_h = (_g = session.unread) == null ? void 0 : _g.snapshot) == null ? void 0 : _h.call(_g);
+      if (uSnap && typeof uSnap === "object") {
+        const channelsMap = uSnap.channels || uSnap.byChannel;
+        if (channelsMap instanceof Map) {
+          for (const [cid, val] of channelsMap.entries()) {
+            const count = typeof val === "number" ? val : Number((val == null ? void 0 : val.count) ?? (val == null ? void 0 : val.unread) ?? 0);
+            if (count > 0) unreadByChannel[String(cid)] = count;
+          }
+        } else if (channelsMap && typeof channelsMap === "object") {
+          for (const [cid, val] of Object.entries(channelsMap)) {
+            const count = typeof val === "number" ? val : Number((val == null ? void 0 : val.count) ?? (val == null ? void 0 : val.unread) ?? 0);
+            if (count > 0) unreadByChannel[String(cid)] = count;
+          }
+        }
+      }
+    } catch {
+    }
+    return {
+      connected: (relaySnap == null ? void 0 : relaySnap.status) === "ready",
+      activityStatus: String((actSnap == null ? void 0 : actSnap.status) || "unavailable"),
+      activeTurns: turns,
+      byPubkey,
+      turnsByPubkey,
+      presenceByPubkey,
+      unreadByChannel
+    };
+  } catch {
+    return EMPTY_TELEMETRY;
+  }
+}
+async function interruptLiveTurn(ctx, turn) {
+  var _a, _b, _c, _d;
+  try {
+    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+    if (((_d = session == null ? void 0 : session.agentActivity) == null ? void 0 : _d.interrupt) && turn.agentPubkey && turn.channelId && turn.messageId) {
+      await session.agentActivity.interrupt(turn.agentPubkey, turn.channelId, turn.messageId);
+      return true;
+    }
+  } catch {
+  }
+  return false;
+}
+async function readBuzzMainAgentPubkey(ctx) {
+  var _a, _b, _c, _d;
+  try {
+    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+    if (typeof ((_d = session == null ? void 0 : session.mainAgent) == null ? void 0 : _d.read) === "function") {
+      const pk = await session.mainAgent.read();
+      return typeof pk === "string" && pk.trim() ? pk.trim().toLowerCase() : null;
+    }
+  } catch {
+  }
+  return null;
+}
+async function readBuzzChannelCanvasDetailed(ctx, channelId, opts) {
+  var _a, _b, _c, _d, _e;
+  if (!channelId) return { content: null, writable: false };
+  try {
+    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+    const writable = Boolean(((_d = session == null ? void 0 : session.canvas) == null ? void 0 : _d.available) && typeof session.canvas.save === "function");
+    if (((_e = session == null ? void 0 : session.canvas) == null ? void 0 : _e.available) && typeof session.canvas.read === "function") {
+      const ev = await session.canvas.read(channelId, (opts == null ? void 0 : opts.strong) ? { strong: true } : void 0);
+      if (ev && typeof ev.content === "string") {
+        return {
+          content: ev.content.trim() ? ev.content : null,
+          eventId: typeof ev.id === "string" ? ev.id : void 0,
+          writable
+        };
+      }
+    }
+    return { content: null, writable };
+  } catch {
+    return { content: null, writable: false };
+  }
+}
+async function saveBuzzChannelCanvas(ctx, channelId, content, expectedEventId) {
+  var _a, _b, _c, _d;
+  if (!channelId) return { ok: false, error: "Canal da empresa não configurado." };
+  try {
+    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+    if (!((_d = session == null ? void 0 : session.canvas) == null ? void 0 : _d.available) || typeof session.canvas.save !== "function") {
+      return { ok: false, error: "API session.canvas.save indisponível no Buzz." };
+    }
+    const saved = await session.canvas.save(channelId, content, expectedEventId);
+    return { ok: true, eventId: typeof (saved == null ? void 0 : saved.id) === "string" ? saved.id : void 0 };
+  } catch (err) {
+    return { ok: false, error: (err == null ? void 0 : err.message) || String(err) };
+  }
+}
+async function readBuzzChannelCanvasHistory(ctx, channelId) {
+  var _a, _b, _c, _d;
+  if (!channelId) return [];
+  try {
+    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+    if (!((_d = session == null ? void 0 : session.canvas) == null ? void 0 : _d.available) || typeof session.canvas.history !== "function") return [];
+    const page = await session.canvas.history(channelId);
+    const entries = Array.isArray(page == null ? void 0 : page.revisions) ? page.revisions : Array.isArray(page == null ? void 0 : page.entries) ? page.entries : Array.isArray(page == null ? void 0 : page.events) ? page.events : Array.isArray(page) ? page : [];
+    return entries.slice(0, 15).map((ev) => {
+      var _a2, _b2, _c2, _d2;
+      const fullContent = String((ev == null ? void 0 : ev.content) ?? ((_a2 = ev == null ? void 0 : ev.event) == null ? void 0 : _a2.content) ?? "");
+      return {
+        id: String((ev == null ? void 0 : ev.id) || ((_b2 = ev == null ? void 0 : ev.event) == null ? void 0 : _b2.id) || ""),
+        createdAt: Number((ev == null ? void 0 : ev.created_at) || ((_c2 = ev == null ? void 0 : ev.event) == null ? void 0 : _c2.created_at) || 0) * 1e3,
+        authorPubkey: String((ev == null ? void 0 : ev.pubkey) || ((_d2 = ev == null ? void 0 : ev.event) == null ? void 0 : _d2.pubkey) || "").toLowerCase(),
+        preview: fullContent.replace(/\s+/g, " ").slice(0, 140),
+        fullContent
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+const MAX_SPANS = 200;
+const spansBuffer = [];
+const listeners = /* @__PURE__ */ new Set();
+const decisionsStats = {
+  totalCalls: 0,
+  decisionsApiCalls: 0,
+  fallbackCalls: 0,
+  wakesOrEscalationsAvoided: 0,
+  estimatedTokensSaved: 0,
+  totalLatencyMs: 0,
+  byMode: {}
+};
+const agentCounters = /* @__PURE__ */ new Map();
+function randomHex(len) {
+  let out = "";
+  const chars = "0123456789abcdef";
+  for (let i = 0; i < len; i++) {
+    out += chars[Math.floor(Math.random() * 16)];
+  }
+  return out;
+}
+function notify() {
+  for (const fn of listeners) {
+    try {
+      fn();
+    } catch {
+    }
+  }
+}
+function subscribeTelemetry(listener) {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+function recordGenAISpan(input) {
+  const span = {
+    spanId: randomHex(16),
+    traceId: input.traceId || randomHex(32),
+    timestamp: input.timestamp || Date.now(),
+    operationName: input.operationName,
+    agentName: input.agentName || "orgfy-system",
+    model: input.model ?? null,
+    provider: input.provider ?? null,
+    toolName: input.toolName ?? null,
+    durationMs: Math.max(0, Math.round(input.durationMs || 0)),
+    status: input.status,
+    finishReason: input.finishReason,
+    attributes: input.attributes || {}
+  };
+  spansBuffer.unshift(span);
+  if (spansBuffer.length > MAX_SPANS) {
+    spansBuffer.length = MAX_SPANS;
+  }
+  if (span.operationName === "invoke_agent" || span.operationName === "execute_tool") {
+    const key = span.agentName;
+    const prev = agentCounters.get(key) || {
+      totalTurns: 0,
+      errorTurns: 0,
+      consecutiveErrors: 0,
+      totalDurationMs: 0,
+      lastActivityTs: span.timestamp
+    };
+    prev.totalTurns += 1;
+    prev.totalDurationMs += span.durationMs;
+    prev.lastActivityTs = span.timestamp;
+    if (span.status === "error") {
+      prev.errorTurns += 1;
+      prev.consecutiveErrors += 1;
+    } else {
+      prev.consecutiveErrors = 0;
+    }
+    agentCounters.set(key, prev);
+  }
+  notify();
+  return span;
+}
+function recordDecisionTelemetry(params) {
+  decisionsStats.totalCalls += 1;
+  if (params.source === "decisions_api") {
+    decisionsStats.decisionsApiCalls += 1;
+  } else {
+    decisionsStats.fallbackCalls += 1;
+  }
+  decisionsStats.totalLatencyMs += Math.max(0, params.durationMs);
+  decisionsStats.byMode[params.mode] = (decisionsStats.byMode[params.mode] || 0) + 1;
+  const saved = params.preventedExpensiveWake ? params.estimatedTokensSaved ?? 18e3 : 0;
+  if (params.preventedExpensiveWake) {
+    decisionsStats.wakesOrEscalationsAvoided += 1;
+    decisionsStats.estimatedTokensSaved += saved;
+  }
+  recordGenAISpan({
+    operationName: "decisions.evaluate",
+    agentName: "orgfy-decisions-router",
+    model: params.model || "deterministic_fallback",
+    provider: params.backend || params.source,
+    durationMs: params.durationMs,
+    status: params.preventedExpensiveWake ? "filtered_out" : "ok",
+    attributes: {
+      "gen_ai.operation.name": "decisions.evaluate",
+      "orgfy.decision.mode": params.mode,
+      "orgfy.decision.source": params.source,
+      "orgfy.tokens_saved_est": saved
+    }
+  });
+}
+function getTelemetrySnapshot() {
+  const agentMetrics = [];
+  const retryCascadeAlerts = [];
+  for (const [agentName, c] of agentCounters.entries()) {
+    const retryCascadeRisk = c.consecutiveErrors >= 2 || c.totalTurns >= 4 && c.errorTurns / c.totalTurns >= 0.5;
+    agentMetrics.push({
+      agentName,
+      totalTurns: c.totalTurns,
+      errorTurns: c.errorTurns,
+      consecutiveErrors: c.consecutiveErrors,
+      retryCascadeRisk,
+      avgDurationMs: c.totalTurns > 0 ? Math.round(c.totalDurationMs / c.totalTurns) : 0,
+      lastActivityTs: c.lastActivityTs
+    });
+    if (retryCascadeRisk) {
+      retryCascadeAlerts.push(
+        `${agentName}: ${c.consecutiveErrors} erro(s) consecutivo(s) (${c.errorTurns}/${c.totalTurns} turnos) — risco de retry cascade.`
+      );
+    }
+  }
+  agentMetrics.sort((a, b) => b.lastActivityTs - a.lastActivityTs);
+  return {
+    updatedAt: Date.now(),
+    totalSpans: spansBuffer.length,
+    recentSpans: spansBuffer.slice(0, 40),
+    decisionsSavings: {
+      totalCalls: decisionsStats.totalCalls,
+      decisionsApiCalls: decisionsStats.decisionsApiCalls,
+      fallbackCalls: decisionsStats.fallbackCalls,
+      wakesOrEscalationsAvoided: decisionsStats.wakesOrEscalationsAvoided,
+      estimatedTokensSaved: decisionsStats.estimatedTokensSaved,
+      avgLatencyMs: decisionsStats.totalCalls > 0 ? Math.round(decisionsStats.totalLatencyMs / decisionsStats.totalCalls) : 0,
+      byMode: { ...decisionsStats.byMode }
+    },
+    agentMetrics,
+    retryCascadeAlerts
+  };
+}
+function resetTelemetryForTests() {
+  spansBuffer.length = 0;
+  agentCounters.clear();
+  decisionsStats.totalCalls = 0;
+  decisionsStats.decisionsApiCalls = 0;
+  decisionsStats.fallbackCalls = 0;
+  decisionsStats.wakesOrEscalationsAvoided = 0;
+  decisionsStats.estimatedTokensSaved = 0;
+  decisionsStats.totalLatencyMs = 0;
+  decisionsStats.byMode = {};
+}
+const FALLBACK_EVAL_WINNERS = /* @__PURE__ */ new Set(["gemini-2.5-flash", "gpt-6.1-terra", "claude-opus-4-6-thinking"]);
+const FALLBACK_MODEL_PRESETS = [
+  {
+    provider: "nexusmind_antigravity",
+    model: "gemini-2.5-flash",
+    label: "gemini-2.5-flash · Fallback (Rápido)",
+    group: "fallback"
+  },
+  {
+    provider: "nexusmind_openai",
+    model: "gpt-6.1-terra",
+    label: "gpt-6.1-terra · Fallback (Qualidade)",
+    group: "fallback"
+  },
+  {
+    provider: "nexusmind_antigravity",
+    model: "claude-opus-4-6-thinking",
+    label: "claude-opus-4-6-thinking · Fallback (Complexo)",
+    group: "fallback"
+  }
+];
+function modelOptionKey(provider, model) {
+  return `${provider}::${model}`;
+}
+function inferProviderForModel(modelId) {
+  const m = String(modelId || "").toLowerCase();
+  if (m.includes("/") || m.includes(":free")) return "nexusmind_openai";
+  if (m.includes("grok")) return "nexusmind_grok";
+  if (m.includes("gemini") || m.includes("antigravity") || m.includes("thinking")) return "nexusmind_antigravity";
+  if (m.includes("claude")) return "nexusmind_anthropic";
+  return "nexusmind_openai";
+}
+function decodeTextBytes(raw) {
+  if (typeof raw === "string") return raw;
+  if (raw instanceof Uint8Array) return new TextDecoder("utf-8").decode(raw);
+  if (raw instanceof ArrayBuffer) return new TextDecoder("utf-8").decode(new Uint8Array(raw));
+  if (ArrayBuffer.isView(raw)) {
+    return new TextDecoder("utf-8").decode(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength));
+  }
+  return String(raw ?? "");
+}
+function formatLatencyShort(ms) {
+  if (typeof ms !== "number" || !Number.isFinite(ms) || ms <= 0) return "";
+  return ms >= 1e3 ? `${(ms / 1e3).toFixed(1)}s` : `${Math.round(ms)}ms`;
+}
+async function loadLiveGatewayModelCatalog(ctx) {
+  var _a, _b, _c, _d;
+  const host = ctx == null ? void 0 : ctx.host;
+  const approvedModels = /* @__PURE__ */ new Set();
+  const offlineModels = /* @__PURE__ */ new Set();
+  const benchByModel = /* @__PURE__ */ new Map();
+  let benchParsed = null;
+  let updatedAt;
+  if (typeof (host == null ? void 0 : host.readFile) === "function") {
+    for (const p of [
+      "~/.buzz/.scratch/nexusmind-quality-bench.json",
+      "/Users/heltonfraga/.buzz/.scratch/nexusmind-quality-bench.json"
+    ]) {
+      try {
+        const raw = await host.readFile(p);
+        if (!raw) continue;
+        const obj = JSON.parse(decodeTextBytes(raw));
+        if (obj && typeof obj === "object") {
+          if (typeof obj.updatedAt === "string") updatedAt = obj.updatedAt;
+          benchParsed = obj.results && typeof obj.results === "object" ? obj.results : obj;
+          break;
+        }
+      } catch {
+      }
+    }
+  }
+  if (!benchParsed) {
+    try {
+      const raw = (_b = (_a = globalThis == null ? void 0 : globalThis.localStorage) == null ? void 0 : _a.getItem) == null ? void 0 : _b.call(_a, "nexusmind_quality_bench_v1");
+      if (raw) {
+        const obj = JSON.parse(raw);
+        benchParsed = (obj == null ? void 0 : obj.results) && typeof obj.results === "object" ? obj.results : obj;
+      }
+    } catch {
+    }
+  }
+  if (benchParsed && typeof benchParsed === "object") {
+    for (const [mid, rec] of Object.entries(benchParsed)) {
+      if (!rec || typeof rec !== "object") continue;
+      const online = Boolean(rec.online);
+      const toolCallOk = Boolean(rec.toolCallOk);
+      const keyLower = mid.toLowerCase();
+      const shortId = String(mid.split("/").pop() || mid).trim().toLowerCase();
+      const latencyMs = typeof rec.avgLatencyMs === "number" ? rec.avgLatencyMs : typeof rec.latencyMs === "number" ? rec.latencyMs : void 0;
+      benchByModel.set(keyLower, {
+        model: mid,
+        toolCallOk,
+        online,
+        qualityScore: typeof rec.qualityScore === "number" ? rec.qualityScore : void 0,
+        latencyMs,
+        group: typeof rec.group === "string" ? rec.group : void 0
+      });
+      if (online && toolCallOk) {
+        approvedModels.add(keyLower);
+        if (shortId) approvedModels.add(shortId);
+      } else {
+        offlineModels.add(keyLower);
+        if (shortId) offlineModels.add(shortId);
+      }
+    }
+  }
+  let rankingParsed = null;
+  if (typeof (host == null ? void 0 : host.readFile) === "function") {
+    for (const p of [
+      "~/.buzz/.scratch/nexusmind-model-ranking.json",
+      "/Users/heltonfraga/.buzz/.scratch/nexusmind-model-ranking.json"
+    ]) {
+      try {
+        const raw = await host.readFile(p);
+        if (!raw) continue;
+        const obj = JSON.parse(decodeTextBytes(raw));
+        if (obj && Array.isArray(obj.models) && obj.models.length > 0) {
+          rankingParsed = obj;
+          if (!updatedAt && typeof obj.updatedAt === "string") updatedAt = obj.updatedAt;
+          break;
+        }
+      } catch {
+      }
+    }
+  }
+  if (!rankingParsed) {
+    try {
+      const raw = (_d = (_c = globalThis == null ? void 0 : globalThis.localStorage) == null ? void 0 : _c.getItem) == null ? void 0 : _d.call(_c, "nexusmind_model_ranking");
+      if (raw) rankingParsed = JSON.parse(raw);
+    } catch {
+    }
+  }
+  const rankingByModel = /* @__PURE__ */ new Map();
+  if (rankingParsed && Array.isArray(rankingParsed.models)) {
+    for (const m of rankingParsed.models) {
+      const mid = String((m == null ? void 0 : m.model) || "").trim();
+      if (mid) rankingByModel.set(mid.toLowerCase(), m);
+    }
+  }
+  const approvedOptions = [];
+  const onlineOtherOptions = [];
+  const seen = /* @__PURE__ */ new Set();
+  const candidateApproved = /* @__PURE__ */ new Map();
+  for (const [keyLower, b] of benchByModel.entries()) {
+    if (!b.online || !b.toolCallOk) continue;
+    const rankRec = rankingByModel.get(keyLower);
+    if (rankRec == null ? void 0 : rankRec.isDisabled) continue;
+    const provider = String((rankRec == null ? void 0 : rankRec.group) || b.group || inferProviderForModel(b.model)).trim() || inferProviderForModel(b.model);
+    candidateApproved.set(keyLower, {
+      model: b.model,
+      provider,
+      qualityScore: b.qualityScore,
+      rankingScore: typeof (rankRec == null ? void 0 : rankRec.score) === "number" ? rankRec.score : void 0,
+      latencyMs: b.latencyMs ?? (typeof (rankRec == null ? void 0 : rankRec.latencyMs) === "number" ? rankRec.latencyMs : void 0),
+      mode: typeof (rankRec == null ? void 0 : rankRec.mode) === "string" ? rankRec.mode : void 0,
+      isFree: b.model.toLowerCase().includes(":free") || Boolean(rankRec == null ? void 0 : rankRec.isFree)
+    });
+  }
+  if (rankingParsed && Array.isArray(rankingParsed.models)) {
+    for (const m of rankingParsed.models) {
+      const mid = String((m == null ? void 0 : m.model) || "").trim();
+      if (!mid || (m == null ? void 0 : m.isDisabled)) continue;
+      const keyLower = mid.toLowerCase();
+      const bench = benchByModel.get(keyLower);
+      if (bench && (!bench.online || !bench.toolCallOk)) continue;
+      if ((m == null ? void 0 : m.online) === false) continue;
+      const tcOk = (m == null ? void 0 : m.toolCallOk) === true || (bench == null ? void 0 : bench.toolCallOk) === true;
+      const provider = String((m == null ? void 0 : m.group) || (bench == null ? void 0 : bench.group) || inferProviderForModel(mid)).trim() || inferProviderForModel(mid);
+      const isFree = mid.toLowerCase().includes(":free") || Boolean(m == null ? void 0 : m.isFree);
+      const latencyMs = (bench == null ? void 0 : bench.latencyMs) ?? (typeof (m == null ? void 0 : m.latencyMs) === "number" ? m.latencyMs : void 0);
+      if (tcOk) {
+        approvedModels.add(keyLower);
+        const shortId = String(mid.split("/").pop() || mid).trim().toLowerCase();
+        if (shortId) approvedModels.add(shortId);
+        if (!candidateApproved.has(keyLower)) {
+          candidateApproved.set(keyLower, {
+            model: mid,
+            provider,
+            qualityScore: bench == null ? void 0 : bench.qualityScore,
+            rankingScore: typeof (m == null ? void 0 : m.score) === "number" ? m.score : void 0,
+            latencyMs,
+            mode: typeof (m == null ? void 0 : m.mode) === "string" ? m.mode : void 0,
+            isFree
+          });
+        }
+      }
+    }
+  }
+  const sortedApproved = Array.from(candidateApproved.values()).sort((a, b) => {
+    const aQ = a.qualityScore ?? -1;
+    const bQ = b.qualityScore ?? -1;
+    if (aQ !== bQ) return bQ - aQ;
+    const aS = a.rankingScore ?? -1;
+    const bS = b.rankingScore ?? -1;
+    if (aS !== bS) return bS - aS;
+    return (a.latencyMs ?? 999999) - (b.latencyMs ?? 999999);
+  });
+  for (const item of sortedApproved) {
+    const keyLower = item.model.toLowerCase();
+    if (seen.has(keyLower)) continue;
+    seen.add(keyLower);
+    const parts = [item.model, "TC ✓"];
+    if (typeof item.qualityScore === "number") parts.push(`Q${Math.round(item.qualityScore)}`);
+    else if (typeof item.rankingScore === "number") parts.push(`score ${item.rankingScore.toFixed(1)}`);
+    const latStr = formatLatencyShort(item.latencyMs);
+    if (latStr) parts.push(latStr);
+    if (item.isFree) parts.push("FREE");
+    else if (item.mode === "vip") parts.push("VIP");
+    approvedOptions.push({
+      provider: item.provider,
+      model: item.model,
+      label: parts.join(" · "),
+      group: "eval_approved",
+      isFree: item.isFree,
+      mode: item.mode,
+      qualityScore: item.qualityScore,
+      rankingScore: item.rankingScore,
+      latencyMs: item.latencyMs
+    });
+    if (approvedOptions.length >= 20) break;
+  }
+  if (rankingParsed && Array.isArray(rankingParsed.models)) {
+    const sortedOther = [...rankingParsed.models].sort(
+      (a, b) => Number((b == null ? void 0 : b.score) || 0) - Number((a == null ? void 0 : a.score) || 0)
+    );
+    for (const m of sortedOther) {
+      const mid = String((m == null ? void 0 : m.model) || "").trim();
+      if (!mid || (m == null ? void 0 : m.isDisabled) || (m == null ? void 0 : m.online) === false) continue;
+      const keyLower = mid.toLowerCase();
+      if (seen.has(keyLower)) continue;
+      const bench = benchByModel.get(keyLower);
+      if (bench && (!bench.online || !bench.toolCallOk)) continue;
+      seen.add(keyLower);
+      const provider = String((m == null ? void 0 : m.group) || inferProviderForModel(mid)).trim() || inferProviderForModel(mid);
+      const scoreTxt = typeof (m == null ? void 0 : m.score) === "number" ? ` · score ${m.score.toFixed(1)}` : "";
+      onlineOtherOptions.push({
+        provider,
+        model: mid,
+        label: `${mid}${scoreTxt}`,
+        group: "nexusmind_online",
+        isFree: mid.toLowerCase().includes(":free") || Boolean(m == null ? void 0 : m.isFree),
+        mode: typeof (m == null ? void 0 : m.mode) === "string" ? m.mode : void 0,
+        rankingScore: typeof (m == null ? void 0 : m.score) === "number" ? m.score : void 0
+      });
+      if (onlineOtherOptions.length >= 10) break;
+    }
+  }
+  return {
+    hasLiveData: approvedOptions.length > 0 || onlineOtherOptions.length > 0 || benchByModel.size > 0,
+    approvedOptions,
+    onlineOtherOptions,
+    approvedModels,
+    offlineModels,
+    forceFree: Boolean(rankingParsed == null ? void 0 : rankingParsed.forceFree),
+    updatedAt
+  };
+}
+function pickLiveRecommendedModel(roleOrName, catalog) {
+  const lower = normName$1(roleOrName);
+  const isTier1 = /(iris|bento|arquit|teo|vera|hugo|lara|ceo|coo|revis|qa|segur|secur|oraculo|conselho|board)/.test(lower);
+  const tierLabel = isTier1 ? "Tier 1 (Liderança/Revisão)" : "Tier 2 (Execução/Rápido)";
+  if (catalog && catalog.approvedOptions.length > 0) {
+    const pool = catalog.approvedOptions;
+    if (isTier1) {
+      const preferredPaid = pool.find((o) => !o.isFree && o.mode === "vip") || pool.find((o) => !o.isFree && /(gpt-6\.1|claude-opus|gemini-4-hydrogen|gemini-2\.5-flash|auto\/reasoning)/.test(o.model.toLowerCase())) || pool.find((o) => !o.isFree) || pool[0];
+      return { provider: preferredPaid.provider, model: preferredPaid.model, tierLabel };
+    }
+    const preferredFast = (catalog.forceFree ? pool.find((o) => o.isFree && o.mode !== "blocked") : null) || pool.find((o) => o.mode !== "blocked" && o.model.toLowerCase() === "gemini-2.5-flash") || pool.find((o) => o.mode !== "blocked") || pool[0];
+    return { provider: preferredFast.provider, model: preferredFast.model, tierLabel };
+  }
+  return isTier1 ? { provider: "nexusmind_openai", model: "gpt-6.1-terra", tierLabel } : { provider: "nexusmind_antigravity", model: "gemini-2.5-flash", tierLabel };
+}
+const SURFACE_BG = "var(--affordance-subtle, rgba(255, 255, 255, 0.035))";
+const CARD_BG$1 = "var(--bg-panel, rgba(255, 255, 255, 0.03))";
+const BORDER$1 = "1px solid var(--border-primary, rgba(255, 255, 255, 0.09))";
+const TEXT_PRIMARY = "var(--text-primary, #f3f4f6)";
+const TEXT_MUTED = "var(--text-tertiary, #9ca3af)";
+const ACCENT = "var(--accent-primary, var(--green-11, #3dd68c))";
+const BLUE = "var(--blue-11, #60a5fa)";
+const AMBER = "var(--amber-11, #fbbf24)";
+const RED = "var(--red-11, #f87171)";
+function normName$1(s) {
+  return String(s || "").trim().toLowerCase();
+}
+function createAgentOrgfyTabComponent(ctx) {
+  const React = ctx == null ? void 0 : ctx.react;
+  if (!(React == null ? void 0 : React.createElement)) {
+    return function FallbackAgentOrgfyTab() {
+      return null;
+    };
+  }
+  const h = React.createElement;
+  return function AgentOrgfyTab({ agent }) {
+    const [cards, setCards] = React.useState([]);
+    const [repoItems, setRepoItems] = React.useState([]);
+    const [repoOwner, setRepoOwner] = React.useState(DEFAULT_ORGFY_REPO_OWNER);
+    const [sessions, setSessions] = React.useState([]);
+    const [telemetry, setTelemetry] = React.useState(() => getTelemetrySnapshot());
+    const [activityTick, setActivityTick] = React.useState(0);
+    const [loading, setLoading] = React.useState(true);
+    const [busyAction, setBusyAction] = React.useState(null);
+    const [statusBanner, setStatusBanner] = React.useState(null);
+    const [gatewayCatalog, setGatewayCatalog] = React.useState(null);
+    const agentName = String((agent == null ? void 0 : agent.name) || (agent == null ? void 0 : agent.key) || "Agente");
+    const agentKey = String((agent == null ? void 0 : agent.key) || "");
+    const agentPubkey = String((agent == null ? void 0 : agent.pubkey) || "").toLowerCase();
+    const agentCfg = (agent == null ? void 0 : agent.config) && typeof agent.config === "object" ? agent.config : {};
+    const currentModel = String(agentCfg.model || (agent == null ? void 0 : agent.model) || "padrão");
+    const currentProvider = String(agentCfg.provider || (agent == null ? void 0 : agent.provider) || "padrão");
+    const currentHarness = String(agentCfg.harness || (agent == null ? void 0 : agent.harness) || (agent == null ? void 0 : agent.type) || "goose");
+    const shortModel = String(currentModel.split("/").pop() || currentModel).trim();
+    const isCurrentOffline = Boolean(
+      (gatewayCatalog == null ? void 0 : gatewayCatalog.offlineModels.has(currentModel.toLowerCase())) || (gatewayCatalog == null ? void 0 : gatewayCatalog.offlineModels.has(shortModel.toLowerCase()))
+    );
+    const isCompliantR51 = (gatewayCatalog == null ? void 0 : gatewayCatalog.hasLiveData) ? gatewayCatalog.approvedModels.has(currentModel.toLowerCase()) || gatewayCatalog.approvedModels.has(shortModel.toLowerCase()) : FALLBACK_EVAL_WINNERS.has(shortModel);
+    const recommended = React.useMemo(
+      () => pickLiveRecommendedModel(agentName, gatewayCatalog),
+      [agentName, gatewayCatalog]
+    );
+    const modelOptions = React.useMemo(() => {
+      if ((gatewayCatalog == null ? void 0 : gatewayCatalog.hasLiveData) && (gatewayCatalog.approvedOptions.length > 0 || gatewayCatalog.onlineOtherOptions.length > 0)) {
+        return [...gatewayCatalog.approvedOptions, ...gatewayCatalog.onlineOtherOptions];
+      }
+      return FALLBACK_MODEL_PRESETS;
+    }, [gatewayCatalog]);
+    const resolveDefaultModelKey = React.useCallback(() => {
+      const exactMatch = modelOptions.find(
+        (o) => o.model.toLowerCase() === currentModel.toLowerCase() || o.model.toLowerCase() === shortModel.toLowerCase()
+      );
+      if (exactMatch) return modelOptionKey(exactMatch.provider, exactMatch.model);
+      return modelOptionKey(recommended.provider, recommended.model);
+    }, [modelOptions, currentModel, shortModel, recommended.provider, recommended.model]);
+    const [selectedModelKey, setSelectedModelKey] = React.useState(() => resolveDefaultModelKey());
+    React.useEffect(() => {
+      setSelectedModelKey(resolveDefaultModelKey());
+    }, [agentKey, currentModel, currentProvider, resolveDefaultModelKey]);
+    const refreshGatewayCatalog = React.useCallback(async () => {
+      try {
+        const cat = await loadLiveGatewayModelCatalog(ctx);
+        setGatewayCatalog(cat);
+      } catch {
+      }
+    }, []);
+    React.useEffect(() => {
+      void refreshGatewayCatalog();
+    }, [refreshGatewayCatalog]);
+    React.useEffect(() => {
+      var _a, _b, _c;
+      const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
+      if (!(session == null ? void 0 : session.agentActivity)) return;
+      const disposers = [];
+      const bump = () => setActivityTick((n) => n + 1);
+      try {
+        if (typeof session.agentActivity.activate === "function") disposers.push(session.agentActivity.activate());
+        if (typeof session.agentActivity.subscribe === "function") disposers.push(session.agentActivity.subscribe(bump));
+        if (typeof session.agentActivity.subscribeWorking === "function") disposers.push(session.agentActivity.subscribeWorking(bump));
+      } catch {
+      }
+      return () => {
+        for (const d of disposers) {
+          try {
+            d();
+          } catch {
+          }
+        }
+      };
+    }, []);
+    const liveTelemetry = React.useMemo(() => {
+      const map = /* @__PURE__ */ new Map();
+      if (agentPubkey) map.set(agentPubkey, agentName);
+      return readBuzzLiveTelemetry(ctx, map);
+    }, [agentPubkey, agentName, activityTick]);
+    const liveTurn = agentPubkey ? liveTelemetry.byPubkey[agentPubkey] || null : null;
+    const presence = agentPubkey ? liveTelemetry.presenceByPubkey[agentPubkey] : void 0;
+    const loadAgentContext = React.useCallback(async () => {
+      setLoading(true);
+      try {
+        const [allCards, radar, repoSnap] = await Promise.all([
+          fetchLiveKanbanCards(ctx, { empresa: "all" }).catch(() => []),
+          fetchGooseLoopRadar(ctx).catch(() => null),
+          loadLiveRepoSnapshot(ctx, { dtag: "orgfy" }).catch(() => null),
+          refreshGatewayCatalog()
+        ]);
+        const targetName = normName$1(agentName);
+        const targetKey = normName$1(agentKey);
+        const targetPk = normName$1(agentPubkey);
+        const matchedCards = (allCards || []).filter((c) => {
+          const ex = normName$1(c.executor);
+          const rv = normName$1(c.revisor);
+          const dc = normName$1(c.decisor);
+          return targetName && (ex === targetName || rv === targetName || dc === targetName || ex.includes(targetName) || rv.includes(targetName)) || targetKey && (ex === targetKey || rv === targetKey);
+        });
+        setCards(matchedCards);
+        if (repoSnap == null ? void 0 : repoSnap.available) {
+          setRepoOwner(repoSnap.owner);
+          const allNip34 = [...repoSnap.prs, ...repoSnap.issues].filter((it) => {
+            if (targetPk && it.authorPubkey === targetPk) return true;
+            if (targetName && it.content.toLowerCase().includes(targetName)) return true;
+            return false;
+          });
+          setRepoItems(allNip34.slice(0, 10));
+        }
+        const matchedSessions = ((radar == null ? void 0 : radar.sessoes) || []).filter((s) => {
+          const sn = normName$1(s.agente);
+          const spk = normName$1(s.agent_pubkey);
+          return targetPk && spk && spk === targetPk || targetName && sn && (sn === targetName || sn.includes(targetName) || targetName.includes(sn));
+        });
+        setSessions(matchedSessions.slice(0, 6));
+      } finally {
+        setLoading(false);
+      }
+    }, [agentName, agentKey, agentPubkey]);
+    React.useEffect(() => {
+      loadAgentContext();
+      const unsub = subscribeTelemetry(() => setTelemetry(getTelemetrySnapshot()));
+      return () => unsub();
+    }, [loadAgentContext]);
+    const selectedModelOption = React.useMemo(() => {
+      return modelOptions.find((o) => modelOptionKey(o.provider, o.model) === selectedModelKey) || {
+        provider: recommended.provider,
+        model: recommended.model,
+        label: `${recommended.model} (${recommended.tierLabel})`,
+        group: "fallback"
+      };
+    }, [modelOptions, selectedModelKey, recommended.provider, recommended.model, recommended.tierLabel]);
+    const isSelectedAlreadyActive = selectedModelOption.model.toLowerCase() === currentModel.toLowerCase() && selectedModelOption.provider.toLowerCase() === currentProvider.toLowerCase();
+    const handleApplySelectedModel = async () => {
+      var _a, _b;
+      const agentsApi = ctx == null ? void 0 : ctx.agents;
+      if (!agentKey || typeof (agentsApi == null ? void 0 : agentsApi.save) !== "function") {
+        setStatusBanner({ ok: false, text: "API ctx.agents.save indisponível nesta versão do Buzz." });
+        return;
+      }
+      setBusyAction("eval");
+      setStatusBanner(null);
+      try {
+        const freshList = ((_b = (_a = agentsApi.snapshot) == null ? void 0 : _a.call(agentsApi)) == null ? void 0 : _b.agents) || [];
+        const freshAgent = freshList.find((x) => (x == null ? void 0 : x.key) === agentKey) || agent;
+        const baseCfg = (freshAgent == null ? void 0 : freshAgent.config) && typeof freshAgent.config === "object" ? freshAgent.config : agentCfg;
+        await agentsApi.save(agentKey, {
+          config: { ...baseCfg, provider: selectedModelOption.provider, model: selectedModelOption.model }
+        });
+        setStatusBanner({
+          ok: true,
+          text: `Modelo atualizado via ctx.agents.save(): ${selectedModelOption.provider}/${selectedModelOption.model}.`
+        });
+        await loadAgentContext();
+      } catch (err) {
+        setStatusBanner({ ok: false, text: `Falha ao atualizar modelo: ${(err == null ? void 0 : err.message) || err}` });
+      } finally {
+        setBusyAction(null);
+      }
+    };
+    const handleSessionAction = async (action) => {
+      setBusyAction(action);
+      setStatusBanner(null);
+      try {
+        if (action === "interrupt" && (liveTurn == null ? void 0 : liveTurn.stoppable)) {
+          const interrupted = await interruptLiveTurn(ctx, liveTurn);
+          if (interrupted) {
+            setStatusBanner({ ok: true, text: `Turno ao vivo de ${agentName} interrompido via session.agentActivity.` });
+            return;
+          }
+        }
+        const agentsApi = ctx == null ? void 0 : ctx.agents;
+        if (!agentKey || typeof (agentsApi == null ? void 0 : agentsApi.session) !== "function") {
+          setStatusBanner({ ok: false, text: "API ctx.agents.session indisponível nesta versão do Buzz." });
+          return;
+        }
+        const place = (liveTurn == null ? void 0 : liveTurn.channelId) ? { channelId: liveTurn.channelId } : {};
+        await agentsApi.session(agentKey, place, action);
+        const label = action === "interrupt" ? "interrompida" : action === "compact" ? "compactada" : "reiniciada";
+        setStatusBanner({ ok: true, text: `Sessão de ${agentName} ${label} via ctx.agents.session().` });
+      } catch (err) {
+        setStatusBanner({ ok: false, text: `Erro ao executar ${action}: ${(err == null ? void 0 : err.message) || err}` });
+      } finally {
+        setBusyAction(null);
+      }
+    };
+    const handleOpenFactory = () => {
+      try {
+        const nav = ctx == null ? void 0 : ctx.navigation;
+        if (nav == null ? void 0 : nav.open) {
+          nav.open({ version: 1, kind: "page", pluginId: "digital.cortexx.orgfy", pageId: "orgfy" });
+        } else if (nav == null ? void 0 : nav.navigate) {
+          nav.navigate("orgfy");
+        }
+      } catch {
+      }
+    };
+    const handleOpenDirectIssue = async (item) => {
+      const ok2 = await openBuzzRepoEntity(ctx, {
+        type: item.kind === "pr" ? "pr" : "issue",
+        owner: item.owner || repoOwner,
+        dtag: item.dtag || "orgfy",
+        id: item.id
+      }).catch(() => false);
+      if (!ok2) {
+        await openIssueInBuzz(ctx, { id: item.id, owner: item.owner || repoOwner, dtag: item.dtag || "orgfy" }).catch(() => false);
+      }
+    };
+    const targetLower = normName$1(agentName);
+    const agentSpans = telemetry.recentSpans.filter((sp) => {
+      const spName = normName$1(sp.agentName);
+      return spName === targetLower || spName.includes(targetLower) || targetLower.includes(spName);
+    }).slice(0, 6);
+    const agentMetric = telemetry.agentMetrics.find((m) => {
+      const mn = normName$1(m.agentName);
+      return mn === targetLower || mn.includes(targetLower);
+    });
+    const activeCards = cards.filter((c) => c.stage !== "feito");
+    const doneCards = cards.filter((c) => c.stage === "feito");
+    const btnBase = {
+      padding: "5px 9px",
+      borderRadius: "7px",
+      border: BORDER$1,
+      backgroundColor: SURFACE_BG,
+      color: TEXT_PRIMARY,
+      fontSize: "11px",
+      fontWeight: "600",
+      cursor: "pointer"
+    };
+    return h(
+      "div",
+      {
+        "data-agent-orgfy-tab": "v17.3",
+        style: {
+          display: "flex",
+          flexDirection: "column",
+          gap: "12px",
+          padding: "10px 0",
+          width: "100%",
+          maxWidth: "100%",
+          minWidth: 0,
+          boxSizing: "border-box",
+          overflowX: "hidden",
+          color: TEXT_PRIMARY,
+          fontFamily: "inherit",
+          fontSize: "12px"
+        }
+      },
+      // 1. Cabeçalho OrgFy Factory + Status ao vivo + Ações nativas Buzz API
+      h(
+        "div",
+        {
+          style: {
+            padding: "12px",
+            borderRadius: "11px",
+            backgroundColor: CARD_BG$1,
+            border: liveTurn ? `1px solid ${BLUE}` : BORDER$1,
+            display: "flex",
+            flexDirection: "column",
+            gap: "10px",
+            width: "100%",
+            boxSizing: "border-box"
+          }
+        },
+        h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: "5px", minWidth: 0 } },
+          h(
+            "div",
+            { style: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: "6px" } },
+            h("span", { style: { fontSize: "13px", fontWeight: "700", color: ACCENT } }, `OrgFy Factory · ${agentName}`),
+            h(
+              "span",
+              {
+                style: {
+                  fontSize: "10px",
+                  fontWeight: "700",
+                  padding: "2px 7px",
+                  borderRadius: "9999px",
+                  backgroundColor: liveTurn ? "rgba(96, 165, 250, 0.16)" : "rgba(61, 214, 140, 0.14)",
+                  color: liveTurn ? BLUE : ACCENT
+                }
+              },
+              liveTurn ? "⚡ Respondendo agora" : presence === "online" ? "Online" : "Disponível"
+            ),
+            !isCompliantR51 && h(
+              "span",
+              {
+                "data-eval-r51-alert": "true",
+                style: {
+                  fontSize: "10px",
+                  fontWeight: "700",
+                  padding: "2px 7px",
+                  borderRadius: "9999px",
+                  backgroundColor: "rgba(248, 113, 113, 0.16)",
+                  color: RED
+                }
+              },
+              isCurrentOffline ? "Modelo offline no Gateway" : "Fora do Eval"
+            ),
+            (agentMetric == null ? void 0 : agentMetric.retryCascadeRisk) && h(
+              "span",
+              {
+                style: {
+                  fontSize: "10px",
+                  fontWeight: "700",
+                  padding: "2px 7px",
+                  borderRadius: "9999px",
+                  backgroundColor: "rgba(248, 113, 113, 0.2)",
+                  color: RED
+                }
+              },
+              "Retry Cascade"
+            )
+          ),
+          h(
+            "div",
+            {
+              style: {
+                fontSize: "11px",
+                color: TEXT_MUTED,
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                lineHeight: "1.45",
+                overflowWrap: "anywhere"
+              }
+            },
+            `Harness: ${currentHarness} · Provider: ${currentProvider} · Modelo: ${currentModel}${agentPubkey ? ` · pk: ${agentPubkey.slice(0, 10)}…` : ""}`
+          )
+        ),
+        // Turno em execução ao vivo (session.agentActivity)
+        liveTurn && h(
+          "div",
+          {
+            style: {
+              padding: "8px 10px",
+              borderRadius: "8px",
+              backgroundColor: SURFACE_BG,
+              border: `1px solid ${liveTurn.state === "error" ? RED : BLUE}`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "8px"
+            }
+          },
+          h(
+            "div",
+            { style: { minWidth: 0, flex: 1 } },
+            h("div", { style: { fontSize: "11.5px", fontWeight: "600", color: liveTurn.state === "error" ? RED : BLUE } }, liveTurn.stepLabel),
+            liveTurn.toolName && h("div", { style: { fontSize: "10px", color: TEXT_MUTED, fontFamily: "monospace" } }, `tool: ${liveTurn.toolName}`)
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              disabled: busyAction === "interrupt",
+              onClick: () => handleSessionAction("interrupt"),
+              style: { ...btnBase, borderColor: "rgba(248, 113, 113, 0.45)", color: RED }
+            },
+            "Parar"
+          )
+        ),
+        // Seletor rápido de modelo (Eval R5.1 + NexusMind Ranking)
+        h(
+          "div",
+          {
+            style: {
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+              flexWrap: "wrap"
+            }
+          },
+          h(
+            "select",
+            {
+              "data-agent-model-select": "true",
+              "aria-label": "Escolher modelo do agente",
+              value: selectedModelKey,
+              disabled: busyAction === "eval",
+              onChange: (e) => {
+                var _a;
+                return setSelectedModelKey(String(((_a = e == null ? void 0 : e.target) == null ? void 0 : _a.value) || ""));
+              },
+              style: {
+                padding: "5px 8px",
+                borderRadius: "7px",
+                border: BORDER$1,
+                backgroundColor: SURFACE_BG,
+                color: TEXT_PRIMARY,
+                fontSize: "11px",
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                flex: "1 1 220px",
+                minWidth: "180px",
+                maxWidth: "100%",
+                cursor: "pointer"
+              }
+            },
+            (gatewayCatalog == null ? void 0 : gatewayCatalog.hasLiveData) && (gatewayCatalog.approvedOptions.length > 0 || gatewayCatalog.onlineOtherOptions.length > 0) ? [
+              gatewayCatalog.approvedOptions.length > 0 && h(
+                "optgroup",
+                { key: "eval-approved", label: "Aprovados no Eval (NexusMind)" },
+                gatewayCatalog.approvedOptions.map(
+                  (opt) => h(
+                    "option",
+                    { key: modelOptionKey(opt.provider, opt.model), value: modelOptionKey(opt.provider, opt.model) },
+                    opt.label
+                  )
+                )
+              ),
+              gatewayCatalog.onlineOtherOptions.length > 0 && h(
+                "optgroup",
+                { key: "nexusmind-online", label: "Ranking NexusMind (Online)" },
+                gatewayCatalog.onlineOtherOptions.map(
+                  (opt) => h(
+                    "option",
+                    { key: modelOptionKey(opt.provider, opt.model), value: modelOptionKey(opt.provider, opt.model) },
+                    opt.label
+                  )
+                )
+              )
+            ] : h(
+              "optgroup",
+              { label: "Fallback (sem Eval ao vivo)" },
+              FALLBACK_MODEL_PRESETS.map(
+                (opt) => h(
+                  "option",
+                  { key: modelOptionKey(opt.provider, opt.model), value: modelOptionKey(opt.provider, opt.model) },
+                  opt.label
+                )
+              )
+            )
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              disabled: busyAction === "eval" || isSelectedAlreadyActive,
+              onClick: handleApplySelectedModel,
+              "data-apply-eval-r51": "true",
+              style: {
+                ...btnBase,
+                borderColor: isSelectedAlreadyActive ? BORDER$1 : "rgba(96, 165, 250, 0.45)",
+                backgroundColor: isSelectedAlreadyActive ? SURFACE_BG : "rgba(96, 165, 250, 0.14)",
+                color: isSelectedAlreadyActive ? TEXT_MUTED : BLUE,
+                opacity: isSelectedAlreadyActive ? 0.65 : 1,
+                cursor: isSelectedAlreadyActive ? "default" : "pointer"
+              }
+            },
+            busyAction === "eval" ? "Salvando..." : isSelectedAlreadyActive ? "Modelo ativo" : "Aplicar modelo"
+          )
+        ),
+        // Barra de ações nativas (Sessão, Factory, Repos)
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" } },
+          h(
+            "button",
+            { type: "button", disabled: busyAction === "compact", onClick: () => handleSessionAction("compact"), style: btnBase },
+            "Compactar"
+          ),
+          h(
+            "button",
+            { type: "button", disabled: busyAction === "new", onClick: () => handleSessionAction("new"), style: btnBase },
+            "Nova sessão"
+          ),
+          h(
+            "button",
+            { type: "button", disabled: loading, onClick: loadAgentContext, style: btnBase },
+            loading ? "..." : "Atualizar"
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              onClick: () => openRepoTabInBuzz(ctx, { owner: repoOwner, dtag: "orgfy", tab: "issues" }),
+              style: btnBase
+            },
+            "Buzz Repos ↗"
+          ),
+          h(
+            "button",
+            {
+              type: "button",
+              onClick: handleOpenFactory,
+              style: {
+                ...btnBase,
+                border: "none",
+                backgroundColor: ACCENT,
+                color: "var(--text-on-prominent, #08120c)"
+              }
+            },
+            "Abrir OrgFy Factory"
+          )
+        )
+      ),
+      statusBanner && h(
+        "div",
+        {
+          style: {
+            padding: "9px 11px",
+            borderRadius: "8px",
+            backgroundColor: statusBanner.ok ? "rgba(61, 214, 140, 0.12)" : "rgba(251, 191, 36, 0.12)",
+            border: `1px solid ${statusBanner.ok ? ACCENT : AMBER}`,
+            color: statusBanner.ok ? ACCENT : AMBER,
+            fontSize: "11px",
+            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+            overflowWrap: "anywhere"
+          }
+        },
+        statusBanner.text
+      ),
+      // 2. 4 KPIs compactos
+      h(
+        "div",
+        {
+          style: {
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))",
+            gap: "8px",
+            width: "100%"
+          }
+        },
+        [
+          { label: "Cards Ativos", value: String(activeCards.length), color: BLUE },
+          { label: "Concluídos", value: String(doneCards.length), color: ACCENT },
+          { label: "NIP-34 (Repos)", value: String(repoItems.length), color: TEXT_PRIMARY },
+          { label: "OTel Spans", value: agentMetric ? `${agentMetric.totalTurns} (${agentMetric.errorTurns} err)` : String(agentSpans.length), color: "#c084fc" }
+        ].map(
+          (k) => h(
+            "div",
+            {
+              key: k.label,
+              style: {
+                padding: "9px 10px",
+                borderRadius: "9px",
+                backgroundColor: CARD_BG$1,
+                border: BORDER$1,
+                minWidth: 0
+              }
+            },
+            h("div", { style: { fontSize: "9.5px", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.05em" } }, k.label),
+            h("div", { style: { fontSize: "15px", fontWeight: "700", color: k.color, fontFamily: "ui-monospace, monospace", marginTop: "3px" } }, k.value)
+          )
+        )
+      ),
+      // 3. Issues & PRs ao vivo do Buzz Repos (NIP-34) — abertura direta em 1 salto
+      repoItems.length > 0 && h(
+        "div",
+        {
+          "data-agent-nip34-list": "true",
+          style: {
+            padding: "12px",
+            borderRadius: "10px",
+            backgroundColor: CARD_BG$1,
+            border: BORDER$1,
+            display: "flex",
+            flexDirection: "column",
+            gap: "7px"
+          }
+        },
+        h(
+          "div",
+          { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
+          h("span", { style: { fontSize: "12px", fontWeight: "700" } }, `Buzz Repos NIP-34 (${repoItems.length})`),
+          h("span", { style: { fontSize: "10px", color: TEXT_MUTED, fontFamily: "monospace" } }, "session.repositories")
+        ),
+        repoItems.slice(0, 6).map(
+          (it) => h(
+            "div",
+            {
+              key: it.id,
+              style: {
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "8px",
+                padding: "7px 9px",
+                borderRadius: "7px",
+                backgroundColor: SURFACE_BG,
+                border: BORDER$1
+              }
+            },
+            h(
+              "div",
+              { style: { minWidth: 0, flex: 1 } },
+              h(
+                "div",
+                { style: { display: "flex", alignItems: "center", gap: "5px", marginBottom: "2px" } },
+                h("span", { style: { fontFamily: "monospace", fontSize: "10px", color: BLUE, fontWeight: "700" } }, `#${String(it.id || "").slice(0, 8)}`),
+                h("span", { style: { fontSize: "9px", fontWeight: "700", padding: "1px 5px", borderRadius: "4px", backgroundColor: it.kind === "pr" ? "rgba(61, 214, 140, 0.16)" : "rgba(96, 165, 250, 0.16)", color: it.kind === "pr" ? ACCENT : BLUE, textTransform: "uppercase" } }, it.kind)
+              ),
+              h("div", { title: it.title, style: { fontSize: "11.5px", fontWeight: "600", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, it.title)
+            ),
+            h(
+              "button",
+              {
+                type: "button",
+                onClick: () => handleOpenDirectIssue({ id: it.id, kind: it.kind, owner: it.owner, dtag: it.dtag }),
+                style: { ...btnBase, color: BLUE, padding: "4px 8px", fontSize: "10px", flexShrink: 0 }
+              },
+              "Abrir ↗"
+            )
+          )
+        )
+      ),
+      // 4. Cards OrgFy atribuídos na esteira
+      h(
+        "div",
+        {
+          style: {
+            padding: "12px",
+            borderRadius: "10px",
+            backgroundColor: CARD_BG$1,
+            border: BORDER$1,
+            display: "flex",
+            flexDirection: "column",
+            gap: "8px"
+          }
+        },
+        h(
+          "div",
+          { style: { display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "4px" } },
+          h("span", { style: { fontSize: "12px", fontWeight: "700" } }, `Cards OrgFy Atribuídos (${cards.length})`),
+          h("span", { style: { fontSize: "10px", color: TEXT_MUTED, fontFamily: "monospace" } }, "Executor / Revisor / Decisor")
+        ),
+        loading ? h("div", { style: { fontSize: "11px", color: TEXT_MUTED } }, "Carregando cards da esteira...") : cards.length === 0 ? h("div", { style: { fontSize: "11px", color: TEXT_MUTED } }, `Nenhum card ativo ou recente vinculado a ${agentName}.`) : h(
+          "div",
+          { style: { display: "flex", flexDirection: "column", gap: "6px", maxHeight: "220px", overflowY: "auto" } },
+          cards.slice(0, 12).map((c) => {
+            const role = normName$1(c.executor) === targetLower ? "EXECUTOR" : normName$1(c.revisor) === targetLower ? "REVISOR" : "DECISOR";
+            return h(
+              "div",
+              {
+                key: c.id,
+                style: {
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: "8px",
+                  padding: "8px 10px",
+                  borderRadius: "7px",
+                  backgroundColor: SURFACE_BG,
+                  border: BORDER$1,
+                  minWidth: 0
+                }
+              },
+              h(
+                "div",
+                { style: { display: "flex", flexDirection: "column", gap: "3px", minWidth: 0, flex: 1 } },
+                h(
+                  "div",
+                  { style: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: "5px" } },
+                  h("span", { style: { fontFamily: "monospace", fontSize: "10px", color: BLUE, fontWeight: "700" } }, `#${String(c.issueId || "").slice(0, 8)}`),
+                  h("span", { style: { fontSize: "9px", fontWeight: "700", padding: "1px 5px", borderRadius: "4px", backgroundColor: role === "EXECUTOR" ? "rgba(61,214,140,0.16)" : "rgba(192,132,252,0.16)", color: role === "EXECUTOR" ? ACCENT : "#d8b4fe" } }, role),
+                  h("span", { style: { fontSize: "9px", fontWeight: "700", padding: "1px 5px", borderRadius: "4px", backgroundColor: "rgba(255,255,255,0.07)", color: TEXT_MUTED, textTransform: "uppercase" } }, c.stage)
+                ),
+                h("span", { title: c.title, style: { fontSize: "11.5px", fontWeight: "600", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, c.title)
+              ),
+              c.fullIssueId && h(
+                "button",
+                {
+                  type: "button",
+                  onClick: () => handleOpenDirectIssue({ id: c.fullIssueId, kind: "issue", owner: c.owner, dtag: c.empresa || "orgfy" }),
+                  style: { ...btnBase, color: BLUE, padding: "4px 8px", fontSize: "10px", flexShrink: 0 }
+                },
+                "Abrir ↗"
+              )
+            );
+          })
+        )
+      ),
+      // 5. Sessões Goose & Spans OTel GenAI
+      h(
+        "div",
+        {
+          style: {
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
+            gap: "10px",
+            width: "100%"
+          }
+        },
+        h(
+          "div",
+          {
+            style: {
+              padding: "12px",
+              borderRadius: "10px",
+              backgroundColor: CARD_BG$1,
+              border: BORDER$1,
+              display: "flex",
+              flexDirection: "column",
+              gap: "6px",
+              minWidth: 0
+            }
+          },
+          h("span", { style: { fontSize: "12px", fontWeight: "700" } }, "Sessões Goose Recentes (3h)"),
+          sessions.length === 0 ? h("div", { style: { fontSize: "11px", color: TEXT_MUTED } }, "Nenhuma sessão recente no radar Goose.") : sessions.map(
+            (s) => h(
+              "div",
+              {
+                key: s.session_id,
+                style: {
+                  padding: "6px 8px",
+                  borderRadius: "6px",
+                  backgroundColor: SURFACE_BG,
+                  border: s.severidade === "critical" ? `1px solid ${RED}` : BORDER$1,
+                  fontSize: "10px",
+                  fontFamily: "monospace",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "2px"
+                }
+              },
+              h(
+                "div",
+                { style: { display: "flex", justifyContent: "space-between", gap: "4px" } },
+                h("span", { style: { color: s.ativa ? ACCENT : TEXT_MUTED, fontWeight: "700" } }, `${s.ativa ? "ATIVA" : "HIST"} · ${s.session_id}`),
+                h("span", { style: { color: TEXT_PRIMARY } }, `${s.duracao_min.toFixed(0)}m · ${s.shells} shells`)
+              ),
+              h("span", { style: { color: s.flags.length > 0 ? AMBER : ACCENT } }, s.flags.length > 0 ? s.flags.join(" · ") : "OK")
+            )
+          )
+        ),
+        h(
+          "div",
+          {
+            style: {
+              padding: "12px",
+              borderRadius: "10px",
+              backgroundColor: CARD_BG$1,
+              border: BORDER$1,
+              display: "flex",
+              flexDirection: "column",
+              gap: "6px",
+              minWidth: 0
+            }
+          },
+          h("span", { style: { fontSize: "12px", fontWeight: "700" } }, "Spans OTel GenAI deste Agente"),
+          agentSpans.length === 0 ? h("div", { style: { fontSize: "11px", color: TEXT_MUTED } }, "Nenhum span OTel capturado ainda nesta sessão do Buzz.") : agentSpans.map(
+            (sp) => h(
+              "div",
+              {
+                key: sp.spanId,
+                style: {
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "5px 8px",
+                  borderRadius: "6px",
+                  backgroundColor: SURFACE_BG,
+                  fontSize: "10px",
+                  fontFamily: "monospace"
+                }
+              },
+              h("span", { style: { color: BLUE, fontWeight: "600", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, sp.toolName || sp.operationName),
+              h("span", { style: { color: sp.status === "error" ? RED : ACCENT, fontWeight: "700", flexShrink: 0 } }, `${sp.status.toUpperCase()} · ${sp.durationMs}ms`)
+            )
+          )
+        )
+      )
+    );
+  };
+}
 const ORGFY_FAILOVER_REQUEST_EVENT = "orgfy.failover.requested";
 async function reconcileAgentsViaBuzzApi(ctx, opts = {}) {
   const agentsApi = ctx == null ? void 0 : ctx.agents;
   const snap = typeof (agentsApi == null ? void 0 : agentsApi.snapshot) === "function" ? agentsApi.snapshot() : null;
   const list = Array.isArray(snap == null ? void 0 : snap.agents) ? snap.agents : [];
+  const catalog = await loadLiveGatewayModelCatalog(ctx).catch(() => null);
+  const hasLiveCatalog = Boolean((catalog == null ? void 0 : catalog.hasLiveData) && catalog.approvedOptions.length > 0);
   const updated = [];
   for (const ag of list) {
     const cfg = (ag == null ? void 0 : ag.config) && typeof ag.config === "object" ? { ...ag.config } : {};
     const prov = cfg.provider || (ag == null ? void 0 : ag.provider) || null;
     const model = cfg.model || (ag == null ? void 0 : ag.model) || null;
     const mlow = String(model || "").trim().toLowerCase();
-    const needsFix = !prov || !model || isFreeModelId(mlow) || isUnsupportedAgentModel(mlow) || prov === "nexusmind_openai" && mlow.startsWith("antigravity/");
+    const shortM = String(mlow.split("/").pop() || mlow).trim();
+    const isOfflineInGateway = Boolean(
+      hasLiveCatalog && ((catalog == null ? void 0 : catalog.offlineModels.has(mlow)) || (catalog == null ? void 0 : catalog.offlineModels.has(shortM)))
+    );
+    const isApprovedInGateway = Boolean(
+      hasLiveCatalog && ((catalog == null ? void 0 : catalog.approvedModels.has(mlow)) || (catalog == null ? void 0 : catalog.approvedModels.has(shortM)))
+    );
+    const needsFix = !prov || !model || isOfflineInGateway || !isApprovedInGateway && (isFreeModelId(mlow) || isUnsupportedAgentModel(mlow)) || prov === "nexusmind_openai" && mlow.startsWith("antigravity/");
     if (!needsFix) continue;
-    const isFastTarget = mlow.includes("flash") || mlow.includes("haiku");
-    const nextModel = isFastTarget ? "gemini-2.5-flash" : "claude-sonnet-4-6";
-    const nextProv = isFastTarget ? "nexusmind_antigravity" : "nexusmind_anthropic";
+    let nextModel;
+    let nextProv;
+    if (hasLiveCatalog) {
+      const rec = pickLiveRecommendedModel(String((ag == null ? void 0 : ag.name) || (ag == null ? void 0 : ag.key) || ""), catalog);
+      nextModel = rec.model;
+      nextProv = rec.provider;
+    } else {
+      const isFastTarget = mlow.includes("flash") || mlow.includes("haiku");
+      nextModel = isFastTarget ? "gemini-2.5-flash" : "claude-sonnet-4-6";
+      nextProv = isFastTarget ? "nexusmind_antigravity" : "nexusmind_anthropic";
+    }
     if (!opts.dryRun && typeof (agentsApi == null ? void 0 : agentsApi.save) === "function") {
       await agentsApi.save(ag.key, { config: { ...cfg, provider: nextProv, model: nextModel } });
     }
@@ -1528,159 +3405,6 @@ async function executeCardProgress(ctx, input) {
     updatedStepId: input.step_id.toUpperCase(),
     writtenToDisk
   };
-}
-const MAX_SPANS = 200;
-const spansBuffer = [];
-const listeners = /* @__PURE__ */ new Set();
-const decisionsStats = {
-  totalCalls: 0,
-  decisionsApiCalls: 0,
-  fallbackCalls: 0,
-  wakesOrEscalationsAvoided: 0,
-  estimatedTokensSaved: 0,
-  totalLatencyMs: 0,
-  byMode: {}
-};
-const agentCounters = /* @__PURE__ */ new Map();
-function randomHex(len) {
-  let out = "";
-  const chars = "0123456789abcdef";
-  for (let i = 0; i < len; i++) {
-    out += chars[Math.floor(Math.random() * 16)];
-  }
-  return out;
-}
-function notify() {
-  for (const fn of listeners) {
-    try {
-      fn();
-    } catch {
-    }
-  }
-}
-function subscribeTelemetry(listener) {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
-}
-function recordGenAISpan(input) {
-  const span = {
-    spanId: randomHex(16),
-    traceId: input.traceId || randomHex(32),
-    timestamp: input.timestamp || Date.now(),
-    operationName: input.operationName,
-    agentName: input.agentName || "orgfy-system",
-    model: input.model ?? null,
-    provider: input.provider ?? null,
-    toolName: input.toolName ?? null,
-    durationMs: Math.max(0, Math.round(input.durationMs || 0)),
-    status: input.status,
-    finishReason: input.finishReason,
-    attributes: input.attributes || {}
-  };
-  spansBuffer.unshift(span);
-  if (spansBuffer.length > MAX_SPANS) {
-    spansBuffer.length = MAX_SPANS;
-  }
-  if (span.operationName === "invoke_agent" || span.operationName === "execute_tool") {
-    const key = span.agentName;
-    const prev = agentCounters.get(key) || {
-      totalTurns: 0,
-      errorTurns: 0,
-      consecutiveErrors: 0,
-      totalDurationMs: 0,
-      lastActivityTs: span.timestamp
-    };
-    prev.totalTurns += 1;
-    prev.totalDurationMs += span.durationMs;
-    prev.lastActivityTs = span.timestamp;
-    if (span.status === "error") {
-      prev.errorTurns += 1;
-      prev.consecutiveErrors += 1;
-    } else {
-      prev.consecutiveErrors = 0;
-    }
-    agentCounters.set(key, prev);
-  }
-  notify();
-  return span;
-}
-function recordDecisionTelemetry(params) {
-  decisionsStats.totalCalls += 1;
-  if (params.source === "decisions_api") {
-    decisionsStats.decisionsApiCalls += 1;
-  } else {
-    decisionsStats.fallbackCalls += 1;
-  }
-  decisionsStats.totalLatencyMs += Math.max(0, params.durationMs);
-  decisionsStats.byMode[params.mode] = (decisionsStats.byMode[params.mode] || 0) + 1;
-  const saved = params.preventedExpensiveWake ? params.estimatedTokensSaved ?? 18e3 : 0;
-  if (params.preventedExpensiveWake) {
-    decisionsStats.wakesOrEscalationsAvoided += 1;
-    decisionsStats.estimatedTokensSaved += saved;
-  }
-  recordGenAISpan({
-    operationName: "decisions.evaluate",
-    agentName: "orgfy-decisions-router",
-    model: params.model || "deterministic_fallback",
-    provider: params.backend || params.source,
-    durationMs: params.durationMs,
-    status: params.preventedExpensiveWake ? "filtered_out" : "ok",
-    attributes: {
-      "gen_ai.operation.name": "decisions.evaluate",
-      "orgfy.decision.mode": params.mode,
-      "orgfy.decision.source": params.source,
-      "orgfy.tokens_saved_est": saved
-    }
-  });
-}
-function getTelemetrySnapshot() {
-  const agentMetrics = [];
-  const retryCascadeAlerts = [];
-  for (const [agentName, c] of agentCounters.entries()) {
-    const retryCascadeRisk = c.consecutiveErrors >= 2 || c.totalTurns >= 4 && c.errorTurns / c.totalTurns >= 0.5;
-    agentMetrics.push({
-      agentName,
-      totalTurns: c.totalTurns,
-      errorTurns: c.errorTurns,
-      consecutiveErrors: c.consecutiveErrors,
-      retryCascadeRisk,
-      avgDurationMs: c.totalTurns > 0 ? Math.round(c.totalDurationMs / c.totalTurns) : 0,
-      lastActivityTs: c.lastActivityTs
-    });
-    if (retryCascadeRisk) {
-      retryCascadeAlerts.push(
-        `${agentName}: ${c.consecutiveErrors} erro(s) consecutivo(s) (${c.errorTurns}/${c.totalTurns} turnos) — risco de retry cascade.`
-      );
-    }
-  }
-  agentMetrics.sort((a, b) => b.lastActivityTs - a.lastActivityTs);
-  return {
-    updatedAt: Date.now(),
-    totalSpans: spansBuffer.length,
-    recentSpans: spansBuffer.slice(0, 40),
-    decisionsSavings: {
-      totalCalls: decisionsStats.totalCalls,
-      decisionsApiCalls: decisionsStats.decisionsApiCalls,
-      fallbackCalls: decisionsStats.fallbackCalls,
-      wakesOrEscalationsAvoided: decisionsStats.wakesOrEscalationsAvoided,
-      estimatedTokensSaved: decisionsStats.estimatedTokensSaved,
-      avgLatencyMs: decisionsStats.totalCalls > 0 ? Math.round(decisionsStats.totalLatencyMs / decisionsStats.totalCalls) : 0,
-      byMode: { ...decisionsStats.byMode }
-    },
-    agentMetrics,
-    retryCascadeAlerts
-  };
-}
-function resetTelemetryForTests() {
-  spansBuffer.length = 0;
-  agentCounters.clear();
-  decisionsStats.totalCalls = 0;
-  decisionsStats.decisionsApiCalls = 0;
-  decisionsStats.fallbackCalls = 0;
-  decisionsStats.wakesOrEscalationsAvoided = 0;
-  decisionsStats.estimatedTokensSaved = 0;
-  decisionsStats.totalLatencyMs = 0;
-  decisionsStats.byMode = {};
 }
 const DEFAULT_ORGFY_CHANNEL$1 = "e445491d-2fb3-4ebd-8e2e-f6813c33fb03";
 const RISCO_LABELS = [
@@ -2110,12 +3834,12 @@ function decodeText(raw) {
   }
   return String(raw ?? "");
 }
-function normName$1(v2) {
+function normName(v2) {
   return String(v2 || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/^@/, "").replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim();
 }
 function namesMatch(a, b) {
-  const na = normName$1(a);
-  const nb = normName$1(b);
+  const na = normName(a);
+  const nb = normName(b);
   return Boolean(na && nb && (na === nb || na.includes(nb) || nb.includes(na)));
 }
 async function reconcileAgentPresenceAndLocks(ctx, options = {}) {
@@ -2223,11 +3947,11 @@ async function loadEmpresaRoles(ctx, empresa) {
     const parsed = JSON.parse(decodeText(raw));
     if (Array.isArray(parsed == null ? void 0 : parsed.agentes)) {
       for (const a of parsed.agentes) {
-        if (a == null ? void 0 : a.nome) map.set(normName$1(a.nome), String(a.papel || "executor"));
+        if (a == null ? void 0 : a.nome) map.set(normName(a.nome), String(a.papel || "executor"));
       }
     } else if ((parsed == null ? void 0 : parsed.agentes) && typeof parsed.agentes === "object") {
       for (const [nome, cfg] of Object.entries(parsed.agentes)) {
-        map.set(normName$1(nome), String((cfg == null ? void 0 : cfg.papel) || "executor"));
+        map.set(normName(nome), String((cfg == null ? void 0 : cfg.papel) || "executor"));
       }
     }
   } catch {
@@ -2297,7 +4021,7 @@ async function buildLiveAgentRoster(ctx, options = {}) {
     } else if (isRunningInBuzz || sessionState === "active" || Boolean(activeLockRec)) {
       status = "WORKING_REAL";
     }
-    const role = rolesMap.get(normName$1(name)) || (normName$1(name).includes("iris") ? "ceo_holding" : normName$1(name).includes("bento arquiteto") ? "arquiteto" : normName$1(name).includes("bento") ? "coo" : normName$1(name).includes("teo") || normName$1(name).includes("vera") || normName$1(name).includes("sentinel") ? "revisor" : "executor");
+    const role = rolesMap.get(normName(name)) || (normName(name).includes("iris") ? "ceo_holding" : normName(name).includes("bento arquiteto") ? "arquiteto" : normName(name).includes("bento") ? "coo" : normName(name).includes("teo") || normName(name).includes("vera") || normName(name).includes("sentinel") ? "revisor" : "executor");
     return {
       name,
       key,
@@ -6423,1582 +8147,6 @@ function buildUnifiedOrgfyTools(ctx) {
       }
     }
   }));
-}
-const DEFAULT_ORGFY_REPO_OWNER = "7fd58ab9885bcf7fb69f6e4e51a4009470ce5ecea48b3ed33398cfce6da86d20";
-function resolveBuzzNavigationScope$1(ctx) {
-  var _a, _b, _c, _d;
-  try {
-    const navSnap = typeof ((_a = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a.snapshot) === "function" ? ctx.navigation.snapshot() : null;
-    const navScope = (_c = (_b = navSnap == null ? void 0 : navSnap.entry) == null ? void 0 : _b.target) == null ? void 0 : _c.scope;
-    if ((navScope == null ? void 0 : navScope.viewer) && (navScope == null ? void 0 : navScope.communityOrigin)) {
-      return {
-        viewer: String(navScope.viewer),
-        communityOrigin: String(navScope.communityOrigin)
-      };
-    }
-  } catch {
-  }
-  try {
-    const relaySnap = typeof ((_d = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _d.snapshot) === "function" ? ctx.relay.snapshot() : null;
-    const viewer = (relaySnap == null ? void 0 : relaySnap.viewer) ? String(relaySnap.viewer) : "";
-    let communityOrigin = (relaySnap == null ? void 0 : relaySnap.origin) ? String(relaySnap.origin) : "";
-    if (!communityOrigin && viewer && typeof (relaySnap == null ? void 0 : relaySnap.scope) === "string" && relaySnap.scope.endsWith(`:${viewer}`)) {
-      communityOrigin = relaySnap.scope.slice(0, -(viewer.length + 1));
-    }
-    if (viewer && communityOrigin) {
-      return { viewer, communityOrigin };
-    }
-  } catch {
-  }
-  return null;
-}
-async function openBuzzRepoEntity(ctx, route) {
-  var _a, _b, _c, _d, _e, _f;
-  const scope = resolveBuzzNavigationScope$1(ctx);
-  if (!scope || typeof ((_a = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _a.open) !== "function") {
-    return false;
-  }
-  let normalizedRoute = "id" in route ? {
-    type: route.type,
-    owner: route.owner.toLowerCase().trim(),
-    dtag: route.dtag.trim(),
-    id: route.id.toLowerCase().replace(/^#/, "").trim()
-  } : {
-    type: "repo",
-    owner: route.owner.toLowerCase().trim(),
-    dtag: route.dtag.trim(),
-    ...route.tab ? { tab: route.tab } : {},
-    ...route.commit ? { commit: route.commit.toLowerCase().trim() } : {}
-  };
-  const session = typeof ((_b = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _b.snapshot) === "function" ? (_c = ctx.relay.snapshot()) == null ? void 0 : _c.session : null;
-  if ("id" in normalizedRoute && (session == null ? void 0 : session.repositories) && typeof session.repositories.load === "function") {
-    const tryLoad = async (cand) => {
-      const ac = new AbortController();
-      const t = setTimeout(() => ac.abort(), 3e3);
-      try {
-        const det = await session.repositories.load(cand, ac.signal);
-        return Boolean(det == null ? void 0 : det.item);
-      } catch {
-        return false;
-      } finally {
-        clearTimeout(t);
-      }
-    };
-    const okDirect = await tryLoad(normalizedRoute);
-    if (!okDirect) {
-      let resolved = null;
-      try {
-        const navSnap = typeof ((_d = ctx == null ? void 0 : ctx.navigation) == null ? void 0 : _d.snapshot) === "function" ? ctx.navigation.snapshot() : null;
-        const activeCh = ((_f = (_e = navSnap == null ? void 0 : navSnap.entry) == null ? void 0 : _e.target) == null ? void 0 : _f.kind) === "conversation" ? navSnap.entry.target.channelId : null;
-        if (activeCh && typeof session.repositories.home === "function") {
-          const acH = new AbortController();
-          const tH = setTimeout(() => acH.abort(), 2500);
-          try {
-            const home = await session.repositories.home(activeCh, acH.signal);
-            const repos = (home == null ? void 0 : home.status) === "home" && Array.isArray(home.repositories) ? home.repositories : [];
-            for (const r of repos) {
-              if (!(r == null ? void 0 : r.owner) || !(r == null ? void 0 : r.dtag)) continue;
-              const cand = { ...normalizedRoute, owner: String(r.owner).toLowerCase(), dtag: String(r.dtag) };
-              if (await tryLoad(cand)) {
-                resolved = cand;
-                break;
-              }
-            }
-          } finally {
-            clearTimeout(tH);
-          }
-        }
-      } catch {
-      }
-      if (!resolved && normalizedRoute.dtag !== "orgfy") {
-        const orgfyCand = { ...normalizedRoute, owner: DEFAULT_ORGFY_REPO_OWNER, dtag: "orgfy" };
-        if (await tryLoad(orgfyCand)) {
-          resolved = orgfyCand;
-        }
-      }
-      if (resolved) {
-        normalizedRoute = resolved;
-      } else {
-        return false;
-      }
-    }
-  } else if ("id" in normalizedRoute) {
-    return false;
-  }
-  try {
-    const res = await ctx.navigation.open({
-      version: 1,
-      kind: "page",
-      pluginId: "buzz.repos",
-      pageId: "repos",
-      scope,
-      route: {
-        version: 1,
-        params: normalizedRoute
-      }
-    });
-    if (res && typeof res === "object" && "status" in res && res.status !== "opened") {
-      return false;
-    }
-    return true;
-  } catch (err) {
-    console.warn("[OrgFy BuzzRepos] ctx.navigation.open falhou:", err);
-    return false;
-  }
-}
-async function openPrInBuzz(ctx, pr) {
-  const id = String(pr.id || "").toLowerCase().replace(/^#/, "").trim();
-  if (!/^[0-9a-f]{64}$/i.test(id)) return false;
-  const owner = /^[0-9a-f]{64}$/i.test(String(pr.owner || "")) ? String(pr.owner).toLowerCase() : DEFAULT_ORGFY_REPO_OWNER;
-  const dtag = String(pr.dtag || "orgfy").trim() || "orgfy";
-  return openBuzzRepoEntity(ctx, { type: "pr", owner, dtag, id });
-}
-async function openRepoTabInBuzz(ctx, opts) {
-  const owner = /^[0-9a-f]{64}$/i.test(String(opts.owner || "")) ? String(opts.owner).toLowerCase() : DEFAULT_ORGFY_REPO_OWNER;
-  const dtag = String(opts.dtag || "orgfy").trim() || "orgfy";
-  return openBuzzRepoEntity(ctx, {
-    type: "repo",
-    owner,
-    dtag,
-    ...opts.tab ? { tab: opts.tab } : {},
-    ...opts.commit ? { tab: "commits", commit: opts.commit } : {}
-  });
-}
-function tagValue(event, name) {
-  const tags = Array.isArray(event == null ? void 0 : event.tags) ? event.tags : [];
-  const found = tags.find((t) => Array.isArray(t) && t[0] === name && typeof t[1] === "string");
-  return found ? String(found[1]) : void 0;
-}
-async function loadLiveRepoSnapshot(ctx, opts) {
-  var _a, _b, _c, _d;
-  const fallbackOwner = /^[0-9a-f]{64}$/i.test(String(opts.owner || "")) ? String(opts.owner).toLowerCase() : DEFAULT_ORGFY_REPO_OWNER;
-  const fallbackDtag = String(opts.dtag || "orgfy").trim() || "orgfy";
-  const session = typeof ((_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) === "function" ? (_b = ctx.relay.snapshot()) == null ? void 0 : _b.session : null;
-  if (!(session == null ? void 0 : session.repositories) || typeof session.repositories.load !== "function") {
-    return { available: false, owner: fallbackOwner, dtag: fallbackDtag, issues: [], prs: [] };
-  }
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), 8e3);
-  try {
-    let owner = fallbackOwner;
-    let dtag = fallbackDtag;
-    let name;
-    if (opts.channelId && typeof session.repositories.home === "function") {
-      try {
-        const home = await session.repositories.home(opts.channelId, ac.signal);
-        if ((home == null ? void 0 : home.status) === "home" && Array.isArray(home.repositories) && home.repositories.length > 0) {
-          const picked = home.repositories.find((r) => String(r.dtag || "").toLowerCase() === fallbackDtag.toLowerCase()) || home.repositories[0];
-          if ((picked == null ? void 0 : picked.owner) && (picked == null ? void 0 : picked.dtag)) {
-            owner = String(picked.owner).toLowerCase();
-            dtag = String(picked.dtag);
-            name = typeof picked.name === "string" ? picked.name : dtag;
-          }
-        }
-      } catch {
-      }
-    }
-    const [issuesDetail, prsDetail] = await Promise.all([
-      session.repositories.load({ type: "repo", owner, dtag, tab: "issues" }, ac.signal).catch(() => null),
-      session.repositories.load({ type: "repo", owner, dtag, tab: "prs" }, ac.signal).catch(() => null)
-    ]);
-    const mapItems = (detail, kind) => {
-      const items = Array.isArray(detail == null ? void 0 : detail.items) ? detail.items : [];
-      return items.map((ev) => {
-        var _a2;
-        const content = String((ev == null ? void 0 : ev.content) || "");
-        const title = tagValue(ev, "subject") || ((_a2 = content.split("\n").find((l) => l.trim())) == null ? void 0 : _a2.replace(/^#+\s*/, "").slice(0, 120)) || `${kind.toUpperCase()} #${String((ev == null ? void 0 : ev.id) || "").slice(0, 8)}`;
-        return {
-          id: String((ev == null ? void 0 : ev.id) || ""),
-          kind,
-          owner,
-          dtag,
-          title,
-          authorPubkey: String((ev == null ? void 0 : ev.pubkey) || "").toLowerCase(),
-          createdAt: Number((ev == null ? void 0 : ev.created_at) || 0) * 1e3,
-          content
-        };
-      });
-    };
-    return {
-      available: Boolean(issuesDetail || prsDetail),
-      owner,
-      dtag,
-      name: name || ((_c = issuesDetail == null ? void 0 : issuesDetail.entity) == null ? void 0 : _c.name) || ((_d = prsDetail == null ? void 0 : prsDetail.entity) == null ? void 0 : _d.name) || dtag,
-      issues: mapItems(issuesDetail, "issue"),
-      prs: mapItems(prsDetail, "pr")
-    };
-  } catch {
-    return { available: false, owner: fallbackOwner, dtag: fallbackDtag, issues: [], prs: [] };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-async function loadLiveRepoEntityDetail(ctx, route) {
-  var _a, _b, _c;
-  const id = String(route.id || "").toLowerCase().replace(/^#/, "").trim();
-  if (!/^[0-9a-f]{64}$/i.test(id)) return null;
-  const session = typeof ((_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) === "function" ? (_b = ctx.relay.snapshot()) == null ? void 0 : _b.session : null;
-  if (!(session == null ? void 0 : session.repositories) || typeof session.repositories.load !== "function") return null;
-  const owner = /^[0-9a-f]{64}$/i.test(String(route.owner)) ? String(route.owner).toLowerCase() : DEFAULT_ORGFY_REPO_OWNER;
-  const dtag = String(route.dtag || "orgfy").trim() || "orgfy";
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), 8e3);
-  try {
-    const fullRoute = { type: route.type, owner, dtag, id };
-    const detail = await session.repositories.load(fullRoute, ac.signal);
-    if (!(detail == null ? void 0 : detail.item)) return null;
-    let commitDiff = null;
-    if (detail.commit && session.projectGit && typeof session.projectGit.read === "function") {
-      try {
-        const git = await session.projectGit.read({ owner, dtag, commit: detail.commit }, ac.signal);
-        if (git && typeof git.diff === "string") {
-          commitDiff = git.diff.slice(0, 12e3);
-        }
-      } catch {
-      }
-    }
-    const content = String(detail.item.content || "");
-    const title = tagValue(detail.item, "subject") || ((_c = content.split("\n").find((l) => l.trim())) == null ? void 0 : _c.replace(/^#+\s*/, "").slice(0, 140)) || `#${id.slice(0, 8)}`;
-    const activity = Array.isArray(detail.activity) ? detail.activity : [];
-    return {
-      route: fullRoute,
-      title,
-      content,
-      status: String(detail.status || "Open"),
-      authorPubkey: String(detail.item.pubkey || "").toLowerCase(),
-      createdAt: Number(detail.item.created_at || 0) * 1e3,
-      commit: detail.commit ? String(detail.commit) : void 0,
-      commitDiff,
-      channels: Array.isArray(detail.channels) ? detail.channels.map(String) : [],
-      comments: activity.map((ev) => ({
-        id: String((ev == null ? void 0 : ev.id) || ""),
-        authorPubkey: String((ev == null ? void 0 : ev.pubkey) || "").toLowerCase(),
-        createdAt: Number((ev == null ? void 0 : ev.created_at) || 0) * 1e3,
-        content: String((ev == null ? void 0 : ev.content) || "")
-      }))
-    };
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-function resolveBuzzIdentityName(ctx, pubkey, fallbackMap) {
-  var _a, _b;
-  const pk = String(pubkey || "").trim().toLowerCase();
-  if (!pk) return "Desconhecido";
-  try {
-    const session = typeof ((_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) === "function" ? (_b = ctx.relay.snapshot()) == null ? void 0 : _b.session : null;
-    const idView = (session == null ? void 0 : session.identityNames) || (ctx == null ? void 0 : ctx.identityNames);
-    if (typeof (idView == null ? void 0 : idView.resolve) === "function") {
-      const resolved = idView.resolve(pk);
-      if (resolved && typeof resolved === "string" && resolved.trim()) return resolved.trim();
-    }
-    if (typeof (idView == null ? void 0 : idView.lookup) === "function") {
-      const looked = idView.lookup(pk);
-      if (looked == null ? void 0 : looked.name) return String(looked.name);
-    }
-  } catch {
-  }
-  if (fallbackMap == null ? void 0 : fallbackMap.has(pk)) return fallbackMap.get(pk);
-  return /^[0-9a-f]{64}$/i.test(pk) ? `#${pk.slice(0, 8)}` : pk;
-}
-async function readBuzzProjectGit(ctx, opts) {
-  var _a, _b;
-  const session = typeof ((_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) === "function" ? (_b = ctx.relay.snapshot()) == null ? void 0 : _b.session : null;
-  if (!(session == null ? void 0 : session.projectGit) || typeof session.projectGit.read !== "function") return null;
-  const owner = /^[0-9a-f]{64}$/i.test(String(opts.owner || "")) ? String(opts.owner).toLowerCase() : DEFAULT_ORGFY_REPO_OWNER;
-  const dtag = String(opts.dtag || "orgfy").trim() || "orgfy";
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), 9e3);
-  try {
-    const input = { owner, dtag };
-    if (opts.commit && /^[0-9a-f]{7,40}$/i.test(opts.commit)) input.commit = opts.commit.toLowerCase();
-    if (opts.path && opts.path.trim()) input.path = opts.path.trim();
-    const res = await session.projectGit.read(input, ac.signal);
-    if (!res || typeof res !== "object") return null;
-    return {
-      head: typeof res.head === "string" ? res.head : null,
-      commits: Array.isArray(res.commits) ? res.commits : [],
-      files: Array.isArray(res.files) ? res.files : [],
-      readme: typeof res.readme === "string" ? res.readme : null,
-      file: res.file && typeof res.file === "object" ? res.file : null,
-      diff: typeof res.diff === "string" ? res.diff : null
-    };
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-function parseUnifiedDiff(rawDiff) {
-  if (!rawDiff || !rawDiff.trim()) return [];
-  const lines = rawDiff.replace(/\r\n/g, "\n").split("\n");
-  const files = [];
-  let current = null;
-  let currentHunk = null;
-  let oldNum = 0;
-  let newNum = 0;
-  for (const line of lines) {
-    if (line.startsWith("diff --git ")) {
-      if (current) files.push(current);
-      const match = /^diff --git a\/(.+?) b\/(.+)$/.exec(line);
-      const aPath = match ? match[1] : "arquivo";
-      const bPath = match ? match[2] : aPath;
-      current = {
-        path: bPath,
-        previousPath: aPath !== bPath ? aPath : void 0,
-        status: aPath !== bPath ? "renamed" : "modified",
-        additions: 0,
-        deletions: 0,
-        hunks: []
-      };
-      currentHunk = null;
-      continue;
-    }
-    if (!current) {
-      if (line.startsWith("+++ b/")) {
-        current = {
-          path: line.slice(6).trim() || "patch",
-          status: "modified",
-          additions: 0,
-          deletions: 0,
-          hunks: []
-        };
-      }
-      continue;
-    }
-    if (line.startsWith("new file mode")) {
-      current.status = "added";
-      continue;
-    }
-    if (line.startsWith("deleted file mode")) {
-      current.status = "deleted";
-      continue;
-    }
-    if (line.startsWith("rename from ")) {
-      current.previousPath = line.slice(12).trim();
-      current.status = "renamed";
-      continue;
-    }
-    if (line.startsWith("rename to ")) {
-      current.path = line.slice(10).trim();
-      current.status = "renamed";
-      continue;
-    }
-    if (line.startsWith("--- ") || line.startsWith("+++ ") || line.startsWith("index ")) {
-      continue;
-    }
-    if (line.startsWith("@@ ")) {
-      const m = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
-      oldNum = m ? Number(m[1]) : 1;
-      newNum = m ? Number(m[2]) : 1;
-      currentHunk = { header: line, lines: [] };
-      current.hunks.push(currentHunk);
-      continue;
-    }
-    if (currentHunk) {
-      if (line.startsWith("+")) {
-        current.additions += 1;
-        currentHunk.lines.push({ type: "add", oldLine: null, newLine: newNum++, text: line.slice(1) });
-      } else if (line.startsWith("-")) {
-        current.deletions += 1;
-        currentHunk.lines.push({ type: "del", oldLine: oldNum++, newLine: null, text: line.slice(1) });
-      } else if (line.startsWith(" ") || line === "") {
-        currentHunk.lines.push({
-          type: "ctx",
-          oldLine: oldNum++,
-          newLine: newNum++,
-          text: line.startsWith(" ") ? line.slice(1) : ""
-        });
-      }
-    }
-  }
-  if (current) files.push(current);
-  return files;
-}
-const EMPTY_TELEMETRY = {
-  connected: false,
-  activityStatus: "unavailable",
-  activeTurns: [],
-  byPubkey: {},
-  turnsByPubkey: {},
-  presenceByPubkey: {},
-  unreadByChannel: {}
-};
-const ERROR_TURN_TTL_MS = 15 * 60 * 1e3;
-const DISMISSED_ERRORS_STORAGE_KEY = "orgfy_dismissed_error_turns_v1";
-function buildErrorTurnKey(turn) {
-  return `${turn.agentPubkey}:${turn.channelId}:${turn.threadRootId || ""}:${turn.messageId || ""}:${turn.startedAt || 0}`;
-}
-function readDismissedErrorKeys() {
-  try {
-    if (typeof localStorage === "undefined") return /* @__PURE__ */ new Set();
-    const raw = localStorage.getItem(DISMISSED_ERRORS_STORAGE_KEY);
-    if (!raw) return /* @__PURE__ */ new Set();
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? new Set(parsed.map((v2) => String(v2))) : /* @__PURE__ */ new Set();
-  } catch {
-    return /* @__PURE__ */ new Set();
-  }
-}
-function dismissErrorTurn(turn) {
-  try {
-    if (typeof localStorage === "undefined") return;
-    const keys = Array.from(readDismissedErrorKeys());
-    const key = buildErrorTurnKey(turn);
-    if (!keys.includes(key)) {
-      keys.push(key);
-      localStorage.setItem(DISMISSED_ERRORS_STORAGE_KEY, JSON.stringify(keys.slice(-250)));
-    }
-  } catch {
-  }
-}
-function readBuzzLiveTelemetry(ctx, nameByPubkey) {
-  var _a, _b, _c, _d, _e, _f, _g, _h;
-  try {
-    const relaySnap = typeof ((_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) === "function" ? ctx.relay.snapshot() : null;
-    const session = relaySnap == null ? void 0 : relaySnap.session;
-    if (!session) return EMPTY_TELEMETRY;
-    const actSnap = (_c = (_b = session.agentActivity) == null ? void 0 : _b.snapshot) == null ? void 0 : _c.call(_b);
-    const now = Date.now();
-    const dismissedErrorKeys = readDismissedErrorKeys();
-    const byPubkey = {};
-    const turnsByPubkey = {};
-    const seenSessionKey = /* @__PURE__ */ new Set();
-    const turns = [];
-    const pushTurn = (item) => {
-      const sk = `${item.agentPubkey}:${item.channelId}:${item.threadRootId || item.messageId || ""}`;
-      if (seenSessionKey.has(sk)) return;
-      seenSessionKey.add(sk);
-      turns.push(item);
-      if (!turnsByPubkey[item.agentPubkey]) turnsByPubkey[item.agentPubkey] = [];
-      turnsByPubkey[item.agentPubkey].push(item);
-      if (!byPubkey[item.agentPubkey] || item.startedAt >= byPubkey[item.agentPubkey].startedAt) {
-        byPubkey[item.agentPubkey] = item;
-      }
-    };
-    const localList = Array.isArray(actSnap == null ? void 0 : actSnap.local) ? actSnap.local : [];
-    for (const row of localList) {
-      if (!row || row.dismissed) continue;
-      if (row.state !== "working" && row.state !== "waiting" && row.state !== "error") continue;
-      const pk = String(row.agent || "").toLowerCase();
-      if (!pk) continue;
-      const startedAt = Number(row.startedAt || now);
-      const channelId = String(row.channelId || "");
-      const threadRootId = row.threadRootId ? String(row.threadRootId) : void 0;
-      const messageId = row.messageId ? String(row.messageId) : void 0;
-      if (row.state === "error") {
-        if (now - startedAt > ERROR_TURN_TTL_MS) continue;
-        if (dismissedErrorKeys.has(buildErrorTurnKey({ agentPubkey: pk, channelId, threadRootId, messageId, startedAt }))) {
-          continue;
-        }
-      }
-      const stepTool = ((_d = row.step) == null ? void 0 : _d.tool) ? String(row.step.tool) : void 0;
-      const stepTarget = ((_e = row.step) == null ? void 0 : _e.target) ? String(row.step.target) : void 0;
-      const stepLabel = row.state === "error" ? `Erro: ${String(row.error || "falha no turno").slice(0, 72)}` : stepTool ? `${stepTool}${stepTarget ? ` · ${stepTarget.slice(0, 40)}` : ""}` : row.state === "waiting" ? "Iniciando turno..." : "Pensando...";
-      pushTurn({
-        agentPubkey: pk,
-        agentName: nameByPubkey.get(pk) || `Agente #${pk.slice(0, 8)}`,
-        channelId,
-        threadRootId,
-        messageId,
-        state: row.state === "error" ? "error" : row.state === "waiting" ? "waiting" : "working",
-        stepLabel,
-        toolName: stepTool,
-        toolTarget: stepTarget,
-        startedAt,
-        error: row.error ? String(row.error) : void 0,
-        stoppable: Boolean(row.stoppable)
-      });
-    }
-    const typingList = Array.isArray(actSnap == null ? void 0 : actSnap.typing) ? actSnap.typing : [];
-    for (const t of typingList) {
-      if (!t || !t.working) continue;
-      if (typeof t.expiresAt === "number" && t.expiresAt < now) continue;
-      const pk = String(t.agent || "").toLowerCase();
-      if (!pk) continue;
-      pushTurn({
-        agentPubkey: pk,
-        agentName: nameByPubkey.get(pk) || `Agente #${pk.slice(0, 8)}`,
-        channelId: String(t.channelId || ""),
-        threadRootId: t.threadRootId ? String(t.threadRootId) : void 0,
-        state: "typing",
-        stepLabel: "Respondendo no Buzz...",
-        startedAt: Number(t.startedAt || t.timestamp || now),
-        stoppable: false
-      });
-    }
-    const remoteTurns = Array.isArray(actSnap == null ? void 0 : actSnap.turns) ? actSnap.turns : [];
-    for (const rt of remoteTurns) {
-      if (!rt || rt.state !== "working") continue;
-      const pk = String(rt.agent || "").toLowerCase();
-      if (!pk) continue;
-      const firstReq = Array.isArray(rt.requests) ? rt.requests[0] : null;
-      pushTurn({
-        agentPubkey: pk,
-        agentName: nameByPubkey.get(pk) || `Agente #${pk.slice(0, 8)}`,
-        channelId: String(rt.channelId || ""),
-        threadRootId: (firstReq == null ? void 0 : firstReq.threadRootId) ? String(firstReq.threadRootId) : void 0,
-        messageId: (firstReq == null ? void 0 : firstReq.messageId) ? String(firstReq.messageId) : void 0,
-        state: "working",
-        stepLabel: "Executando turno...",
-        startedAt: Number(rt.timestamp || now),
-        stoppable: false
-      });
-    }
-    const presenceByPubkey = {};
-    if (typeof ((_f = session.presence) == null ? void 0 : _f.status) === "function") {
-      for (const pk of nameByPubkey.keys()) {
-        try {
-          const st = session.presence.status(pk);
-          if (st === "online" || st === "away" || st === "offline" || st === "unknown") {
-            presenceByPubkey[pk] = st;
-          }
-        } catch {
-        }
-      }
-    }
-    const unreadByChannel = {};
-    try {
-      const uSnap = (_h = (_g = session.unread) == null ? void 0 : _g.snapshot) == null ? void 0 : _h.call(_g);
-      if (uSnap && typeof uSnap === "object") {
-        const channelsMap = uSnap.channels || uSnap.byChannel;
-        if (channelsMap instanceof Map) {
-          for (const [cid, val] of channelsMap.entries()) {
-            const count = typeof val === "number" ? val : Number((val == null ? void 0 : val.count) ?? (val == null ? void 0 : val.unread) ?? 0);
-            if (count > 0) unreadByChannel[String(cid)] = count;
-          }
-        } else if (channelsMap && typeof channelsMap === "object") {
-          for (const [cid, val] of Object.entries(channelsMap)) {
-            const count = typeof val === "number" ? val : Number((val == null ? void 0 : val.count) ?? (val == null ? void 0 : val.unread) ?? 0);
-            if (count > 0) unreadByChannel[String(cid)] = count;
-          }
-        }
-      }
-    } catch {
-    }
-    return {
-      connected: (relaySnap == null ? void 0 : relaySnap.status) === "ready",
-      activityStatus: String((actSnap == null ? void 0 : actSnap.status) || "unavailable"),
-      activeTurns: turns,
-      byPubkey,
-      turnsByPubkey,
-      presenceByPubkey,
-      unreadByChannel
-    };
-  } catch {
-    return EMPTY_TELEMETRY;
-  }
-}
-async function interruptLiveTurn(ctx, turn) {
-  var _a, _b, _c, _d;
-  try {
-    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
-    if (((_d = session == null ? void 0 : session.agentActivity) == null ? void 0 : _d.interrupt) && turn.agentPubkey && turn.channelId && turn.messageId) {
-      await session.agentActivity.interrupt(turn.agentPubkey, turn.channelId, turn.messageId);
-      return true;
-    }
-  } catch {
-  }
-  return false;
-}
-async function readBuzzMainAgentPubkey(ctx) {
-  var _a, _b, _c, _d;
-  try {
-    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
-    if (typeof ((_d = session == null ? void 0 : session.mainAgent) == null ? void 0 : _d.read) === "function") {
-      const pk = await session.mainAgent.read();
-      return typeof pk === "string" && pk.trim() ? pk.trim().toLowerCase() : null;
-    }
-  } catch {
-  }
-  return null;
-}
-async function readBuzzChannelCanvasDetailed(ctx, channelId, opts) {
-  var _a, _b, _c, _d, _e;
-  if (!channelId) return { content: null, writable: false };
-  try {
-    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
-    const writable = Boolean(((_d = session == null ? void 0 : session.canvas) == null ? void 0 : _d.available) && typeof session.canvas.save === "function");
-    if (((_e = session == null ? void 0 : session.canvas) == null ? void 0 : _e.available) && typeof session.canvas.read === "function") {
-      const ev = await session.canvas.read(channelId, (opts == null ? void 0 : opts.strong) ? { strong: true } : void 0);
-      if (ev && typeof ev.content === "string") {
-        return {
-          content: ev.content.trim() ? ev.content : null,
-          eventId: typeof ev.id === "string" ? ev.id : void 0,
-          writable
-        };
-      }
-    }
-    return { content: null, writable };
-  } catch {
-    return { content: null, writable: false };
-  }
-}
-async function saveBuzzChannelCanvas(ctx, channelId, content, expectedEventId) {
-  var _a, _b, _c, _d;
-  if (!channelId) return { ok: false, error: "Canal da empresa não configurado." };
-  try {
-    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
-    if (!((_d = session == null ? void 0 : session.canvas) == null ? void 0 : _d.available) || typeof session.canvas.save !== "function") {
-      return { ok: false, error: "API session.canvas.save indisponível no Buzz." };
-    }
-    const saved = await session.canvas.save(channelId, content, expectedEventId);
-    return { ok: true, eventId: typeof (saved == null ? void 0 : saved.id) === "string" ? saved.id : void 0 };
-  } catch (err) {
-    return { ok: false, error: (err == null ? void 0 : err.message) || String(err) };
-  }
-}
-async function readBuzzChannelCanvasHistory(ctx, channelId) {
-  var _a, _b, _c, _d;
-  if (!channelId) return [];
-  try {
-    const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
-    if (!((_d = session == null ? void 0 : session.canvas) == null ? void 0 : _d.available) || typeof session.canvas.history !== "function") return [];
-    const page = await session.canvas.history(channelId);
-    const entries = Array.isArray(page == null ? void 0 : page.revisions) ? page.revisions : Array.isArray(page == null ? void 0 : page.entries) ? page.entries : Array.isArray(page == null ? void 0 : page.events) ? page.events : Array.isArray(page) ? page : [];
-    return entries.slice(0, 15).map((ev) => {
-      var _a2, _b2, _c2, _d2;
-      const fullContent = String((ev == null ? void 0 : ev.content) ?? ((_a2 = ev == null ? void 0 : ev.event) == null ? void 0 : _a2.content) ?? "");
-      return {
-        id: String((ev == null ? void 0 : ev.id) || ((_b2 = ev == null ? void 0 : ev.event) == null ? void 0 : _b2.id) || ""),
-        createdAt: Number((ev == null ? void 0 : ev.created_at) || ((_c2 = ev == null ? void 0 : ev.event) == null ? void 0 : _c2.created_at) || 0) * 1e3,
-        authorPubkey: String((ev == null ? void 0 : ev.pubkey) || ((_d2 = ev == null ? void 0 : ev.event) == null ? void 0 : _d2.pubkey) || "").toLowerCase(),
-        preview: fullContent.replace(/\s+/g, " ").slice(0, 140),
-        fullContent
-      };
-    });
-  } catch {
-    return [];
-  }
-}
-const EVAL_R51_WINNERS = /* @__PURE__ */ new Set(["claude-sonnet-5-5", "claude-sonnet-4-6", "gemini-2.5-flash"]);
-const AGENT_MODEL_PRESETS = [
-  {
-    provider: "nexusmind_anthropic",
-    model: "claude-sonnet-4-6",
-    label: "claude-sonnet-4-6 · Eval R5.1 (Qualidade)",
-    group: "curated"
-  },
-  {
-    provider: "nexusmind_anthropic",
-    model: "claude-sonnet-5-5",
-    label: "claude-sonnet-5-5 · Eval R5.1 (Liderança)",
-    group: "curated"
-  },
-  {
-    provider: "nexusmind_antigravity",
-    model: "gemini-2.5-flash",
-    label: "gemini-2.5-flash · Eval R5.1 (Rápido)",
-    group: "curated"
-  },
-  {
-    provider: "nexusmind_antigravity",
-    model: "claude-opus-4-6-thinking",
-    label: "claude-opus-4-6-thinking · Thinking (Complexo)",
-    group: "curated"
-  },
-  {
-    provider: "nexusmind_grok",
-    model: "grok-4.1-fast",
-    label: "grok-4.1-fast · Alternativo (Rápido)",
-    group: "curated"
-  }
-];
-function modelOptionKey(provider, model) {
-  return `${provider}::${model}`;
-}
-function inferProviderForModel(modelId) {
-  const m = String(modelId || "").toLowerCase();
-  if (m.includes("grok")) return "nexusmind_grok";
-  if (m.includes("gemini") || m.includes("antigravity") || m.includes("thinking")) return "nexusmind_antigravity";
-  if (m.includes("claude")) return "nexusmind_anthropic";
-  return "nexusmind_openai";
-}
-function decodeTextBytes(raw) {
-  if (typeof raw === "string") return raw;
-  if (raw instanceof Uint8Array) return new TextDecoder("utf-8").decode(raw);
-  if (raw instanceof ArrayBuffer) return new TextDecoder("utf-8").decode(new Uint8Array(raw));
-  if (ArrayBuffer.isView(raw)) {
-    return new TextDecoder("utf-8").decode(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength));
-  }
-  return String(raw ?? "");
-}
-async function loadGatewayEvalAndRanking(ctx) {
-  var _a, _b, _c, _d;
-  const host = ctx == null ? void 0 : ctx.host;
-  const approvedModels = /* @__PURE__ */ new Set();
-  const benchByModel = /* @__PURE__ */ new Map();
-  let benchParsed = null;
-  if (typeof (host == null ? void 0 : host.readFile) === "function") {
-    for (const p of ["~/.buzz/.scratch/nexusmind-quality-bench.json", "/Users/heltonfraga/.buzz/.scratch/nexusmind-quality-bench.json"]) {
-      try {
-        const raw = await host.readFile(p);
-        if (!raw) continue;
-        const obj = JSON.parse(decodeTextBytes(raw));
-        if (obj && typeof obj === "object") {
-          benchParsed = obj.results && typeof obj.results === "object" ? obj.results : obj;
-          break;
-        }
-      } catch {
-      }
-    }
-  }
-  if (!benchParsed) {
-    try {
-      const raw = (_b = (_a = globalThis == null ? void 0 : globalThis.localStorage) == null ? void 0 : _a.getItem) == null ? void 0 : _b.call(_a, "nexusmind_quality_bench_v1");
-      if (raw) benchParsed = JSON.parse(raw);
-    } catch {
-    }
-  }
-  if (benchParsed && typeof benchParsed === "object") {
-    for (const [mid, rec] of Object.entries(benchParsed)) {
-      if (!rec || typeof rec !== "object") continue;
-      benchByModel.set(mid.toLowerCase(), {
-        toolCallOk: Boolean(rec.toolCallOk),
-        online: Boolean(rec.online),
-        qualityScore: typeof rec.qualityScore === "number" ? rec.qualityScore : void 0,
-        group: typeof rec.group === "string" ? rec.group : void 0
-      });
-      if (rec.online && rec.toolCallOk) {
-        approvedModels.add(mid.toLowerCase());
-        const shortId = String(mid.split("/").pop() || mid).trim().toLowerCase();
-        if (shortId) approvedModels.add(shortId);
-      }
-    }
-  }
-  let parsed = null;
-  if (typeof (host == null ? void 0 : host.readFile) === "function") {
-    for (const p of ["~/.buzz/.scratch/nexusmind-model-ranking.json", "/Users/heltonfraga/.buzz/.scratch/nexusmind-model-ranking.json"]) {
-      try {
-        const raw = await host.readFile(p);
-        if (!raw) continue;
-        const obj = JSON.parse(decodeTextBytes(raw));
-        if (obj && Array.isArray(obj.models) && obj.models.length > 0) {
-          parsed = obj;
-          break;
-        }
-      } catch {
-      }
-    }
-  }
-  if (!parsed) {
-    try {
-      const raw = (_d = (_c = globalThis == null ? void 0 : globalThis.localStorage) == null ? void 0 : _c.getItem) == null ? void 0 : _d.call(_c, "nexusmind_model_ranking");
-      if (raw) parsed = JSON.parse(raw);
-    } catch {
-    }
-  }
-  const seen = new Set(AGENT_MODEL_PRESETS.map((o) => o.model.toLowerCase()));
-  const extras = [];
-  if (parsed && Array.isArray(parsed.models)) {
-    const sorted = [...parsed.models].sort((a, b) => {
-      var _a2, _b2;
-      const aTc = (a == null ? void 0 : a.toolCallOk) === true || ((_a2 = benchByModel.get(String((a == null ? void 0 : a.model) || "").toLowerCase())) == null ? void 0 : _a2.toolCallOk) === true;
-      const bTc = (b == null ? void 0 : b.toolCallOk) === true || ((_b2 = benchByModel.get(String((b == null ? void 0 : b.model) || "").toLowerCase())) == null ? void 0 : _b2.toolCallOk) === true;
-      if (aTc !== bTc) return aTc ? -1 : 1;
-      return Number((b == null ? void 0 : b.score) || 0) - Number((a == null ? void 0 : a.score) || 0);
-    });
-    for (const m of sorted) {
-      const mid = String((m == null ? void 0 : m.model) || "").trim();
-      if (!mid || seen.has(mid.toLowerCase()) || (m == null ? void 0 : m.isDisabled) || (m == null ? void 0 : m.online) === false) continue;
-      const bench = benchByModel.get(mid.toLowerCase());
-      const tcOk = (m == null ? void 0 : m.toolCallOk) === true || (bench == null ? void 0 : bench.toolCallOk) === true;
-      if (tcOk && (m == null ? void 0 : m.online) !== false) {
-        approvedModels.add(mid.toLowerCase());
-        const shortId = String(mid.split("/").pop() || mid).trim().toLowerCase();
-        if (shortId) approvedModels.add(shortId);
-      }
-      const provider = String((m == null ? void 0 : m.group) || (bench == null ? void 0 : bench.group) || inferProviderForModel(mid)).trim() || inferProviderForModel(mid);
-      seen.add(mid.toLowerCase());
-      const tcTag = tcOk ? " · TC ✓" : "";
-      const scoreTxt = typeof (m == null ? void 0 : m.score) === "number" ? ` · score ${m.score.toFixed(1)}` : "";
-      extras.push({
-        provider,
-        model: mid,
-        label: `${mid}${tcTag}${scoreTxt}`,
-        group: "nexusmind"
-      });
-      if (extras.length >= 8) break;
-    }
-  }
-  return { extras, approvedModels };
-}
-const SURFACE_BG = "var(--affordance-subtle, rgba(255, 255, 255, 0.035))";
-const CARD_BG$1 = "var(--bg-panel, rgba(255, 255, 255, 0.03))";
-const BORDER$1 = "1px solid var(--border-primary, rgba(255, 255, 255, 0.09))";
-const TEXT_PRIMARY = "var(--text-primary, #f3f4f6)";
-const TEXT_MUTED = "var(--text-tertiary, #9ca3af)";
-const ACCENT = "var(--accent-primary, var(--green-11, #3dd68c))";
-const BLUE = "var(--blue-11, #60a5fa)";
-const AMBER = "var(--amber-11, #fbbf24)";
-const RED = "var(--red-11, #f87171)";
-function normName(s) {
-  return String(s || "").trim().toLowerCase();
-}
-function recommendedModelForAgent(name) {
-  const lower = normName(name);
-  const isTier1 = /(iris|bento|arquit|teo|vera|hugo|lara|ceo|coo|revis|qa|segur|oraculo)/.test(lower);
-  if (isTier1) {
-    return { provider: "nexusmind_anthropic", model: "claude-sonnet-5-5", tierLabel: "Tier 1 (Liderança/Revisão)" };
-  }
-  return { provider: "nexusmind_anthropic", model: "claude-sonnet-4-6", tierLabel: "Tier 2 (Qualidade/Execução)" };
-}
-function createAgentOrgfyTabComponent(ctx) {
-  const React = ctx == null ? void 0 : ctx.react;
-  if (!(React == null ? void 0 : React.createElement)) {
-    return function FallbackAgentOrgfyTab() {
-      return null;
-    };
-  }
-  const h = React.createElement;
-  return function AgentOrgfyTab({ agent }) {
-    const [cards, setCards] = React.useState([]);
-    const [repoItems, setRepoItems] = React.useState([]);
-    const [repoOwner, setRepoOwner] = React.useState(DEFAULT_ORGFY_REPO_OWNER);
-    const [sessions, setSessions] = React.useState([]);
-    const [telemetry, setTelemetry] = React.useState(() => getTelemetrySnapshot());
-    const [activityTick, setActivityTick] = React.useState(0);
-    const [loading, setLoading] = React.useState(true);
-    const [busyAction, setBusyAction] = React.useState(null);
-    const [statusBanner, setStatusBanner] = React.useState(null);
-    const [extraModels, setExtraModels] = React.useState([]);
-    const [gatewayApprovedModels, setGatewayApprovedModels] = React.useState(() => /* @__PURE__ */ new Set());
-    const agentName = String((agent == null ? void 0 : agent.name) || (agent == null ? void 0 : agent.key) || "Agente");
-    const agentKey = String((agent == null ? void 0 : agent.key) || "");
-    const agentPubkey = String((agent == null ? void 0 : agent.pubkey) || "").toLowerCase();
-    const agentCfg = (agent == null ? void 0 : agent.config) && typeof agent.config === "object" ? agent.config : {};
-    const currentModel = String(agentCfg.model || (agent == null ? void 0 : agent.model) || "padrão");
-    const currentProvider = String(agentCfg.provider || (agent == null ? void 0 : agent.provider) || "padrão");
-    const currentHarness = String(agentCfg.harness || (agent == null ? void 0 : agent.harness) || (agent == null ? void 0 : agent.type) || "goose");
-    const shortModel = String(currentModel.split("/").pop() || currentModel).trim();
-    const isCompliantR51 = EVAL_R51_WINNERS.has(shortModel) || gatewayApprovedModels.has(currentModel.toLowerCase()) || gatewayApprovedModels.has(shortModel.toLowerCase());
-    const recommended = recommendedModelForAgent(agentName);
-    const modelOptions = React.useMemo(() => {
-      return [...AGENT_MODEL_PRESETS, ...extraModels];
-    }, [extraModels]);
-    const resolveDefaultModelKey = React.useCallback(() => {
-      const exactMatch = modelOptions.find(
-        (o) => o.model.toLowerCase() === currentModel.toLowerCase() || o.model.toLowerCase() === shortModel.toLowerCase()
-      );
-      if (exactMatch) return modelOptionKey(exactMatch.provider, exactMatch.model);
-      return modelOptionKey(recommended.provider, recommended.model);
-    }, [modelOptions, currentModel, shortModel, recommended.provider, recommended.model]);
-    const [selectedModelKey, setSelectedModelKey] = React.useState(() => resolveDefaultModelKey());
-    React.useEffect(() => {
-      setSelectedModelKey(resolveDefaultModelKey());
-    }, [agentKey, currentModel, currentProvider, resolveDefaultModelKey]);
-    React.useEffect(() => {
-      let cancelled = false;
-      loadGatewayEvalAndRanking(ctx).then(({ extras, approvedModels }) => {
-        if (cancelled) return;
-        if (extras.length > 0) setExtraModels(extras);
-        if (approvedModels.size > 0) setGatewayApprovedModels(approvedModels);
-      }).catch(() => {
-      });
-      return () => {
-        cancelled = true;
-      };
-    }, []);
-    React.useEffect(() => {
-      var _a, _b, _c;
-      const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
-      if (!(session == null ? void 0 : session.agentActivity)) return;
-      const disposers = [];
-      const bump = () => setActivityTick((n) => n + 1);
-      try {
-        if (typeof session.agentActivity.activate === "function") disposers.push(session.agentActivity.activate());
-        if (typeof session.agentActivity.subscribe === "function") disposers.push(session.agentActivity.subscribe(bump));
-        if (typeof session.agentActivity.subscribeWorking === "function") disposers.push(session.agentActivity.subscribeWorking(bump));
-      } catch {
-      }
-      return () => {
-        for (const d of disposers) {
-          try {
-            d();
-          } catch {
-          }
-        }
-      };
-    }, []);
-    const liveTelemetry = React.useMemo(() => {
-      const map = /* @__PURE__ */ new Map();
-      if (agentPubkey) map.set(agentPubkey, agentName);
-      return readBuzzLiveTelemetry(ctx, map);
-    }, [agentPubkey, agentName, activityTick]);
-    const liveTurn = agentPubkey ? liveTelemetry.byPubkey[agentPubkey] || null : null;
-    const presence = agentPubkey ? liveTelemetry.presenceByPubkey[agentPubkey] : void 0;
-    const loadAgentContext = React.useCallback(async () => {
-      setLoading(true);
-      try {
-        const [allCards, radar, repoSnap] = await Promise.all([
-          fetchLiveKanbanCards(ctx, { empresa: "all" }).catch(() => []),
-          fetchGooseLoopRadar(ctx).catch(() => null),
-          loadLiveRepoSnapshot(ctx, { dtag: "orgfy" }).catch(() => null)
-        ]);
-        const targetName = normName(agentName);
-        const targetKey = normName(agentKey);
-        const targetPk = normName(agentPubkey);
-        const matchedCards = (allCards || []).filter((c) => {
-          const ex = normName(c.executor);
-          const rv = normName(c.revisor);
-          const dc = normName(c.decisor);
-          return targetName && (ex === targetName || rv === targetName || dc === targetName || ex.includes(targetName) || rv.includes(targetName)) || targetKey && (ex === targetKey || rv === targetKey);
-        });
-        setCards(matchedCards);
-        if (repoSnap == null ? void 0 : repoSnap.available) {
-          setRepoOwner(repoSnap.owner);
-          const allNip34 = [...repoSnap.prs, ...repoSnap.issues].filter((it) => {
-            if (targetPk && it.authorPubkey === targetPk) return true;
-            if (targetName && it.content.toLowerCase().includes(targetName)) return true;
-            return false;
-          });
-          setRepoItems(allNip34.slice(0, 10));
-        }
-        const matchedSessions = ((radar == null ? void 0 : radar.sessoes) || []).filter((s) => {
-          const sn = normName(s.agente);
-          const spk = normName(s.agent_pubkey);
-          return targetPk && spk && spk === targetPk || targetName && sn && (sn === targetName || sn.includes(targetName) || targetName.includes(sn));
-        });
-        setSessions(matchedSessions.slice(0, 6));
-      } finally {
-        setLoading(false);
-      }
-    }, [agentName, agentKey, agentPubkey]);
-    React.useEffect(() => {
-      loadAgentContext();
-      const unsub = subscribeTelemetry(() => setTelemetry(getTelemetrySnapshot()));
-      return () => unsub();
-    }, [loadAgentContext]);
-    const selectedModelOption = React.useMemo(() => {
-      return modelOptions.find((o) => modelOptionKey(o.provider, o.model) === selectedModelKey) || {
-        provider: recommended.provider,
-        model: recommended.model,
-        label: `${recommended.model} (${recommended.tierLabel})`,
-        group: "curated"
-      };
-    }, [modelOptions, selectedModelKey, recommended.provider, recommended.model, recommended.tierLabel]);
-    const isSelectedAlreadyActive = selectedModelOption.model.toLowerCase() === currentModel.toLowerCase() && selectedModelOption.provider.toLowerCase() === currentProvider.toLowerCase();
-    const handleApplySelectedModel = async () => {
-      var _a, _b;
-      const agentsApi = ctx == null ? void 0 : ctx.agents;
-      if (!agentKey || typeof (agentsApi == null ? void 0 : agentsApi.save) !== "function") {
-        setStatusBanner({ ok: false, text: "API ctx.agents.save indisponível nesta versão do Buzz." });
-        return;
-      }
-      setBusyAction("eval");
-      setStatusBanner(null);
-      try {
-        const freshList = ((_b = (_a = agentsApi.snapshot) == null ? void 0 : _a.call(agentsApi)) == null ? void 0 : _b.agents) || [];
-        const freshAgent = freshList.find((x) => (x == null ? void 0 : x.key) === agentKey) || agent;
-        const baseCfg = (freshAgent == null ? void 0 : freshAgent.config) && typeof freshAgent.config === "object" ? freshAgent.config : agentCfg;
-        await agentsApi.save(agentKey, {
-          config: { ...baseCfg, provider: selectedModelOption.provider, model: selectedModelOption.model }
-        });
-        setStatusBanner({
-          ok: true,
-          text: `Modelo atualizado via ctx.agents.save(): ${selectedModelOption.provider}/${selectedModelOption.model}.`
-        });
-        await loadAgentContext();
-      } catch (err) {
-        setStatusBanner({ ok: false, text: `Falha ao atualizar modelo: ${(err == null ? void 0 : err.message) || err}` });
-      } finally {
-        setBusyAction(null);
-      }
-    };
-    const handleSessionAction = async (action) => {
-      setBusyAction(action);
-      setStatusBanner(null);
-      try {
-        if (action === "interrupt" && (liveTurn == null ? void 0 : liveTurn.stoppable)) {
-          const interrupted = await interruptLiveTurn(ctx, liveTurn);
-          if (interrupted) {
-            setStatusBanner({ ok: true, text: `Turno ao vivo de ${agentName} interrompido via session.agentActivity.` });
-            return;
-          }
-        }
-        const agentsApi = ctx == null ? void 0 : ctx.agents;
-        if (!agentKey || typeof (agentsApi == null ? void 0 : agentsApi.session) !== "function") {
-          setStatusBanner({ ok: false, text: "API ctx.agents.session indisponível nesta versão do Buzz." });
-          return;
-        }
-        const place = (liveTurn == null ? void 0 : liveTurn.channelId) ? { channelId: liveTurn.channelId } : {};
-        await agentsApi.session(agentKey, place, action);
-        const label = action === "interrupt" ? "interrompida" : action === "compact" ? "compactada" : "reiniciada";
-        setStatusBanner({ ok: true, text: `Sessão de ${agentName} ${label} via ctx.agents.session().` });
-      } catch (err) {
-        setStatusBanner({ ok: false, text: `Erro ao executar ${action}: ${(err == null ? void 0 : err.message) || err}` });
-      } finally {
-        setBusyAction(null);
-      }
-    };
-    const handleOpenFactory = () => {
-      try {
-        const nav = ctx == null ? void 0 : ctx.navigation;
-        if (nav == null ? void 0 : nav.open) {
-          nav.open({ version: 1, kind: "page", pluginId: "digital.cortexx.orgfy", pageId: "orgfy" });
-        } else if (nav == null ? void 0 : nav.navigate) {
-          nav.navigate("orgfy");
-        }
-      } catch {
-      }
-    };
-    const handleOpenDirectIssue = async (item) => {
-      const ok2 = await openBuzzRepoEntity(ctx, {
-        type: item.kind === "pr" ? "pr" : "issue",
-        owner: item.owner || repoOwner,
-        dtag: item.dtag || "orgfy",
-        id: item.id
-      }).catch(() => false);
-      if (!ok2) {
-        await openIssueInBuzz(ctx, { id: item.id, owner: item.owner || repoOwner, dtag: item.dtag || "orgfy" }).catch(() => false);
-      }
-    };
-    const targetLower = normName(agentName);
-    const agentSpans = telemetry.recentSpans.filter((sp) => {
-      const spName = normName(sp.agentName);
-      return spName === targetLower || spName.includes(targetLower) || targetLower.includes(spName);
-    }).slice(0, 6);
-    const agentMetric = telemetry.agentMetrics.find((m) => {
-      const mn = normName(m.agentName);
-      return mn === targetLower || mn.includes(targetLower);
-    });
-    const activeCards = cards.filter((c) => c.stage !== "feito");
-    const doneCards = cards.filter((c) => c.stage === "feito");
-    const btnBase = {
-      padding: "5px 9px",
-      borderRadius: "7px",
-      border: BORDER$1,
-      backgroundColor: SURFACE_BG,
-      color: TEXT_PRIMARY,
-      fontSize: "11px",
-      fontWeight: "600",
-      cursor: "pointer"
-    };
-    return h(
-      "div",
-      {
-        "data-agent-orgfy-tab": "v17.3",
-        style: {
-          display: "flex",
-          flexDirection: "column",
-          gap: "12px",
-          padding: "10px 0",
-          width: "100%",
-          maxWidth: "100%",
-          minWidth: 0,
-          boxSizing: "border-box",
-          overflowX: "hidden",
-          color: TEXT_PRIMARY,
-          fontFamily: "inherit",
-          fontSize: "12px"
-        }
-      },
-      // 1. Cabeçalho OrgFy Factory + Status ao vivo + Ações nativas Buzz API
-      h(
-        "div",
-        {
-          style: {
-            padding: "12px",
-            borderRadius: "11px",
-            backgroundColor: CARD_BG$1,
-            border: liveTurn ? `1px solid ${BLUE}` : BORDER$1,
-            display: "flex",
-            flexDirection: "column",
-            gap: "10px",
-            width: "100%",
-            boxSizing: "border-box"
-          }
-        },
-        h(
-          "div",
-          { style: { display: "flex", flexDirection: "column", gap: "5px", minWidth: 0 } },
-          h(
-            "div",
-            { style: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: "6px" } },
-            h("span", { style: { fontSize: "13px", fontWeight: "700", color: ACCENT } }, `OrgFy Factory · ${agentName}`),
-            h(
-              "span",
-              {
-                style: {
-                  fontSize: "10px",
-                  fontWeight: "700",
-                  padding: "2px 7px",
-                  borderRadius: "9999px",
-                  backgroundColor: liveTurn ? "rgba(96, 165, 250, 0.16)" : "rgba(61, 214, 140, 0.14)",
-                  color: liveTurn ? BLUE : ACCENT
-                }
-              },
-              liveTurn ? "⚡ Respondendo agora" : presence === "online" ? "Online" : "Disponível"
-            ),
-            !isCompliantR51 && h(
-              "span",
-              {
-                "data-eval-r51-alert": "true",
-                style: {
-                  fontSize: "10px",
-                  fontWeight: "700",
-                  padding: "2px 7px",
-                  borderRadius: "9999px",
-                  backgroundColor: "rgba(248, 113, 113, 0.16)",
-                  color: RED
-                }
-              },
-              "Fora do Eval R5.1"
-            ),
-            (agentMetric == null ? void 0 : agentMetric.retryCascadeRisk) && h(
-              "span",
-              {
-                style: {
-                  fontSize: "10px",
-                  fontWeight: "700",
-                  padding: "2px 7px",
-                  borderRadius: "9999px",
-                  backgroundColor: "rgba(248, 113, 113, 0.2)",
-                  color: RED
-                }
-              },
-              "Retry Cascade"
-            )
-          ),
-          h(
-            "div",
-            {
-              style: {
-                fontSize: "11px",
-                color: TEXT_MUTED,
-                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                lineHeight: "1.45",
-                overflowWrap: "anywhere"
-              }
-            },
-            `Harness: ${currentHarness} · Provider: ${currentProvider} · Modelo: ${currentModel}${agentPubkey ? ` · pk: ${agentPubkey.slice(0, 10)}…` : ""}`
-          )
-        ),
-        // Turno em execução ao vivo (session.agentActivity)
-        liveTurn && h(
-          "div",
-          {
-            style: {
-              padding: "8px 10px",
-              borderRadius: "8px",
-              backgroundColor: SURFACE_BG,
-              border: `1px solid ${liveTurn.state === "error" ? RED : BLUE}`,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: "8px"
-            }
-          },
-          h(
-            "div",
-            { style: { minWidth: 0, flex: 1 } },
-            h("div", { style: { fontSize: "11.5px", fontWeight: "600", color: liveTurn.state === "error" ? RED : BLUE } }, liveTurn.stepLabel),
-            liveTurn.toolName && h("div", { style: { fontSize: "10px", color: TEXT_MUTED, fontFamily: "monospace" } }, `tool: ${liveTurn.toolName}`)
-          ),
-          h(
-            "button",
-            {
-              type: "button",
-              disabled: busyAction === "interrupt",
-              onClick: () => handleSessionAction("interrupt"),
-              style: { ...btnBase, borderColor: "rgba(248, 113, 113, 0.45)", color: RED }
-            },
-            "Parar"
-          )
-        ),
-        // Seletor rápido de modelo (Eval R5.1 + NexusMind Ranking)
-        h(
-          "div",
-          {
-            style: {
-              display: "flex",
-              alignItems: "center",
-              gap: "6px",
-              flexWrap: "wrap"
-            }
-          },
-          h(
-            "select",
-            {
-              "data-agent-model-select": "true",
-              "aria-label": "Escolher modelo do agente",
-              value: selectedModelKey,
-              disabled: busyAction === "eval",
-              onChange: (e) => {
-                var _a;
-                return setSelectedModelKey(String(((_a = e == null ? void 0 : e.target) == null ? void 0 : _a.value) || ""));
-              },
-              style: {
-                padding: "5px 8px",
-                borderRadius: "7px",
-                border: BORDER$1,
-                backgroundColor: SURFACE_BG,
-                color: TEXT_PRIMARY,
-                fontSize: "11px",
-                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                flex: "1 1 220px",
-                minWidth: "180px",
-                maxWidth: "100%",
-                cursor: "pointer"
-              }
-            },
-            h(
-              "optgroup",
-              { label: "Modelos Validados (OrgFy)" },
-              AGENT_MODEL_PRESETS.map(
-                (opt) => h(
-                  "option",
-                  { key: modelOptionKey(opt.provider, opt.model), value: modelOptionKey(opt.provider, opt.model) },
-                  opt.label
-                )
-              )
-            ),
-            extraModels.length > 0 && h(
-              "optgroup",
-              { label: "NexusMind Ranking" },
-              extraModels.map(
-                (opt) => h(
-                  "option",
-                  { key: modelOptionKey(opt.provider, opt.model), value: modelOptionKey(opt.provider, opt.model) },
-                  opt.label
-                )
-              )
-            )
-          ),
-          h(
-            "button",
-            {
-              type: "button",
-              disabled: busyAction === "eval" || isSelectedAlreadyActive,
-              onClick: handleApplySelectedModel,
-              "data-apply-eval-r51": "true",
-              style: {
-                ...btnBase,
-                borderColor: isSelectedAlreadyActive ? BORDER$1 : "rgba(96, 165, 250, 0.45)",
-                backgroundColor: isSelectedAlreadyActive ? SURFACE_BG : "rgba(96, 165, 250, 0.14)",
-                color: isSelectedAlreadyActive ? TEXT_MUTED : BLUE,
-                opacity: isSelectedAlreadyActive ? 0.65 : 1,
-                cursor: isSelectedAlreadyActive ? "default" : "pointer"
-              }
-            },
-            busyAction === "eval" ? "Salvando..." : isSelectedAlreadyActive ? "Modelo ativo" : "Aplicar modelo"
-          )
-        ),
-        // Barra de ações nativas (Sessão, Factory, Repos)
-        h(
-          "div",
-          { style: { display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" } },
-          h(
-            "button",
-            { type: "button", disabled: busyAction === "compact", onClick: () => handleSessionAction("compact"), style: btnBase },
-            "Compactar"
-          ),
-          h(
-            "button",
-            { type: "button", disabled: busyAction === "new", onClick: () => handleSessionAction("new"), style: btnBase },
-            "Nova sessão"
-          ),
-          h(
-            "button",
-            { type: "button", disabled: loading, onClick: loadAgentContext, style: btnBase },
-            loading ? "..." : "Atualizar"
-          ),
-          h(
-            "button",
-            {
-              type: "button",
-              onClick: () => openRepoTabInBuzz(ctx, { owner: repoOwner, dtag: "orgfy", tab: "issues" }),
-              style: btnBase
-            },
-            "Buzz Repos ↗"
-          ),
-          h(
-            "button",
-            {
-              type: "button",
-              onClick: handleOpenFactory,
-              style: {
-                ...btnBase,
-                border: "none",
-                backgroundColor: ACCENT,
-                color: "var(--text-on-prominent, #08120c)"
-              }
-            },
-            "Abrir OrgFy Factory"
-          )
-        )
-      ),
-      statusBanner && h(
-        "div",
-        {
-          style: {
-            padding: "9px 11px",
-            borderRadius: "8px",
-            backgroundColor: statusBanner.ok ? "rgba(61, 214, 140, 0.12)" : "rgba(251, 191, 36, 0.12)",
-            border: `1px solid ${statusBanner.ok ? ACCENT : AMBER}`,
-            color: statusBanner.ok ? ACCENT : AMBER,
-            fontSize: "11px",
-            fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-            overflowWrap: "anywhere"
-          }
-        },
-        statusBanner.text
-      ),
-      // 2. 4 KPIs compactos
-      h(
-        "div",
-        {
-          style: {
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))",
-            gap: "8px",
-            width: "100%"
-          }
-        },
-        [
-          { label: "Cards Ativos", value: String(activeCards.length), color: BLUE },
-          { label: "Concluídos", value: String(doneCards.length), color: ACCENT },
-          { label: "NIP-34 (Repos)", value: String(repoItems.length), color: TEXT_PRIMARY },
-          { label: "OTel Spans", value: agentMetric ? `${agentMetric.totalTurns} (${agentMetric.errorTurns} err)` : String(agentSpans.length), color: "#c084fc" }
-        ].map(
-          (k) => h(
-            "div",
-            {
-              key: k.label,
-              style: {
-                padding: "9px 10px",
-                borderRadius: "9px",
-                backgroundColor: CARD_BG$1,
-                border: BORDER$1,
-                minWidth: 0
-              }
-            },
-            h("div", { style: { fontSize: "9.5px", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.05em" } }, k.label),
-            h("div", { style: { fontSize: "15px", fontWeight: "700", color: k.color, fontFamily: "ui-monospace, monospace", marginTop: "3px" } }, k.value)
-          )
-        )
-      ),
-      // 3. Issues & PRs ao vivo do Buzz Repos (NIP-34) — abertura direta em 1 salto
-      repoItems.length > 0 && h(
-        "div",
-        {
-          "data-agent-nip34-list": "true",
-          style: {
-            padding: "12px",
-            borderRadius: "10px",
-            backgroundColor: CARD_BG$1,
-            border: BORDER$1,
-            display: "flex",
-            flexDirection: "column",
-            gap: "7px"
-          }
-        },
-        h(
-          "div",
-          { style: { display: "flex", justifyContent: "space-between", alignItems: "center" } },
-          h("span", { style: { fontSize: "12px", fontWeight: "700" } }, `Buzz Repos NIP-34 (${repoItems.length})`),
-          h("span", { style: { fontSize: "10px", color: TEXT_MUTED, fontFamily: "monospace" } }, "session.repositories")
-        ),
-        repoItems.slice(0, 6).map(
-          (it) => h(
-            "div",
-            {
-              key: it.id,
-              style: {
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: "8px",
-                padding: "7px 9px",
-                borderRadius: "7px",
-                backgroundColor: SURFACE_BG,
-                border: BORDER$1
-              }
-            },
-            h(
-              "div",
-              { style: { minWidth: 0, flex: 1 } },
-              h(
-                "div",
-                { style: { display: "flex", alignItems: "center", gap: "5px", marginBottom: "2px" } },
-                h("span", { style: { fontFamily: "monospace", fontSize: "10px", color: BLUE, fontWeight: "700" } }, `#${String(it.id || "").slice(0, 8)}`),
-                h("span", { style: { fontSize: "9px", fontWeight: "700", padding: "1px 5px", borderRadius: "4px", backgroundColor: it.kind === "pr" ? "rgba(61, 214, 140, 0.16)" : "rgba(96, 165, 250, 0.16)", color: it.kind === "pr" ? ACCENT : BLUE, textTransform: "uppercase" } }, it.kind)
-              ),
-              h("div", { title: it.title, style: { fontSize: "11.5px", fontWeight: "600", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, it.title)
-            ),
-            h(
-              "button",
-              {
-                type: "button",
-                onClick: () => handleOpenDirectIssue({ id: it.id, kind: it.kind, owner: it.owner, dtag: it.dtag }),
-                style: { ...btnBase, color: BLUE, padding: "4px 8px", fontSize: "10px", flexShrink: 0 }
-              },
-              "Abrir ↗"
-            )
-          )
-        )
-      ),
-      // 4. Cards OrgFy atribuídos na esteira
-      h(
-        "div",
-        {
-          style: {
-            padding: "12px",
-            borderRadius: "10px",
-            backgroundColor: CARD_BG$1,
-            border: BORDER$1,
-            display: "flex",
-            flexDirection: "column",
-            gap: "8px"
-          }
-        },
-        h(
-          "div",
-          { style: { display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "4px" } },
-          h("span", { style: { fontSize: "12px", fontWeight: "700" } }, `Cards OrgFy Atribuídos (${cards.length})`),
-          h("span", { style: { fontSize: "10px", color: TEXT_MUTED, fontFamily: "monospace" } }, "Executor / Revisor / Decisor")
-        ),
-        loading ? h("div", { style: { fontSize: "11px", color: TEXT_MUTED } }, "Carregando cards da esteira...") : cards.length === 0 ? h("div", { style: { fontSize: "11px", color: TEXT_MUTED } }, `Nenhum card ativo ou recente vinculado a ${agentName}.`) : h(
-          "div",
-          { style: { display: "flex", flexDirection: "column", gap: "6px", maxHeight: "220px", overflowY: "auto" } },
-          cards.slice(0, 12).map((c) => {
-            const role = normName(c.executor) === targetLower ? "EXECUTOR" : normName(c.revisor) === targetLower ? "REVISOR" : "DECISOR";
-            return h(
-              "div",
-              {
-                key: c.id,
-                style: {
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: "8px",
-                  padding: "8px 10px",
-                  borderRadius: "7px",
-                  backgroundColor: SURFACE_BG,
-                  border: BORDER$1,
-                  minWidth: 0
-                }
-              },
-              h(
-                "div",
-                { style: { display: "flex", flexDirection: "column", gap: "3px", minWidth: 0, flex: 1 } },
-                h(
-                  "div",
-                  { style: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: "5px" } },
-                  h("span", { style: { fontFamily: "monospace", fontSize: "10px", color: BLUE, fontWeight: "700" } }, `#${String(c.issueId || "").slice(0, 8)}`),
-                  h("span", { style: { fontSize: "9px", fontWeight: "700", padding: "1px 5px", borderRadius: "4px", backgroundColor: role === "EXECUTOR" ? "rgba(61,214,140,0.16)" : "rgba(192,132,252,0.16)", color: role === "EXECUTOR" ? ACCENT : "#d8b4fe" } }, role),
-                  h("span", { style: { fontSize: "9px", fontWeight: "700", padding: "1px 5px", borderRadius: "4px", backgroundColor: "rgba(255,255,255,0.07)", color: TEXT_MUTED, textTransform: "uppercase" } }, c.stage)
-                ),
-                h("span", { title: c.title, style: { fontSize: "11.5px", fontWeight: "600", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, c.title)
-              ),
-              c.fullIssueId && h(
-                "button",
-                {
-                  type: "button",
-                  onClick: () => handleOpenDirectIssue({ id: c.fullIssueId, kind: "issue", owner: c.owner, dtag: c.empresa || "orgfy" }),
-                  style: { ...btnBase, color: BLUE, padding: "4px 8px", fontSize: "10px", flexShrink: 0 }
-                },
-                "Abrir ↗"
-              )
-            );
-          })
-        )
-      ),
-      // 5. Sessões Goose & Spans OTel GenAI
-      h(
-        "div",
-        {
-          style: {
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
-            gap: "10px",
-            width: "100%"
-          }
-        },
-        h(
-          "div",
-          {
-            style: {
-              padding: "12px",
-              borderRadius: "10px",
-              backgroundColor: CARD_BG$1,
-              border: BORDER$1,
-              display: "flex",
-              flexDirection: "column",
-              gap: "6px",
-              minWidth: 0
-            }
-          },
-          h("span", { style: { fontSize: "12px", fontWeight: "700" } }, "Sessões Goose Recentes (3h)"),
-          sessions.length === 0 ? h("div", { style: { fontSize: "11px", color: TEXT_MUTED } }, "Nenhuma sessão recente no radar Goose.") : sessions.map(
-            (s) => h(
-              "div",
-              {
-                key: s.session_id,
-                style: {
-                  padding: "6px 8px",
-                  borderRadius: "6px",
-                  backgroundColor: SURFACE_BG,
-                  border: s.severidade === "critical" ? `1px solid ${RED}` : BORDER$1,
-                  fontSize: "10px",
-                  fontFamily: "monospace",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "2px"
-                }
-              },
-              h(
-                "div",
-                { style: { display: "flex", justifyContent: "space-between", gap: "4px" } },
-                h("span", { style: { color: s.ativa ? ACCENT : TEXT_MUTED, fontWeight: "700" } }, `${s.ativa ? "ATIVA" : "HIST"} · ${s.session_id}`),
-                h("span", { style: { color: TEXT_PRIMARY } }, `${s.duracao_min.toFixed(0)}m · ${s.shells} shells`)
-              ),
-              h("span", { style: { color: s.flags.length > 0 ? AMBER : ACCENT } }, s.flags.length > 0 ? s.flags.join(" · ") : "OK")
-            )
-          )
-        ),
-        h(
-          "div",
-          {
-            style: {
-              padding: "12px",
-              borderRadius: "10px",
-              backgroundColor: CARD_BG$1,
-              border: BORDER$1,
-              display: "flex",
-              flexDirection: "column",
-              gap: "6px",
-              minWidth: 0
-            }
-          },
-          h("span", { style: { fontSize: "12px", fontWeight: "700" } }, "Spans OTel GenAI deste Agente"),
-          agentSpans.length === 0 ? h("div", { style: { fontSize: "11px", color: TEXT_MUTED } }, "Nenhum span OTel capturado ainda nesta sessão do Buzz.") : agentSpans.map(
-            (sp) => h(
-              "div",
-              {
-                key: sp.spanId,
-                style: {
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: "6px",
-                  padding: "5px 8px",
-                  borderRadius: "6px",
-                  backgroundColor: SURFACE_BG,
-                  fontSize: "10px",
-                  fontFamily: "monospace"
-                }
-              },
-              h("span", { style: { color: BLUE, fontWeight: "600", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, sp.toolName || sp.operationName),
-              h("span", { style: { color: sp.status === "error" ? RED : ACCENT, fontWeight: "700", flexShrink: 0 } }, `${sp.status.toUpperCase()} · ${sp.durationMs}ms`)
-            )
-          )
-        )
-      )
-    );
-  };
 }
 const DEFAULT_ATTENTION_POLL_MS = 3e4;
 const MIN_ATTENTION_POLL_MS = 5e3;
@@ -13613,52 +13761,62 @@ function buildEmptyFactoryStatus(tenant, reason) {
   };
 }
 const VERIFIED_R51_BASELINE = {
-  "claude-sonnet-4-6": { score: "10/10", scoreNum: 10, abaixo: false, latencyMs: 4064, costUsd: "$0.0815" },
-  "gemini-2.5-flash": { score: "10/10", scoreNum: 10, abaixo: false, latencyMs: 2045, costUsd: "$0.0022" },
-  "claude-sonnet-5-5": { score: "9/10", scoreNum: 9, abaixo: false, latencyMs: 5143, costUsd: "$0.0715" },
-  "claude-haiku-5-5": { score: "3/10", scoreNum: 3, abaixo: true, latencyMs: 3738, costUsd: "$0.0219" },
-  "gemini-3.8-flash-medium": { score: "0/10", scoreNum: 0, abaixo: true, latencyMs: 4956, costUsd: "$0.0046" }
+  "claude-sonnet-4-6": { score: "10/10", scoreNum: 10, abaixo: false, latencyMs: 4064, costUsd: "$0.0815", provider: "nexusmind_anthropic", model: "claude-sonnet-4-6" },
+  "gemini-2.5-flash": { score: "10/10", scoreNum: 10, abaixo: false, latencyMs: 2045, costUsd: "$0.0022", provider: "nexusmind_antigravity", model: "gemini-2.5-flash" },
+  "claude-sonnet-5-5": { score: "9/10", scoreNum: 9, abaixo: false, latencyMs: 5143, costUsd: "$0.0715", provider: "nexusmind_anthropic", model: "claude-sonnet-5-5" },
+  "claude-haiku-5-5": { score: "3/10", scoreNum: 3, abaixo: true, latencyMs: 3738, costUsd: "$0.0219", provider: "nexusmind_anthropic", model: "claude-haiku-5-5" },
+  "gemini-3.8-flash-medium": { score: "0/10", scoreNum: 0, abaixo: true, latencyMs: 4956, costUsd: "$0.0046", provider: "nexusmind_antigravity", model: "gemini-3.8-flash-medium" }
 };
 function parseEvalTable(md) {
-  const map = /* @__PURE__ */ new Map();
-  for (const [k, v2] of Object.entries(VERIFIED_R51_BASELINE)) {
-    map.set(k.toLowerCase(), v2);
-  }
-  if (!md) return map;
-  let modelColIdx = 0;
-  for (const line of md.split("\n")) {
-    if (!line.trim().startsWith("|")) continue;
-    const cols = line.split("|").map((c) => c.trim()).filter(Boolean);
-    if (cols.length < 3) continue;
-    if (cols.every((c) => /^:?-+:?$/.test(c))) continue;
-    const lowerCols = cols.map((c) => c.toLowerCase());
-    const headerModelIdx = lowerCols.findIndex((c) => c === "model" || c === "modelo");
-    if (headerModelIdx >= 0) {
-      modelColIdx = headerModelIdx;
-      continue;
-    }
-    const model = (cols[modelColIdx] || cols[0] || "").replace(/`/g, "").trim();
-    const m = line.match(/(\d+)\s*\/\s*10/g);
-    if (model && m && m.length >= 1) {
-      const toolStr = m.length >= 2 ? m[1] : m[0];
-      const num = parseInt(toolStr.split("/")[0], 10);
-      if (!Number.isNaN(num)) {
-        const latCol = cols.find((c) => /^\d{3,6}$/.test(c));
-        const costCol = cols.find((c) => /^\$\d/.test(c));
-        const entry = {
-          score: `${num}/10`,
-          scoreNum: num,
-          abaixo: num < 8,
-          latencyMs: latCol ? parseInt(latCol, 10) : null,
-          costUsd: costCol || null
-        };
-        const shortName = model.includes("/") ? model.split("/").pop() : model;
-        map.set(model.toLowerCase(), entry);
-        map.set(shortName.toLowerCase(), entry);
+  const liveMap = /* @__PURE__ */ new Map();
+  if (md) {
+    let modelColIdx = 0;
+    let providerColIdx = -1;
+    for (const line of md.split("\n")) {
+      if (!line.trim().startsWith("|")) continue;
+      const cols = line.split("|").map((c) => c.trim()).filter(Boolean);
+      if (cols.length < 3) continue;
+      if (cols.every((c) => /^:?-+:?$/.test(c))) continue;
+      const lowerCols = cols.map((c) => c.toLowerCase());
+      const headerModelIdx = lowerCols.findIndex((c) => c === "model" || c === "modelo");
+      if (headerModelIdx >= 0) {
+        modelColIdx = headerModelIdx;
+        providerColIdx = lowerCols.findIndex((c) => c === "provider" || c === "provedor");
+        continue;
+      }
+      const model = (cols[modelColIdx] || cols[0] || "").replace(/`/g, "").trim();
+      const provider = providerColIdx >= 0 ? (cols[providerColIdx] || "").replace(/`/g, "").trim() : null;
+      const m = line.match(/(\d+)\s*\/\s*10(?!\d)/g);
+      if (model && m && m.length >= 1) {
+        const toolStr = m.length >= 2 ? m[1] : m[0];
+        const num = parseInt(toolStr.split("/")[0], 10);
+        if (!Number.isNaN(num)) {
+          const latCol = cols.find((c) => /^\d{2,6}$/.test(c));
+          const costCol = cols.find((c) => /^\$\d/.test(c));
+          const entry = {
+            score: `${num}/10`,
+            scoreNum: num,
+            abaixo: num < 8,
+            latencyMs: latCol ? parseInt(latCol, 10) : null,
+            costUsd: costCol || null,
+            provider: provider || null,
+            model
+          };
+          const shortName = model.includes("/") ? model.split("/").pop() : model;
+          liveMap.set(model.toLowerCase(), entry);
+          if (!liveMap.has(shortName.toLowerCase())) {
+            liveMap.set(shortName.toLowerCase(), entry);
+          }
+        }
       }
     }
   }
-  return map;
+  if (liveMap.size > 0) return liveMap;
+  const fallbackMap = /* @__PURE__ */ new Map();
+  for (const [k, v2] of Object.entries(VERIFIED_R51_BASELINE)) {
+    fallbackMap.set(k.toLowerCase(), v2);
+  }
+  return fallbackMap;
 }
 function describeOrgfyRole(papelRaw) {
   const p = String(papelRaw || "").trim().toLowerCase();
@@ -13790,7 +13948,7 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
       modelo,
       provider,
       toolcall_eval: (ev == null ? void 0 : ev.score) || null,
-      abaixo_minimo: Boolean((ev == null ? void 0 : ev.abaixo) || isUnsupported),
+      abaixo_minimo: ev ? ev.abaixo : isUnsupported,
       scoreNum: ev ? ev.scoreNum : null,
       latencyMs: ev ? ev.latencyMs : null,
       costUsd: ev ? ev.costUsd : null,
@@ -14028,6 +14186,25 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
     lastDigest: digestJson || null,
     ...spotChecksJson ? { spotChecks: spotChecksJson } : {},
     modelos,
+    evalWinners: (() => {
+      const seenW = /* @__PURE__ */ new Set();
+      const out = [];
+      for (const entry of evalMap.values()) {
+        if (entry.abaixo || !entry.model) continue;
+        const key = entry.model.toLowerCase();
+        if (seenW.has(key)) continue;
+        seenW.add(key);
+        out.push({
+          provider: entry.provider || (entry.model.includes("/") || entry.model.includes(":free") ? "nexusmind_openai" : "nexusmind_antigravity"),
+          model: entry.model,
+          score: entry.score,
+          scoreNum: entry.scoreNum,
+          latencyMs: entry.latencyMs,
+          costUsd: entry.costUsd
+        });
+      }
+      return out;
+    })(),
     indisponivel: [
       ...!kpis ? ["kpis-esteira.json"] : [],
       ...!digestJson ? ["lastDigest"] : [],
@@ -63224,6 +63401,14 @@ function renderFactorySecondaryPage(props) {
         const approvedCount = modelos.filter((m) => m.evalStatus === "approved").length;
         const belowCount = modelos.filter((m) => m.evalStatus === "below_min").length;
         const attentionCount = modelos.filter((m) => m.evalStatus !== "approved").length;
+        const liveWinners = status.evalWinners || [];
+        const topTier1Winner = liveWinners.find((w) => !w.model.includes(":free") && /(gpt-6\.1|claude-opus|gemini-4-hydrogen|gemini-2\.5-flash|auto\/reasoning)/i.test(w.model)) || liveWinners.find((w) => !w.model.includes(":free")) || liveWinners[0] || { provider: "nexusmind_openai", model: "gpt-6.1-terra" };
+        const topTier2Winner = liveWinners.find((w) => w.model.toLowerCase() === "gemini-2.5-flash") || liveWinners[0] || { provider: "nexusmind_antigravity", model: "gemini-2.5-flash" };
+        const shortLabel = (mid) => {
+          const s = String(mid.split("/").pop() || mid);
+          return s.length > 22 ? s.slice(0, 20) + "…" : s;
+        };
+        const winnersSub = liveWinners.length > 0 ? liveWinners.slice(0, 2).map((w) => `${shortLabel(w.model)}${w.latencyMs ? ` (${(w.latencyMs / 1e3).toFixed(1)}s)` : ""}`).join(" · ") : "Rode o Eval no NexusMind Gateway";
         const filteredModelos = evalFilter === "attention" ? modelos.filter((m) => m.evalStatus !== "approved") : evalFilter === "approved" ? modelos.filter((m) => m.evalStatus === "approved") : modelos;
         return h(
           "div",
@@ -63232,10 +63417,10 @@ function renderFactorySecondaryPage(props) {
             "div",
             { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "10px" } },
             [
-              { label: "Aprovados R5.1 (≥ 8/10)", val: `${approvedCount}/${modelos.length}`, tone: "done", sub: "tool call validado em 10 cards" },
-              { label: "Abaixo do mínimo (< 8/10)", val: String(belowCount), tone: belowCount > 0 ? "failed" : "done", sub: belowCount > 0 ? "migração recomendada" : "nenhum agente crítico" },
-              { label: "Fora do eval / Timeout", val: String(Math.max(0, attentionCount - belowCount)), tone: attentionCount - belowCount > 0 ? "waiting" : "done", sub: "mistral-large (>20s) ou não testado" },
-              { label: "Vencedores R5.1 (10/10)", val: "2 modelos", tone: "done", sub: "gemini-2.5-flash (2.0s) · sonnet-4-6 (4.1s)" }
+              { label: "Aprovados no Eval (≥ 8/10)", val: `${approvedCount}/${modelos.length}`, tone: "done", sub: "tool call validado ao vivo (Gateway)" },
+              { label: "Abaixo do mínimo / Offline", val: String(belowCount), tone: belowCount > 0 ? "failed" : "done", sub: belowCount > 0 ? "migração recomendada" : "nenhum agente crítico" },
+              { label: "Fora do eval / Não testado", val: String(Math.max(0, attentionCount - belowCount)), tone: attentionCount - belowCount > 0 ? "waiting" : "done", sub: "modelo sem resultado no Eval atual" },
+              { label: "Vencedores ao vivo (10/10)", val: `${liveWinners.length} modelo${liveWinners.length === 1 ? "" : "s"}`, tone: "done", sub: winnersSub }
             ].map(
               (k) => h(
                 "div",
@@ -63256,7 +63441,7 @@ function renderFactorySecondaryPage(props) {
                 "div",
                 null,
                 h("div", { style: { fontSize: "14px", fontWeight: 700 } }, PT_BR.labels.modelsTitle),
-                h("div", { className: "of-muted", style: { fontSize: "11.5px", marginTop: "2px" } }, "Fonte: docs/eval-modelos-onda5.md (10 cards reais). Modelos < 8/10 ou com timeout >20s ficam sinalizados para migração em 1 clique via ctx.agents.save().")
+                h("div", { className: "of-muted", style: { fontSize: "11.5px", marginTop: "2px" } }, "Fonte: docs/eval-modelos-onda5.md (sincronizado pelo NexusMind Gateway). Modelos offline ou < 8/10 ficam sinalizados para migração em 1 clique via ctx.agents.save().")
               ),
               props.setEvalFilter && h(
                 "div",
@@ -63286,7 +63471,7 @@ function renderFactorySecondaryPage(props) {
               h(
                 "thead",
                 null,
-                h("tr", null, h("th", null, "Agente"), h("th", null, "Papel"), h("th", null, "Modelo & Provider"), h("th", null, "Tool call (R5.1)"), h("th", null, "Latência / Custo"), h("th", null, "Ação (Buzz API)"))
+                h("tr", null, h("th", null, "Agente"), h("th", null, "Papel"), h("th", null, "Modelo & Provider"), h("th", null, "Tool call (Eval)"), h("th", null, "Latência / Custo"), h("th", null, "Ação (Buzz API)"))
               ),
               h(
                 "tbody",
@@ -63294,7 +63479,12 @@ function renderFactorySecondaryPage(props) {
                 filteredModelos.map((m) => {
                   const agSpec = tenantAgents.find((a) => a.name === m.agente);
                   const isTier1 = /(ceo|coo|revis|arquit|segur|secur|qa|oraculo|conselho|board)/i.test(String(m.papel || ""));
-                  const recTarget = isTier1 ? { provider: "nexusmind_anthropic", model: "claude-sonnet-4-6", label: "Sonnet 4.6" } : { provider: "nexusmind_antigravity", model: "gemini-2.5-flash", label: "Flash 2.5" };
+                  const chosen = isTier1 ? topTier1Winner : topTier2Winner;
+                  const recTarget = {
+                    provider: chosen.provider,
+                    model: chosen.model,
+                    label: shortLabel(chosen.model)
+                  };
                   const scorePct = typeof m.scoreNum === "number" ? Math.max(4, m.scoreNum * 10) : 0;
                   const tone = m.evalStatus === "approved" ? "done" : m.evalStatus === "below_min" ? "failed" : "waiting";
                   const pillText = m.evalStatus === "approved" ? `${m.toolcall_eval} · aprovado` : m.evalStatus === "below_min" ? `${m.toolcall_eval} · abaixo do mín.` : m.evalStatus === "unsupported" ? "Timeout >20s · bloquear" : "Não avaliado no R5.1";
@@ -65871,7 +66061,7 @@ const PINNED_HOST_COMMANDS = Object.freeze([
   {
     id: "orgfy-kpis",
     scriptPath: "ferramentas/esteira/gerar_kpis_esteira.py",
-    sha256: "174ed76e353db11e6aae4c94140234adc5adfa43606141be82f5618ea9867f46"
+    sha256: "ec21ca0b2835869c9baf5d18f27ddd1bb868be47a86aa6d9fb0884cee5ae534a"
   },
   {
     id: "orgfy-controle-write",
@@ -66888,26 +67078,39 @@ function createFactoryAppComponent(ctx, opts = {}) {
         notify2("API ctx.agents.save indisponível nesta versão do Buzz.");
         return;
       }
-      const winners = /* @__PURE__ */ new Set([
-        "claude-sonnet-5-5",
-        "claude-sonnet-4-6",
-        "gemini-2.5-flash"
-      ]);
-      const targets = tenantAgents.filter(
-        (a) => a.inBuzz && a.agentKey && !winners.has(String(a.model || "").split("/").pop() || "")
-      );
+      const catalog = await loadLiveGatewayModelCatalog(ctx).catch(() => null);
+      const liveWinners = /* @__PURE__ */ new Set();
+      if ((catalog == null ? void 0 : catalog.hasLiveData) && catalog.approvedModels.size > 0) {
+        for (const m of catalog.approvedModels) liveWinners.add(m);
+      } else if (Array.isArray(status.evalWinners) && status.evalWinners.length > 0) {
+        for (const w of status.evalWinners) {
+          liveWinners.add(w.model.toLowerCase());
+          const shortW = String(w.model.split("/").pop() || w.model).toLowerCase();
+          if (shortW) liveWinners.add(shortW);
+        }
+      } else {
+        liveWinners.add("gemini-2.5-flash");
+        liveWinners.add("gpt-6.1-terra");
+      }
+      const targets = tenantAgents.filter((a) => {
+        if (!a.inBuzz || !a.agentKey) return false;
+        const full = String(a.model || "").trim().toLowerCase();
+        const short = String(full.split("/").pop() || full).trim();
+        if ((catalog == null ? void 0 : catalog.offlineModels.has(full)) || (catalog == null ? void 0 : catalog.offlineModels.has(short))) return true;
+        return !liveWinners.has(full) && !liveWinners.has(short);
+      });
       if (targets.length === 0) {
-        notify2("Todos os agentes provisionados já estão em modelos aprovados no Eval R5.1.");
+        notify2("Todos os agentes provisionados já estão em modelos online aprovados no Eval.");
         return;
       }
       const freshAgents = ((_b2 = (_a2 = agentsApi.snapshot) == null ? void 0 : _a2.call(agentsApi)) == null ? void 0 : _b2.agents) || [];
       let updated = 0;
       let firstError = "";
+      const assignedModels = /* @__PURE__ */ new Set();
       for (const ag of targets) {
-        const papel = String(ag.papel || "").toLowerCase();
-        const isTier1 = /(ceo|coo|revis|arquit|segur|secur|qa|oraculo|conselho|board)/.test(papel);
-        const provider = isTier1 ? "nexusmind_anthropic" : "nexusmind_antigravity";
-        const model = isTier1 ? "claude-sonnet-5-5" : "gemini-2.5-flash";
+        const rec = pickLiveRecommendedModel(`${ag.papel || ""} ${ag.name || ""}`, catalog);
+        const provider = rec.provider;
+        const model = rec.model;
         const fresh = freshAgents.find((c) => (c == null ? void 0 : c.key) === ag.agentKey) || liveCrew.find((c) => c.key === ag.agentKey);
         const baseCfg = (fresh == null ? void 0 : fresh.config) && typeof fresh.config === "object" ? fresh.config : {};
         try {
@@ -66915,15 +67118,16 @@ function createFactoryAppComponent(ctx, opts = {}) {
             config: { ...baseCfg, provider, model }
           });
           updated += 1;
+          assignedModels.add(model);
         } catch (err) {
           if (!firstError) firstError = (err == null ? void 0 : err.message) || String(err);
         }
       }
       notify2(
-        updated > 0 ? `${updated}/${targets.length} agente(s) reconciliado(s) para os vencedores do Eval R5.1 via ctx.agents.save().` : `Nenhum agente pôde ser atualizado${firstError ? `: ${firstError}` : " via ctx.agents.save()."}`
+        updated > 0 ? `${updated}/${targets.length} agente(s) reconciliado(s) para ${Array.from(assignedModels).join(", ")} (Eval ao vivo) ✓` : `Nenhum agente pôde ser atualizado${firstError ? `: ${firstError}` : " via ctx.agents.save()."}`
       );
       await refresh(tenant);
-    }, [tenantAgents, liveCrew, tenant, notify2, refresh]);
+    }, [tenantAgents, liveCrew, status.evalWinners, tenant, notify2, refresh]);
     const handleSaveAgentProfile = React.useCallback(
       async (agentKey, patch) => {
         var _a2, _b2;
