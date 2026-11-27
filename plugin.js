@@ -2067,6 +2067,11 @@ function decodeTextBytes(raw) {
   }
   return String(raw ?? "");
 }
+function isBlockedGatewayCatalogModel(modelId) {
+  const m = String(modelId || "").trim().toLowerCase();
+  if (!m) return true;
+  return m === "haiku" || m === "grok-4.5" || m.includes("gemini-3.8-flash-medium") || m.includes("gemini-4-hydrogen") || m.includes("mistral-large-4-1t-a52b") || m.includes("claude-opus-5-5") || m.includes("minimax-m3.1-flash") || m.includes("pol/community/") || m.startsWith("auto/");
+}
 function formatLatencyShort(ms) {
   if (typeof ms !== "number" || !Number.isFinite(ms) || ms <= 0) return "";
   return ms >= 1e3 ? `${(ms / 1e3).toFixed(1)}s` : `${Math.round(ms)}ms`;
@@ -2307,7 +2312,8 @@ async function loadLiveGatewayModelCatalog(ctx) {
       const score = typeof m.evalScore === "number" ? m.evalScore : void 0;
       const latencyMs = typeof m.latencyMs === "number" ? m.latencyMs : void 0;
       const isFree = Boolean(m.isFree);
-      if (evalApproved) {
+      const blockedByPolicy = isBlockedGatewayCatalogModel(mid) || !cpForceFree && isFree || policyState === "blocked";
+      if (evalApproved && !blockedByPolicy) {
         approvedModels.add(keyLower);
         if (shortId) approvedModels.add(shortId);
         const parts = [mid, "Eval ✓"];
@@ -2327,7 +2333,9 @@ async function loadLiveGatewayModelCatalog(ctx) {
           rankingScore: score,
           latencyMs
         });
-      } else if (!isOnline || policyState === "blocked") {
+      } else if (!isOnline || blockedByPolicy) {
+        approvedModels.delete(keyLower);
+        if (shortId) approvedModels.delete(shortId);
         offlineModels.add(keyLower);
         if (shortId) offlineModels.add(shortId);
       }
@@ -2344,10 +2352,16 @@ async function loadLiveGatewayModelCatalog(ctx) {
       };
     }
   }
+  const filteredApproved = approvedOptions.filter(
+    (o) => {
+      var _a2;
+      return !isBlockedGatewayCatalogModel(o.model) && (Boolean((_a2 = rankingParsed == null ? void 0 : rankingParsed.policy) == null ? void 0 : _a2.forceFree) || !o.isFree);
+    }
+  );
   return {
-    hasLiveData: approvedOptions.length > 0 || onlineOtherOptions.length > 0 || benchByModel.size > 0,
-    approvedOptions,
-    onlineOtherOptions,
+    hasLiveData: filteredApproved.length > 0 || onlineOtherOptions.length > 0 || benchByModel.size > 0,
+    approvedOptions: filteredApproved,
+    onlineOtherOptions: onlineOtherOptions.filter((o) => !isBlockedGatewayCatalogModel(o.model) && !o.isFree),
     approvedModels,
     offlineModels,
     forceFree: Boolean(((_f = rankingParsed == null ? void 0 : rankingParsed.policy) == null ? void 0 : _f.forceFree) ?? (rankingParsed == null ? void 0 : rankingParsed.forceFree)),
@@ -2359,13 +2373,15 @@ function pickLiveRecommendedModel(roleOrName, catalog) {
   const isTier1 = /(iris|bento|arquit|teo|vera|hugo|lara|ceo|coo|revis|qa|segur|secur|oraculo|conselho|board)/.test(lower);
   const tierLabel = isTier1 ? "Tier 1 (Liderança/Revisão)" : "Tier 2 (Execução/Rápido)";
   if (catalog && catalog.approvedOptions.length > 0) {
-    const pool = catalog.approvedOptions;
-    if (isTier1) {
-      const preferredPaid = pool.find((o) => !o.isFree && o.mode === "vip") || pool.find((o) => !o.isFree && /(gpt-6\.1|claude-opus|gemini-4-hydrogen|gemini-2\.5-flash|auto\/reasoning)/.test(o.model.toLowerCase())) || pool.find((o) => !o.isFree) || pool[0];
-      return { provider: preferredPaid.provider, model: preferredPaid.model, tierLabel };
+    const pool = catalog.approvedOptions.filter((o) => !isBlockedGatewayCatalogModel(o.model) && (catalog.forceFree || !o.isFree));
+    if (pool.length > 0) {
+      if (isTier1) {
+        const preferredPaid = pool.find((o) => !o.isFree && o.mode === "vip") || pool.find((o) => !o.isFree && /(gpt-6\.1|claude-sonnet-4-6|claude-opus-4-6|gemini-2\.5-flash)/.test(o.model.toLowerCase())) || pool.find((o) => !o.isFree) || pool[0];
+        return { provider: preferredPaid.provider, model: preferredPaid.model, tierLabel };
+      }
+      const preferredFast = (catalog.forceFree ? pool.find((o) => o.isFree && o.mode !== "blocked") : null) || pool.find((o) => !o.isFree && o.mode !== "blocked" && o.model.toLowerCase() === "gemini-2.5-flash") || pool.find((o) => !o.isFree && o.mode !== "blocked") || pool[0];
+      return { provider: preferredFast.provider, model: preferredFast.model, tierLabel };
     }
-    const preferredFast = (catalog.forceFree ? pool.find((o) => o.isFree && o.mode !== "blocked") : null) || pool.find((o) => o.mode !== "blocked" && o.model.toLowerCase() === "gemini-2.5-flash") || pool.find((o) => o.mode !== "blocked") || pool[0];
-    return { provider: preferredFast.provider, model: preferredFast.model, tierLabel };
   }
   return isTier1 ? { provider: "nexusmind_openai", model: "gpt-6.1-terra", tierLabel } : { provider: "nexusmind_antigravity", model: "gemini-2.5-flash", tierLabel };
 }
@@ -3172,10 +3188,10 @@ async function reconcileAgentsViaBuzzApi(ctx, opts = {}) {
     const isOfflineInGateway = Boolean(
       hasLiveCatalog && ((catalog == null ? void 0 : catalog.offlineModels.has(mlow)) || (catalog == null ? void 0 : catalog.offlineModels.has(shortM)))
     );
-    const isApprovedInGateway = Boolean(
+    Boolean(
       hasLiveCatalog && ((catalog == null ? void 0 : catalog.approvedModels.has(mlow)) || (catalog == null ? void 0 : catalog.approvedModels.has(shortM)))
     );
-    const needsFix = !prov || !model || isUnsupportedAgentModel(mlow) || isOfflineInGateway || !isApprovedInGateway && isFreeModelId(mlow) || prov === "nexusmind_openai" && mlow.startsWith("antigravity/");
+    const needsFix = !prov || !model || isUnsupportedAgentModel(mlow) || isOfflineInGateway || !(catalog == null ? void 0 : catalog.forceFree) && isFreeModelId(mlow) || prov === "nexusmind_openai" && mlow.startsWith("antigravity/");
     if (!needsFix) continue;
     let nextModel;
     let nextProv;
@@ -3356,7 +3372,7 @@ function isFreeModelId(modelId) {
 function isUnsupportedAgentModel(modelId) {
   const m = String(modelId || "").trim().toLowerCase();
   if (!m) return true;
-  return m === "haiku" || m === "grok-4.5" || m.includes("gemini-3.8-flash-medium") || m.includes("gemini-4-hydrogen-sonar") || m.includes("mistral-large-4-1t-a52b") || m.includes("claude-opus-5-5") || m.includes("minimax-m3.1-flash") || m.startsWith("auto/") || m.includes("tab_jump") || m.includes("autocomplete") || m.includes("fim-") || m.includes("embedding") || m.includes("rerank") || m.includes("whisper") || m.includes("tts") || m.includes("imagen") || m.includes("dall-e") || m.includes("moderation");
+  return m === "haiku" || m === "grok-4.5" || m.includes("gemini-3.8-flash-medium") || m.includes("gemini-4-hydrogen") || m.includes("mistral-large-4-1t-a52b") || m.includes("claude-opus-5-5") || m.includes("minimax-m3.1-flash") || m.includes("pol/community/") || m.startsWith("auto/") || m.includes("tab_jump") || m.includes("autocomplete") || m.includes("fim-") || m.includes("embedding") || m.includes("rerank") || m.includes("whisper") || m.includes("tts") || m.includes("imagen") || m.includes("dall-e") || m.includes("moderation");
 }
 function estimateModelIntelligence(modelId) {
   const m = String(modelId || "").toLowerCase();

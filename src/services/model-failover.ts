@@ -75,7 +75,7 @@ export async function reconcileAgentsViaBuzzApi(
       !model ||
       isUnsupportedAgentModel(mlow) ||
       isOfflineInGateway ||
-      (!isApprovedInGateway && isFreeModelId(mlow)) ||
+      (!catalog?.forceFree && isFreeModelId(mlow)) ||
       (prov === "nexusmind_openai" && mlow.startsWith("antigravity/"));
     if (!needsFix) continue;
     let nextModel: string;
@@ -318,10 +318,11 @@ export function isUnsupportedAgentModel(modelId: string): boolean {
     m === "haiku" ||
     m === "grok-4.5" ||
     m.includes("gemini-3.8-flash-medium") ||
-    m.includes("gemini-4-hydrogen-sonar") ||
+    m.includes("gemini-4-hydrogen") ||
     m.includes("mistral-large-4-1t-a52b") ||
     m.includes("claude-opus-5-5") ||
     m.includes("minimax-m3.1-flash") ||
+    m.includes("pol/community/") ||
     m.startsWith("auto/") ||
     m.includes("tab_jump") ||
     m.includes("autocomplete") ||

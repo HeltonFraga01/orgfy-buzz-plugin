@@ -96,6 +96,22 @@ function decodeTextBytes(raw: unknown): string {
   return String(raw ?? "");
 }
 
+function isBlockedGatewayCatalogModel(modelId: string): boolean {
+  const m = String(modelId || "").trim().toLowerCase();
+  if (!m) return true;
+  return (
+    m === "haiku" ||
+    m === "grok-4.5" ||
+    m.includes("gemini-3.8-flash-medium") ||
+    m.includes("gemini-4-hydrogen") ||
+    m.includes("mistral-large-4-1t-a52b") ||
+    m.includes("claude-opus-5-5") ||
+    m.includes("minimax-m3.1-flash") ||
+    m.includes("pol/community/") ||
+    m.startsWith("auto/")
+  );
+}
+
 function formatLatencyShort(ms?: number): string {
   if (typeof ms !== "number" || !Number.isFinite(ms) || ms <= 0) return "";
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`;
@@ -377,7 +393,8 @@ export async function loadLiveGatewayModelCatalog(ctx: Context): Promise<LiveGat
       const latencyMs = typeof m.latencyMs === "number" ? m.latencyMs : undefined;
       const isFree = Boolean(m.isFree);
 
-      if (evalApproved) {
+      const blockedByPolicy = isBlockedGatewayCatalogModel(mid) || (!cpForceFree && isFree) || policyState === "blocked";
+      if (evalApproved && !blockedByPolicy) {
         approvedModels.add(keyLower);
         if (shortId) approvedModels.add(shortId);
         const parts = [mid, "Eval ✓"];
@@ -397,7 +414,9 @@ export async function loadLiveGatewayModelCatalog(ctx: Context): Promise<LiveGat
           rankingScore: score,
           latencyMs,
         });
-      } else if (!isOnline || policyState === "blocked") {
+      } else if (!isOnline || blockedByPolicy) {
+        approvedModels.delete(keyLower);
+        if (shortId) approvedModels.delete(shortId);
         offlineModels.add(keyLower);
         if (shortId) offlineModels.add(shortId);
       }
@@ -415,10 +434,13 @@ export async function loadLiveGatewayModelCatalog(ctx: Context): Promise<LiveGat
     }
   }
 
+  const filteredApproved = approvedOptions.filter(
+    (o) => !isBlockedGatewayCatalogModel(o.model) && (Boolean(rankingParsed?.policy?.forceFree) || !o.isFree)
+  );
   return {
-    hasLiveData: approvedOptions.length > 0 || onlineOtherOptions.length > 0 || benchByModel.size > 0,
-    approvedOptions,
-    onlineOtherOptions,
+    hasLiveData: filteredApproved.length > 0 || onlineOtherOptions.length > 0 || benchByModel.size > 0,
+    approvedOptions: filteredApproved,
+    onlineOtherOptions: onlineOtherOptions.filter((o) => !isBlockedGatewayCatalogModel(o.model) && !o.isFree),
     approvedModels,
     offlineModels,
     forceFree: Boolean(rankingParsed?.policy?.forceFree ?? rankingParsed?.forceFree),
@@ -435,21 +457,23 @@ export function pickLiveRecommendedModel(
   const tierLabel = isTier1 ? "Tier 1 (Liderança/Revisão)" : "Tier 2 (Execução/Rápido)";
 
   if (catalog && catalog.approvedOptions.length > 0) {
-    const pool = catalog.approvedOptions;
-    if (isTier1) {
-      const preferredPaid =
-        pool.find((o) => !o.isFree && o.mode === "vip") ||
-        pool.find((o) => !o.isFree && /(gpt-6\.1|claude-opus|gemini-4-hydrogen|gemini-2\.5-flash|auto\/reasoning)/.test(o.model.toLowerCase())) ||
-        pool.find((o) => !o.isFree) ||
+    const pool = catalog.approvedOptions.filter((o) => !isBlockedGatewayCatalogModel(o.model) && (catalog.forceFree || !o.isFree));
+    if (pool.length > 0) {
+      if (isTier1) {
+        const preferredPaid =
+          pool.find((o) => !o.isFree && o.mode === "vip") ||
+          pool.find((o) => !o.isFree && /(gpt-6\.1|claude-sonnet-4-6|claude-opus-4-6|gemini-2\.5-flash)/.test(o.model.toLowerCase())) ||
+          pool.find((o) => !o.isFree) ||
+          pool[0];
+        return { provider: preferredPaid.provider, model: preferredPaid.model, tierLabel };
+      }
+      const preferredFast =
+        (catalog.forceFree ? pool.find((o) => o.isFree && o.mode !== "blocked") : null) ||
+        pool.find((o) => !o.isFree && o.mode !== "blocked" && o.model.toLowerCase() === "gemini-2.5-flash") ||
+        pool.find((o) => !o.isFree && o.mode !== "blocked") ||
         pool[0];
-      return { provider: preferredPaid.provider, model: preferredPaid.model, tierLabel };
+      return { provider: preferredFast.provider, model: preferredFast.model, tierLabel };
     }
-    const preferredFast =
-      (catalog.forceFree ? pool.find((o) => o.isFree && o.mode !== "blocked") : null) ||
-      pool.find((o) => o.mode !== "blocked" && o.model.toLowerCase() === "gemini-2.5-flash") ||
-      pool.find((o) => o.mode !== "blocked") ||
-      pool[0];
-    return { provider: preferredFast.provider, model: preferredFast.model, tierLabel };
   }
 
   return isTier1
