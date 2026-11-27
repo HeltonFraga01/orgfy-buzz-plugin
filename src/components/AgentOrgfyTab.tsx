@@ -92,9 +92,53 @@ function decodeTextBytes(raw: unknown): string {
   return String(raw ?? "");
 }
 
-async function loadExtraNexusMindModels(ctx: Context): Promise<AgentModelOption[]> {
-  let parsed: any = null;
+async function loadGatewayEvalAndRanking(
+  ctx: Context
+): Promise<{ extras: AgentModelOption[]; approvedModels: Set<string> }> {
   const host = (ctx as any)?.host;
+  const approvedModels = new Set<string>();
+  const benchByModel = new Map<string, { toolCallOk?: boolean; online?: boolean; qualityScore?: number; group?: string }>();
+
+  // 1. Lê resultados do Eval manual do Gateway (nexusmind-quality-bench.json)
+  let benchParsed: any = null;
+  if (typeof host?.readFile === "function") {
+    for (const p of ["~/.buzz/.scratch/nexusmind-quality-bench.json", "/Users/heltonfraga/.buzz/.scratch/nexusmind-quality-bench.json"]) {
+      try {
+        const raw = await host.readFile(p);
+        if (!raw) continue;
+        const obj = JSON.parse(decodeTextBytes(raw));
+        if (obj && typeof obj === "object") {
+          benchParsed = obj.results && typeof obj.results === "object" ? obj.results : obj;
+          break;
+        }
+      } catch {}
+    }
+  }
+  if (!benchParsed) {
+    try {
+      const raw = (globalThis as any)?.localStorage?.getItem?.("nexusmind_quality_bench_v1");
+      if (raw) benchParsed = JSON.parse(raw);
+    } catch {}
+  }
+  if (benchParsed && typeof benchParsed === "object") {
+    for (const [mid, rec] of Object.entries(benchParsed as Record<string, any>)) {
+      if (!rec || typeof rec !== "object") continue;
+      benchByModel.set(mid.toLowerCase(), {
+        toolCallOk: Boolean(rec.toolCallOk),
+        online: Boolean(rec.online),
+        qualityScore: typeof rec.qualityScore === "number" ? rec.qualityScore : undefined,
+        group: typeof rec.group === "string" ? rec.group : undefined,
+      });
+      if (rec.online && rec.toolCallOk) {
+        approvedModels.add(mid.toLowerCase());
+        const shortId = String(mid.split("/").pop() || mid).trim().toLowerCase();
+        if (shortId) approvedModels.add(shortId);
+      }
+    }
+  }
+
+  // 2. Lê o Ranking do Gateway (nexusmind-model-ranking.json)
+  let parsed: any = null;
   if (typeof host?.readFile === "function") {
     for (const p of ["~/.buzz/.scratch/nexusmind-model-ranking.json", "/Users/heltonfraga/.buzz/.scratch/nexusmind-model-ranking.json"]) {
       try {
@@ -114,24 +158,42 @@ async function loadExtraNexusMindModels(ctx: Context): Promise<AgentModelOption[
       if (raw) parsed = JSON.parse(raw);
     } catch {}
   }
-  if (!parsed || !Array.isArray(parsed.models)) return [];
+
   const seen = new Set(AGENT_MODEL_PRESETS.map((o) => o.model.toLowerCase()));
   const extras: AgentModelOption[] = [];
-  for (const m of parsed.models) {
-    const mid = String(m?.model || "").trim();
-    if (!mid || seen.has(mid.toLowerCase()) || m?.isDisabled || m?.online === false) continue;
-    const provider = String(m?.group || inferProviderForModel(mid)).trim() || inferProviderForModel(mid);
-    seen.add(mid.toLowerCase());
-    const scoreTxt = typeof m?.score === "number" ? ` · score ${m.score.toFixed(1)}` : "";
-    extras.push({
-      provider,
-      model: mid,
-      label: `${mid}${scoreTxt}`,
-      group: "nexusmind",
+
+  if (parsed && Array.isArray(parsed.models)) {
+    const sorted = [...parsed.models].sort((a: any, b: any) => {
+      const aTc = a?.toolCallOk === true || benchByModel.get(String(a?.model || "").toLowerCase())?.toolCallOk === true;
+      const bTc = b?.toolCallOk === true || benchByModel.get(String(b?.model || "").toLowerCase())?.toolCallOk === true;
+      if (aTc !== bTc) return aTc ? -1 : 1;
+      return Number(b?.score || 0) - Number(a?.score || 0);
     });
-    if (extras.length >= 6) break;
+    for (const m of sorted) {
+      const mid = String(m?.model || "").trim();
+      if (!mid || seen.has(mid.toLowerCase()) || m?.isDisabled || m?.online === false) continue;
+      const bench = benchByModel.get(mid.toLowerCase());
+      const tcOk = m?.toolCallOk === true || bench?.toolCallOk === true;
+      if (tcOk && m?.online !== false) {
+        approvedModels.add(mid.toLowerCase());
+        const shortId = String(mid.split("/").pop() || mid).trim().toLowerCase();
+        if (shortId) approvedModels.add(shortId);
+      }
+      const provider = String(m?.group || bench?.group || inferProviderForModel(mid)).trim() || inferProviderForModel(mid);
+      seen.add(mid.toLowerCase());
+      const tcTag = tcOk ? " · TC ✓" : "";
+      const scoreTxt = typeof m?.score === "number" ? ` · score ${m.score.toFixed(1)}` : "";
+      extras.push({
+        provider,
+        model: mid,
+        label: `${mid}${tcTag}${scoreTxt}`,
+        group: "nexusmind",
+      });
+      if (extras.length >= 8) break;
+    }
   }
-  return extras;
+
+  return { extras, approvedModels };
 }
 
 const SURFACE_BG = "var(--affordance-subtle, rgba(255, 255, 255, 0.035))";
@@ -177,6 +239,7 @@ export function createAgentOrgfyTabComponent(ctx: Context) {
     const [busyAction, setBusyAction] = React.useState<string | null>(null);
     const [statusBanner, setStatusBanner] = React.useState<{ ok: boolean; text: string } | null>(null);
     const [extraModels, setExtraModels] = React.useState<AgentModelOption[]>([]);
+    const [gatewayApprovedModels, setGatewayApprovedModels] = React.useState<Set<string>>(() => new Set());
 
     const agentName = String(agent?.name || agent?.key || "Agente");
     const agentKey = String(agent?.key || "");
@@ -186,7 +249,10 @@ export function createAgentOrgfyTabComponent(ctx: Context) {
     const currentProvider = String(agentCfg.provider || agent?.provider || "padrão");
     const currentHarness = String(agentCfg.harness || agent?.harness || agent?.type || "goose");
     const shortModel = String(currentModel.split("/").pop() || currentModel).trim();
-    const isCompliantR51 = EVAL_R51_WINNERS.has(shortModel);
+    const isCompliantR51 =
+      EVAL_R51_WINNERS.has(shortModel) ||
+      gatewayApprovedModels.has(currentModel.toLowerCase()) ||
+      gatewayApprovedModels.has(shortModel.toLowerCase());
     const recommended = recommendedModelForAgent(agentName);
 
     const modelOptions = React.useMemo<AgentModelOption[]>(() => {
@@ -211,9 +277,11 @@ export function createAgentOrgfyTabComponent(ctx: Context) {
 
     React.useEffect(() => {
       let cancelled = false;
-      loadExtraNexusMindModels(ctx)
-        .then((extras) => {
-          if (!cancelled && extras.length > 0) setExtraModels(extras);
+      loadGatewayEvalAndRanking(ctx)
+        .then(({ extras, approvedModels }) => {
+          if (cancelled) return;
+          if (extras.length > 0) setExtraModels(extras);
+          if (approvedModels.size > 0) setGatewayApprovedModels(approvedModels);
         })
         .catch(() => {});
       return () => {

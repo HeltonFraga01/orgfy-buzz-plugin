@@ -7125,10 +7125,50 @@ function decodeTextBytes(raw) {
   }
   return String(raw ?? "");
 }
-async function loadExtraNexusMindModels(ctx) {
-  var _a, _b;
-  let parsed = null;
+async function loadGatewayEvalAndRanking(ctx) {
+  var _a, _b, _c, _d;
   const host = ctx == null ? void 0 : ctx.host;
+  const approvedModels = /* @__PURE__ */ new Set();
+  const benchByModel = /* @__PURE__ */ new Map();
+  let benchParsed = null;
+  if (typeof (host == null ? void 0 : host.readFile) === "function") {
+    for (const p of ["~/.buzz/.scratch/nexusmind-quality-bench.json", "/Users/heltonfraga/.buzz/.scratch/nexusmind-quality-bench.json"]) {
+      try {
+        const raw = await host.readFile(p);
+        if (!raw) continue;
+        const obj = JSON.parse(decodeTextBytes(raw));
+        if (obj && typeof obj === "object") {
+          benchParsed = obj.results && typeof obj.results === "object" ? obj.results : obj;
+          break;
+        }
+      } catch {
+      }
+    }
+  }
+  if (!benchParsed) {
+    try {
+      const raw = (_b = (_a = globalThis == null ? void 0 : globalThis.localStorage) == null ? void 0 : _a.getItem) == null ? void 0 : _b.call(_a, "nexusmind_quality_bench_v1");
+      if (raw) benchParsed = JSON.parse(raw);
+    } catch {
+    }
+  }
+  if (benchParsed && typeof benchParsed === "object") {
+    for (const [mid, rec] of Object.entries(benchParsed)) {
+      if (!rec || typeof rec !== "object") continue;
+      benchByModel.set(mid.toLowerCase(), {
+        toolCallOk: Boolean(rec.toolCallOk),
+        online: Boolean(rec.online),
+        qualityScore: typeof rec.qualityScore === "number" ? rec.qualityScore : void 0,
+        group: typeof rec.group === "string" ? rec.group : void 0
+      });
+      if (rec.online && rec.toolCallOk) {
+        approvedModels.add(mid.toLowerCase());
+        const shortId = String(mid.split("/").pop() || mid).trim().toLowerCase();
+        if (shortId) approvedModels.add(shortId);
+      }
+    }
+  }
+  let parsed = null;
   if (typeof (host == null ? void 0 : host.readFile) === "function") {
     for (const p of ["~/.buzz/.scratch/nexusmind-model-ranking.json", "/Users/heltonfraga/.buzz/.scratch/nexusmind-model-ranking.json"]) {
       try {
@@ -7145,29 +7185,45 @@ async function loadExtraNexusMindModels(ctx) {
   }
   if (!parsed) {
     try {
-      const raw = (_b = (_a = globalThis == null ? void 0 : globalThis.localStorage) == null ? void 0 : _a.getItem) == null ? void 0 : _b.call(_a, "nexusmind_model_ranking");
+      const raw = (_d = (_c = globalThis == null ? void 0 : globalThis.localStorage) == null ? void 0 : _c.getItem) == null ? void 0 : _d.call(_c, "nexusmind_model_ranking");
       if (raw) parsed = JSON.parse(raw);
     } catch {
     }
   }
-  if (!parsed || !Array.isArray(parsed.models)) return [];
   const seen = new Set(AGENT_MODEL_PRESETS.map((o) => o.model.toLowerCase()));
   const extras = [];
-  for (const m of parsed.models) {
-    const mid = String((m == null ? void 0 : m.model) || "").trim();
-    if (!mid || seen.has(mid.toLowerCase()) || (m == null ? void 0 : m.isDisabled) || (m == null ? void 0 : m.online) === false) continue;
-    const provider = String((m == null ? void 0 : m.group) || inferProviderForModel(mid)).trim() || inferProviderForModel(mid);
-    seen.add(mid.toLowerCase());
-    const scoreTxt = typeof (m == null ? void 0 : m.score) === "number" ? ` · score ${m.score.toFixed(1)}` : "";
-    extras.push({
-      provider,
-      model: mid,
-      label: `${mid}${scoreTxt}`,
-      group: "nexusmind"
+  if (parsed && Array.isArray(parsed.models)) {
+    const sorted = [...parsed.models].sort((a, b) => {
+      var _a2, _b2;
+      const aTc = (a == null ? void 0 : a.toolCallOk) === true || ((_a2 = benchByModel.get(String((a == null ? void 0 : a.model) || "").toLowerCase())) == null ? void 0 : _a2.toolCallOk) === true;
+      const bTc = (b == null ? void 0 : b.toolCallOk) === true || ((_b2 = benchByModel.get(String((b == null ? void 0 : b.model) || "").toLowerCase())) == null ? void 0 : _b2.toolCallOk) === true;
+      if (aTc !== bTc) return aTc ? -1 : 1;
+      return Number((b == null ? void 0 : b.score) || 0) - Number((a == null ? void 0 : a.score) || 0);
     });
-    if (extras.length >= 6) break;
+    for (const m of sorted) {
+      const mid = String((m == null ? void 0 : m.model) || "").trim();
+      if (!mid || seen.has(mid.toLowerCase()) || (m == null ? void 0 : m.isDisabled) || (m == null ? void 0 : m.online) === false) continue;
+      const bench = benchByModel.get(mid.toLowerCase());
+      const tcOk = (m == null ? void 0 : m.toolCallOk) === true || (bench == null ? void 0 : bench.toolCallOk) === true;
+      if (tcOk && (m == null ? void 0 : m.online) !== false) {
+        approvedModels.add(mid.toLowerCase());
+        const shortId = String(mid.split("/").pop() || mid).trim().toLowerCase();
+        if (shortId) approvedModels.add(shortId);
+      }
+      const provider = String((m == null ? void 0 : m.group) || (bench == null ? void 0 : bench.group) || inferProviderForModel(mid)).trim() || inferProviderForModel(mid);
+      seen.add(mid.toLowerCase());
+      const tcTag = tcOk ? " · TC ✓" : "";
+      const scoreTxt = typeof (m == null ? void 0 : m.score) === "number" ? ` · score ${m.score.toFixed(1)}` : "";
+      extras.push({
+        provider,
+        model: mid,
+        label: `${mid}${tcTag}${scoreTxt}`,
+        group: "nexusmind"
+      });
+      if (extras.length >= 8) break;
+    }
   }
-  return extras;
+  return { extras, approvedModels };
 }
 const SURFACE_BG = "var(--affordance-subtle, rgba(255, 255, 255, 0.035))";
 const CARD_BG$1 = "var(--bg-panel, rgba(255, 255, 255, 0.03))";
@@ -7208,6 +7264,7 @@ function createAgentOrgfyTabComponent(ctx) {
     const [busyAction, setBusyAction] = React.useState(null);
     const [statusBanner, setStatusBanner] = React.useState(null);
     const [extraModels, setExtraModels] = React.useState([]);
+    const [gatewayApprovedModels, setGatewayApprovedModels] = React.useState(() => /* @__PURE__ */ new Set());
     const agentName = String((agent == null ? void 0 : agent.name) || (agent == null ? void 0 : agent.key) || "Agente");
     const agentKey = String((agent == null ? void 0 : agent.key) || "");
     const agentPubkey = String((agent == null ? void 0 : agent.pubkey) || "").toLowerCase();
@@ -7216,7 +7273,7 @@ function createAgentOrgfyTabComponent(ctx) {
     const currentProvider = String(agentCfg.provider || (agent == null ? void 0 : agent.provider) || "padrão");
     const currentHarness = String(agentCfg.harness || (agent == null ? void 0 : agent.harness) || (agent == null ? void 0 : agent.type) || "goose");
     const shortModel = String(currentModel.split("/").pop() || currentModel).trim();
-    const isCompliantR51 = EVAL_R51_WINNERS.has(shortModel);
+    const isCompliantR51 = EVAL_R51_WINNERS.has(shortModel) || gatewayApprovedModels.has(currentModel.toLowerCase()) || gatewayApprovedModels.has(shortModel.toLowerCase());
     const recommended = recommendedModelForAgent(agentName);
     const modelOptions = React.useMemo(() => {
       return [...AGENT_MODEL_PRESETS, ...extraModels];
@@ -7234,8 +7291,10 @@ function createAgentOrgfyTabComponent(ctx) {
     }, [agentKey, currentModel, currentProvider, resolveDefaultModelKey]);
     React.useEffect(() => {
       let cancelled = false;
-      loadExtraNexusMindModels(ctx).then((extras) => {
-        if (!cancelled && extras.length > 0) setExtraModels(extras);
+      loadGatewayEvalAndRanking(ctx).then(({ extras, approvedModels }) => {
+        if (cancelled) return;
+        if (extras.length > 0) setExtraModels(extras);
+        if (approvedModels.size > 0) setGatewayApprovedModels(approvedModels);
       }).catch(() => {
       });
       return () => {
