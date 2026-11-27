@@ -7074,6 +7074,101 @@ async function readBuzzChannelCanvasHistory(ctx, channelId) {
   }
 }
 const EVAL_R51_WINNERS = /* @__PURE__ */ new Set(["claude-sonnet-5-5", "claude-sonnet-4-6", "gemini-2.5-flash"]);
+const AGENT_MODEL_PRESETS = [
+  {
+    provider: "nexusmind_anthropic",
+    model: "claude-sonnet-4-6",
+    label: "claude-sonnet-4-6 · Eval R5.1 (Qualidade)",
+    group: "curated"
+  },
+  {
+    provider: "nexusmind_anthropic",
+    model: "claude-sonnet-5-5",
+    label: "claude-sonnet-5-5 · Eval R5.1 (Liderança)",
+    group: "curated"
+  },
+  {
+    provider: "nexusmind_antigravity",
+    model: "gemini-2.5-flash",
+    label: "gemini-2.5-flash · Eval R5.1 (Rápido)",
+    group: "curated"
+  },
+  {
+    provider: "nexusmind_antigravity",
+    model: "claude-opus-4-6-thinking",
+    label: "claude-opus-4-6-thinking · Thinking (Complexo)",
+    group: "curated"
+  },
+  {
+    provider: "nexusmind_grok",
+    model: "grok-4.1-fast",
+    label: "grok-4.1-fast · Alternativo (Rápido)",
+    group: "curated"
+  }
+];
+function modelOptionKey(provider, model) {
+  return `${provider}::${model}`;
+}
+function inferProviderForModel(modelId) {
+  const m = String(modelId || "").toLowerCase();
+  if (m.includes("grok")) return "nexusmind_grok";
+  if (m.includes("gemini") || m.includes("antigravity") || m.includes("thinking")) return "nexusmind_antigravity";
+  if (m.includes("claude")) return "nexusmind_anthropic";
+  return "nexusmind_openai";
+}
+function decodeTextBytes(raw) {
+  if (typeof raw === "string") return raw;
+  if (raw instanceof Uint8Array) return new TextDecoder("utf-8").decode(raw);
+  if (raw instanceof ArrayBuffer) return new TextDecoder("utf-8").decode(new Uint8Array(raw));
+  if (ArrayBuffer.isView(raw)) {
+    return new TextDecoder("utf-8").decode(new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength));
+  }
+  return String(raw ?? "");
+}
+async function loadExtraNexusMindModels(ctx) {
+  var _a, _b;
+  let parsed = null;
+  const host = ctx == null ? void 0 : ctx.host;
+  if (typeof (host == null ? void 0 : host.readFile) === "function") {
+    for (const p of ["~/.buzz/.scratch/nexusmind-model-ranking.json", "/Users/heltonfraga/.buzz/.scratch/nexusmind-model-ranking.json"]) {
+      try {
+        const raw = await host.readFile(p);
+        if (!raw) continue;
+        const obj = JSON.parse(decodeTextBytes(raw));
+        if (obj && Array.isArray(obj.models) && obj.models.length > 0) {
+          parsed = obj;
+          break;
+        }
+      } catch {
+      }
+    }
+  }
+  if (!parsed) {
+    try {
+      const raw = (_b = (_a = globalThis == null ? void 0 : globalThis.localStorage) == null ? void 0 : _a.getItem) == null ? void 0 : _b.call(_a, "nexusmind_model_ranking");
+      if (raw) parsed = JSON.parse(raw);
+    } catch {
+    }
+  }
+  if (!parsed || !Array.isArray(parsed.models)) return [];
+  const seen = new Set(AGENT_MODEL_PRESETS.map((o) => o.model.toLowerCase()));
+  const extras = [];
+  for (const m of parsed.models) {
+    const mid = String((m == null ? void 0 : m.model) || "").trim();
+    if (!mid || seen.has(mid.toLowerCase()) || (m == null ? void 0 : m.isDisabled) || (m == null ? void 0 : m.online) === false) continue;
+    const provider = String((m == null ? void 0 : m.group) || inferProviderForModel(mid)).trim() || inferProviderForModel(mid);
+    seen.add(mid.toLowerCase());
+    const scoreTxt = typeof (m == null ? void 0 : m.score) === "number" ? ` · score ${m.score.toFixed(1)}` : "";
+    extras.push({
+      provider,
+      model: mid,
+      label: `${mid}${scoreTxt}`,
+      group: "nexusmind"
+    });
+    if (extras.length >= 6) break;
+  }
+  return extras;
+}
 const SURFACE_BG = "var(--affordance-subtle, rgba(255, 255, 255, 0.035))";
 const CARD_BG$1 = "var(--bg-panel, rgba(255, 255, 255, 0.03))";
 const BORDER$1 = "1px solid var(--border-primary, rgba(255, 255, 255, 0.09))";
@@ -7092,7 +7187,7 @@ function recommendedModelForAgent(name) {
   if (isTier1) {
     return { provider: "nexusmind_anthropic", model: "claude-sonnet-5-5", tierLabel: "Tier 1 (Liderança/Revisão)" };
   }
-  return { provider: "nexusmind_antigravity", model: "gemini-2.5-flash", tierLabel: "Tier 2 (Execução rápida)" };
+  return { provider: "nexusmind_anthropic", model: "claude-sonnet-4-6", tierLabel: "Tier 2 (Qualidade/Execução)" };
 }
 function createAgentOrgfyTabComponent(ctx) {
   const React = ctx == null ? void 0 : ctx.react;
@@ -7112,6 +7207,7 @@ function createAgentOrgfyTabComponent(ctx) {
     const [loading, setLoading] = React.useState(true);
     const [busyAction, setBusyAction] = React.useState(null);
     const [statusBanner, setStatusBanner] = React.useState(null);
+    const [extraModels, setExtraModels] = React.useState([]);
     const agentName = String((agent == null ? void 0 : agent.name) || (agent == null ? void 0 : agent.key) || "Agente");
     const agentKey = String((agent == null ? void 0 : agent.key) || "");
     const agentPubkey = String((agent == null ? void 0 : agent.pubkey) || "").toLowerCase();
@@ -7122,6 +7218,30 @@ function createAgentOrgfyTabComponent(ctx) {
     const shortModel = String(currentModel.split("/").pop() || currentModel).trim();
     const isCompliantR51 = EVAL_R51_WINNERS.has(shortModel);
     const recommended = recommendedModelForAgent(agentName);
+    const modelOptions = React.useMemo(() => {
+      return [...AGENT_MODEL_PRESETS, ...extraModels];
+    }, [extraModels]);
+    const resolveDefaultModelKey = React.useCallback(() => {
+      const exactMatch = modelOptions.find(
+        (o) => o.model.toLowerCase() === currentModel.toLowerCase() || o.model.toLowerCase() === shortModel.toLowerCase()
+      );
+      if (exactMatch) return modelOptionKey(exactMatch.provider, exactMatch.model);
+      return modelOptionKey(recommended.provider, recommended.model);
+    }, [modelOptions, currentModel, shortModel, recommended.provider, recommended.model]);
+    const [selectedModelKey, setSelectedModelKey] = React.useState(() => resolveDefaultModelKey());
+    React.useEffect(() => {
+      setSelectedModelKey(resolveDefaultModelKey());
+    }, [agentKey, currentModel, currentProvider, resolveDefaultModelKey]);
+    React.useEffect(() => {
+      let cancelled = false;
+      loadExtraNexusMindModels(ctx).then((extras) => {
+        if (!cancelled && extras.length > 0) setExtraModels(extras);
+      }).catch(() => {
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, []);
     React.useEffect(() => {
       var _a, _b, _c;
       const session = (_c = (_b = (_a = ctx == null ? void 0 : ctx.relay) == null ? void 0 : _a.snapshot) == null ? void 0 : _b.call(_a)) == null ? void 0 : _c.session;
@@ -7192,7 +7312,16 @@ function createAgentOrgfyTabComponent(ctx) {
       const unsub = subscribeTelemetry(() => setTelemetry(getTelemetrySnapshot()));
       return () => unsub();
     }, [loadAgentContext]);
-    const handleApplyEvalR51 = async () => {
+    const selectedModelOption = React.useMemo(() => {
+      return modelOptions.find((o) => modelOptionKey(o.provider, o.model) === selectedModelKey) || {
+        provider: recommended.provider,
+        model: recommended.model,
+        label: `${recommended.model} (${recommended.tierLabel})`,
+        group: "curated"
+      };
+    }, [modelOptions, selectedModelKey, recommended.provider, recommended.model, recommended.tierLabel]);
+    const isSelectedAlreadyActive = selectedModelOption.model.toLowerCase() === currentModel.toLowerCase() && selectedModelOption.provider.toLowerCase() === currentProvider.toLowerCase();
+    const handleApplySelectedModel = async () => {
       var _a, _b;
       const agentsApi = ctx == null ? void 0 : ctx.agents;
       if (!agentKey || typeof (agentsApi == null ? void 0 : agentsApi.save) !== "function") {
@@ -7206,11 +7335,11 @@ function createAgentOrgfyTabComponent(ctx) {
         const freshAgent = freshList.find((x) => (x == null ? void 0 : x.key) === agentKey) || agent;
         const baseCfg = (freshAgent == null ? void 0 : freshAgent.config) && typeof freshAgent.config === "object" ? freshAgent.config : agentCfg;
         await agentsApi.save(agentKey, {
-          config: { ...baseCfg, provider: recommended.provider, model: recommended.model }
+          config: { ...baseCfg, provider: selectedModelOption.provider, model: selectedModelOption.model }
         });
         setStatusBanner({
           ok: true,
-          text: `Modelo atualizado via ctx.agents.save(): ${recommended.provider}/${recommended.model} (${recommended.tierLabel}).`
+          text: `Modelo atualizado via ctx.agents.save(): ${selectedModelOption.provider}/${selectedModelOption.model}.`
         });
         await loadAgentContext();
       } catch (err) {
@@ -7420,26 +7549,88 @@ function createAgentOrgfyTabComponent(ctx) {
             "Parar"
           )
         ),
-        // Barra de ações nativas (Eval R5.1, Sessão, Factory, Repos)
+        // Seletor rápido de modelo (Eval R5.1 + NexusMind Ranking)
         h(
           "div",
-          { style: { display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" } },
-          !isCompliantR51 && h(
+          {
+            style: {
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+              flexWrap: "wrap"
+            }
+          },
+          h(
+            "select",
+            {
+              "data-agent-model-select": "true",
+              "aria-label": "Escolher modelo do agente",
+              value: selectedModelKey,
+              disabled: busyAction === "eval",
+              onChange: (e) => {
+                var _a;
+                return setSelectedModelKey(String(((_a = e == null ? void 0 : e.target) == null ? void 0 : _a.value) || ""));
+              },
+              style: {
+                padding: "5px 8px",
+                borderRadius: "7px",
+                border: BORDER$1,
+                backgroundColor: SURFACE_BG,
+                color: TEXT_PRIMARY,
+                fontSize: "11px",
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                flex: "1 1 220px",
+                minWidth: "180px",
+                maxWidth: "100%",
+                cursor: "pointer"
+              }
+            },
+            h(
+              "optgroup",
+              { label: "Modelos Validados (OrgFy)" },
+              AGENT_MODEL_PRESETS.map(
+                (opt) => h(
+                  "option",
+                  { key: modelOptionKey(opt.provider, opt.model), value: modelOptionKey(opt.provider, opt.model) },
+                  opt.label
+                )
+              )
+            ),
+            extraModels.length > 0 && h(
+              "optgroup",
+              { label: "NexusMind Ranking" },
+              extraModels.map(
+                (opt) => h(
+                  "option",
+                  { key: modelOptionKey(opt.provider, opt.model), value: modelOptionKey(opt.provider, opt.model) },
+                  opt.label
+                )
+              )
+            )
+          ),
+          h(
             "button",
             {
               type: "button",
-              disabled: busyAction === "eval",
-              onClick: handleApplyEvalR51,
+              disabled: busyAction === "eval" || isSelectedAlreadyActive,
+              onClick: handleApplySelectedModel,
               "data-apply-eval-r51": "true",
               style: {
                 ...btnBase,
-                borderColor: "rgba(96, 165, 250, 0.45)",
-                backgroundColor: "rgba(96, 165, 250, 0.14)",
-                color: BLUE
+                borderColor: isSelectedAlreadyActive ? BORDER$1 : "rgba(96, 165, 250, 0.45)",
+                backgroundColor: isSelectedAlreadyActive ? SURFACE_BG : "rgba(96, 165, 250, 0.14)",
+                color: isSelectedAlreadyActive ? TEXT_MUTED : BLUE,
+                opacity: isSelectedAlreadyActive ? 0.65 : 1,
+                cursor: isSelectedAlreadyActive ? "default" : "pointer"
               }
             },
-            busyAction === "eval" ? "Salvando..." : `Aplicar ${recommended.model}`
-          ),
+            busyAction === "eval" ? "Salvando..." : isSelectedAlreadyActive ? "Modelo ativo" : "Aplicar modelo"
+          )
+        ),
+        // Barra de ações nativas (Sessão, Factory, Repos)
+        h(
+          "div",
+          { style: { display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" } },
           h(
             "button",
             { type: "button", disabled: busyAction === "compact", onClick: () => handleSessionAction("compact"), style: btnBase },
