@@ -869,15 +869,56 @@ export async function executeSmartModelFailover(
       ? String((matchedAgent.config as any).provider || "")
       : "") || (previousModel ? inferProviderId(previousModel) : null);
 
-  // Proteção do Roteador Local: agentes em nexusmind_router / tier/* já fazem failover in-flight na porta 4199;
-  // nunca sobrescrever de volta para um provedor estático.
+  // Proteção do Roteador Local + Auto-Cura / Auto-Resume:
+  // Agentes em nexusmind_router / tier/* já fazem failover in-flight na porta 4199;
+  // nunca sobrescrever de volta para um provedor estático — mas se o turno caiu no meio
+  // (ex.: erro de stream/rede/timeout), o watchdog DEVE interromper e acordar o agente
+  // na mesma thread para continuar o trabalho automaticamente!
   if (
     String(previousProvider || "").toLowerCase() === "nexusmind_router" ||
     String(previousModel || "").toLowerCase().startsWith("tier/")
   ) {
+    let retriggeredOnRouter = false;
+    let resumeNote = "";
+    if (applyChange && retrigger && matchedAgent && typeof agentsApi?.wake === "function") {
+      try {
+        const channel = String(input.channel_id || DEFAULT_ORGFY_CHANNEL).trim() || DEFAULT_ORGFY_CHANNEL;
+        const root = input.thread_root ? String(input.thread_root).trim() : undefined;
+        if (typeof agentsApi?.session === "function") {
+          try {
+            const place = root ? { channelId: channel, root } : { channelId: channel };
+            await agentsApi.session(matchedAgent.key, place, "interrupt");
+          } catch {
+            // Sessão pode já estar ociosa
+          }
+        }
+        const runningList: any[] = Array.isArray(agentsApi?.snapshot?.()?.running) ? agentsApi.snapshot().running : [];
+        const alreadyRunningElsewhere = runningList.some(
+          (r: any) =>
+            r?.key === matchedAgent.key &&
+            r?.place?.channelId === channel &&
+            (!root || (r?.place?.root && r.place.root !== root))
+        );
+        if (alreadyRunningElsewhere) {
+          resumeNote = " Sessão paralela já ativa no canal; retomada suprimida para evitar duplicidade.";
+        } else {
+          await agentsApi.wake(matchedAgent.key, {
+            channel,
+            ...(root ? { root } : {}),
+            text:
+              input.retrigger_text ||
+              `[ORGFY AUTO-CURA · RETOMADA AUTOMÁTICA] Seu turno anterior em '${previousModel}' foi interrompido por erro transitório de rede/stream no roteador local. Retome imediatamente do ponto exato onde parou nesta thread sem refazer etapas já concluídas.`,
+          });
+          retriggeredOnRouter = true;
+          resumeNote = " Agente re-disparado automaticamente na thread para continuar o trabalho.";
+        }
+      } catch (wErr: any) {
+        resumeNote = ` (Aviso: falha ao acordar agente: ${wErr?.message || wErr})`;
+      }
+    }
     return {
       ok: true,
-      mode: "delegated",
+      mode: retriggeredOnRouter ? "applied" : "delegated",
       agentName: matchedAgent?.name || input.agente || null,
       agentKey: matchedAgent?.key || null,
       previousModel,
@@ -885,10 +926,10 @@ export async function executeSmartModelFailover(
       selectedProvider: "nexusmind_router",
       selectedLatencyMs: null,
       selectedIntelligenceScore: 98,
-      retriggered: false,
+      retriggered: retriggeredOnRouter,
       candidatesTested: 0,
       ranking: [],
-      message: `${resolvedAgentLabel || "Agente"} protegido em nexusmind_router/${previousModel} (failover in-flight ativo em 127.0.0.1:4199).`,
+      message: `${resolvedAgentLabel || "Agente"} mantido em nexusmind_router/${previousModel} (failover in-flight ativo em 127.0.0.1:4199).${resumeNote}`,
     };
   }
 

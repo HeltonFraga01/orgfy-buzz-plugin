@@ -1683,6 +1683,13 @@ export function isRateLimitOrProviderError(text: string): boolean {
     "upstream_malformed_function_call",
     "overloaded_error",
     "model is overloaded",
+    "stream decode error",
+    "failed to parse streaming chunk",
+    "eof while parsing",
+    "network error",
+    "connection reset",
+    "broken pipe",
+    "timed out",
   ].some((marker) => low.includes(marker));
 }
 

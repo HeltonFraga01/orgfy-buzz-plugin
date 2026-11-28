@@ -3998,7 +3998,7 @@ function findAgentInSnapshot(agentsApi, query, pubkey) {
   return pkLower && pool.find((a) => String(a.pubkey || "").toLowerCase() === pkLower) || qLower && pool.find((a) => String(a.key || "").toLowerCase() === qLower) || qLower && pool.find((a) => String(a.name || "").toLowerCase() === qLower) || (qLower ? pool.find((a) => String(a.name || "").toLowerCase().includes(qLower)) : void 0);
 }
 async function executeSmartModelFailover(ctx, input = {}) {
-  var _a, _b, _c, _d, _e, _f;
+  var _a, _b, _c, _d, _e, _f, _g, _h;
   const applyChange = Boolean(input.apply);
   const retrigger = input.retrigger !== false;
   const maxProbes = Math.max(1, Math.min(10, Number(input.max_probes || 6)));
@@ -4012,9 +4012,44 @@ async function executeSmartModelFailover(ctx, input = {}) {
   const previousModel = ((matchedAgent == null ? void 0 : matchedAgent.config) && typeof matchedAgent.config === "object" ? String(matchedAgent.config.model || "") : "") || (input.failed_model || null);
   const previousProvider = ((matchedAgent == null ? void 0 : matchedAgent.config) && typeof matchedAgent.config === "object" ? String(matchedAgent.config.provider || "") : "") || (previousModel ? inferProviderId(previousModel) : null);
   if (String(previousProvider || "").toLowerCase() === "nexusmind_router" || String(previousModel || "").toLowerCase().startsWith("tier/")) {
+    let retriggeredOnRouter = false;
+    let resumeNote = "";
+    if (applyChange && retrigger && matchedAgent && typeof (agentsApi == null ? void 0 : agentsApi.wake) === "function") {
+      try {
+        const channel = String(input.channel_id || DEFAULT_ORGFY_CHANNEL$2).trim() || DEFAULT_ORGFY_CHANNEL$2;
+        const root = input.thread_root ? String(input.thread_root).trim() : void 0;
+        if (typeof (agentsApi == null ? void 0 : agentsApi.session) === "function") {
+          try {
+            const place = root ? { channelId: channel, root } : { channelId: channel };
+            await agentsApi.session(matchedAgent.key, place, "interrupt");
+          } catch {
+          }
+        }
+        const runningList = Array.isArray((_b = (_a = agentsApi == null ? void 0 : agentsApi.snapshot) == null ? void 0 : _a.call(agentsApi)) == null ? void 0 : _b.running) ? agentsApi.snapshot().running : [];
+        const alreadyRunningElsewhere = runningList.some(
+          (r) => {
+            var _a2, _b2;
+            return (r == null ? void 0 : r.key) === matchedAgent.key && ((_a2 = r == null ? void 0 : r.place) == null ? void 0 : _a2.channelId) === channel && (!root || ((_b2 = r == null ? void 0 : r.place) == null ? void 0 : _b2.root) && r.place.root !== root);
+          }
+        );
+        if (alreadyRunningElsewhere) {
+          resumeNote = " Sessão paralela já ativa no canal; retomada suprimida para evitar duplicidade.";
+        } else {
+          await agentsApi.wake(matchedAgent.key, {
+            channel,
+            ...root ? { root } : {},
+            text: input.retrigger_text || `[ORGFY AUTO-CURA · RETOMADA AUTOMÁTICA] Seu turno anterior em '${previousModel}' foi interrompido por erro transitório de rede/stream no roteador local. Retome imediatamente do ponto exato onde parou nesta thread sem refazer etapas já concluídas.`
+          });
+          retriggeredOnRouter = true;
+          resumeNote = " Agente re-disparado automaticamente na thread para continuar o trabalho.";
+        }
+      } catch (wErr) {
+        resumeNote = ` (Aviso: falha ao acordar agente: ${(wErr == null ? void 0 : wErr.message) || wErr})`;
+      }
+    }
     return {
       ok: true,
-      mode: "delegated",
+      mode: retriggeredOnRouter ? "applied" : "delegated",
       agentName: (matchedAgent == null ? void 0 : matchedAgent.name) || input.agente || null,
       agentKey: (matchedAgent == null ? void 0 : matchedAgent.key) || null,
       previousModel,
@@ -4022,10 +4057,10 @@ async function executeSmartModelFailover(ctx, input = {}) {
       selectedProvider: "nexusmind_router",
       selectedLatencyMs: null,
       selectedIntelligenceScore: 98,
-      retriggered: false,
+      retriggered: retriggeredOnRouter,
       candidatesTested: 0,
       ranking: [],
-      message: `${resolvedAgentLabel || "Agente"} protegido em nexusmind_router/${previousModel} (failover in-flight ativo em 127.0.0.1:4199).`
+      message: `${resolvedAgentLabel || "Agente"} mantido em nexusmind_router/${previousModel} (failover in-flight ativo em 127.0.0.1:4199).${resumeNote}`
     };
   }
   const hostForRetry = ctx == null ? void 0 : ctx.host;
@@ -4220,7 +4255,7 @@ async function executeSmartModelFailover(ctx, input = {}) {
   const finalRanking = verifiedShared.some((v2) => v2.online) ? verifiedShared : probed.some((p) => p.online) ? probed : verifiedShared.length > 0 ? verifiedShared : sharedRanking.length > 0 ? sharedRanking : probed;
   const onlineCandidates = finalRanking.filter((p) => p.online);
   let winner = onlineCandidates[0] || null;
-  if (winner && onlineCandidates.length >= 2 && typeof ((_a = ctx == null ? void 0 : ctx.decisions) == null ? void 0 : _a.decide) === "function") {
+  if (winner && onlineCandidates.length >= 2 && typeof ((_c = ctx == null ? void 0 : ctx.decisions) == null ? void 0 : _c.decide) === "function") {
     try {
       const top3 = onlineCandidates.slice(0, 3);
       const dec = await ctx.decisions.decide({
@@ -4282,7 +4317,7 @@ async function executeSmartModelFailover(ctx, input = {}) {
       ts: Date.now()
     };
     try {
-      (_c = (_b = ctx == null ? void 0 : ctx.host) == null ? void 0 : _b.emit) == null ? void 0 : _c.call(_b, ORGFY_FAILOVER_REQUEST_EVENT, failoverPayload);
+      (_e = (_d = ctx == null ? void 0 : ctx.host) == null ? void 0 : _d.emit) == null ? void 0 : _e.call(_d, ORGFY_FAILOVER_REQUEST_EVENT, failoverPayload);
       if (typeof (globalThis == null ? void 0 : globalThis.dispatchEvent) === "function" && typeof (globalThis == null ? void 0 : globalThis.CustomEvent) === "function") {
         globalThis.dispatchEvent(new globalThis.CustomEvent(ORGFY_FAILOVER_REQUEST_EVENT, { detail: failoverPayload }));
       }
@@ -4290,7 +4325,7 @@ async function executeSmartModelFailover(ctx, input = {}) {
     }
     let nexusDelegator = null;
     try {
-      nexusDelegator = ((_d = ctx == null ? void 0 : ctx.nexusmind) == null ? void 0 : _d.applyBestModel) ?? null;
+      nexusDelegator = ((_f = ctx == null ? void 0 : ctx.nexusmind) == null ? void 0 : _f.applyBestModel) ?? null;
     } catch {
       nexusDelegator = null;
     }
@@ -4374,7 +4409,7 @@ async function executeSmartModelFailover(ctx, input = {}) {
           } catch {
           }
         }
-        const runningList = Array.isArray((_f = (_e = agentsApi == null ? void 0 : agentsApi.snapshot) == null ? void 0 : _e.call(agentsApi)) == null ? void 0 : _f.running) ? agentsApi.snapshot().running : [];
+        const runningList = Array.isArray((_h = (_g = agentsApi == null ? void 0 : agentsApi.snapshot) == null ? void 0 : _g.call(agentsApi)) == null ? void 0 : _h.running) ? agentsApi.snapshot().running : [];
         const alreadyRunningElsewhere = runningList.some(
           (r) => {
             var _a2, _b2;
@@ -6876,7 +6911,14 @@ function isRateLimitOrProviderError(text) {
     "upstream request failed",
     "upstream_malformed_function_call",
     "overloaded_error",
-    "model is overloaded"
+    "model is overloaded",
+    "stream decode error",
+    "failed to parse streaming chunk",
+    "eof while parsing",
+    "network error",
+    "connection reset",
+    "broken pipe",
+    "timed out"
   ].some((marker) => low.includes(marker));
 }
 function normalizeAgentAlias(raw) {

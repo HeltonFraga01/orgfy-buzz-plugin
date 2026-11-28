@@ -299,6 +299,13 @@ def main() -> int:
                 "upstream_malformed_function_call",
                 "overloaded_error",
                 "model is overloaded",
+                "network error",
+                "stream decode error",
+                "failed to parse streaming chunk",
+                "eof while parsing",
+                "connection reset",
+                "broken pipe",
+                "timed out",
             )
 
             for idx, (role, ts, cj) in enumerate(msgs):
@@ -329,7 +336,7 @@ def main() -> int:
                                 err_low = err_msg.lower()
                                 if has_provider_err_marker or any(
                                     k in err_low
-                                    for k in ("server error", "request failed", "provider", "upstream", "rate limit", "unavailable", "404", "429", "502", "503", "504")
+                                    for k in ("server error", "request failed", "provider", "upstream", "rate limit", "unavailable", "network error", "stream decode", "timed out", "connection reset", "eof while parsing", "404", "429", "502", "503", "504")
                                 ):
                                     is_real_provider_err = True
                                     last_provider_error_text = err_msg[:180]
