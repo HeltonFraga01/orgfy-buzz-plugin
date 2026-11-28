@@ -1026,7 +1026,38 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                                 )
                               )
                           ),
-                          h("td", { className: "of-mono", style: { fontSize: "11.5px" } }, a.model),
+                          h(
+                            "td",
+                            { className: "of-mono", style: { fontSize: "11.5px" } },
+                            (() => {
+                              const rawM = String(a.model || "");
+                              if (!rawM.startsWith("tier/")) return rawM;
+                              const tierToGroup: Record<string, string> = {
+                                "tier/vip-iris": "group/vip-iris",
+                                "tier/diretoria": "group/vip-leadership",
+                                "tier/frontier": "group/frontier",
+                                "tier/reasoning": "group/reasoning",
+                                "tier/code": "group/code",
+                                "tier/fast": "group/fast",
+                              };
+                              const grpKey = tierToGroup[rawM.toLowerCase()];
+                              const ladder = grpKey ? status.modelControlPlane?.tierFallbackGroups?.[grpKey] : undefined;
+                              const activeModel = Array.isArray(ladder) && ladder.length > 0 ? ladder[0]?.model : null;
+                              const fullLadder = Array.isArray(ladder) && ladder.length > 0
+                                ? ladder.map((item, idx) => `#${idx + 1} ${item.model}`).join(" · ")
+                                : "Roteador Local (127.0.0.1:4199)";
+                              return h(
+                                "span",
+                                {
+                                  title: `Escada ativa do Roteador Local: ${fullLadder}`,
+                                  style: { display: "inline-flex", alignItems: "center", gap: "5px", flexWrap: "wrap" },
+                                },
+                                h("span", { style: { fontWeight: 700, color: "var(--foreground)" } }, rawM),
+                                activeModel &&
+                                  h("span", { className: "of-muted", style: { fontSize: "10.5px" } }, `→ ${activeModel}`)
+                              );
+                            })()
+                          ),
                           h(
                             "td",
                             { style: { whiteSpace: "nowrap" } },
@@ -1411,12 +1442,21 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                         filteredModelos.map((m) => {
                           const agSpec = tenantAgents.find((a) => a.name === m.agente);
                           const isIrisRow = /\biris\b/i.test(String(m.agente || ""));
-                          const isTier1 = /(ceo|coo|revis|arquit|segur|secur|qa|oraculo|conselho|board)/i.test(String(m.papel || ""));
-                          const chosen = isIrisRow ? topIrisWinner : isTier1 ? topTier1Winner : topTier2Winner;
+                          const papelLow = String(m.papel || "").toLowerCase();
+                          const nomeLow = String(m.agente || "").toLowerCase();
+                          const targetTier = isIrisRow
+                            ? "tier/vip-iris"
+                            : /(ceo|coo|conselho|board|bento(?!\s*arquit))/i.test(`${papelLow} ${nomeLow}`)
+                            ? "tier/diretoria"
+                            : /(revis|arquit|segur|secur|qa|vera|hugo|teo)/i.test(`${papelLow} ${nomeLow}`)
+                            ? "tier/reasoning"
+                            : /(po|oraculo|oráculo|cron|scout|sol)/i.test(`${papelLow} ${nomeLow}`)
+                            ? "tier/fast"
+                            : "tier/code";
                           const recTarget = {
-                            provider: chosen.provider,
-                            model: chosen.model,
-                            label: shortLabel(chosen.model),
+                            provider: "nexusmind_router",
+                            model: targetTier,
+                            label: targetTier,
                           };
                           const scorePct = typeof m.scoreNum === "number" ? Math.max(4, m.scoreNum * 10) : 0;
                           const tone =

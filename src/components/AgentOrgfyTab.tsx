@@ -54,17 +54,53 @@ export interface LiveGatewayModelCatalog {
   updatedAt?: string;
 }
 
+export const ROUTER_TIER_PRESETS: AgentModelOption[] = [
+  {
+    provider: "nexusmind_router",
+    model: "tier/vip-iris",
+    label: "tier/vip-iris · VIP Iris (CEO · Sticky Retry 2×5s)",
+    group: "eval_approved",
+    mode: "vip",
+  },
+  {
+    provider: "nexusmind_router",
+    model: "tier/diretoria",
+    label: "tier/diretoria · Diretoria & Conselho (VIP + Auto)",
+    group: "eval_approved",
+    mode: "vip",
+  },
+  {
+    provider: "nexusmind_router",
+    model: "tier/frontier",
+    label: "tier/frontier · Frontier / Arquitetura (Auto-Fallback)",
+    group: "eval_approved",
+  },
+  {
+    provider: "nexusmind_router",
+    model: "tier/reasoning",
+    label: "tier/reasoning · Raciocínio / QA L-01 (Auto-Fallback)",
+    group: "eval_approved",
+  },
+  {
+    provider: "nexusmind_router",
+    model: "tier/code",
+    label: "tier/code · Código / Dev (Auto-Fallback)",
+    group: "eval_approved",
+  },
+  {
+    provider: "nexusmind_router",
+    model: "tier/fast",
+    label: "tier/fast · Rápido / PO / Operações (Auto-Fallback)",
+    group: "eval_approved",
+  },
+];
+
 const FALLBACK_MODEL_PRESETS: AgentModelOption[] = [
+  ...ROUTER_TIER_PRESETS,
   {
     provider: "nexusmind_antigravity",
     model: "gemini-2.5-flash",
     label: "gemini-2.5-flash · Fallback (Tier 2 · Código)",
-    group: "fallback",
-  },
-  {
-    provider: "nexusmind_antigravity",
-    model: "gemini-2.5-flash-thinking",
-    label: "gemini-2.5-flash-thinking · Fallback (Raciocínio L-01)",
     group: "fallback",
   },
   {
@@ -741,10 +777,11 @@ export function createAgentOrgfyTabComponent(ctx: Context) {
       gatewayCatalog?.offlineModels.has(currentModel.toLowerCase()) ||
         gatewayCatalog?.offlineModels.has(shortModel.toLowerCase())
     );
-    const isCompliantR51 = gatewayCatalog?.hasLiveData
+    const isRouterTier = currentProvider.toLowerCase() === "nexusmind_router" || currentModel.toLowerCase().startsWith("tier/");
+    const isCompliantR51 = isRouterTier || (gatewayCatalog?.hasLiveData
       ? gatewayCatalog.approvedModels.has(currentModel.toLowerCase()) ||
         gatewayCatalog.approvedModels.has(shortModel.toLowerCase())
-      : FALLBACK_EVAL_WINNERS.has(shortModel);
+      : FALLBACK_EVAL_WINNERS.has(shortModel));
     const recommended = React.useMemo(
       () => pickLiveRecommendedModel(agentName, gatewayCatalog),
       [agentName, gatewayCatalog]
@@ -752,7 +789,7 @@ export function createAgentOrgfyTabComponent(ctx: Context) {
 
     const modelOptions = React.useMemo<AgentModelOption[]>(() => {
       if (gatewayCatalog?.hasLiveData && (gatewayCatalog.approvedOptions.length > 0 || gatewayCatalog.onlineOtherOptions.length > 0)) {
-        return [...gatewayCatalog.approvedOptions, ...gatewayCatalog.onlineOtherOptions];
+        return [...ROUTER_TIER_PRESETS, ...gatewayCatalog.approvedOptions, ...gatewayCatalog.onlineOtherOptions];
       }
       return FALLBACK_MODEL_PRESETS;
     }, [gatewayCatalog]);
@@ -1164,6 +1201,17 @@ export function createAgentOrgfyTabComponent(ctx: Context) {
             },
             gatewayCatalog?.hasLiveData && (gatewayCatalog.approvedOptions.length > 0 || gatewayCatalog.onlineOtherOptions.length > 0)
               ? [
+                  h(
+                    "optgroup",
+                    { key: "router-tiers", label: "Roteador Local (Tiers Auto-Fallback)" },
+                    ROUTER_TIER_PRESETS.map((opt) =>
+                      h(
+                        "option",
+                        { key: modelOptionKey(opt.provider, opt.model), value: modelOptionKey(opt.provider, opt.model) },
+                        opt.label
+                      )
+                    )
+                  ),
                   gatewayCatalog.approvedOptions.length > 0 &&
                     h(
                       "optgroup",

@@ -76,144 +76,54 @@ export async function reconcileAgentsViaBuzzApi(
   const agentsApi = (ctx as any)?.agents;
   const snap = typeof agentsApi?.snapshot === "function" ? agentsApi.snapshot() : null;
   const list: any[] = Array.isArray(snap?.agents) ? snap.agents : [];
-  const catalog = await loadLiveGatewayModelCatalog(ctx).catch(() => null);
-  const hasLiveCatalog = Boolean(catalog?.hasLiveData && catalog.approvedOptions.length > 0);
   const updated: Array<{ key: string; from: string; to: string }> = [];
-
-  // Detecta se uma reconciliação anterior achatou >= 6 agentes não-Iris no mesmo modelo (ex.: gemini-4-hydrogen-sonar)
-  const nonIrisModelCounts = new Map<string, number>();
-  for (const ag of list) {
-    const label = String(ag?.name || ag?.key || "");
-    if (isIrisAgent(label)) continue;
-    const m = String(ag?.config?.model || ag?.model || "").trim().toLowerCase();
-    if (m) nonIrisModelCounts.set(m, (nonIrisModelCounts.get(m) || 0) + 1);
-  }
-  const flattenedMassModel = Array.from(nonIrisModelCounts.entries()).find(([, count]) => count >= 6)?.[0] || null;
 
   for (const ag of list) {
     const cfg = ag?.config && typeof ag.config === "object" ? { ...ag.config } : {};
     const prov = cfg.provider || ag?.provider || null;
     const model = cfg.model || ag?.model || null;
     const mlow = String(model || "").trim().toLowerCase();
-    const shortM = String(mlow.split("/").pop() || mlow).trim();
     const agentLabel = String(ag?.name || ag?.key || "");
-    const agentNorm = agentLabel.trim().toLowerCase();
     const isIris = isIrisAgent(agentLabel);
-    const isVip = isVipOrLeadershipAgent(agentLabel);
     const tier = resolveAgentRoutingTier(agentLabel);
 
-    // Expansão validada do Roteador Local (127.0.0.1:4199): migra automaticamente todos os agentes
-    // da fábrica (OrgFy / Lumen / Conselho) para seus tiers no nexusmind_router (mantendo OrgFy Iris em gpt-6.1-terra)
-    const isFactoryManagedAgent = /(orgfy|lumen|conselho)/i.test(agentNorm);
-    if (!isIris && isFactoryManagedAgent) {
-      const targetTierModel =
-        tier === "vip_leadership"
-          ? "tier/diretoria"
-          : tier === "reasoning"
-          ? "tier/reasoning"
-          : tier === "tier1_fast"
-          ? "tier/fast"
-          : "tier/code";
-      const alreadyOnRouter =
-        String(prov || "").toLowerCase() === "nexusmind_router" && mlow === targetTierModel;
-      if (!alreadyOnRouter) {
-        if (!opts.dryRun && typeof agentsApi?.save === "function") {
-          try {
-            await agentsApi.save(ag.key, {
-              config: { ...cfg, provider: "nexusmind_router", model: targetTierModel },
-            });
-            updated.push({
-              key: String(ag.key || ag.name || ""),
-              from: `${prov}/${model}`,
-              to: `nexusmind_router/${targetTierModel}`,
-            });
-          } catch (err) {
-            console.warn(`[ORGFY AUTO-RECONCILE] pulando roteador ${ag.key}:`, err);
-          }
-        } else {
-          updated.push({
-            key: String(ag.key || ag.name || ""),
-            from: `${prov}/${model}`,
-            to: `nexusmind_router/${targetTierModel}`,
-          });
-        }
-      }
-      continue;
-    }
+    // Padronização universal do Roteador Local (127.0.0.1:4199):
+    // TODOS os agentes no Buzz (incluindo OrgFy Iris -> tier/vip-iris e novos agentes criados)
+    // operam via nexusmind_router / tier/* com failover automático em voo.
+    const targetTierModel = isIris
+      ? "tier/vip-iris"
+      : tier === "vip_leadership"
+      ? "tier/diretoria"
+      : tier === "reasoning"
+      ? "tier/reasoning"
+      : tier === "tier1_fast"
+      ? "tier/fast"
+      : "tier/code";
 
-    // Preserva quaisquer outros agentes já roteados pelo Roteador Local (nexusmind_router / tier/*)
-    if (String(prov || "").toLowerCase() === "nexusmind_router" || mlow.startsWith("tier/")) {
-      continue;
-    }
-    // Regra soberana para OrgFy Iris:
-    // - Se ela JÁ está em um modelo VIP saudável e aprovado (ex.: gpt-6.1-terra, claude-sonnet-4-6, gpt-6.2-sol, claude-opus-4-6-thinking), NÃO mexer.
-    // - Se ela caiu para um modelo NÃO-VIP (ex.: gemini-3.1-flash-lite, flash, free, offline ou banido), restaurar imediatamente para o VIP #1 (gpt-6.1-terra).
-    const currentOpt = catalog?.approvedOptions.find((o) => o.model.toLowerCase() === mlow || o.model.toLowerCase() === shortM);
-    const irisOnHealthyVip = Boolean(
-      isIris &&
-        prov &&
-        model &&
-        !isUnsupportedAgentModel(mlow) &&
-        !isFreeModelId(mlow) &&
-        (currentOpt?.mode === "vip" || isTopVipModel(mlow, currentOpt?.mode)) &&
-        !(hasLiveCatalog && (catalog?.offlineModels.has(mlow) || catalog?.offlineModels.has(shortM)))
-    );
-    if (irisOnHealthyVip) {
-      continue;
-    }
-    const rec = pickLiveRecommendedModel(agentLabel, catalog);
-    const hasAnyPaidApproved = Boolean(!hasLiveCatalog || catalog?.approvedOptions.some((o) => !o.isFree));
-    const isOfflineInGateway = Boolean(
-      hasLiveCatalog && (catalog?.offlineModels.has(mlow) || catalog?.offlineModels.has(shortM))
-    );
-    const isNotEvalApproved = Boolean(
-      hasLiveCatalog &&
-        catalog?.approvedModels &&
-        catalog.approvedModels.size > 0 &&
-        !catalog.approvedModels.has(mlow) &&
-        !catalog.approvedModels.has(shortM)
-    );
-    const leakedIrisExclusiveModel = !isIris && (mlow === "gpt-6.1-terra" || shortM === "gpt-6.1-terra");
-    const isFlattenedVictim = Boolean(
-      flattenedMassModel &&
-        mlow === flattenedMassModel &&
-        rec.model.toLowerCase() !== mlow
-    );
-    const leakedVipToWorker =
-      (tier === "tier2_balanced" || tier === "tier1_fast") &&
-      (currentOpt?.mode === "vip" || /^(claude-opus|claude-sonnet-5|claude-sonnet-4-6)/.test(shortM));
-    const irisNeedsVipRestore = isIris && !irisOnHealthyVip;
-
-    const needsFix =
-      !prov ||
-      !model ||
-      irisNeedsVipRestore ||
-      leakedIrisExclusiveModel ||
-      leakedVipToWorker ||
-      isFlattenedVictim ||
-      isUnsupportedAgentModel(mlow) ||
-      isOfflineInGateway ||
-      isNotEvalApproved ||
-      (isVip && isFreeModelId(mlow) && hasAnyPaidApproved) ||
-      (!isVip && !catalog?.forceFree && isFreeModelId(mlow)) ||
-      (prov === "nexusmind_openai" && mlow.startsWith("antigravity/"));
-    if (!needsFix) continue;
-
-    const nextModel = rec.model;
-    const nextProv = rec.provider;
-    if (!isIris && nextModel.toLowerCase() === "gpt-6.1-terra") continue;
-    if (nextModel.toLowerCase() === mlow && String(prov || "").toLowerCase() === nextProv.toLowerCase()) continue;
+    const isOnRouterTier =
+      String(prov || "").toLowerCase() === "nexusmind_router" && mlow.startsWith("tier/");
+    const needsRouterMigration = !isOnRouterTier || (isIris && mlow !== "tier/vip-iris");
+    if (!needsRouterMigration) continue;
 
     if (!opts.dryRun && typeof agentsApi?.save === "function") {
       try {
-        await agentsApi.save(ag.key, { config: { ...cfg, provider: nextProv, model: nextModel } });
-        updated.push({ key: String(ag.key || ag.name || ""), from: `${prov}/${model}`, to: `${nextProv}/${nextModel}` });
+        await agentsApi.save(ag.key, {
+          config: { ...cfg, provider: "nexusmind_router", model: targetTierModel },
+        });
+        updated.push({
+          key: String(ag.key || ag.name || ""),
+          from: `${prov}/${model}`,
+          to: `nexusmind_router/${targetTierModel}`,
+        });
       } catch (err) {
-        // Isola erro de um agente (ex.: config ainda não sincronizada no relay ou agente hosted) sem abortar os demais
-        console.warn(`[ORGFY AUTO-RECONCILE] pulando ${ag.key}:`, err);
+        console.warn(`[ORGFY AUTO-RECONCILE] pulando roteador ${ag.key}:`, err);
       }
     } else {
-      updated.push({ key: String(ag.key || ag.name || ""), from: `${prov}/${model}`, to: `${nextProv}/${nextModel}` });
+      updated.push({
+        key: String(ag.key || ag.name || ""),
+        from: `${prov}/${model}`,
+        to: `nexusmind_router/${targetTierModel}`,
+      });
     }
   }
   return { total: list.length, updated };

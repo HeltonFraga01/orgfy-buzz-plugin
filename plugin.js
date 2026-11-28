@@ -2086,17 +2086,52 @@ function resetTelemetryForTests() {
   decisionsStats.byMode = {};
 }
 const FALLBACK_EVAL_WINNERS = /* @__PURE__ */ new Set(["gemini-2.5-flash", "gpt-6.1-terra", "claude-opus-4-6-thinking"]);
+const ROUTER_TIER_PRESETS = [
+  {
+    provider: "nexusmind_router",
+    model: "tier/vip-iris",
+    label: "tier/vip-iris · VIP Iris (CEO · Sticky Retry 2×5s)",
+    group: "eval_approved",
+    mode: "vip"
+  },
+  {
+    provider: "nexusmind_router",
+    model: "tier/diretoria",
+    label: "tier/diretoria · Diretoria & Conselho (VIP + Auto)",
+    group: "eval_approved",
+    mode: "vip"
+  },
+  {
+    provider: "nexusmind_router",
+    model: "tier/frontier",
+    label: "tier/frontier · Frontier / Arquitetura (Auto-Fallback)",
+    group: "eval_approved"
+  },
+  {
+    provider: "nexusmind_router",
+    model: "tier/reasoning",
+    label: "tier/reasoning · Raciocínio / QA L-01 (Auto-Fallback)",
+    group: "eval_approved"
+  },
+  {
+    provider: "nexusmind_router",
+    model: "tier/code",
+    label: "tier/code · Código / Dev (Auto-Fallback)",
+    group: "eval_approved"
+  },
+  {
+    provider: "nexusmind_router",
+    model: "tier/fast",
+    label: "tier/fast · Rápido / PO / Operações (Auto-Fallback)",
+    group: "eval_approved"
+  }
+];
 const FALLBACK_MODEL_PRESETS = [
+  ...ROUTER_TIER_PRESETS,
   {
     provider: "nexusmind_antigravity",
     model: "gemini-2.5-flash",
     label: "gemini-2.5-flash · Fallback (Tier 2 · Código)",
-    group: "fallback"
-  },
-  {
-    provider: "nexusmind_antigravity",
-    model: "gemini-2.5-flash-thinking",
-    label: "gemini-2.5-flash-thinking · Fallback (Raciocínio L-01)",
     group: "fallback"
   },
   {
@@ -2638,14 +2673,15 @@ function createAgentOrgfyTabComponent(ctx) {
     const isCurrentOffline = Boolean(
       (gatewayCatalog == null ? void 0 : gatewayCatalog.offlineModels.has(currentModel.toLowerCase())) || (gatewayCatalog == null ? void 0 : gatewayCatalog.offlineModels.has(shortModel.toLowerCase()))
     );
-    const isCompliantR51 = (gatewayCatalog == null ? void 0 : gatewayCatalog.hasLiveData) ? gatewayCatalog.approvedModels.has(currentModel.toLowerCase()) || gatewayCatalog.approvedModels.has(shortModel.toLowerCase()) : FALLBACK_EVAL_WINNERS.has(shortModel);
+    const isRouterTier = currentProvider.toLowerCase() === "nexusmind_router" || currentModel.toLowerCase().startsWith("tier/");
+    const isCompliantR51 = isRouterTier || ((gatewayCatalog == null ? void 0 : gatewayCatalog.hasLiveData) ? gatewayCatalog.approvedModels.has(currentModel.toLowerCase()) || gatewayCatalog.approvedModels.has(shortModel.toLowerCase()) : FALLBACK_EVAL_WINNERS.has(shortModel));
     const recommended = React.useMemo(
       () => pickLiveRecommendedModel(agentName, gatewayCatalog),
       [agentName, gatewayCatalog]
     );
     const modelOptions = React.useMemo(() => {
       if ((gatewayCatalog == null ? void 0 : gatewayCatalog.hasLiveData) && (gatewayCatalog.approvedOptions.length > 0 || gatewayCatalog.onlineOtherOptions.length > 0)) {
-        return [...gatewayCatalog.approvedOptions, ...gatewayCatalog.onlineOtherOptions];
+        return [...ROUTER_TIER_PRESETS, ...gatewayCatalog.approvedOptions, ...gatewayCatalog.onlineOtherOptions];
       }
       return FALLBACK_MODEL_PRESETS;
     }, [gatewayCatalog]);
@@ -3015,6 +3051,17 @@ function createAgentOrgfyTabComponent(ctx) {
               }
             },
             (gatewayCatalog == null ? void 0 : gatewayCatalog.hasLiveData) && (gatewayCatalog.approvedOptions.length > 0 || gatewayCatalog.onlineOtherOptions.length > 0) ? [
+              h(
+                "optgroup",
+                { key: "router-tiers", label: "Roteador Local (Tiers Auto-Fallback)" },
+                ROUTER_TIER_PRESETS.map(
+                  (opt) => h(
+                    "option",
+                    { key: modelOptionKey(opt.provider, opt.model), value: modelOptionKey(opt.provider, opt.model) },
+                    opt.label
+                  )
+                )
+              ),
               gatewayCatalog.approvedOptions.length > 0 && h(
                 "optgroup",
                 { key: "eval-approved", label: "Aprovados no Eval (NexusMind)" },
@@ -3393,99 +3440,41 @@ function isTopVipModel(modelId, policyState) {
   return /(opus|sonnet-4-6|sonnet-5|gpt-5|gpt-6|\bo3\b|gemini-2\.5-pro|gemini-3\.5-pro|gemini-4-hydrogen-high|deepseek-r1)/.test(m);
 }
 async function reconcileAgentsViaBuzzApi(ctx, opts = {}) {
-  var _a, _b;
   const agentsApi = ctx == null ? void 0 : ctx.agents;
   const snap = typeof (agentsApi == null ? void 0 : agentsApi.snapshot) === "function" ? agentsApi.snapshot() : null;
   const list = Array.isArray(snap == null ? void 0 : snap.agents) ? snap.agents : [];
-  const catalog = await loadLiveGatewayModelCatalog(ctx).catch(() => null);
-  const hasLiveCatalog = Boolean((catalog == null ? void 0 : catalog.hasLiveData) && catalog.approvedOptions.length > 0);
   const updated = [];
-  const nonIrisModelCounts = /* @__PURE__ */ new Map();
-  for (const ag of list) {
-    const label = String((ag == null ? void 0 : ag.name) || (ag == null ? void 0 : ag.key) || "");
-    if (isIrisAgent(label)) continue;
-    const m = String(((_a = ag == null ? void 0 : ag.config) == null ? void 0 : _a.model) || (ag == null ? void 0 : ag.model) || "").trim().toLowerCase();
-    if (m) nonIrisModelCounts.set(m, (nonIrisModelCounts.get(m) || 0) + 1);
-  }
-  const flattenedMassModel = ((_b = Array.from(nonIrisModelCounts.entries()).find(([, count]) => count >= 6)) == null ? void 0 : _b[0]) || null;
   for (const ag of list) {
     const cfg = (ag == null ? void 0 : ag.config) && typeof ag.config === "object" ? { ...ag.config } : {};
     const prov = cfg.provider || (ag == null ? void 0 : ag.provider) || null;
     const model = cfg.model || (ag == null ? void 0 : ag.model) || null;
     const mlow = String(model || "").trim().toLowerCase();
-    const shortM = String(mlow.split("/").pop() || mlow).trim();
     const agentLabel = String((ag == null ? void 0 : ag.name) || (ag == null ? void 0 : ag.key) || "");
-    const agentNorm = agentLabel.trim().toLowerCase();
     const isIris = isIrisAgent(agentLabel);
-    const isVip = isVipOrLeadershipAgent(agentLabel);
     const tier = resolveAgentRoutingTier(agentLabel);
-    const isFactoryManagedAgent = /(orgfy|lumen|conselho)/i.test(agentNorm);
-    if (!isIris && isFactoryManagedAgent) {
-      const targetTierModel = tier === "vip_leadership" ? "tier/diretoria" : tier === "reasoning" ? "tier/reasoning" : tier === "tier1_fast" ? "tier/fast" : "tier/code";
-      const alreadyOnRouter = String(prov || "").toLowerCase() === "nexusmind_router" && mlow === targetTierModel;
-      if (!alreadyOnRouter) {
-        if (!opts.dryRun && typeof (agentsApi == null ? void 0 : agentsApi.save) === "function") {
-          try {
-            await agentsApi.save(ag.key, {
-              config: { ...cfg, provider: "nexusmind_router", model: targetTierModel }
-            });
-            updated.push({
-              key: String(ag.key || ag.name || ""),
-              from: `${prov}/${model}`,
-              to: `nexusmind_router/${targetTierModel}`
-            });
-          } catch (err) {
-            console.warn(`[ORGFY AUTO-RECONCILE] pulando roteador ${ag.key}:`, err);
-          }
-        } else {
-          updated.push({
-            key: String(ag.key || ag.name || ""),
-            from: `${prov}/${model}`,
-            to: `nexusmind_router/${targetTierModel}`
-          });
-        }
-      }
-      continue;
-    }
-    if (String(prov || "").toLowerCase() === "nexusmind_router" || mlow.startsWith("tier/")) {
-      continue;
-    }
-    const currentOpt = catalog == null ? void 0 : catalog.approvedOptions.find((o) => o.model.toLowerCase() === mlow || o.model.toLowerCase() === shortM);
-    const irisOnHealthyVip = Boolean(
-      isIris && prov && model && !isUnsupportedAgentModel(mlow) && !isFreeModelId(mlow) && ((currentOpt == null ? void 0 : currentOpt.mode) === "vip" || isTopVipModel(mlow, currentOpt == null ? void 0 : currentOpt.mode)) && !(hasLiveCatalog && ((catalog == null ? void 0 : catalog.offlineModels.has(mlow)) || (catalog == null ? void 0 : catalog.offlineModels.has(shortM))))
-    );
-    if (irisOnHealthyVip) {
-      continue;
-    }
-    const rec = pickLiveRecommendedModel(agentLabel, catalog);
-    const hasAnyPaidApproved = Boolean(!hasLiveCatalog || (catalog == null ? void 0 : catalog.approvedOptions.some((o) => !o.isFree)));
-    const isOfflineInGateway = Boolean(
-      hasLiveCatalog && ((catalog == null ? void 0 : catalog.offlineModels.has(mlow)) || (catalog == null ? void 0 : catalog.offlineModels.has(shortM)))
-    );
-    const isNotEvalApproved = Boolean(
-      hasLiveCatalog && (catalog == null ? void 0 : catalog.approvedModels) && catalog.approvedModels.size > 0 && !catalog.approvedModels.has(mlow) && !catalog.approvedModels.has(shortM)
-    );
-    const leakedIrisExclusiveModel = !isIris && (mlow === "gpt-6.1-terra" || shortM === "gpt-6.1-terra");
-    const isFlattenedVictim = Boolean(
-      flattenedMassModel && mlow === flattenedMassModel && rec.model.toLowerCase() !== mlow
-    );
-    const leakedVipToWorker = (tier === "tier2_balanced" || tier === "tier1_fast") && ((currentOpt == null ? void 0 : currentOpt.mode) === "vip" || /^(claude-opus|claude-sonnet-5|claude-sonnet-4-6)/.test(shortM));
-    const irisNeedsVipRestore = isIris && !irisOnHealthyVip;
-    const needsFix = !prov || !model || irisNeedsVipRestore || leakedIrisExclusiveModel || leakedVipToWorker || isFlattenedVictim || isUnsupportedAgentModel(mlow) || isOfflineInGateway || isNotEvalApproved || isVip && isFreeModelId(mlow) && hasAnyPaidApproved || !isVip && !(catalog == null ? void 0 : catalog.forceFree) && isFreeModelId(mlow) || prov === "nexusmind_openai" && mlow.startsWith("antigravity/");
-    if (!needsFix) continue;
-    const nextModel = rec.model;
-    const nextProv = rec.provider;
-    if (!isIris && nextModel.toLowerCase() === "gpt-6.1-terra") continue;
-    if (nextModel.toLowerCase() === mlow && String(prov || "").toLowerCase() === nextProv.toLowerCase()) continue;
+    const targetTierModel = isIris ? "tier/vip-iris" : tier === "vip_leadership" ? "tier/diretoria" : tier === "reasoning" ? "tier/reasoning" : tier === "tier1_fast" ? "tier/fast" : "tier/code";
+    const isOnRouterTier = String(prov || "").toLowerCase() === "nexusmind_router" && mlow.startsWith("tier/");
+    const needsRouterMigration = !isOnRouterTier || isIris && mlow !== "tier/vip-iris";
+    if (!needsRouterMigration) continue;
     if (!opts.dryRun && typeof (agentsApi == null ? void 0 : agentsApi.save) === "function") {
       try {
-        await agentsApi.save(ag.key, { config: { ...cfg, provider: nextProv, model: nextModel } });
-        updated.push({ key: String(ag.key || ag.name || ""), from: `${prov}/${model}`, to: `${nextProv}/${nextModel}` });
+        await agentsApi.save(ag.key, {
+          config: { ...cfg, provider: "nexusmind_router", model: targetTierModel }
+        });
+        updated.push({
+          key: String(ag.key || ag.name || ""),
+          from: `${prov}/${model}`,
+          to: `nexusmind_router/${targetTierModel}`
+        });
       } catch (err) {
-        console.warn(`[ORGFY AUTO-RECONCILE] pulando ${ag.key}:`, err);
+        console.warn(`[ORGFY AUTO-RECONCILE] pulando roteador ${ag.key}:`, err);
       }
     } else {
-      updated.push({ key: String(ag.key || ag.name || ""), from: `${prov}/${model}`, to: `${nextProv}/${nextModel}` });
+      updated.push({
+        key: String(ag.key || ag.name || ""),
+        from: `${prov}/${model}`,
+        to: `nexusmind_router/${targetTierModel}`
+      });
     }
   }
   return { total: list.length, updated };
@@ -66332,7 +66321,36 @@ function renderFactorySecondaryPage(props) {
                       )
                     )
                   ),
-                  h("td", { className: "of-mono", style: { fontSize: "11.5px" } }, a.model),
+                  h(
+                    "td",
+                    { className: "of-mono", style: { fontSize: "11.5px" } },
+                    (() => {
+                      var _a3, _b3, _c2;
+                      const rawM = String(a.model || "");
+                      if (!rawM.startsWith("tier/")) return rawM;
+                      const tierToGroup = {
+                        "tier/vip-iris": "group/vip-iris",
+                        "tier/diretoria": "group/vip-leadership",
+                        "tier/frontier": "group/frontier",
+                        "tier/reasoning": "group/reasoning",
+                        "tier/code": "group/code",
+                        "tier/fast": "group/fast"
+                      };
+                      const grpKey = tierToGroup[rawM.toLowerCase()];
+                      const ladder = grpKey ? (_b3 = (_a3 = status.modelControlPlane) == null ? void 0 : _a3.tierFallbackGroups) == null ? void 0 : _b3[grpKey] : void 0;
+                      const activeModel = Array.isArray(ladder) && ladder.length > 0 ? (_c2 = ladder[0]) == null ? void 0 : _c2.model : null;
+                      const fullLadder = Array.isArray(ladder) && ladder.length > 0 ? ladder.map((item, idx) => `#${idx + 1} ${item.model}`).join(" · ") : "Roteador Local (127.0.0.1:4199)";
+                      return h(
+                        "span",
+                        {
+                          title: `Escada ativa do Roteador Local: ${fullLadder}`,
+                          style: { display: "inline-flex", alignItems: "center", gap: "5px", flexWrap: "wrap" }
+                        },
+                        h("span", { style: { fontWeight: 700, color: "var(--foreground)" } }, rawM),
+                        activeModel && h("span", { className: "of-muted", style: { fontSize: "10.5px" } }, `→ ${activeModel}`)
+                      );
+                    })()
+                  ),
                   h(
                     "td",
                     { style: { whiteSpace: "nowrap" } },
@@ -66515,9 +66533,9 @@ function renderFactorySecondaryPage(props) {
         const belowCount = modelos.filter((m) => m.evalStatus === "below_min").length;
         const attentionCount = modelos.filter((m) => m.evalStatus !== "approved").length;
         const liveWinners = (status.evalWinners || []).filter((w) => !/^(pol\/|pollinations\/|auto\/)/i.test(w.model) && !/(tab_flash|tab_jump|mistral-large-4-1t-a52b|nex-n2-pro|claude-sonnet-5-5)/i.test(w.model));
-        const topIrisWinner = liveWinners.find((w) => w.model.toLowerCase() === "gpt-6.1-terra") || { provider: "nexusmind_openai", model: "gpt-6.1-terra" };
-        const topTier1Winner = liveWinners.find((w) => !w.model.includes(":free") && w.model.toLowerCase() !== "gpt-6.1-terra" && /(gemini-4-hydrogen-high|claude-sonnet-4-6|gpt-6-luna|gpt-6\.2-sol|gemini-2\.5-flash)/i.test(w.model)) || liveWinners.find((w) => !w.model.includes(":free") && w.model.toLowerCase() !== "gpt-6.1-terra") || { provider: "nexusmind_antigravity", model: "gemini-4-hydrogen-high" };
-        const topTier2Winner = liveWinners.find((w) => !w.model.includes(":free") && w.model.toLowerCase() === "gemini-2.5-flash") || liveWinners.find((w) => !w.model.includes(":free") && w.model.toLowerCase() !== "gpt-6.1-terra") || { provider: "nexusmind_antigravity", model: "gemini-2.5-flash" };
+        liveWinners.find((w) => w.model.toLowerCase() === "gpt-6.1-terra") || {};
+        liveWinners.find((w) => !w.model.includes(":free") && w.model.toLowerCase() !== "gpt-6.1-terra" && /(gemini-4-hydrogen-high|claude-sonnet-4-6|gpt-6-luna|gpt-6\.2-sol|gemini-2\.5-flash)/i.test(w.model)) || liveWinners.find((w) => !w.model.includes(":free") && w.model.toLowerCase() !== "gpt-6.1-terra") || {};
+        liveWinners.find((w) => !w.model.includes(":free") && w.model.toLowerCase() === "gemini-2.5-flash") || liveWinners.find((w) => !w.model.includes(":free") && w.model.toLowerCase() !== "gpt-6.1-terra") || {};
         const shortLabel = (mid) => {
           const s = String(mid.split("/").pop() || mid);
           return s.length > 22 ? s.slice(0, 20) + "…" : s;
@@ -66674,12 +66692,13 @@ function renderFactorySecondaryPage(props) {
                 filteredModelos.map((m) => {
                   const agSpec = tenantAgents.find((a) => a.name === m.agente);
                   const isIrisRow = /\biris\b/i.test(String(m.agente || ""));
-                  const isTier1 = /(ceo|coo|revis|arquit|segur|secur|qa|oraculo|conselho|board)/i.test(String(m.papel || ""));
-                  const chosen = isIrisRow ? topIrisWinner : isTier1 ? topTier1Winner : topTier2Winner;
+                  const papelLow = String(m.papel || "").toLowerCase();
+                  const nomeLow = String(m.agente || "").toLowerCase();
+                  const targetTier = isIrisRow ? "tier/vip-iris" : /(ceo|coo|conselho|board|bento(?!\s*arquit))/i.test(`${papelLow} ${nomeLow}`) ? "tier/diretoria" : /(revis|arquit|segur|secur|qa|vera|hugo|teo)/i.test(`${papelLow} ${nomeLow}`) ? "tier/reasoning" : /(po|oraculo|oráculo|cron|scout|sol)/i.test(`${papelLow} ${nomeLow}`) ? "tier/fast" : "tier/code";
                   const recTarget = {
-                    provider: chosen.provider,
-                    model: chosen.model,
-                    label: shortLabel(chosen.model)
+                    provider: "nexusmind_router",
+                    model: targetTier,
+                    label: targetTier
                   };
                   const scorePct = typeof m.scoreNum === "number" ? Math.max(4, m.scoreNum * 10) : 0;
                   const tone = m.evalStatus === "approved" ? "done" : m.evalStatus === "below_min" ? "failed" : "waiting";
@@ -69397,7 +69416,7 @@ const PINNED_HOST_COMMANDS = Object.freeze([
   {
     id: "orgfy-holding-scaffold",
     scriptPath: "ferramentas/esteira/holding_scaffold.py",
-    sha256: "44bff725004a838decf978a9a58ba3d4588fdd72f800535b20e416ed3d21e046"
+    sha256: "7afa5411c40c4fb7779a0f4675d5479fe4f378614fab83fe3f2dda74e197b3c7"
   }
 ]);
 async function computeUtf8Sha256(content) {

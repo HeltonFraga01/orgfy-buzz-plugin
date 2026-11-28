@@ -197,6 +197,10 @@ export interface FactoryStatusPayload {
       prodSuccessRate24hPct: number | null;
     };
     bestByTier?: Record<string, string | null>;
+    tierFallbackGroups?: Record<
+      string,
+      Array<{ model: string; provider?: string; score?: number }>
+    >;
     providerHealth?: Array<{
       provider: string;
       total: number;
