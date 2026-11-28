@@ -100,6 +100,10 @@ export async function reconcileAgentsViaBuzzApi(
     const isIris = isIrisAgent(agentLabel);
     const isVip = isVipOrLeadershipAgent(agentLabel);
     const tier = resolveAgentRoutingTier(agentLabel);
+    // Preserva agentes roteados pelo Roteador Local (nexusmind_router / tier/*) sem sobrescrever para modelo estático
+    if (String(prov || "").toLowerCase() === "nexusmind_router" || mlow.startsWith("tier/")) {
+      continue;
+    }
     // Regra soberana para OrgFy Iris:
     // - Se ela JÁ está em um modelo VIP saudável e aprovado (ex.: gpt-6.1-terra, claude-sonnet-4-6, gpt-6.2-sol, claude-opus-4-6-thinking), NÃO mexer.
     // - Se ela caiu para um modelo NÃO-VIP (ex.: gemini-3.1-flash-lite, flash, free, offline ou banido), restaurar imediatamente para o VIP #1 (gpt-6.1-terra).

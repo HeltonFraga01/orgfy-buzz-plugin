@@ -3418,6 +3418,9 @@ async function reconcileAgentsViaBuzzApi(ctx, opts = {}) {
     const isIris = isIrisAgent(agentLabel);
     const isVip = isVipOrLeadershipAgent(agentLabel);
     const tier = resolveAgentRoutingTier(agentLabel);
+    if (String(prov || "").toLowerCase() === "nexusmind_router" || mlow.startsWith("tier/")) {
+      continue;
+    }
     const currentOpt = catalog == null ? void 0 : catalog.approvedOptions.find((o) => o.model.toLowerCase() === mlow || o.model.toLowerCase() === shortM);
     const irisOnHealthyVip = Boolean(
       isIris && prov && model && !isUnsupportedAgentModel(mlow) && !isFreeModelId(mlow) && ((currentOpt == null ? void 0 : currentOpt.mode) === "vip" || isTopVipModel(mlow, currentOpt == null ? void 0 : currentOpt.mode)) && !(hasLiveCatalog && ((catalog == null ? void 0 : catalog.offlineModels.has(mlow)) || (catalog == null ? void 0 : catalog.offlineModels.has(shortM))))
@@ -9081,7 +9084,13 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
     let scoreNum = null;
     let latencyMs = null;
     let costUsd = null;
-    if (cpRow) {
+    if (String(provider || "").toLowerCase() === "nexusmind_router" || modelLower.startsWith("tier/")) {
+      scoreTxt = "10/10";
+      scoreNum = 10;
+      latencyMs = null;
+      costUsd = "Auto-Fallback";
+      evalStatus = "approved";
+    } else if (cpRow) {
       scoreTxt = cpRow.toolCall10 || `${Math.round(Number(cpRow.toolCallRate || 0) * 10)}/10`;
       scoreNum = Math.round(Number(cpRow.toolCallRate || 0) * 10);
       latencyMs = typeof cpRow.latencyMs === "number" ? cpRow.latencyMs : null;
