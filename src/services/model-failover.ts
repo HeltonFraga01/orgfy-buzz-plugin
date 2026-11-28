@@ -102,35 +102,39 @@ export async function reconcileAgentsViaBuzzApi(
     const isVip = isVipOrLeadershipAgent(agentLabel);
     const tier = resolveAgentRoutingTier(agentLabel);
 
-    // Piloto ativo do Roteador Local (127.0.0.1:4199): migra automaticamente via ctx.agents.save()
-    const LOCAL_ROUTER_PILOT_TARGETS: Array<{ match: RegExp; model: string }> = [
-      { match: /^orgfy\s+bento$/, model: "tier/diretoria" },
-      { match: /^lumen\s+dev$/, model: "tier/code" },
-      { match: /^lumen\s+po$/, model: "tier/fast" },
-    ];
-    const pilotTarget = LOCAL_ROUTER_PILOT_TARGETS.find((p) => p.match.test(agentNorm));
-    if (pilotTarget) {
-      const alreadyOnPilot =
-        String(prov || "").toLowerCase() === "nexusmind_router" && mlow === pilotTarget.model;
-      if (!alreadyOnPilot) {
+    // Expansão validada do Roteador Local (127.0.0.1:4199): migra automaticamente todos os agentes
+    // da fábrica (OrgFy / Lumen / Conselho) para seus tiers no nexusmind_router (mantendo OrgFy Iris em gpt-6.1-terra)
+    const isFactoryManagedAgent = /(orgfy|lumen|conselho)/i.test(agentNorm);
+    if (!isIris && isFactoryManagedAgent) {
+      const targetTierModel =
+        tier === "vip_leadership"
+          ? "tier/diretoria"
+          : tier === "reasoning"
+          ? "tier/reasoning"
+          : tier === "tier1_fast"
+          ? "tier/fast"
+          : "tier/code";
+      const alreadyOnRouter =
+        String(prov || "").toLowerCase() === "nexusmind_router" && mlow === targetTierModel;
+      if (!alreadyOnRouter) {
         if (!opts.dryRun && typeof agentsApi?.save === "function") {
           try {
             await agentsApi.save(ag.key, {
-              config: { ...cfg, provider: "nexusmind_router", model: pilotTarget.model },
+              config: { ...cfg, provider: "nexusmind_router", model: targetTierModel },
             });
             updated.push({
               key: String(ag.key || ag.name || ""),
               from: `${prov}/${model}`,
-              to: `nexusmind_router/${pilotTarget.model}`,
+              to: `nexusmind_router/${targetTierModel}`,
             });
           } catch (err) {
-            console.warn(`[ORGFY AUTO-RECONCILE] pulando piloto ${ag.key}:`, err);
+            console.warn(`[ORGFY AUTO-RECONCILE] pulando roteador ${ag.key}:`, err);
           }
         } else {
           updated.push({
             key: String(ag.key || ag.name || ""),
             from: `${prov}/${model}`,
-            to: `nexusmind_router/${pilotTarget.model}`,
+            to: `nexusmind_router/${targetTierModel}`,
           });
         }
       }
@@ -954,6 +958,29 @@ export async function executeSmartModelFailover(
     (matchedAgent?.config && typeof matchedAgent.config === "object"
       ? String((matchedAgent.config as any).provider || "")
       : "") || (previousModel ? inferProviderId(previousModel) : null);
+
+  // Proteção do Roteador Local: agentes em nexusmind_router / tier/* já fazem failover in-flight na porta 4199;
+  // nunca sobrescrever de volta para um provedor estático.
+  if (
+    String(previousProvider || "").toLowerCase() === "nexusmind_router" ||
+    String(previousModel || "").toLowerCase().startsWith("tier/")
+  ) {
+    return {
+      ok: true,
+      mode: "delegated",
+      agentName: matchedAgent?.name || input.agente || null,
+      agentKey: matchedAgent?.key || null,
+      previousModel,
+      selectedModel: previousModel,
+      selectedProvider: "nexusmind_router",
+      selectedLatencyMs: null,
+      selectedIntelligenceScore: 98,
+      retriggered: false,
+      candidatesTested: 0,
+      ranking: [],
+      message: `${resolvedAgentLabel || "Agente"} protegido em nexusmind_router/${previousModel} (failover in-flight ativo em 127.0.0.1:4199).`,
+    };
+  }
 
   // Proteção Retry Escalonado antes de trocar de modelo:
   // - OrgFy Iris: 2 tentativas [5000, 5000] para preservar modelo VIP de topo.

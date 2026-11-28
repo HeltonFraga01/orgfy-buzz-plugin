@@ -3419,33 +3419,29 @@ async function reconcileAgentsViaBuzzApi(ctx, opts = {}) {
     const isIris = isIrisAgent(agentLabel);
     const isVip = isVipOrLeadershipAgent(agentLabel);
     const tier = resolveAgentRoutingTier(agentLabel);
-    const LOCAL_ROUTER_PILOT_TARGETS = [
-      { match: /^orgfy\s+bento$/, model: "tier/diretoria" },
-      { match: /^lumen\s+dev$/, model: "tier/code" },
-      { match: /^lumen\s+po$/, model: "tier/fast" }
-    ];
-    const pilotTarget = LOCAL_ROUTER_PILOT_TARGETS.find((p) => p.match.test(agentNorm));
-    if (pilotTarget) {
-      const alreadyOnPilot = String(prov || "").toLowerCase() === "nexusmind_router" && mlow === pilotTarget.model;
-      if (!alreadyOnPilot) {
+    const isFactoryManagedAgent = /(orgfy|lumen|conselho)/i.test(agentNorm);
+    if (!isIris && isFactoryManagedAgent) {
+      const targetTierModel = tier === "vip_leadership" ? "tier/diretoria" : tier === "reasoning" ? "tier/reasoning" : tier === "tier1_fast" ? "tier/fast" : "tier/code";
+      const alreadyOnRouter = String(prov || "").toLowerCase() === "nexusmind_router" && mlow === targetTierModel;
+      if (!alreadyOnRouter) {
         if (!opts.dryRun && typeof (agentsApi == null ? void 0 : agentsApi.save) === "function") {
           try {
             await agentsApi.save(ag.key, {
-              config: { ...cfg, provider: "nexusmind_router", model: pilotTarget.model }
+              config: { ...cfg, provider: "nexusmind_router", model: targetTierModel }
             });
             updated.push({
               key: String(ag.key || ag.name || ""),
               from: `${prov}/${model}`,
-              to: `nexusmind_router/${pilotTarget.model}`
+              to: `nexusmind_router/${targetTierModel}`
             });
           } catch (err) {
-            console.warn(`[ORGFY AUTO-RECONCILE] pulando piloto ${ag.key}:`, err);
+            console.warn(`[ORGFY AUTO-RECONCILE] pulando roteador ${ag.key}:`, err);
           }
         } else {
           updated.push({
             key: String(ag.key || ag.name || ""),
             from: `${prov}/${model}`,
-            to: `nexusmind_router/${pilotTarget.model}`
+            to: `nexusmind_router/${targetTierModel}`
           });
         }
       }
@@ -4026,6 +4022,23 @@ async function executeSmartModelFailover(ctx, input = {}) {
   const preferFree = isVip ? false : Boolean(input.prefer_free);
   const previousModel = ((matchedAgent == null ? void 0 : matchedAgent.config) && typeof matchedAgent.config === "object" ? String(matchedAgent.config.model || "") : "") || (input.failed_model || null);
   const previousProvider = ((matchedAgent == null ? void 0 : matchedAgent.config) && typeof matchedAgent.config === "object" ? String(matchedAgent.config.provider || "") : "") || (previousModel ? inferProviderId(previousModel) : null);
+  if (String(previousProvider || "").toLowerCase() === "nexusmind_router" || String(previousModel || "").toLowerCase().startsWith("tier/")) {
+    return {
+      ok: true,
+      mode: "delegated",
+      agentName: (matchedAgent == null ? void 0 : matchedAgent.name) || input.agente || null,
+      agentKey: (matchedAgent == null ? void 0 : matchedAgent.key) || null,
+      previousModel,
+      selectedModel: previousModel,
+      selectedProvider: "nexusmind_router",
+      selectedLatencyMs: null,
+      selectedIntelligenceScore: 98,
+      retriggered: false,
+      candidatesTested: 0,
+      ranking: [],
+      message: `${resolvedAgentLabel || "Agente"} protegido em nexusmind_router/${previousModel} (failover in-flight ativo em 127.0.0.1:4199).`
+    };
+  }
   const hostForRetry = ctx == null ? void 0 : ctx.host;
   const isTransientSpikeReason = /(503|429|no available accounts|temporarily unavailable|transient)/i.test(
     String((input == null ? void 0 : input.reason) || "")
