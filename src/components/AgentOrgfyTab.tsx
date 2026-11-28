@@ -561,6 +561,53 @@ export function pickLiveRecommendedModel(
         return (a.latencyMs ?? 999999) - (b.latencyMs ?? 999999);
       });
 
+    // Intercala modelos aprovados do ranking entre provedores diferentes (openai, antigravity, anthropic, grok)
+    // para evitar concentrar todos os agentes no mesmo modelo ou na mesma conta de API.
+    const interleaveByProvider = (sorted: AgentModelOption[], maxItems: number): AgentModelOption[] => {
+      const buckets = new Map<string, AgentModelOption[]>();
+      const provOrder: string[] = [];
+      for (const item of sorted) {
+        const p = String(item.provider || "default").toLowerCase();
+        if (!buckets.has(p)) {
+          buckets.set(p, []);
+          provOrder.push(p);
+        }
+        buckets.get(p)!.push(item);
+      }
+      const out: AgentModelOption[] = [];
+      let round = 0;
+      while (out.length < maxItems) {
+        let added = false;
+        for (const p of provOrder) {
+          const list = buckets.get(p)!;
+          if (round < list.length) {
+            out.push(list[round]);
+            added = true;
+            if (out.length >= maxItems) break;
+          }
+        }
+        if (!added) break;
+        round += 1;
+      }
+      return out;
+    };
+
+    const pickDiversifiedForAgent = (
+      pool: AgentModelOption[],
+      tierKey: string,
+      maxSpread: number
+    ): AgentModelOption => {
+      const ranked = sortByTierScore(pool, tierKey);
+      const spread = interleaveByProvider(ranked, Math.max(1, Math.min(maxSpread, ranked.length)));
+      if (spread.length <= 1) return spread[0];
+      // Hash determinístico estável baseado no nome/papel do agente para espalhar no Top N multi-provedor
+      let hash = 0;
+      for (let i = 0; i < lowerRole.length; i++) {
+        hash = (hash * 31 + lowerRole.charCodeAt(i)) >>> 0;
+      }
+      return spread[hash % spread.length];
+    };
+
     if (tier === "vip_iris") {
       const paidPool = unblocked.filter((o) => !o.isFree);
       if (paidPool.length > 0) {
@@ -572,46 +619,41 @@ export function pickLiveRecommendedModel(
         return { provider: chosen.provider, model: chosen.model, tierLabel, tier };
       }
     } else if (tier === "vip_leadership") {
-      const paidPool = unblocked.filter((o) => !o.isFree);
+      const vipPool = unblocked.filter((o) => !o.isFree && o.mode === "vip" && !isIrisExclusiveModel(o.model));
+      const paidPool = vipPool.length > 0 ? vipPool : unblocked.filter((o) => !o.isFree && !isIrisExclusiveModel(o.model));
       if (paidPool.length > 0) {
-        const chosen =
-          findOption(catalog.bestByTier?.vip_leadership) ||
-          paidPool.find((o) => o.mode === "vip" && !isIrisExclusiveModel(o.model)) ||
-          findOption(catalog.bestByTier?.tier3_frontier) ||
-          sortByTierScore(paidPool, "tier3_frontier")[0];
+        const chosen = pickDiversifiedForAgent(paidPool, "tier3_frontier", 3);
         return { provider: chosen.provider, model: chosen.model, tierLabel, tier };
       }
     } else if (tier === "reasoning") {
-      const paidAutoPool = unblocked.filter((o) => !o.isFree && o.mode !== "vip");
+      const paidAutoPool = unblocked.filter(
+        (o) => !o.isFree && o.mode !== "vip" && o.model.toLowerCase() !== "gemini-2.5-flash-thinking"
+      );
       const pool = paidAutoPool.length > 0 ? paidAutoPool : unblocked.filter((o) => !o.isFree);
       if (pool.length > 0) {
         const tierKey = isArchitectOrSecurity ? "tier3_frontier" : "reasoning";
-        const preferredWinner = isArchitectOrSecurity
-          ? findOption(catalog.bestByTier?.tier3_frontier) || findOption(catalog.bestByTier?.reasoning)
-          : findOption(catalog.bestByTier?.reasoning) || findOption(catalog.bestByTier?.tier3_frontier);
-        const chosen = preferredWinner || sortByTierScore(pool, tierKey)[0];
+        const chosen = pickDiversifiedForAgent(pool, tierKey, 5);
         return { provider: chosen.provider, model: chosen.model, tierLabel, tier };
       }
     } else if (tier === "tier1_fast") {
-      const autoPool = unblocked.filter((o) => (catalog.forceFree || !o.isFree) && o.mode !== "vip");
+      const autoPool = unblocked.filter(
+        (o) => (catalog.forceFree || !o.isFree) && o.mode !== "vip" && o.model.toLowerCase() !== "gemini-2.5-flash-thinking"
+      );
       if (autoPool.length > 0) {
         const chosen =
           (catalog.forceFree ? autoPool.find((o) => o.isFree) : null) ||
-          findOption(catalog.bestByTier?.tier1_fast) ||
-          autoPool.find((o) => o.model.toLowerCase() === "gemini-2.5-flash") ||
-          autoPool.find((o) => o.model.toLowerCase() === "gemini-3-flash") ||
-          sortByTierScore(autoPool, "tier1_fast")[0];
+          pickDiversifiedForAgent(autoPool, "tier1_fast", 5);
         return { provider: chosen.provider, model: chosen.model, tierLabel, tier };
       }
     } else {
       // tier2_balanced (Builders: backend, frontend, infra, prompts, release, growth)
-      const autoPool = unblocked.filter((o) => (catalog.forceFree || !o.isFree) && o.mode !== "vip");
+      const autoPool = unblocked.filter(
+        (o) => (catalog.forceFree || !o.isFree) && o.mode !== "vip" && o.model.toLowerCase() !== "gemini-2.5-flash-thinking"
+      );
       if (autoPool.length > 0) {
         const chosen =
           (catalog.forceFree ? autoPool.find((o) => o.isFree) : null) ||
-          findOption(catalog.bestByTier?.tier2_balanced) ||
-          findOption(catalog.bestByTier?.geral) ||
-          sortByTierScore(autoPool, "tier2_balanced")[0];
+          pickDiversifiedForAgent(autoPool, "tier2_balanced", 8);
         return { provider: chosen.provider, model: chosen.model, tierLabel, tier };
       }
     }

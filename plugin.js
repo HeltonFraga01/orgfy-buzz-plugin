@@ -2472,7 +2472,7 @@ function isIrisExclusiveModel(modelId) {
   return normName$1(modelId) === "gpt-6.1-terra";
 }
 function pickLiveRecommendedModel(roleOrName, catalog) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
+  var _a;
   const tier = resolveAgentRoutingTier(roleOrName);
   const lowerRole = normName$1(roleOrName);
   const isArchitectOrSecurity = /(arquit|segur|secur|hugo)/.test(lowerRole);
@@ -2492,12 +2492,50 @@ function pickLiveRecommendedModel(roleOrName, catalog) {
       return unblocked.find((o) => o.model.toLowerCase() === target);
     };
     const sortByTierScore = (pool, tierKey) => [...pool].sort((a, b) => {
-      var _a2, _b2;
+      var _a2, _b;
       const sa = ((_a2 = a.tierScores) == null ? void 0 : _a2[tierKey]) ?? a.rankingScore ?? a.qualityScore ?? 0;
-      const sb = ((_b2 = b.tierScores) == null ? void 0 : _b2[tierKey]) ?? b.rankingScore ?? b.qualityScore ?? 0;
+      const sb = ((_b = b.tierScores) == null ? void 0 : _b[tierKey]) ?? b.rankingScore ?? b.qualityScore ?? 0;
       if (sb !== sa) return sb - sa;
       return (a.latencyMs ?? 999999) - (b.latencyMs ?? 999999);
     });
+    const interleaveByProvider = (sorted, maxItems) => {
+      const buckets = /* @__PURE__ */ new Map();
+      const provOrder = [];
+      for (const item of sorted) {
+        const p = String(item.provider || "default").toLowerCase();
+        if (!buckets.has(p)) {
+          buckets.set(p, []);
+          provOrder.push(p);
+        }
+        buckets.get(p).push(item);
+      }
+      const out = [];
+      let round = 0;
+      while (out.length < maxItems) {
+        let added = false;
+        for (const p of provOrder) {
+          const list = buckets.get(p);
+          if (round < list.length) {
+            out.push(list[round]);
+            added = true;
+            if (out.length >= maxItems) break;
+          }
+        }
+        if (!added) break;
+        round += 1;
+      }
+      return out;
+    };
+    const pickDiversifiedForAgent = (pool, tierKey, maxSpread) => {
+      const ranked = sortByTierScore(pool, tierKey);
+      const spread = interleaveByProvider(ranked, Math.max(1, Math.min(maxSpread, ranked.length)));
+      if (spread.length <= 1) return spread[0];
+      let hash = 0;
+      for (let i = 0; i < lowerRole.length; i++) {
+        hash = hash * 31 + lowerRole.charCodeAt(i) >>> 0;
+      }
+      return spread[hash % spread.length];
+    };
     if (tier === "vip_iris") {
       const paidPool = unblocked.filter((o) => !o.isFree);
       if (paidPool.length > 0) {
@@ -2505,30 +2543,36 @@ function pickLiveRecommendedModel(roleOrName, catalog) {
         return { provider: chosen.provider, model: chosen.model, tierLabel, tier };
       }
     } else if (tier === "vip_leadership") {
-      const paidPool = unblocked.filter((o) => !o.isFree);
+      const vipPool = unblocked.filter((o) => !o.isFree && o.mode === "vip" && !isIrisExclusiveModel(o.model));
+      const paidPool = vipPool.length > 0 ? vipPool : unblocked.filter((o) => !o.isFree && !isIrisExclusiveModel(o.model));
       if (paidPool.length > 0) {
-        const chosen = findOption((_b = catalog.bestByTier) == null ? void 0 : _b.vip_leadership) || paidPool.find((o) => o.mode === "vip" && !isIrisExclusiveModel(o.model)) || findOption((_c = catalog.bestByTier) == null ? void 0 : _c.tier3_frontier) || sortByTierScore(paidPool, "tier3_frontier")[0];
+        const chosen = pickDiversifiedForAgent(paidPool, "tier3_frontier", 3);
         return { provider: chosen.provider, model: chosen.model, tierLabel, tier };
       }
     } else if (tier === "reasoning") {
-      const paidAutoPool = unblocked.filter((o) => !o.isFree && o.mode !== "vip");
+      const paidAutoPool = unblocked.filter(
+        (o) => !o.isFree && o.mode !== "vip" && o.model.toLowerCase() !== "gemini-2.5-flash-thinking"
+      );
       const pool = paidAutoPool.length > 0 ? paidAutoPool : unblocked.filter((o) => !o.isFree);
       if (pool.length > 0) {
         const tierKey = isArchitectOrSecurity ? "tier3_frontier" : "reasoning";
-        const preferredWinner = isArchitectOrSecurity ? findOption((_d = catalog.bestByTier) == null ? void 0 : _d.tier3_frontier) || findOption((_e = catalog.bestByTier) == null ? void 0 : _e.reasoning) : findOption((_f = catalog.bestByTier) == null ? void 0 : _f.reasoning) || findOption((_g = catalog.bestByTier) == null ? void 0 : _g.tier3_frontier);
-        const chosen = preferredWinner || sortByTierScore(pool, tierKey)[0];
+        const chosen = pickDiversifiedForAgent(pool, tierKey, 5);
         return { provider: chosen.provider, model: chosen.model, tierLabel, tier };
       }
     } else if (tier === "tier1_fast") {
-      const autoPool = unblocked.filter((o) => (catalog.forceFree || !o.isFree) && o.mode !== "vip");
+      const autoPool = unblocked.filter(
+        (o) => (catalog.forceFree || !o.isFree) && o.mode !== "vip" && o.model.toLowerCase() !== "gemini-2.5-flash-thinking"
+      );
       if (autoPool.length > 0) {
-        const chosen = (catalog.forceFree ? autoPool.find((o) => o.isFree) : null) || findOption((_h = catalog.bestByTier) == null ? void 0 : _h.tier1_fast) || autoPool.find((o) => o.model.toLowerCase() === "gemini-2.5-flash") || autoPool.find((o) => o.model.toLowerCase() === "gemini-3-flash") || sortByTierScore(autoPool, "tier1_fast")[0];
+        const chosen = (catalog.forceFree ? autoPool.find((o) => o.isFree) : null) || pickDiversifiedForAgent(autoPool, "tier1_fast", 5);
         return { provider: chosen.provider, model: chosen.model, tierLabel, tier };
       }
     } else {
-      const autoPool = unblocked.filter((o) => (catalog.forceFree || !o.isFree) && o.mode !== "vip");
+      const autoPool = unblocked.filter(
+        (o) => (catalog.forceFree || !o.isFree) && o.mode !== "vip" && o.model.toLowerCase() !== "gemini-2.5-flash-thinking"
+      );
       if (autoPool.length > 0) {
-        const chosen = (catalog.forceFree ? autoPool.find((o) => o.isFree) : null) || findOption((_i = catalog.bestByTier) == null ? void 0 : _i.tier2_balanced) || findOption((_j = catalog.bestByTier) == null ? void 0 : _j.geral) || sortByTierScore(autoPool, "tier2_balanced")[0];
+        const chosen = (catalog.forceFree ? autoPool.find((o) => o.isFree) : null) || pickDiversifiedForAgent(autoPool, "tier2_balanced", 8);
         return { provider: chosen.provider, model: chosen.model, tierLabel, tier };
       }
     }
