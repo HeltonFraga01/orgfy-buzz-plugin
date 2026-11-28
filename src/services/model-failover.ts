@@ -825,12 +825,29 @@ export async function executeSmartModelFailover(
       ? String((matchedAgent.config as any).provider || "")
       : "") || (previousModel ? inferProviderId(previousModel) : null);
 
-  // Proteção VIP Escalonada da OrgFy Iris: antes de trocar o modelo de topo da Iris por um glitch transitório,
-  // executa tentativas escalonadas no modelo VIP atual (padrão: aguarda 5s -> tenta; falha -> aguarda 5s -> tenta).
-  // Só troca de modelo se TODAS as tentativas falharem (evitando rebaixamento indevido sem nunca parar a empresa).
+  // Proteção Retry Escalonado antes de trocar de modelo:
+  // - OrgFy Iris: 2 tentativas [5000, 5000] para preservar modelo VIP de topo.
+  // - Demais agentes em modelo estável: 1 tentativa curta [5000] quando o erro for pico transitório 503/429
+  //   (ou quando vipRetryDelaysMs for passado explicitamente), evitando trocar de modelo em oscilações de 2-3s.
   const hostForRetry = (ctx as any)?.host;
-  if (applyChange && isIris && previousModel && !isUnsupportedAgentModel(previousModel) && typeof hostForRetry?.request === "function") {
-    const delays = Array.isArray(input.vipRetryDelaysMs) ? input.vipRetryDelaysMs : [...IRIS_VIP_RETRY_DELAYS_MS];
+  const isTransientSpikeReason = /(503|429|no available accounts|temporarily unavailable|transient)/i.test(
+    String((input as any)?.reason || "")
+  );
+  const shouldRetryCurrentModel =
+    applyChange &&
+    previousModel &&
+    !isUnsupportedAgentModel(previousModel) &&
+    typeof hostForRetry?.request === "function" &&
+    (isIris ||
+      (Array.isArray(input.vipRetryDelaysMs)
+        ? input.vipRetryDelaysMs.length > 0
+        : isTransientSpikeReason));
+  if (shouldRetryCurrentModel) {
+    const delays = Array.isArray(input.vipRetryDelaysMs)
+      ? input.vipRetryDelaysMs
+      : isIris
+      ? [...IRIS_VIP_RETRY_DELAYS_MS]
+      : [5000];
     const currentProv =
       NEXUSMIND_PROVIDERS.find((p) => p.id === previousProvider) ||
       NEXUSMIND_PROVIDERS.find((p) => p.id === inferProviderId(previousModel)) ||
@@ -852,7 +869,7 @@ export async function executeSmartModelFailover(
               ...(root ? { root } : {}),
               text:
                 input.retrigger_text ||
-                `[ORGFY RETRY VIP ESCALONADO] Modelo VIP '${previousModel}' voltou a responder HTTP 200 na tentativa ${i + 1}/${delays.length} (${retryProbe.latencyMs ?? 0}ms). Retome imediatamente o ponto exato onde parou nesta thread.`,
+                `[ORGFY RETRY ${isIris ? "VIP " : ""}ESCALONADO] Modelo '${previousModel}' voltou a responder HTTP 200 na tentativa ${i + 1}/${delays.length} (${retryProbe.latencyMs ?? 0}ms). Retome imediatamente o ponto exato onde parou nesta thread.`,
             });
             retriggeredOnRetry = true;
           } catch {
@@ -885,7 +902,7 @@ export async function executeSmartModelFailover(
               source: "live_probe",
             },
           ],
-          message: `OrgFy Iris recuperou no modelo VIP '${previousModel}' após retry escalonado (${i + 1}/${delays.length} · ${retryProbe.latencyMs ?? 0}ms) — modelo de topo preservado sem rebaixamento.`,
+          message: `${resolvedAgentLabel || "Agente"} recuperou no modelo '${previousModel}' após retry escalonado (${i + 1}/${delays.length} · ${retryProbe.latencyMs ?? 0}ms) — modelo preservado sem troca desnecessária.`,
         };
       }
     }
@@ -1389,6 +1406,7 @@ export async function requestModelFailover(
       agente: input.agente,
       agent_pubkey: input.agent_pubkey || null,
       failed_model: input.failed_model || null,
+      reason: input.reason,
       prefer_free: Boolean(input.prefer_free),
       apply: true,
       retrigger: input.retrigger !== false,
@@ -1397,7 +1415,7 @@ export async function requestModelFailover(
       retrigger_text: input.retrigger_text,
       max_probes: input.max_probes,
       vipRetryDelaysMs: Array.isArray(input.vipRetryDelaysMs) ? (input.vipRetryDelaysMs as number[]) : undefined,
-    });
+    } as any);
     if (directRes.ok && directRes.selectedModel) {
       return {
         ok: true,

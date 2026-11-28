@@ -2433,13 +2433,13 @@ async function loadLiveGatewayModelCatalog(ctx) {
 }
 function pickLiveRecommendedModel(roleOrName, catalog) {
   const isTier1 = isVipOrLeadershipAgent(roleOrName);
-  const tierLabel = isTier1 ? "Tier 1 (VIP · Somente Pago)" : "Tier 2 (Execução/Rápido)";
+  const tierLabel = isTier1 ? "Tier 1 (VIP · Pool OpenAI)" : "Tier 2 (Execução · Pool Antigravity)";
   if (catalog && catalog.approvedOptions.length > 0) {
     const unblocked = catalog.approvedOptions.filter((o) => !isBlockedGatewayCatalogModel(o.model) && o.mode !== "blocked");
     if (isTier1) {
       const paidPool = unblocked.filter((o) => !o.isFree);
       if (paidPool.length > 0) {
-        const preferredPaid = paidPool.find((o) => o.mode === "vip") || paidPool.find((o) => /(gpt-6\.1|claude-sonnet-4-6|claude-opus-4-6|gemini-4-hydrogen|gemini-2\.5-flash)/.test(o.model.toLowerCase())) || paidPool[0];
+        const preferredPaid = paidPool.find((o) => o.model.toLowerCase() === "gpt-6.1-terra") || paidPool.find((o) => o.provider === "nexusmind_openai" && o.mode !== "blocked") || paidPool.find((o) => o.mode === "vip") || paidPool.find((o) => /(claude-sonnet-4-6|claude-opus-4-6|gemini-4-hydrogen-high|gemini-4-hydrogen-sonar)/.test(o.model.toLowerCase())) || paidPool[0];
         return { provider: preferredPaid.provider, model: preferredPaid.model, tierLabel };
       }
       if (unblocked.length > 0) {
@@ -2448,12 +2448,12 @@ function pickLiveRecommendedModel(roleOrName, catalog) {
     } else {
       const pool = unblocked.filter((o) => catalog.forceFree || !o.isFree);
       if (pool.length > 0) {
-        const preferredFast = (catalog.forceFree ? pool.find((o) => o.isFree) : null) || pool.find((o) => !o.isFree && o.model.toLowerCase() === "gemini-2.5-flash") || pool.find((o) => !o.isFree && o.model.toLowerCase().includes("gemini-4-hydrogen")) || pool.find((o) => !o.isFree) || pool[0];
+        const preferredFast = (catalog.forceFree ? pool.find((o) => o.isFree) : null) || pool.find((o) => !o.isFree && o.model.toLowerCase() === "gemini-4-hydrogen-sonar") || pool.find((o) => !o.isFree && o.model.toLowerCase() === "gemini-4-hydrogen-high") || pool.find((o) => !o.isFree && o.model.toLowerCase() === "gemini-4-hydrogen-low") || pool.find((o) => !o.isFree && o.model.toLowerCase() === "gpt-6.1-terra") || pool.find((o) => !o.isFree && o.model.toLowerCase() === "gemini-2.5-flash") || pool.find((o) => !o.isFree) || pool[0];
         return { provider: preferredFast.provider, model: preferredFast.model, tierLabel };
       }
     }
   }
-  return isTier1 ? { provider: "nexusmind_openai", model: "gpt-6.1-terra", tierLabel } : { provider: "nexusmind_antigravity", model: "gemini-2.5-flash", tierLabel };
+  return isTier1 ? { provider: "nexusmind_openai", model: "gpt-6.1-terra", tierLabel } : { provider: "nexusmind_antigravity", model: "gemini-4-hydrogen-sonar", tierLabel };
 }
 const SURFACE_BG = "var(--affordance-subtle, rgba(255, 255, 255, 0.035))";
 const CARD_BG$1 = "var(--bg-panel, rgba(255, 255, 255, 0.03))";
@@ -3805,8 +3805,12 @@ async function executeSmartModelFailover(ctx, input = {}) {
   const previousModel = ((matchedAgent == null ? void 0 : matchedAgent.config) && typeof matchedAgent.config === "object" ? String(matchedAgent.config.model || "") : "") || (input.failed_model || null);
   const previousProvider = ((matchedAgent == null ? void 0 : matchedAgent.config) && typeof matchedAgent.config === "object" ? String(matchedAgent.config.provider || "") : "") || (previousModel ? inferProviderId(previousModel) : null);
   const hostForRetry = ctx == null ? void 0 : ctx.host;
-  if (applyChange && isIris && previousModel && !isUnsupportedAgentModel(previousModel) && typeof (hostForRetry == null ? void 0 : hostForRetry.request) === "function") {
-    const delays = Array.isArray(input.vipRetryDelaysMs) ? input.vipRetryDelaysMs : [...IRIS_VIP_RETRY_DELAYS_MS];
+  const isTransientSpikeReason = /(503|429|no available accounts|temporarily unavailable|transient)/i.test(
+    String((input == null ? void 0 : input.reason) || "")
+  );
+  const shouldRetryCurrentModel = applyChange && previousModel && !isUnsupportedAgentModel(previousModel) && typeof (hostForRetry == null ? void 0 : hostForRetry.request) === "function" && (isIris || (Array.isArray(input.vipRetryDelaysMs) ? input.vipRetryDelaysMs.length > 0 : isTransientSpikeReason));
+  if (shouldRetryCurrentModel) {
+    const delays = Array.isArray(input.vipRetryDelaysMs) ? input.vipRetryDelaysMs : isIris ? [...IRIS_VIP_RETRY_DELAYS_MS] : [5e3];
     const currentProv = NEXUSMIND_PROVIDERS.find((p) => p.id === previousProvider) || NEXUSMIND_PROVIDERS.find((p) => p.id === inferProviderId(previousModel)) || NEXUSMIND_PROVIDERS[0];
     for (let i = 0; i < delays.length; i++) {
       const waitMs = Math.max(0, Number(delays[i] || 0));
@@ -3823,7 +3827,7 @@ async function executeSmartModelFailover(ctx, input = {}) {
             await agentsApi.wake(matchedAgent.key, {
               channel,
               ...root ? { root } : {},
-              text: input.retrigger_text || `[ORGFY RETRY VIP ESCALONADO] Modelo VIP '${previousModel}' voltou a responder HTTP 200 na tentativa ${i + 1}/${delays.length} (${retryProbe.latencyMs ?? 0}ms). Retome imediatamente o ponto exato onde parou nesta thread.`
+              text: input.retrigger_text || `[ORGFY RETRY ${isIris ? "VIP " : ""}ESCALONADO] Modelo '${previousModel}' voltou a responder HTTP 200 na tentativa ${i + 1}/${delays.length} (${retryProbe.latencyMs ?? 0}ms). Retome imediatamente o ponto exato onde parou nesta thread.`
             });
             retriggeredOnRetry = true;
           } catch {
@@ -3855,7 +3859,7 @@ async function executeSmartModelFailover(ctx, input = {}) {
               source: "live_probe"
             }
           ],
-          message: `OrgFy Iris recuperou no modelo VIP '${previousModel}' após retry escalonado (${i + 1}/${delays.length} · ${retryProbe.latencyMs ?? 0}ms) — modelo de topo preservado sem rebaixamento.`
+          message: `${resolvedAgentLabel || "Agente"} recuperou no modelo '${previousModel}' após retry escalonado (${i + 1}/${delays.length} · ${retryProbe.latencyMs ?? 0}ms) — modelo preservado sem troca desnecessária.`
         };
       }
     }
@@ -4245,6 +4249,7 @@ async function requestModelFailover(ctx, input) {
       agente: input.agente,
       agent_pubkey: input.agent_pubkey || null,
       failed_model: input.failed_model || null,
+      reason: input.reason,
       prefer_free: Boolean(input.prefer_free),
       apply: true,
       retrigger: input.retrigger !== false,
@@ -6019,9 +6024,11 @@ async function evaluateGovernanceAndReact(ctx, options = {}) {
                   }
                 }
               }
+              const isIsolatedTransient503 = Number(s.errors_5xx ?? 0) === 1 && Number(s.recent_provider_errors ?? 0) <= 1 && !/404|not found/i.test(String(s.last_provider_error_text || s.last_error_text || ""));
               const failoverRes = await requestModelFailover(ctx, {
                 agente: s.agente,
                 agent_pubkey: s.agent_pubkey || null,
+                reason: isIsolatedTransient503 ? "provider_503_transient" : "provider_storm",
                 prefer_free: false,
                 apply: true,
                 retrigger: true,

@@ -462,17 +462,20 @@ export function pickLiveRecommendedModel(
   catalog: LiveGatewayModelCatalog | null
 ): { provider: string; model: string; tierLabel: string } {
   const isTier1 = isVipOrLeadershipAgent(roleOrName);
-  const tierLabel = isTier1 ? "Tier 1 (VIP · Somente Pago)" : "Tier 2 (Execução/Rápido)";
+  const tierLabel = isTier1 ? "Tier 1 (VIP · Pool OpenAI)" : "Tier 2 (Execução · Pool Antigravity)";
 
   if (catalog && catalog.approvedOptions.length > 0) {
     const unblocked = catalog.approvedOptions.filter((o) => !isBlockedGatewayCatalogModel(o.model) && o.mode !== "blocked");
     if (isTier1) {
-      // Regra estrita VIP: NUNCA usa :free quando houver qualquer modelo pago disponível, mesmo com forceFree ligado.
+      // Balanceamento Multi-Provedor + Regra estrita VIP:
+      // Liderança/VIPs (Iris, Bento, Conselho) priorizam gpt-6.1-terra (nexusmind_openai · 1.9% erro real) para desafogar o pool Antigravity.
       const paidPool = unblocked.filter((o) => !o.isFree);
       if (paidPool.length > 0) {
         const preferredPaid =
+          paidPool.find((o) => o.model.toLowerCase() === "gpt-6.1-terra") ||
+          paidPool.find((o) => o.provider === "nexusmind_openai" && o.mode !== "blocked") ||
           paidPool.find((o) => o.mode === "vip") ||
-          paidPool.find((o) => /(gpt-6\.1|claude-sonnet-4-6|claude-opus-4-6|gemini-4-hydrogen|gemini-2\.5-flash)/.test(o.model.toLowerCase())) ||
+          paidPool.find((o) => /(claude-sonnet-4-6|claude-opus-4-6|gemini-4-hydrogen-high|gemini-4-hydrogen-sonar)/.test(o.model.toLowerCase())) ||
           paidPool[0];
         return { provider: preferredPaid.provider, model: preferredPaid.model, tierLabel };
       }
@@ -480,12 +483,17 @@ export function pickLiveRecommendedModel(
         return { provider: unblocked[0].provider, model: unblocked[0].model, tierLabel };
       }
     } else {
+      // Operação/Execução (PO, Dev, QA): prioriza família gemini-4-hydrogen-high/sonar/low (2.0%–2.4% erro real, 0 malformed_tool)
+      // antes de gemini-2.5-flash (50x malformed_function_call/24h).
       const pool = unblocked.filter((o) => catalog.forceFree || !o.isFree);
       if (pool.length > 0) {
         const preferredFast =
           (catalog.forceFree ? pool.find((o) => o.isFree) : null) ||
+          pool.find((o) => !o.isFree && o.model.toLowerCase() === "gemini-4-hydrogen-sonar") ||
+          pool.find((o) => !o.isFree && o.model.toLowerCase() === "gemini-4-hydrogen-high") ||
+          pool.find((o) => !o.isFree && o.model.toLowerCase() === "gemini-4-hydrogen-low") ||
+          pool.find((o) => !o.isFree && o.model.toLowerCase() === "gpt-6.1-terra") ||
           pool.find((o) => !o.isFree && o.model.toLowerCase() === "gemini-2.5-flash") ||
-          pool.find((o) => !o.isFree && o.model.toLowerCase().includes("gemini-4-hydrogen")) ||
           pool.find((o) => !o.isFree) ||
           pool[0];
         return { provider: preferredFast.provider, model: preferredFast.model, tierLabel };
@@ -495,7 +503,7 @@ export function pickLiveRecommendedModel(
 
   return isTier1
     ? { provider: "nexusmind_openai", model: "gpt-6.1-terra", tierLabel }
-    : { provider: "nexusmind_antigravity", model: "gemini-2.5-flash", tierLabel };
+    : { provider: "nexusmind_antigravity", model: "gemini-4-hydrogen-sonar", tierLabel };
 }
 
 const SURFACE_BG = "var(--affordance-subtle, rgba(255, 255, 255, 0.035))";

@@ -813,9 +813,15 @@ export async function evaluateGovernanceAndReact(
                 }
               }
 
+              const isIsolatedTransient503 =
+                Number(s.errors_5xx ?? 0) === 1 &&
+                Number(s.recent_provider_errors ?? 0) <= 1 &&
+                !/404|not found/i.test(String((s as any).last_provider_error_text || (s as any).last_error_text || ""));
+
               const failoverRes = await requestModelFailover(ctx, {
                 agente: s.agente,
                 agent_pubkey: s.agent_pubkey || null,
+                reason: isIsolatedTransient503 ? "provider_503_transient" : "provider_storm",
                 prefer_free: false,
                 apply: true,
                 retrigger: true,
