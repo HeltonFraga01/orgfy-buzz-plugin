@@ -80,7 +80,13 @@ export async function reconcileAgentsViaBuzzApi(
     const model = cfg.model || ag?.model || null;
     const mlow = String(model || "").trim().toLowerCase();
     const shortM = String(mlow.split("/").pop() || mlow).trim();
-    const isVip = isVipOrLeadershipAgent(String(ag?.name || ag?.key || ""));
+    const agentLabel = String(ag?.name || ag?.key || "");
+    const isIris = isIrisAgent(agentLabel);
+    const isVip = isVipOrLeadershipAgent(agentLabel);
+    // Regra soberana: NUNCA alterar o modelo da OrgFy Iris na reconciliação automática de fundo
+    if (isIris && prov && model && !isUnsupportedAgentModel(mlow) && !isFreeModelId(mlow)) {
+      continue;
+    }
     const hasAnyPaidApproved = Boolean(!hasLiveCatalog || catalog?.approvedOptions.some((o) => !o.isFree));
     const isOfflineInGateway = Boolean(
       hasLiveCatalog && (catalog?.offlineModels.has(mlow) || catalog?.offlineModels.has(shortM))
@@ -92,9 +98,11 @@ export async function reconcileAgentsViaBuzzApi(
         !catalog.approvedModels.has(mlow) &&
         !catalog.approvedModels.has(shortM)
     );
+    const leakedIrisExclusiveModel = !isIris && (mlow === "gpt-6.1-terra" || shortM === "gpt-6.1-terra");
     const needsFix =
       !prov ||
       !model ||
+      leakedIrisExclusiveModel ||
       isUnsupportedAgentModel(mlow) ||
       isOfflineInGateway ||
       isNotEvalApproved ||
@@ -105,14 +113,14 @@ export async function reconcileAgentsViaBuzzApi(
     let nextModel: string;
     let nextProv: string;
     if (hasLiveCatalog) {
-      const rec = pickLiveRecommendedModel(String(ag?.name || ag?.key || ""), catalog);
+      const rec = pickLiveRecommendedModel(agentLabel, catalog);
       nextModel = rec.model;
       nextProv = rec.provider;
     } else {
-      const isFastTarget = mlow.includes("flash") || mlow.includes("haiku");
-      nextModel = isFastTarget ? "gemini-2.5-flash" : "claude-sonnet-4-6";
-      nextProv = isFastTarget ? "nexusmind_antigravity" : "nexusmind_anthropic";
+      nextModel = isIris ? "gpt-6.1-terra" : "gemini-2.5-flash";
+      nextProv = isIris ? "nexusmind_openai" : "nexusmind_antigravity";
     }
+    if (!isIris && nextModel.toLowerCase() === "gpt-6.1-terra") continue;
     if (!opts.dryRun && typeof agentsApi?.save === "function") {
       await agentsApi.save(ag.key, { config: { ...cfg, provider: nextProv, model: nextModel } });
     }
@@ -428,7 +436,8 @@ async function loadSharedNexusMindRanking(
   ctx: Context,
   excludeSet: Set<string>,
   preferFree: boolean,
-  isVip: boolean = false
+  isVip: boolean = false,
+  isIris: boolean = false
 ): Promise<ModelCandidateScore[]> {
   const disabled = getDisabledModelsFromLocalStorage();
   let parsed: any = null;
@@ -449,6 +458,7 @@ async function loadSharedNexusMindRanking(
           for (const m of cp.models) {
             const mid = String(m?.model || "").trim();
             if (!mid || isUnsupportedAgentModel(mid) || disabled.has(mid) || excludeSet.has(mid.toLowerCase())) continue;
+            if (!isIris && mid.toLowerCase() === "gpt-6.1-terra") continue;
             if (!m.online || !m.evalApproved) continue;
             if (m.policyState === "blocked" || (!isVip && m.policyState === "vip")) continue;
             const free = Boolean(m.isFree) || isFreeModelId(mid);
@@ -535,6 +545,8 @@ async function loadSharedNexusMindRanking(
     for (const m of parsed.models) {
       const mid = String(m?.model || "").trim();
       if (!mid || isUnsupportedAgentModel(mid) || m.isDisabled || m.autoAssignBlocked || disabled.has(mid) || excludeSet.has(mid.toLowerCase())) continue;
+      if (!isIris && mid.toLowerCase() === "gpt-6.1-terra") continue;
+      if (!isVip && (m.policyState === "vip" || isTopVipModel(mid, m.policyState))) continue;
       if (blockedAuto.has(mid.toLowerCase())) continue;
       if (m.online === false) continue; // Pula modelos que falharam no ping real do NexusMind
       if (maxCost !== null && typeof m.avgCostUsd === "number" && m.avgCostUsd > 0 && m.avgCostUsd > maxCost) continue;
@@ -591,6 +603,8 @@ async function loadSharedNexusMindRanking(
         for (const it of items) {
           const mid = String(it?.model || "").trim();
           if (!mid || disabled.has(mid) || excludeSet.has(mid.toLowerCase())) continue;
+          if (!isIris && mid.toLowerCase() === "gpt-6.1-terra") continue;
+          if (!isVip && isTopVipModel(mid)) continue;
           const free = isFreeModelId(mid);
           if (preferFree && !free) continue;
           if (!preferFree && free) continue;
@@ -922,13 +936,13 @@ export async function executeSmartModelFailover(
   if (previousModel) excludeSet.add(previousModel.toLowerCase());
 
   // 1. Primeiro verifica o ranking real compartilhado pelo NexusMind Gateway
-  let sharedRanking = await loadSharedNexusMindRanking(ctx, excludeSet, preferFree, isVip);
+  let sharedRanking = await loadSharedNexusMindRanking(ctx, excludeSet, preferFree, isVip, isIris);
   // Se todos os modelos do ranking estiverem em quarentena, relaxa quarentena mantendo apenas o modelo atual excluído
   if (sharedRanking.length === 0 && quarantined.size > 0) {
     const minimalExclude = new Set<string>();
     if (failedNorm) minimalExclude.add(failedNorm);
     if (previousModel) minimalExclude.add(previousModel.toLowerCase());
-    sharedRanking = await loadSharedNexusMindRanking(ctx, minimalExclude, preferFree, isVip);
+    sharedRanking = await loadSharedNexusMindRanking(ctx, minimalExclude, preferFree, isVip, isIris);
   }
   // Separação de domínio de falha (Cross-Provider Preference): prioriza fortemente provedor distinto do que falhou
   // (+45 supera o vipBoost de +30 para que VIPs escapem imediatamente de quedas de pool inteiro como 503 No available accounts)
@@ -987,7 +1001,7 @@ export async function executeSmartModelFailover(
       const minimalEx = new Set<string>();
       if (failedNorm) minimalEx.add(failedNorm);
       if (previousModel) minimalEx.add(previousModel.toLowerCase());
-      const halfOpenPool = (await loadSharedNexusMindRanking(ctx, minimalEx, preferFree, isVip))
+      const halfOpenPool = (await loadSharedNexusMindRanking(ctx, minimalEx, preferFree, isVip, isIris))
         .filter((c) => quarantined.has(c.model.toLowerCase()) && (!failedProvider || c.provider !== failedProvider))
         .slice(0, 4);
       for (const cand of halfOpenPool) {
@@ -1020,7 +1034,13 @@ export async function executeSmartModelFailover(
   const hasVerifiedOnline = verifiedShared.some((v) => v.online);
   if (sharedRanking.length === 0 || (verifiedShared.length > 0 && !hasVerifiedOnline)) {
     const catalog = await discoverNexusMindCatalog(ctx);
-    let pool = catalog.filter((c) => !isUnsupportedAgentModel(c.id) && !excludeSet.has(c.id.toLowerCase()));
+    let pool = catalog.filter((c) => {
+      const cid = c.id.toLowerCase();
+      if (isUnsupportedAgentModel(c.id) || excludeSet.has(cid)) return false;
+      if (!isIris && cid === "gpt-6.1-terra") return false;
+      if (!isVip && isTopVipModel(c.id)) return false;
+      return true;
+    });
     if (preferFree) {
       const freeOnly = pool.filter((c) => isFreeModelId(c.id));
       if (freeOnly.length > 0) pool = freeOnly;

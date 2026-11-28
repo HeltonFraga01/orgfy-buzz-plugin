@@ -457,34 +457,55 @@ export async function loadLiveGatewayModelCatalog(ctx: Context): Promise<LiveGat
   };
 }
 
+function isIrisOnlyAgent(roleOrName: string): boolean {
+  return /\biris\b/i.test(normName(roleOrName));
+}
+
+function isIrisExclusiveModel(modelId: string): boolean {
+  return normName(modelId) === "gpt-6.1-terra";
+}
+
 export function pickLiveRecommendedModel(
   roleOrName: string,
   catalog: LiveGatewayModelCatalog | null
 ): { provider: string; model: string; tierLabel: string } {
+  const isIris = isIrisOnlyAgent(roleOrName);
   const isTier1 = isVipOrLeadershipAgent(roleOrName);
-  const tierLabel = isTier1 ? "Tier 1 (VIP · Pool OpenAI)" : "Tier 2 (Execução · Pool Antigravity)";
+  const tierLabel = isIris
+    ? "VIP Exclusivo (OrgFy Iris)"
+    : isTier1
+    ? "Tier 1 (Liderança · Somente Pago)"
+    : "Tier 2 (Execução · Pool Auto)";
 
   if (catalog && catalog.approvedOptions.length > 0) {
-    const unblocked = catalog.approvedOptions.filter((o) => !isBlockedGatewayCatalogModel(o.model) && o.mode !== "blocked");
-    if (isTier1) {
-      // Balanceamento Multi-Provedor + Regra estrita VIP:
-      // Liderança/VIPs (Iris, Bento, Conselho) priorizam gpt-6.1-terra (nexusmind_openai · 1.9% erro real) para desafogar o pool Antigravity.
+    // Regra soberana: gpt-6.1-terra é EXCLUSIVO da OrgFy Iris; workers nunca recebem modelos VIP.
+    const unblocked = catalog.approvedOptions.filter((o) => {
+      if (isBlockedGatewayCatalogModel(o.model) || o.mode === "blocked") return false;
+      if (!isIris && isIrisExclusiveModel(o.model)) return false;
+      if (!isTier1 && o.mode === "vip") return false;
+      return true;
+    });
+    if (isIris) {
+      const paidPool = unblocked.filter((o) => !o.isFree);
+      if (paidPool.length > 0) {
+        const preferredIris =
+          paidPool.find((o) => isIrisExclusiveModel(o.model)) ||
+          paidPool.find((o) => o.mode === "vip") ||
+          paidPool.find((o) => /(claude-sonnet-4-6|claude-opus-4-6|claude-sonnet-5)/.test(o.model.toLowerCase())) ||
+          paidPool[0];
+        return { provider: preferredIris.provider, model: preferredIris.model, tierLabel };
+      }
+    } else if (isTier1) {
       const paidPool = unblocked.filter((o) => !o.isFree);
       if (paidPool.length > 0) {
         const preferredPaid =
-          paidPool.find((o) => o.model.toLowerCase() === "gpt-6.1-terra") ||
-          paidPool.find((o) => o.provider === "nexusmind_openai" && o.mode !== "blocked") ||
-          paidPool.find((o) => o.mode === "vip") ||
-          paidPool.find((o) => /(claude-sonnet-4-6|claude-opus-4-6|gemini-4-hydrogen-high|gemini-4-hydrogen-sonar)/.test(o.model.toLowerCase())) ||
+          paidPool.find((o) => o.model.toLowerCase() === "gemini-4-hydrogen-high") ||
+          paidPool.find((o) => o.model.toLowerCase() === "gemini-4-hydrogen-sonar") ||
+          paidPool.find((o) => /(claude-sonnet-4-6|gemini-4-hydrogen|gemini-2\.5-flash)/.test(o.model.toLowerCase())) ||
           paidPool[0];
         return { provider: preferredPaid.provider, model: preferredPaid.model, tierLabel };
       }
-      if (unblocked.length > 0) {
-        return { provider: unblocked[0].provider, model: unblocked[0].model, tierLabel };
-      }
     } else {
-      // Operação/Execução (PO, Dev, QA): prioriza família gemini-4-hydrogen-high/sonar/low (2.0%–2.4% erro real, 0 malformed_tool)
-      // antes de gemini-2.5-flash (50x malformed_function_call/24h).
       const pool = unblocked.filter((o) => catalog.forceFree || !o.isFree);
       if (pool.length > 0) {
         const preferredFast =
@@ -492,7 +513,6 @@ export function pickLiveRecommendedModel(
           pool.find((o) => !o.isFree && o.model.toLowerCase() === "gemini-4-hydrogen-sonar") ||
           pool.find((o) => !o.isFree && o.model.toLowerCase() === "gemini-4-hydrogen-high") ||
           pool.find((o) => !o.isFree && o.model.toLowerCase() === "gemini-4-hydrogen-low") ||
-          pool.find((o) => !o.isFree && o.model.toLowerCase() === "gpt-6.1-terra") ||
           pool.find((o) => !o.isFree && o.model.toLowerCase() === "gemini-2.5-flash") ||
           pool.find((o) => !o.isFree) ||
           pool[0];
@@ -501,7 +521,7 @@ export function pickLiveRecommendedModel(
     }
   }
 
-  return isTier1
+  return isIris
     ? { provider: "nexusmind_openai", model: "gpt-6.1-terra", tierLabel }
     : { provider: "nexusmind_antigravity", model: "gemini-4-hydrogen-sonar", tierLabel };
 }

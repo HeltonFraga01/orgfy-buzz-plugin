@@ -1038,6 +1038,7 @@ console.log("[MODEL FAILOVER NEXUSMIND + FALLBACK OK]", JSON.stringify({ selecte
     models: [
       { rank: 1, model: "claude-sonnet-5-5", group: "nexusmind_anthropic", score: 92, online: true },
       { rank: 2, model: "gpt-6.1-terra", group: "nexusmind_openai", score: 88, online: true },
+      { rank: 3, model: "gemini-4-hydrogen-sonar", group: "nexusmind_antigravity", score: 86, online: true },
     ],
   });
 
@@ -1089,6 +1090,9 @@ console.log("[MODEL FAILOVER NEXUSMIND + FALLBACK OK]", JSON.stringify({ selecte
   const r1 = JSON.parse(await govCron.call({}, {}, { dry_run: false, auto_wake: true }));
   assert.equal(r1.ok, true);
   assert.ok(cronSaves.length >= 1, "Sem listener NexusMind, OrgFy deve curar 404 via fallback direto (ctx.agents.save)");
+  assert.notEqual(cronModel, "gpt-6.1-terra", "Worker NUNCA deve receber gpt-6.1-terra (exclusivo OrgFy Iris)");
+  assert.notEqual(cronModel, "claude-sonnet-5-5", "Worker NUNCA deve receber modelo VIP claude-sonnet-5-5");
+  assert.equal(cronModel, "gemini-4-hydrogen-sonar", "Worker deve migrar para modelo auto elegível (gemini-4-hydrogen-sonar)");
   const r2 = JSON.parse(await govCron.call({}, {}, { dry_run: false, auto_wake: true }));
   assert.ok(r2.skippedByCooldown.some((s) => s.includes("auto_failover_already_healed:OrgFy Cron")));
   console.log("[1ST CRASH 404 DIRECT FALLBACK + DEDUP OK]");
@@ -1151,6 +1155,7 @@ console.log("[MODEL FAILOVER NEXUSMIND + FALLBACK OK]", JSON.stringify({ selecte
       { rank: 1, model: "tab_jump_flash_lite_preview", group: "nexusmind_antigravity", score: 99, online: null, autoAssignBlocked: false },
       { rank: 2, model: "auto/claude-sonnet", group: "nexusmind_openai", score: 98, online: null, autoAssignBlocked: false },
       { rank: 3, model: "gemini-3.8-flash-medium", group: "nexusmind_antigravity", score: 89.6, online: true, autoAssignBlocked: false },
+      { rank: 4, model: "gemini-4-hydrogen-sonar", group: "nexusmind_antigravity", score: 88.0, online: true, autoAssignBlocked: false },
     ],
   });
 
@@ -1191,6 +1196,7 @@ console.log("[MODEL FAILOVER NEXUSMIND + FALLBACK OK]", JSON.stringify({ selecte
         return { status: 200, body: JSON.stringify({ choices: [{ message: { content: "ok" } }] }) };
       },
       readFile: async (p) => {
+        if (p.endsWith("model-control-plane.json")) throw new Error("ENOENT");
         if (p.endsWith("nexusmind-model-ranking.json")) return new TextEncoder().encode(fakeRankingBad);
         if (p.endsWith("orgfy-model-quarantine.json")) return new TextEncoder().encode("{}");
         return new Uint8Array(fs.readFileSync(p));
@@ -1226,6 +1232,7 @@ console.log("[MODEL FAILOVER NEXUSMIND + FALLBACK OK]", JSON.stringify({ selecte
   assert.equal(handlers("buzz.claude-code/claude-code", "beforeTool").length, 0, "claude-code não usa beforeTool");
 
   assert.ok(saves.length >= 1, "Sem listener NexusMind, hook deve acionar fallback direto via ctx.agents.save()");
+  assert.notEqual(arqModel, "gpt-6.1-terra", "OrgFy Bento Arquiteto NUNCA deve receber gpt-6.1-terra (exclusivo Iris)");
   console.log("[HOOK DIRECT FALLBACK OK]", JSON.stringify({ directSaves: saves.length, newModel: arqModel }));
 }
 

@@ -2431,29 +2431,44 @@ async function loadLiveGatewayModelCatalog(ctx) {
     updatedAt
   };
 }
+function isIrisOnlyAgent(roleOrName) {
+  return /\biris\b/i.test(normName$1(roleOrName));
+}
+function isIrisExclusiveModel(modelId) {
+  return normName$1(modelId) === "gpt-6.1-terra";
+}
 function pickLiveRecommendedModel(roleOrName, catalog) {
+  const isIris = isIrisOnlyAgent(roleOrName);
   const isTier1 = isVipOrLeadershipAgent(roleOrName);
-  const tierLabel = isTier1 ? "Tier 1 (VIP · Pool OpenAI)" : "Tier 2 (Execução · Pool Antigravity)";
+  const tierLabel = isIris ? "VIP Exclusivo (OrgFy Iris)" : isTier1 ? "Tier 1 (Liderança · Somente Pago)" : "Tier 2 (Execução · Pool Auto)";
   if (catalog && catalog.approvedOptions.length > 0) {
-    const unblocked = catalog.approvedOptions.filter((o) => !isBlockedGatewayCatalogModel(o.model) && o.mode !== "blocked");
-    if (isTier1) {
+    const unblocked = catalog.approvedOptions.filter((o) => {
+      if (isBlockedGatewayCatalogModel(o.model) || o.mode === "blocked") return false;
+      if (!isIris && isIrisExclusiveModel(o.model)) return false;
+      if (!isTier1 && o.mode === "vip") return false;
+      return true;
+    });
+    if (isIris) {
       const paidPool = unblocked.filter((o) => !o.isFree);
       if (paidPool.length > 0) {
-        const preferredPaid = paidPool.find((o) => o.model.toLowerCase() === "gpt-6.1-terra") || paidPool.find((o) => o.provider === "nexusmind_openai" && o.mode !== "blocked") || paidPool.find((o) => o.mode === "vip") || paidPool.find((o) => /(claude-sonnet-4-6|claude-opus-4-6|gemini-4-hydrogen-high|gemini-4-hydrogen-sonar)/.test(o.model.toLowerCase())) || paidPool[0];
-        return { provider: preferredPaid.provider, model: preferredPaid.model, tierLabel };
+        const preferredIris = paidPool.find((o) => isIrisExclusiveModel(o.model)) || paidPool.find((o) => o.mode === "vip") || paidPool.find((o) => /(claude-sonnet-4-6|claude-opus-4-6|claude-sonnet-5)/.test(o.model.toLowerCase())) || paidPool[0];
+        return { provider: preferredIris.provider, model: preferredIris.model, tierLabel };
       }
-      if (unblocked.length > 0) {
-        return { provider: unblocked[0].provider, model: unblocked[0].model, tierLabel };
+    } else if (isTier1) {
+      const paidPool = unblocked.filter((o) => !o.isFree);
+      if (paidPool.length > 0) {
+        const preferredPaid = paidPool.find((o) => o.model.toLowerCase() === "gemini-4-hydrogen-high") || paidPool.find((o) => o.model.toLowerCase() === "gemini-4-hydrogen-sonar") || paidPool.find((o) => /(claude-sonnet-4-6|gemini-4-hydrogen|gemini-2\.5-flash)/.test(o.model.toLowerCase())) || paidPool[0];
+        return { provider: preferredPaid.provider, model: preferredPaid.model, tierLabel };
       }
     } else {
       const pool = unblocked.filter((o) => catalog.forceFree || !o.isFree);
       if (pool.length > 0) {
-        const preferredFast = (catalog.forceFree ? pool.find((o) => o.isFree) : null) || pool.find((o) => !o.isFree && o.model.toLowerCase() === "gemini-4-hydrogen-sonar") || pool.find((o) => !o.isFree && o.model.toLowerCase() === "gemini-4-hydrogen-high") || pool.find((o) => !o.isFree && o.model.toLowerCase() === "gemini-4-hydrogen-low") || pool.find((o) => !o.isFree && o.model.toLowerCase() === "gpt-6.1-terra") || pool.find((o) => !o.isFree && o.model.toLowerCase() === "gemini-2.5-flash") || pool.find((o) => !o.isFree) || pool[0];
+        const preferredFast = (catalog.forceFree ? pool.find((o) => o.isFree) : null) || pool.find((o) => !o.isFree && o.model.toLowerCase() === "gemini-4-hydrogen-sonar") || pool.find((o) => !o.isFree && o.model.toLowerCase() === "gemini-4-hydrogen-high") || pool.find((o) => !o.isFree && o.model.toLowerCase() === "gemini-4-hydrogen-low") || pool.find((o) => !o.isFree && o.model.toLowerCase() === "gemini-2.5-flash") || pool.find((o) => !o.isFree) || pool[0];
         return { provider: preferredFast.provider, model: preferredFast.model, tierLabel };
       }
     }
   }
-  return isTier1 ? { provider: "nexusmind_openai", model: "gpt-6.1-terra", tierLabel } : { provider: "nexusmind_antigravity", model: "gemini-4-hydrogen-sonar", tierLabel };
+  return isIris ? { provider: "nexusmind_openai", model: "gpt-6.1-terra", tierLabel } : { provider: "nexusmind_antigravity", model: "gemini-4-hydrogen-sonar", tierLabel };
 }
 const SURFACE_BG = "var(--affordance-subtle, rgba(255, 255, 255, 0.035))";
 const CARD_BG$1 = "var(--bg-panel, rgba(255, 255, 255, 0.03))";
@@ -3264,7 +3279,12 @@ async function reconcileAgentsViaBuzzApi(ctx, opts = {}) {
     const model = cfg.model || (ag == null ? void 0 : ag.model) || null;
     const mlow = String(model || "").trim().toLowerCase();
     const shortM = String(mlow.split("/").pop() || mlow).trim();
-    const isVip = isVipOrLeadershipAgent(String((ag == null ? void 0 : ag.name) || (ag == null ? void 0 : ag.key) || ""));
+    const agentLabel = String((ag == null ? void 0 : ag.name) || (ag == null ? void 0 : ag.key) || "");
+    const isIris = isIrisAgent(agentLabel);
+    const isVip = isVipOrLeadershipAgent(agentLabel);
+    if (isIris && prov && model && !isUnsupportedAgentModel(mlow) && !isFreeModelId(mlow)) {
+      continue;
+    }
     const hasAnyPaidApproved = Boolean(!hasLiveCatalog || (catalog == null ? void 0 : catalog.approvedOptions.some((o) => !o.isFree)));
     const isOfflineInGateway = Boolean(
       hasLiveCatalog && ((catalog == null ? void 0 : catalog.offlineModels.has(mlow)) || (catalog == null ? void 0 : catalog.offlineModels.has(shortM)))
@@ -3272,19 +3292,20 @@ async function reconcileAgentsViaBuzzApi(ctx, opts = {}) {
     const isNotEvalApproved = Boolean(
       hasLiveCatalog && (catalog == null ? void 0 : catalog.approvedModels) && catalog.approvedModels.size > 0 && !catalog.approvedModels.has(mlow) && !catalog.approvedModels.has(shortM)
     );
-    const needsFix = !prov || !model || isUnsupportedAgentModel(mlow) || isOfflineInGateway || isNotEvalApproved || isVip && isFreeModelId(mlow) && hasAnyPaidApproved || !isVip && !(catalog == null ? void 0 : catalog.forceFree) && isFreeModelId(mlow) || prov === "nexusmind_openai" && mlow.startsWith("antigravity/");
+    const leakedIrisExclusiveModel = !isIris && (mlow === "gpt-6.1-terra" || shortM === "gpt-6.1-terra");
+    const needsFix = !prov || !model || leakedIrisExclusiveModel || isUnsupportedAgentModel(mlow) || isOfflineInGateway || isNotEvalApproved || isVip && isFreeModelId(mlow) && hasAnyPaidApproved || !isVip && !(catalog == null ? void 0 : catalog.forceFree) && isFreeModelId(mlow) || prov === "nexusmind_openai" && mlow.startsWith("antigravity/");
     if (!needsFix) continue;
     let nextModel;
     let nextProv;
     if (hasLiveCatalog) {
-      const rec = pickLiveRecommendedModel(String((ag == null ? void 0 : ag.name) || (ag == null ? void 0 : ag.key) || ""), catalog);
+      const rec = pickLiveRecommendedModel(agentLabel, catalog);
       nextModel = rec.model;
       nextProv = rec.provider;
     } else {
-      const isFastTarget = mlow.includes("flash") || mlow.includes("haiku");
-      nextModel = isFastTarget ? "gemini-2.5-flash" : "claude-sonnet-4-6";
-      nextProv = isFastTarget ? "nexusmind_antigravity" : "nexusmind_anthropic";
+      nextModel = isIris ? "gpt-6.1-terra" : "gemini-2.5-flash";
+      nextProv = isIris ? "nexusmind_openai" : "nexusmind_antigravity";
     }
+    if (!isIris && nextModel.toLowerCase() === "gpt-6.1-terra") continue;
     if (!opts.dryRun && typeof (agentsApi == null ? void 0 : agentsApi.save) === "function") {
       await agentsApi.save(ag.key, { config: { ...cfg, provider: nextProv, model: nextModel } });
     }
@@ -3489,7 +3510,7 @@ function getDisabledModelsFromLocalStorage() {
     return /* @__PURE__ */ new Set();
   }
 }
-async function loadSharedNexusMindRanking(ctx, excludeSet, preferFree, isVip = false) {
+async function loadSharedNexusMindRanking(ctx, excludeSet, preferFree, isVip = false, isIris = false) {
   var _a, _b, _c, _d;
   const disabled = getDisabledModelsFromLocalStorage();
   let parsed = null;
@@ -3507,6 +3528,7 @@ async function loadSharedNexusMindRanking(ctx, excludeSet, preferFree, isVip = f
           for (const m of cp.models) {
             const mid = String((m == null ? void 0 : m.model) || "").trim();
             if (!mid || isUnsupportedAgentModel(mid) || disabled.has(mid) || excludeSet.has(mid.toLowerCase())) continue;
+            if (!isIris && mid.toLowerCase() === "gpt-6.1-terra") continue;
             if (!m.online || !m.evalApproved) continue;
             if (m.policyState === "blocked" || !isVip && m.policyState === "vip") continue;
             const free = Boolean(m.isFree) || isFreeModelId(mid);
@@ -3576,6 +3598,8 @@ async function loadSharedNexusMindRanking(ctx, excludeSet, preferFree, isVip = f
     for (const m of parsed.models) {
       const mid = String((m == null ? void 0 : m.model) || "").trim();
       if (!mid || isUnsupportedAgentModel(mid) || m.isDisabled || m.autoAssignBlocked || disabled.has(mid) || excludeSet.has(mid.toLowerCase())) continue;
+      if (!isIris && mid.toLowerCase() === "gpt-6.1-terra") continue;
+      if (!isVip && (m.policyState === "vip" || isTopVipModel(mid, m.policyState))) continue;
       if (blockedAuto.has(mid.toLowerCase())) continue;
       if (m.online === false) continue;
       if (maxCost !== null && typeof m.avgCostUsd === "number" && m.avgCostUsd > 0 && m.avgCostUsd > maxCost) continue;
@@ -3617,6 +3641,8 @@ async function loadSharedNexusMindRanking(ctx, excludeSet, preferFree, isVip = f
         for (const it of items) {
           const mid = String((it == null ? void 0 : it.model) || "").trim();
           if (!mid || disabled.has(mid) || excludeSet.has(mid.toLowerCase())) continue;
+          if (!isIris && mid.toLowerCase() === "gpt-6.1-terra") continue;
+          if (!isVip && isTopVipModel(mid)) continue;
           const free = isFreeModelId(mid);
           if (preferFree && !free) continue;
           if (!preferFree && free) continue;
@@ -3874,12 +3900,12 @@ async function executeSmartModelFailover(ctx, input = {}) {
   const excludeSet = new Set(quarantined);
   if (failedNorm) excludeSet.add(failedNorm);
   if (previousModel) excludeSet.add(previousModel.toLowerCase());
-  let sharedRanking = await loadSharedNexusMindRanking(ctx, excludeSet, preferFree, isVip);
+  let sharedRanking = await loadSharedNexusMindRanking(ctx, excludeSet, preferFree, isVip, isIris);
   if (sharedRanking.length === 0 && quarantined.size > 0) {
     const minimalExclude = /* @__PURE__ */ new Set();
     if (failedNorm) minimalExclude.add(failedNorm);
     if (previousModel) minimalExclude.add(previousModel.toLowerCase());
-    sharedRanking = await loadSharedNexusMindRanking(ctx, minimalExclude, preferFree, isVip);
+    sharedRanking = await loadSharedNexusMindRanking(ctx, minimalExclude, preferFree, isVip, isIris);
   }
   const failedProvider = previousModel ? inferProviderId(previousModel) : failedNorm ? inferProviderId(failedNorm) : null;
   if (failedProvider && sharedRanking.length > 1) {
@@ -3925,7 +3951,7 @@ async function executeSmartModelFailover(ctx, input = {}) {
       const minimalEx = /* @__PURE__ */ new Set();
       if (failedNorm) minimalEx.add(failedNorm);
       if (previousModel) minimalEx.add(previousModel.toLowerCase());
-      const halfOpenPool = (await loadSharedNexusMindRanking(ctx, minimalEx, preferFree, isVip)).filter((c) => quarantined.has(c.model.toLowerCase()) && (!failedProvider || c.provider !== failedProvider)).slice(0, 4);
+      const halfOpenPool = (await loadSharedNexusMindRanking(ctx, minimalEx, preferFree, isVip, isIris)).filter((c) => quarantined.has(c.model.toLowerCase()) && (!failedProvider || c.provider !== failedProvider)).slice(0, 4);
       for (const cand of halfOpenPool) {
         const prov = NEXUSMIND_PROVIDERS.find((p) => p.id === cand.provider) || NEXUSMIND_PROVIDERS.find((p) => p.id === inferProviderId(cand.model)) || NEXUSMIND_PROVIDERS[0];
         const res = await probeModelLive(ctx, cand.model, prov);
@@ -3950,7 +3976,13 @@ async function executeSmartModelFailover(ctx, input = {}) {
   const hasVerifiedOnline = verifiedShared.some((v2) => v2.online);
   if (sharedRanking.length === 0 || verifiedShared.length > 0 && !hasVerifiedOnline) {
     const catalog = await discoverNexusMindCatalog(ctx);
-    let pool = catalog.filter((c) => !isUnsupportedAgentModel(c.id) && !excludeSet.has(c.id.toLowerCase()));
+    let pool = catalog.filter((c) => {
+      const cid = c.id.toLowerCase();
+      if (isUnsupportedAgentModel(c.id) || excludeSet.has(cid)) return false;
+      if (!isIris && cid === "gpt-6.1-terra") return false;
+      if (!isVip && isTopVipModel(c.id)) return false;
+      return true;
+    });
     if (preferFree) {
       const freeOnly = pool.filter((c) => isFreeModelId(c.id));
       if (freeOnly.length > 0) pool = freeOnly;
