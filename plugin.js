@@ -3881,7 +3881,7 @@ async function executeSmartModelFailover(ctx, input = {}) {
   if (failedProvider && sharedRanking.length > 1) {
     sharedRanking = sharedRanking.map((c) => ({
       ...c,
-      combinedScore: c.provider !== failedProvider ? Number((c.combinedScore + 12).toFixed(2)) : c.combinedScore
+      combinedScore: c.provider !== failedProvider ? Number((c.combinedScore + 45).toFixed(2)) : c.combinedScore
     })).sort((a, b) => b.combinedScore - a.combinedScore);
   }
   const host = ctx == null ? void 0 : ctx.host;
@@ -3915,6 +3915,27 @@ async function executeSmartModelFailover(ctx, input = {}) {
           source: "live_probe",
           error: res.error
         });
+      }
+    }
+    if (gotAnyHttpResponse && !verifiedShared.some((v2) => v2.online) && quarantined.size > 0) {
+      const minimalEx = /* @__PURE__ */ new Set();
+      if (failedNorm) minimalEx.add(failedNorm);
+      if (previousModel) minimalEx.add(previousModel.toLowerCase());
+      const halfOpenPool = (await loadSharedNexusMindRanking(ctx, minimalEx, preferFree, isVip)).filter((c) => quarantined.has(c.model.toLowerCase()) && (!failedProvider || c.provider !== failedProvider)).slice(0, 4);
+      for (const cand of halfOpenPool) {
+        const prov = NEXUSMIND_PROVIDERS.find((p) => p.id === cand.provider) || NEXUSMIND_PROVIDERS.find((p) => p.id === inferProviderId(cand.model)) || NEXUSMIND_PROVIDERS[0];
+        const res = await probeModelLive(ctx, cand.model, prov);
+        if (res.online) {
+          modelQuarantineMemory.delete(cand.model.toLowerCase());
+          verifiedShared.unshift({
+            ...cand,
+            provider: prov.id,
+            latencyMs: res.latencyMs,
+            online: true,
+            source: "live_probe"
+          });
+          break;
+        }
       }
     }
     if (!gotAnyHttpResponse) {

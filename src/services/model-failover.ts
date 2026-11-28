@@ -913,13 +913,14 @@ export async function executeSmartModelFailover(
     if (previousModel) minimalExclude.add(previousModel.toLowerCase());
     sharedRanking = await loadSharedNexusMindRanking(ctx, minimalExclude, preferFree, isVip);
   }
-  // Separação de domínio de falha (Cross-Provider Preference): prioriza provedor distinto do modelo que falhou
+  // Separação de domínio de falha (Cross-Provider Preference): prioriza fortemente provedor distinto do que falhou
+  // (+45 supera o vipBoost de +30 para que VIPs escapem imediatamente de quedas de pool inteiro como 503 No available accounts)
   const failedProvider = previousModel ? inferProviderId(previousModel) : failedNorm ? inferProviderId(failedNorm) : null;
   if (failedProvider && sharedRanking.length > 1) {
     sharedRanking = sharedRanking
       .map((c) => ({
         ...c,
-        combinedScore: c.provider !== failedProvider ? Number((c.combinedScore + 12).toFixed(2)) : c.combinedScore,
+        combinedScore: c.provider !== failedProvider ? Number((c.combinedScore + 45).toFixed(2)) : c.combinedScore,
       }))
       .sort((a, b) => b.combinedScore - a.combinedScore);
   }
@@ -961,6 +962,34 @@ export async function executeSmartModelFailover(
           source: "live_probe",
           error: res.error,
         });
+      }
+    }
+    // Half-open circuit breaker: se todos os candidatos ativos falharam (ex.: queda do pool inteiro),
+    // re-sonda candidatos em quarentena de OUTRO provedor para recuperar imediatamente caso tenham voltado online.
+    if (gotAnyHttpResponse && !verifiedShared.some((v) => v.online) && quarantined.size > 0) {
+      const minimalEx = new Set<string>();
+      if (failedNorm) minimalEx.add(failedNorm);
+      if (previousModel) minimalEx.add(previousModel.toLowerCase());
+      const halfOpenPool = (await loadSharedNexusMindRanking(ctx, minimalEx, preferFree, isVip))
+        .filter((c) => quarantined.has(c.model.toLowerCase()) && (!failedProvider || c.provider !== failedProvider))
+        .slice(0, 4);
+      for (const cand of halfOpenPool) {
+        const prov =
+          NEXUSMIND_PROVIDERS.find((p) => p.id === cand.provider) ||
+          NEXUSMIND_PROVIDERS.find((p) => p.id === inferProviderId(cand.model)) ||
+          NEXUSMIND_PROVIDERS[0];
+        const res = await probeModelLive(ctx, cand.model, prov);
+        if (res.online) {
+          modelQuarantineMemory.delete(cand.model.toLowerCase());
+          verifiedShared.unshift({
+            ...cand,
+            provider: prov.id,
+            latencyMs: res.latencyMs,
+            online: true,
+            source: "live_probe",
+          });
+          break;
+        }
       }
     }
     if (!gotAnyHttpResponse) {
