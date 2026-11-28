@@ -2522,7 +2522,7 @@ function pickLiveRecommendedModel(roleOrName, catalog) {
     } else if (tier === "tier1_fast") {
       const autoPool = unblocked.filter((o) => (catalog.forceFree || !o.isFree) && o.mode !== "vip");
       if (autoPool.length > 0) {
-        const chosen = (catalog.forceFree ? autoPool.find((o) => o.isFree) : null) || autoPool.find((o) => o.model.toLowerCase() === "gemini-4-hydrogen-low") || autoPool.find((o) => o.model.toLowerCase() === "gemini-3-flash") || findOption((_h = catalog.bestByTier) == null ? void 0 : _h.tier1_fast) || sortByTierScore(autoPool, "tier1_fast")[0];
+        const chosen = (catalog.forceFree ? autoPool.find((o) => o.isFree) : null) || findOption((_h = catalog.bestByTier) == null ? void 0 : _h.tier1_fast) || autoPool.find((o) => o.model.toLowerCase() === "gemini-2.5-flash") || autoPool.find((o) => o.model.toLowerCase() === "gemini-3-flash") || sortByTierScore(autoPool, "tier1_fast")[0];
         return { provider: chosen.provider, model: chosen.model, tierLabel, tier };
       }
     } else {
@@ -2548,7 +2548,7 @@ function pickLiveRecommendedModel(roleOrName, catalog) {
     };
   }
   if (tier === "tier1_fast") {
-    return { provider: "nexusmind_antigravity", model: "gemini-4-hydrogen-low", tierLabel, tier };
+    return { provider: "nexusmind_antigravity", model: "gemini-2.5-flash", tierLabel, tier };
   }
   return { provider: "nexusmind_antigravity", model: "gemini-2.5-flash", tierLabel, tier };
 }
