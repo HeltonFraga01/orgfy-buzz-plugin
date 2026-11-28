@@ -109,6 +109,7 @@ function isBlockedGatewayCatalogModel(modelId: string): boolean {
   if (!m) return true;
   return (
     m === "haiku" ||
+    m === "flash" ||
     m === "grok-4.5" ||
     m === "grok-4.5-latest" ||
     m === "nex-n2-pro" ||
@@ -124,7 +125,21 @@ function isBlockedGatewayCatalogModel(modelId: string): boolean {
     m.startsWith("pollinations/") ||
     m.includes("pol/community/") ||
     m.includes("pollinations/community/") ||
-    m.startsWith("auto/")
+    m.startsWith("auto/") ||
+    m.includes("tab_flash") ||
+    m.includes("tab_jump") ||
+    m.includes("autocomplete") ||
+    m.includes("fim-") ||
+    m.includes("embedding") ||
+    m.includes("rerank") ||
+    m.includes("whisper") ||
+    m.includes("tts") ||
+    m.includes("imagen") ||
+    m.includes("-image") ||
+    m.includes("dall-e") ||
+    m.includes("moderation") ||
+    m.includes("safety-guard") ||
+    m.endsWith(":batch")
   );
 }
 

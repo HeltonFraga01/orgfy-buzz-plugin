@@ -1222,15 +1222,17 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
             const approvedCount = modelos.filter((m) => m.evalStatus === "approved").length;
             const belowCount = modelos.filter((m) => m.evalStatus === "below_min").length;
             const attentionCount = modelos.filter((m) => m.evalStatus !== "approved").length;
-            const liveWinners = status.evalWinners || [];
-            const topTier1Winner =
-              liveWinners.find((w) => !w.model.includes(":free") && /(gpt-6\.1|claude-opus|gemini-4-hydrogen|gemini-2\.5-flash|auto\/reasoning)/i.test(w.model)) ||
-              liveWinners.find((w) => !w.model.includes(":free")) ||
-              liveWinners[0] ||
+            const liveWinners = (status.evalWinners || []).filter((w) => !/^(pol\/|pollinations\/|auto\/)/i.test(w.model) && !/(tab_flash|tab_jump|mistral-large-4-1t-a52b|nex-n2-pro|claude-sonnet-5-5)/i.test(w.model));
+            const topIrisWinner =
+              liveWinners.find((w) => w.model.toLowerCase() === "gpt-6.1-terra") ||
               { provider: "nexusmind_openai", model: "gpt-6.1-terra", latencyMs: null, costUsd: null };
+            const topTier1Winner =
+              liveWinners.find((w) => !w.model.includes(":free") && w.model.toLowerCase() !== "gpt-6.1-terra" && /(gemini-4-hydrogen-high|claude-sonnet-4-6|gpt-6-luna|gpt-6\.2-sol|gemini-2\.5-flash)/i.test(w.model)) ||
+              liveWinners.find((w) => !w.model.includes(":free") && w.model.toLowerCase() !== "gpt-6.1-terra") ||
+              { provider: "nexusmind_antigravity", model: "gemini-4-hydrogen-high", latencyMs: null, costUsd: null };
             const topTier2Winner =
-              liveWinners.find((w) => w.model.toLowerCase() === "gemini-2.5-flash") ||
-              liveWinners[0] ||
+              liveWinners.find((w) => !w.model.includes(":free") && w.model.toLowerCase() === "gemini-2.5-flash") ||
+              liveWinners.find((w) => !w.model.includes(":free") && w.model.toLowerCase() !== "gpt-6.1-terra") ||
               { provider: "nexusmind_antigravity", model: "gemini-2.5-flash", latencyMs: null, costUsd: null };
             const shortLabel = (mid: string) => {
               const s = String(mid.split("/").pop() || mid);
@@ -1408,8 +1410,9 @@ export function renderFactorySecondaryPage(props: FactorySecondaryPagesProps) {
                         null,
                         filteredModelos.map((m) => {
                           const agSpec = tenantAgents.find((a) => a.name === m.agente);
+                          const isIrisRow = /\biris\b/i.test(String(m.agente || ""));
                           const isTier1 = /(ceo|coo|revis|arquit|segur|secur|qa|oraculo|conselho|board)/i.test(String(m.papel || ""));
-                          const chosen = isTier1 ? topTier1Winner : topTier2Winner;
+                          const chosen = isIrisRow ? topIrisWinner : isTier1 ? topTier1Winner : topTier2Winner;
                           const recTarget = {
                             provider: chosen.provider,
                             model: chosen.model,

@@ -2135,7 +2135,7 @@ function decodeTextBytes(raw) {
 function isBlockedGatewayCatalogModel(modelId) {
   const m = String(modelId || "").trim().toLowerCase();
   if (!m) return true;
-  return m === "haiku" || m === "grok-4.5" || m === "grok-4.5-latest" || m === "nex-n2-pro" || m.includes("claude-sonnet-5-5") || m.includes("gemini-3.8-flash-medium") || m.includes("gemini-4-hydrogen-medium") || m.includes("gemini-3-pro-low") || m.includes("gemini-3-pro-high") || m.includes("mistral-large-4-1t-a52b") || m.includes("claude-opus-5-5") || m.includes("minimax-m3.1-flash") || m.startsWith("pol/") || m.startsWith("pollinations/") || m.includes("pol/community/") || m.includes("pollinations/community/") || m.startsWith("auto/");
+  return m === "haiku" || m === "flash" || m === "grok-4.5" || m === "grok-4.5-latest" || m === "nex-n2-pro" || m.includes("claude-sonnet-5-5") || m.includes("gemini-3.8-flash-medium") || m.includes("gemini-4-hydrogen-medium") || m.includes("gemini-3-pro-low") || m.includes("gemini-3-pro-high") || m.includes("mistral-large-4-1t-a52b") || m.includes("claude-opus-5-5") || m.includes("minimax-m3.1-flash") || m.startsWith("pol/") || m.startsWith("pollinations/") || m.includes("pol/community/") || m.includes("pollinations/community/") || m.startsWith("auto/") || m.includes("tab_flash") || m.includes("tab_jump") || m.includes("autocomplete") || m.includes("fim-") || m.includes("embedding") || m.includes("rerank") || m.includes("whisper") || m.includes("tts") || m.includes("imagen") || m.includes("-image") || m.includes("dall-e") || m.includes("moderation") || m.includes("safety-guard") || m.endsWith(":batch");
 }
 function resolveAgentRoutingTier(roleOrName) {
   const lower = normName$1(roleOrName);
@@ -3418,7 +3418,11 @@ async function reconcileAgentsViaBuzzApi(ctx, opts = {}) {
     const isIris = isIrisAgent(agentLabel);
     const isVip = isVipOrLeadershipAgent(agentLabel);
     const tier = resolveAgentRoutingTier(agentLabel);
-    if (isIris && prov && model && !isUnsupportedAgentModel(mlow) && !isFreeModelId(mlow)) {
+    const currentOpt = catalog == null ? void 0 : catalog.approvedOptions.find((o) => o.model.toLowerCase() === mlow || o.model.toLowerCase() === shortM);
+    const irisOnHealthyVip = Boolean(
+      isIris && prov && model && !isUnsupportedAgentModel(mlow) && !isFreeModelId(mlow) && ((currentOpt == null ? void 0 : currentOpt.mode) === "vip" || isTopVipModel(mlow, currentOpt == null ? void 0 : currentOpt.mode)) && !(hasLiveCatalog && ((catalog == null ? void 0 : catalog.offlineModels.has(mlow)) || (catalog == null ? void 0 : catalog.offlineModels.has(shortM))))
+    );
+    if (irisOnHealthyVip) {
       continue;
     }
     const rec = pickLiveRecommendedModel(agentLabel, catalog);
@@ -3433,9 +3437,9 @@ async function reconcileAgentsViaBuzzApi(ctx, opts = {}) {
     const isFlattenedVictim = Boolean(
       flattenedMassModel && mlow === flattenedMassModel && rec.model.toLowerCase() !== mlow
     );
-    const currentOpt = catalog == null ? void 0 : catalog.approvedOptions.find((o) => o.model.toLowerCase() === mlow || o.model.toLowerCase() === shortM);
     const leakedVipToWorker = (tier === "tier2_balanced" || tier === "tier1_fast") && ((currentOpt == null ? void 0 : currentOpt.mode) === "vip" || /^(claude-opus|claude-sonnet-5|claude-sonnet-4-6)/.test(shortM));
-    const needsFix = !prov || !model || leakedIrisExclusiveModel || leakedVipToWorker || isFlattenedVictim || isUnsupportedAgentModel(mlow) || isOfflineInGateway || isNotEvalApproved || isVip && isFreeModelId(mlow) && hasAnyPaidApproved || !isVip && !(catalog == null ? void 0 : catalog.forceFree) && isFreeModelId(mlow) || prov === "nexusmind_openai" && mlow.startsWith("antigravity/");
+    const irisNeedsVipRestore = isIris && !irisOnHealthyVip;
+    const needsFix = !prov || !model || irisNeedsVipRestore || leakedIrisExclusiveModel || leakedVipToWorker || isFlattenedVictim || isUnsupportedAgentModel(mlow) || isOfflineInGateway || isNotEvalApproved || isVip && isFreeModelId(mlow) && hasAnyPaidApproved || !isVip && !(catalog == null ? void 0 : catalog.forceFree) && isFreeModelId(mlow) || prov === "nexusmind_openai" && mlow.startsWith("antigravity/");
     if (!needsFix) continue;
     const nextModel = rec.model;
     const nextProv = rec.provider;
@@ -3627,7 +3631,7 @@ function isFreeModelId(modelId) {
 function isUnsupportedAgentModel(modelId) {
   const m = String(modelId || "").trim().toLowerCase();
   if (!m) return true;
-  return m === "haiku" || m === "grok-4.5" || m === "grok-4.5-latest" || m === "nex-n2-pro" || m.includes("gemini-3.8-flash-medium") || m.includes("gemini-4-hydrogen-medium") || m.includes("gemini-3-pro-low") || m.includes("gemini-3-pro-high") || m.includes("mistral-large-4-1t-a52b") || m.includes("claude-opus-5-5") || m.includes("minimax-m3.1-flash") || m.startsWith("pol/") || m.startsWith("pollinations/") || m.includes("pol/community/") || m.includes("pollinations/community/") || m.startsWith("auto/") || m.includes("tab_jump") || m.includes("autocomplete") || m.includes("fim-") || m.includes("embedding") || m.includes("rerank") || m.includes("whisper") || m.includes("tts") || m.includes("imagen") || m.includes("dall-e") || m.includes("moderation");
+  return m === "haiku" || m === "flash" || m === "grok-4.5" || m === "grok-4.5-latest" || m === "nex-n2-pro" || m.includes("claude-sonnet-5-5") || m.includes("gemini-3.8-flash-medium") || m.includes("gemini-4-hydrogen-medium") || m.includes("gemini-3-pro-low") || m.includes("gemini-3-pro-high") || m.includes("mistral-large-4-1t-a52b") || m.includes("claude-opus-5-5") || m.includes("minimax-m3.1-flash") || m.startsWith("pol/") || m.startsWith("pollinations/") || m.includes("pol/community/") || m.includes("pollinations/community/") || m.startsWith("auto/") || m.includes("tab_flash") || m.includes("tab_jump") || m.includes("autocomplete") || m.includes("fim-") || m.includes("embedding") || m.includes("rerank") || m.includes("whisper") || m.includes("tts") || m.includes("imagen") || m.includes("-image") || m.includes("dall-e") || m.includes("moderation") || m.includes("safety-guard") || m.endsWith(":batch");
 }
 function estimateModelIntelligence(modelId) {
   const m = String(modelId || "").toLowerCase();
@@ -9013,6 +9017,19 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
     if (a == null ? void 0 : a.pubkey) liveByPubkey.set(String(a.pubkey).toLowerCase(), a);
   }
   const evalMap = parseEvalTable(evalMd);
+  const cpModelMap = /* @__PURE__ */ new Map();
+  for (const cm of (modelControlPlane == null ? void 0 : modelControlPlane.models) || []) {
+    const mid = String((cm == null ? void 0 : cm.model) || "").trim();
+    if (!mid) continue;
+    cpModelMap.set(mid.toLowerCase(), cm);
+    const shortMid = mid.includes("/") ? mid.split("/").pop().toLowerCase() : mid.toLowerCase();
+    if (!cpModelMap.has(shortMid)) cpModelMap.set(shortMid, cm);
+  }
+  const isBlockedEvalModel = (mid) => {
+    const m = String(mid || "").trim().toLowerCase();
+    if (!m) return true;
+    return m === "haiku" || m === "flash" || m === "nex-n2-pro" || m === "grok-4.5" || m === "grok-4.5-latest" || m.startsWith("pol/") || m.startsWith("pollinations/") || m.startsWith("auto/") || m.includes("tab_flash") || m.includes("tab_jump") || m.includes("autocomplete") || m.includes("mistral-large-4-1t-a52b") || m.includes("gemini-3.8-flash-medium") || m.includes("gemini-4-hydrogen-medium") || m.includes("claude-sonnet-5-5") || m.includes("claude-opus-5-5") || m.includes("minimax-m3.1-flash") || m.includes("-image") || m.endsWith(":batch");
+  };
   const modelos = [];
   const tenantAgents = [];
   const isBoardSlug = slug === "board";
@@ -9023,8 +9040,8 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
     out[ceoNome] = {
       papel: "ceo_holding",
       pubkey: ((_b2 = boardJson == null ? void 0 : boardJson.ceo_holding) == null ? void 0 : _b2.pubkey) || "",
-      model: "claude-sonnet-5-5",
-      provider: "nexusmind_anthropic",
+      model: "gpt-6.1-terra",
+      provider: "nexusmind_openai",
       parallelism: 1
     };
     const conselhoList = Array.isArray(boardJson == null ? void 0 : boardJson.conselho) ? boardJson.conselho : [];
@@ -9036,7 +9053,7 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
         papel: roleKey,
         funcaoCustom: `${(c == null ? void 0 : c.sigla) || "Board"} · ${(c == null ? void 0 : c.area) || "Conselho"}`,
         pubkey: typeof (c == null ? void 0 : c.pubkey) === "string" ? c.pubkey : "",
-        model: (c == null ? void 0 : c.status) === "ativo" ? "claude-sonnet-5-5" : "planejado",
+        model: (c == null ? void 0 : c.status) === "ativo" ? "claude-sonnet-4-6" : "planejado",
         provider: "nexusmind_anthropic",
         parallelism: 1
       };
@@ -9048,28 +9065,47 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
     const live = manifestPk && liveByPubkey.get(manifestPk.toLowerCase()) || liveByName.get(agName.toLowerCase()) || null;
     const modelo = String(((_c = live == null ? void 0 : live.config) == null ? void 0 : _c.model) || (info == null ? void 0 : info.model) || "").trim() || null;
     const provider = String(((_d = live == null ? void 0 : live.config) == null ? void 0 : _d.provider) || (info == null ? void 0 : info.provider) || "").trim() || null;
-    const ev = modelo ? evalMap.get(modelo.toLowerCase()) || evalMap.get((modelo.split("/").pop() || "").toLowerCase()) : void 0;
+    const modelLower = String(modelo || "").toLowerCase();
+    const shortLower = modelLower.includes("/") ? modelLower.split("/").pop() : modelLower;
+    const cpRow = modelo ? cpModelMap.get(modelLower) || cpModelMap.get(shortLower) : void 0;
+    const ev = modelo ? evalMap.get(modelLower) || evalMap.get(shortLower) : void 0;
     const roleMeta = (info == null ? void 0 : info.funcaoCustom) ? { funcao: String(info.funcaoCustom), categoria: "lideranca" } : describeOrgfyRole(info == null ? void 0 : info.papel);
     const liveKey = String((live == null ? void 0 : live.key) || "");
     const livePk = String((live == null ? void 0 : live.pubkey) || manifestPk || "");
     const isRunning = Boolean(
       liveKey && runningKeys.has(liveKey.toLowerCase()) || livePk && runningPubkeys.has(livePk.toLowerCase()) || runningKeys.has(agName.toLowerCase())
     );
-    const modelLower = String(modelo || "").toLowerCase();
-    const isUnsupported = Boolean(
-      modelLower.includes("mistral-large-4-1t-a52b") || modelLower.includes("grok-4.5") || modelLower.includes("minimax-m3.1-flash")
-    );
-    const evalStatus = ev ? ev.abaixo ? "below_min" : "approved" : isUnsupported ? "unsupported" : "untested";
+    const isUnsupported = Boolean(modelo && (isBlockedEvalModel(modelo) || (cpRow == null ? void 0 : cpRow.policyState) === "blocked"));
+    let evalStatus;
+    let scoreTxt = null;
+    let scoreNum = null;
+    let latencyMs = null;
+    let costUsd = null;
+    if (cpRow) {
+      scoreTxt = cpRow.toolCall10 || `${Math.round(Number(cpRow.toolCallRate || 0) * 10)}/10`;
+      scoreNum = Math.round(Number(cpRow.toolCallRate || 0) * 10);
+      latencyMs = typeof cpRow.latencyMs === "number" ? cpRow.latencyMs : null;
+      costUsd = typeof cpRow.cost10CardsUsd === "number" ? `$${cpRow.cost10CardsUsd.toFixed(4)}` : null;
+      evalStatus = isUnsupported ? "unsupported" : cpRow.evalApproved && cpRow.online ? "approved" : "below_min";
+    } else if (ev) {
+      scoreTxt = ev.score;
+      scoreNum = ev.scoreNum;
+      latencyMs = ev.latencyMs;
+      costUsd = ev.costUsd;
+      evalStatus = isUnsupported ? "unsupported" : ev.abaixo ? "below_min" : "approved";
+    } else {
+      evalStatus = isUnsupported ? "unsupported" : "untested";
+    }
     modelos.push({
       agente: agName,
       papel: (info == null ? void 0 : info.papel) || null,
       modelo,
       provider,
-      toolcall_eval: (ev == null ? void 0 : ev.score) || null,
-      abaixo_minimo: ev ? ev.abaixo : isUnsupported,
-      scoreNum: ev ? ev.scoreNum : null,
-      latencyMs: ev ? ev.latencyMs : null,
-      costUsd: ev ? ev.costUsd : null,
+      toolcall_eval: scoreTxt,
+      abaixo_minimo: evalStatus === "below_min" || evalStatus === "unsupported",
+      scoreNum,
+      latencyMs,
+      costUsd,
       evalStatus,
       agentKey: liveKey || `manifest:${slug}:${agName}`,
       inBuzz: Boolean(live)
@@ -9388,10 +9424,28 @@ async function hydrateFactoryStatusFromFiles(ctx, slug) {
     modelos,
     modelControlPlane,
     evalWinners: (() => {
+      var _a2;
       const seenW = /* @__PURE__ */ new Set();
       const out = [];
+      if ((_a2 = modelControlPlane == null ? void 0 : modelControlPlane.models) == null ? void 0 : _a2.length) {
+        for (const cm of modelControlPlane.models) {
+          if (!(cm == null ? void 0 : cm.model) || !cm.evalApproved || !cm.online || cm.policyState === "blocked" || isBlockedEvalModel(cm.model)) continue;
+          const key = cm.model.toLowerCase();
+          if (seenW.has(key)) continue;
+          seenW.add(key);
+          out.push({
+            provider: cm.provider || "nexusmind_antigravity",
+            model: cm.model,
+            score: cm.toolCall10 || "10/10",
+            scoreNum: Math.round(Number(cm.toolCallRate || 1) * 10),
+            latencyMs: typeof cm.latencyMs === "number" ? cm.latencyMs : null,
+            costUsd: typeof cm.cost10CardsUsd === "number" ? `$${cm.cost10CardsUsd.toFixed(4)}` : null
+          });
+        }
+        if (out.length > 0) return out;
+      }
       for (const entry of evalMap.values()) {
-        if (entry.abaixo || !entry.model) continue;
+        if (entry.abaixo || !entry.model || isBlockedEvalModel(entry.model)) continue;
         const key = entry.model.toLowerCase();
         if (seenW.has(key)) continue;
         seenW.add(key);
@@ -66405,9 +66459,10 @@ function renderFactorySecondaryPage(props) {
         const approvedCount = modelos.filter((m) => m.evalStatus === "approved").length;
         const belowCount = modelos.filter((m) => m.evalStatus === "below_min").length;
         const attentionCount = modelos.filter((m) => m.evalStatus !== "approved").length;
-        const liveWinners = status.evalWinners || [];
-        const topTier1Winner = liveWinners.find((w) => !w.model.includes(":free") && /(gpt-6\.1|claude-opus|gemini-4-hydrogen|gemini-2\.5-flash|auto\/reasoning)/i.test(w.model)) || liveWinners.find((w) => !w.model.includes(":free")) || liveWinners[0] || { provider: "nexusmind_openai", model: "gpt-6.1-terra" };
-        const topTier2Winner = liveWinners.find((w) => w.model.toLowerCase() === "gemini-2.5-flash") || liveWinners[0] || { provider: "nexusmind_antigravity", model: "gemini-2.5-flash" };
+        const liveWinners = (status.evalWinners || []).filter((w) => !/^(pol\/|pollinations\/|auto\/)/i.test(w.model) && !/(tab_flash|tab_jump|mistral-large-4-1t-a52b|nex-n2-pro|claude-sonnet-5-5)/i.test(w.model));
+        const topIrisWinner = liveWinners.find((w) => w.model.toLowerCase() === "gpt-6.1-terra") || { provider: "nexusmind_openai", model: "gpt-6.1-terra" };
+        const topTier1Winner = liveWinners.find((w) => !w.model.includes(":free") && w.model.toLowerCase() !== "gpt-6.1-terra" && /(gemini-4-hydrogen-high|claude-sonnet-4-6|gpt-6-luna|gpt-6\.2-sol|gemini-2\.5-flash)/i.test(w.model)) || liveWinners.find((w) => !w.model.includes(":free") && w.model.toLowerCase() !== "gpt-6.1-terra") || { provider: "nexusmind_antigravity", model: "gemini-4-hydrogen-high" };
+        const topTier2Winner = liveWinners.find((w) => !w.model.includes(":free") && w.model.toLowerCase() === "gemini-2.5-flash") || liveWinners.find((w) => !w.model.includes(":free") && w.model.toLowerCase() !== "gpt-6.1-terra") || { provider: "nexusmind_antigravity", model: "gemini-2.5-flash" };
         const shortLabel = (mid) => {
           const s = String(mid.split("/").pop() || mid);
           return s.length > 22 ? s.slice(0, 20) + "…" : s;
@@ -66563,8 +66618,9 @@ function renderFactorySecondaryPage(props) {
                 null,
                 filteredModelos.map((m) => {
                   const agSpec = tenantAgents.find((a) => a.name === m.agente);
+                  const isIrisRow = /\biris\b/i.test(String(m.agente || ""));
                   const isTier1 = /(ceo|coo|revis|arquit|segur|secur|qa|oraculo|conselho|board)/i.test(String(m.papel || ""));
-                  const chosen = isTier1 ? topTier1Winner : topTier2Winner;
+                  const chosen = isIrisRow ? topIrisWinner : isTier1 ? topTier1Winner : topTier2Winner;
                   const recTarget = {
                     provider: chosen.provider,
                     model: chosen.model,

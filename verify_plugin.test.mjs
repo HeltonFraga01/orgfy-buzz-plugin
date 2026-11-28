@@ -2601,7 +2601,7 @@ console.log("[MODEL FAILOVER NEXUSMIND + FALLBACK OK]", JSON.stringify({ selecte
       models: [
         { model: "gemini-2.5-flash", provider: "nexusmind_antigravity", online: true, evalApproved: true, evalScore: 99.2, policyState: "auto", isFree: false },
         { model: "gpt-6.1-terra", provider: "nexusmind_openai", online: true, evalApproved: true, evalScore: 98.2, policyState: "auto", isFree: false },
-        { model: "claude-sonnet-5-5", provider: "nexusmind_anthropic", online: true, evalApproved: true, evalScore: 93.0, policyState: "vip", isFree: false },
+        { model: "claude-sonnet-4-6", provider: "nexusmind_anthropic", online: true, evalApproved: true, evalScore: 93.0, policyState: "vip", isFree: false },
       ],
     });
     const irisCtxB = {
@@ -2647,7 +2647,7 @@ console.log("[MODEL FAILOVER NEXUSMIND + FALLBACK OK]", JSON.stringify({ selecte
       vipRetryDelaysMs: [0, 0],
     });
     assert.equal(resVipFallback.ok, true);
-    assert.equal(resVipFallback.selectedModel, "claude-sonnet-5-5", "quando VIP atual cai em definitivo, Iris deve migrar para outro modelo VIP (não gemini-2.5-flash)");
+    assert.equal(resVipFallback.selectedModel, "claude-sonnet-4-6", "quando VIP atual cai em definitivo, Iris deve migrar para outro modelo VIP (não gemini-2.5-flash)");
     assert.equal(irisSavesB.length, 1);
   });
 }

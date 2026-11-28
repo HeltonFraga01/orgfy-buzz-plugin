@@ -516,6 +516,39 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
   }
 
   const evalMap = parseEvalTable(evalMd);
+  const cpModelMap = new Map<string, NonNullable<NonNullable<FactoryStatusPayload["modelControlPlane"]>["models"]>[number]>();
+  for (const cm of modelControlPlane?.models || []) {
+    const mid = String(cm?.model || "").trim();
+    if (!mid) continue;
+    cpModelMap.set(mid.toLowerCase(), cm);
+    const shortMid = mid.includes("/") ? mid.split("/").pop()!.toLowerCase() : mid.toLowerCase();
+    if (!cpModelMap.has(shortMid)) cpModelMap.set(shortMid, cm);
+  }
+  const isBlockedEvalModel = (mid: string): boolean => {
+    const m = String(mid || "").trim().toLowerCase();
+    if (!m) return true;
+    return (
+      m === "haiku" ||
+      m === "flash" ||
+      m === "nex-n2-pro" ||
+      m === "grok-4.5" ||
+      m === "grok-4.5-latest" ||
+      m.startsWith("pol/") ||
+      m.startsWith("pollinations/") ||
+      m.startsWith("auto/") ||
+      m.includes("tab_flash") ||
+      m.includes("tab_jump") ||
+      m.includes("autocomplete") ||
+      m.includes("mistral-large-4-1t-a52b") ||
+      m.includes("gemini-3.8-flash-medium") ||
+      m.includes("gemini-4-hydrogen-medium") ||
+      m.includes("claude-sonnet-5-5") ||
+      m.includes("claude-opus-5-5") ||
+      m.includes("minimax-m3.1-flash") ||
+      m.includes("-image") ||
+      m.endsWith(":batch")
+    );
+  };
   const modelos: AgentModelEvalRow[] = [];
   const tenantAgents: TenantAgentSpec[] = [];
   const isBoardSlug = slug === "board";
@@ -527,8 +560,8 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
           out[ceoNome] = {
             papel: "ceo_holding",
             pubkey: boardJson?.ceo_holding?.pubkey || "",
-            model: "claude-sonnet-5-5",
-            provider: "nexusmind_anthropic",
+            model: "gpt-6.1-terra",
+            provider: "nexusmind_openai",
             parallelism: 1,
           };
           const conselhoList: any[] = Array.isArray(boardJson?.conselho) ? boardJson.conselho : [];
@@ -540,7 +573,7 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
               papel: roleKey,
               funcaoCustom: `${c?.sigla || "Board"} · ${c?.area || "Conselho"}`,
               pubkey: typeof c?.pubkey === "string" ? c.pubkey : "",
-              model: c?.status === "ativo" ? "claude-sonnet-5-5" : "planejado",
+              model: c?.status === "ativo" ? "claude-sonnet-4-6" : "planejado",
               provider: "nexusmind_anthropic",
               parallelism: 1,
             };
@@ -558,7 +591,10 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
       null;
     const modelo = String(live?.config?.model || info?.model || "").trim() || null;
     const provider = String(live?.config?.provider || info?.provider || "").trim() || null;
-    const ev = modelo ? evalMap.get(modelo.toLowerCase()) || evalMap.get((modelo.split("/").pop() || "").toLowerCase()) : undefined;
+    const modelLower = String(modelo || "").toLowerCase();
+    const shortLower = modelLower.includes("/") ? modelLower.split("/").pop()! : modelLower;
+    const cpRow = modelo ? cpModelMap.get(modelLower) || cpModelMap.get(shortLower) : undefined;
+    const ev = modelo ? evalMap.get(modelLower) || evalMap.get(shortLower) : undefined;
     const roleMeta = info?.funcaoCustom
       ? { funcao: String(info.funcaoCustom), categoria: "lideranca" as const }
       : describeOrgfyRole(info?.papel);
@@ -570,30 +606,43 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
       runningKeys.has(agName.toLowerCase())
     );
 
-    const modelLower = String(modelo || "").toLowerCase();
-    const isUnsupported = Boolean(
-      modelLower.includes("mistral-large-4-1t-a52b") ||
-      modelLower.includes("grok-4.5") ||
-      modelLower.includes("minimax-m3.1-flash")
-    );
-    const evalStatus: AgentModelEvalRow["evalStatus"] = ev
-      ? ev.abaixo
-        ? "below_min"
-        : "approved"
-      : isUnsupported
-      ? "unsupported"
-      : "untested";
+    const isUnsupported = Boolean(modelo && (isBlockedEvalModel(modelo) || cpRow?.policyState === "blocked"));
+    let evalStatus: AgentModelEvalRow["evalStatus"];
+    let scoreTxt: string | null = null;
+    let scoreNum: number | null = null;
+    let latencyMs: number | null = null;
+    let costUsd: string | null = null;
+
+    if (cpRow) {
+      scoreTxt = cpRow.toolCall10 || `${Math.round(Number(cpRow.toolCallRate || 0) * 10)}/10`;
+      scoreNum = Math.round(Number(cpRow.toolCallRate || 0) * 10);
+      latencyMs = typeof cpRow.latencyMs === "number" ? cpRow.latencyMs : null;
+      costUsd = typeof cpRow.cost10CardsUsd === "number" ? `$${cpRow.cost10CardsUsd.toFixed(4)}` : null;
+      evalStatus = isUnsupported
+        ? "unsupported"
+        : cpRow.evalApproved && cpRow.online
+        ? "approved"
+        : "below_min";
+    } else if (ev) {
+      scoreTxt = ev.score;
+      scoreNum = ev.scoreNum;
+      latencyMs = ev.latencyMs;
+      costUsd = ev.costUsd;
+      evalStatus = isUnsupported ? "unsupported" : ev.abaixo ? "below_min" : "approved";
+    } else {
+      evalStatus = isUnsupported ? "unsupported" : "untested";
+    }
 
     modelos.push({
       agente: agName,
       papel: info?.papel || null,
       modelo,
       provider,
-      toolcall_eval: ev?.score || null,
-      abaixo_minimo: ev ? ev.abaixo : isUnsupported,
-      scoreNum: ev ? ev.scoreNum : null,
-      latencyMs: ev ? ev.latencyMs : null,
-      costUsd: ev ? ev.costUsd : null,
+      toolcall_eval: scoreTxt,
+      abaixo_minimo: evalStatus === "below_min" || evalStatus === "unsupported",
+      scoreNum,
+      latencyMs,
+      costUsd,
       evalStatus,
       agentKey: liveKey || `manifest:${slug}:${agName}`,
       inBuzz: Boolean(live),
@@ -1022,8 +1071,26 @@ async function hydrateFactoryStatusFromFiles(ctx: Context, slug: string): Promis
     evalWinners: (() => {
       const seenW = new Set<string>();
       const out: Array<{ provider: string; model: string; score: string; scoreNum: number; latencyMs: number | null; costUsd: string | null }> = [];
+      // Fonte única prioritária: modelControlPlane (respeitando Hard Gate + policyState != blocked + não-unsupported)
+      if (modelControlPlane?.models?.length) {
+        for (const cm of modelControlPlane.models) {
+          if (!cm?.model || !cm.evalApproved || !cm.online || cm.policyState === "blocked" || isBlockedEvalModel(cm.model)) continue;
+          const key = cm.model.toLowerCase();
+          if (seenW.has(key)) continue;
+          seenW.add(key);
+          out.push({
+            provider: cm.provider || "nexusmind_antigravity",
+            model: cm.model,
+            score: cm.toolCall10 || "10/10",
+            scoreNum: Math.round(Number(cm.toolCallRate || 1) * 10),
+            latencyMs: typeof cm.latencyMs === "number" ? cm.latencyMs : null,
+            costUsd: typeof cm.cost10CardsUsd === "number" ? `$${cm.cost10CardsUsd.toFixed(4)}` : null,
+          });
+        }
+        if (out.length > 0) return out;
+      }
       for (const entry of evalMap.values()) {
-        if (entry.abaixo || !entry.model) continue;
+        if (entry.abaixo || !entry.model || isBlockedEvalModel(entry.model)) continue;
         const key = entry.model.toLowerCase();
         if (seenW.has(key)) continue;
         seenW.add(key);

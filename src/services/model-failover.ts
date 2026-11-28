@@ -100,8 +100,20 @@ export async function reconcileAgentsViaBuzzApi(
     const isIris = isIrisAgent(agentLabel);
     const isVip = isVipOrLeadershipAgent(agentLabel);
     const tier = resolveAgentRoutingTier(agentLabel);
-    // Regra soberana: NUNCA alterar o modelo da OrgFy Iris na reconciliação automática de fundo
-    if (isIris && prov && model && !isUnsupportedAgentModel(mlow) && !isFreeModelId(mlow)) {
+    // Regra soberana para OrgFy Iris:
+    // - Se ela JÁ está em um modelo VIP saudável e aprovado (ex.: gpt-6.1-terra, claude-sonnet-4-6, gpt-6.2-sol, claude-opus-4-6-thinking), NÃO mexer.
+    // - Se ela caiu para um modelo NÃO-VIP (ex.: gemini-3.1-flash-lite, flash, free, offline ou banido), restaurar imediatamente para o VIP #1 (gpt-6.1-terra).
+    const currentOpt = catalog?.approvedOptions.find((o) => o.model.toLowerCase() === mlow || o.model.toLowerCase() === shortM);
+    const irisOnHealthyVip = Boolean(
+      isIris &&
+        prov &&
+        model &&
+        !isUnsupportedAgentModel(mlow) &&
+        !isFreeModelId(mlow) &&
+        (currentOpt?.mode === "vip" || isTopVipModel(mlow, currentOpt?.mode)) &&
+        !(hasLiveCatalog && (catalog?.offlineModels.has(mlow) || catalog?.offlineModels.has(shortM)))
+    );
+    if (irisOnHealthyVip) {
       continue;
     }
     const rec = pickLiveRecommendedModel(agentLabel, catalog);
@@ -122,14 +134,15 @@ export async function reconcileAgentsViaBuzzApi(
         mlow === flattenedMassModel &&
         rec.model.toLowerCase() !== mlow
     );
-    const currentOpt = catalog?.approvedOptions.find((o) => o.model.toLowerCase() === mlow || o.model.toLowerCase() === shortM);
     const leakedVipToWorker =
       (tier === "tier2_balanced" || tier === "tier1_fast") &&
       (currentOpt?.mode === "vip" || /^(claude-opus|claude-sonnet-5|claude-sonnet-4-6)/.test(shortM));
+    const irisNeedsVipRestore = isIris && !irisOnHealthyVip;
 
     const needsFix =
       !prov ||
       !model ||
+      irisNeedsVipRestore ||
       leakedIrisExclusiveModel ||
       leakedVipToWorker ||
       isFlattenedVictim ||
@@ -395,9 +408,11 @@ export function isUnsupportedAgentModel(modelId: string): boolean {
   if (!m) return true;
   return (
     m === "haiku" ||
+    m === "flash" ||
     m === "grok-4.5" ||
     m === "grok-4.5-latest" ||
     m === "nex-n2-pro" ||
+    m.includes("claude-sonnet-5-5") ||
     m.includes("gemini-3.8-flash-medium") ||
     m.includes("gemini-4-hydrogen-medium") ||
     m.includes("gemini-3-pro-low") ||
@@ -410,6 +425,7 @@ export function isUnsupportedAgentModel(modelId: string): boolean {
     m.includes("pol/community/") ||
     m.includes("pollinations/community/") ||
     m.startsWith("auto/") ||
+    m.includes("tab_flash") ||
     m.includes("tab_jump") ||
     m.includes("autocomplete") ||
     m.includes("fim-") ||
@@ -418,8 +434,11 @@ export function isUnsupportedAgentModel(modelId: string): boolean {
     m.includes("whisper") ||
     m.includes("tts") ||
     m.includes("imagen") ||
+    m.includes("-image") ||
     m.includes("dall-e") ||
-    m.includes("moderation")
+    m.includes("moderation") ||
+    m.includes("safety-guard") ||
+    m.endsWith(":batch")
   );
 }
 
