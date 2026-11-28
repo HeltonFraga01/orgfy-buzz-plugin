@@ -1213,7 +1213,11 @@ function isSessionRecentlyStoppedForRadar(session, nowMs = Date.now()) {
     const channelMatch = !rec.channelId || !sessChannel || rec.channelId === sessChannel;
     const rootMatch = !rec.threadRoot || !sessRoot || rec.threadRoot === sessRoot;
     if (!channelMatch || !rootMatch) continue;
-    if (lastUpdateMs <= rec.stoppedAtMs + 9e4) {
+    const errTsMs = typeof session.last_provider_error_ts === "number" ? session.last_provider_error_ts * 1e3 : 0;
+    if (errTsMs > rec.stoppedAtMs + 2e3) {
+      continue;
+    }
+    if (lastUpdateMs <= rec.stoppedAtMs + 15e3) {
       return true;
     }
   }

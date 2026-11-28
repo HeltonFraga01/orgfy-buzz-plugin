@@ -452,9 +452,14 @@ export function isSessionRecentlyStoppedForRadar(
     const channelMatch = !rec.channelId || !sessChannel || rec.channelId === sessChannel;
     const rootMatch = !rec.threadRoot || !sessRoot || rec.threadRoot === sessRoot;
     if (!channelMatch || !rootMatch) continue;
-    // Se a última atividade da sessão no Goose é anterior (ou até 90s após) ao stop, é a mesma sessão já curada.
-    // Se o agente abriu trabalho novo significativamente depois do stop, volta a ser monitorado normalmente.
-    if (lastUpdateMs <= rec.stoppedAtMs + 90_000) {
+    // Se ocorreu um NOVO erro de provedor depois do stop/failover, nunca suprime — o watchdog precisa reagir no próximo ciclo!
+    const errTsMs = typeof session.last_provider_error_ts === "number" ? session.last_provider_error_ts * 1000 : 0;
+    if (errTsMs > rec.stoppedAtMs + 2_000) {
+      continue;
+    }
+    // Se a última atividade da sessão no Goose é anterior (ou até 15s após) ao stop, é o "cadáver" da sessão antiga já curada.
+    // Qualquer trabalho novo depois disso volta a ser monitorado normalmente.
+    if (lastUpdateMs <= rec.stoppedAtMs + 15_000) {
       return true;
     }
   }
