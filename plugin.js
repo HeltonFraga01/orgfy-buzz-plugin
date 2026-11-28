@@ -3307,14 +3307,20 @@ async function reconcileAgentsViaBuzzApi(ctx, opts = {}) {
     }
     if (!isIris && nextModel.toLowerCase() === "gpt-6.1-terra") continue;
     if (!opts.dryRun && typeof (agentsApi == null ? void 0 : agentsApi.save) === "function") {
-      await agentsApi.save(ag.key, { config: { ...cfg, provider: nextProv, model: nextModel } });
+      try {
+        await agentsApi.save(ag.key, { config: { ...cfg, provider: nextProv, model: nextModel } });
+        updated.push({ key: String(ag.key || ag.name || ""), from: `${prov}/${model}`, to: `${nextProv}/${nextModel}` });
+      } catch (err) {
+        console.warn(`[ORGFY AUTO-RECONCILE] pulando ${ag.key}:`, err);
+      }
+    } else {
+      updated.push({ key: String(ag.key || ag.name || ""), from: `${prov}/${model}`, to: `${nextProv}/${nextModel}` });
     }
-    updated.push({ key: String(ag.key || ag.name || ""), from: `${prov}/${model}`, to: `${nextProv}/${nextModel}` });
   }
   return { total: list.length, updated };
 }
 function startAutoAgentModelReconciler(ctx) {
-  var _a, _b;
+  var _a, _b, _c, _d;
   const agentsApi = ctx == null ? void 0 : ctx.agents;
   if (typeof (agentsApi == null ? void 0 : agentsApi.save) !== "function" || typeof (agentsApi == null ? void 0 : agentsApi.snapshot) !== "function") {
     return () => {
@@ -3337,16 +3343,26 @@ function startAutoAgentModelReconciler(ctx) {
       running = false;
     }
   };
-  const bootTimer = setTimeout(() => {
+  const bootTimer1 = setTimeout(() => {
     void runOnce();
   }, 8e3);
+  const bootTimer2 = setTimeout(() => {
+    void runOnce();
+  }, 25e3);
+  const bootTimer3 = setTimeout(() => {
+    void runOnce();
+  }, 6e4);
   const intervalTimer = setInterval(() => {
     void runOnce();
   }, 10 * 6e4);
-  (_a = bootTimer == null ? void 0 : bootTimer.unref) == null ? void 0 : _a.call(bootTimer);
-  (_b = intervalTimer == null ? void 0 : intervalTimer.unref) == null ? void 0 : _b.call(intervalTimer);
+  (_a = bootTimer1 == null ? void 0 : bootTimer1.unref) == null ? void 0 : _a.call(bootTimer1);
+  (_b = bootTimer2 == null ? void 0 : bootTimer2.unref) == null ? void 0 : _b.call(bootTimer2);
+  (_c = bootTimer3 == null ? void 0 : bootTimer3.unref) == null ? void 0 : _c.call(bootTimer3);
+  (_d = intervalTimer == null ? void 0 : intervalTimer.unref) == null ? void 0 : _d.call(intervalTimer);
   return () => {
-    clearTimeout(bootTimer);
+    clearTimeout(bootTimer1);
+    clearTimeout(bootTimer2);
+    clearTimeout(bootTimer3);
     clearInterval(intervalTimer);
   };
 }
@@ -70133,8 +70149,11 @@ function createFactoryAppComponent(ctx, opts = {}) {
       }
       const targets = tenantAgents.filter((a) => {
         if (!a.inBuzz || !a.agentKey) return false;
+        const isIris = /\biris\b/i.test(`${a.name || ""} ${a.agentKey || ""}`);
         const full = String(a.model || "").trim().toLowerCase();
         const short = String(full.split("/").pop() || full).trim();
+        if (isIris && full && !full.includes(":free")) return false;
+        if (!isIris && (full === "gpt-6.1-terra" || short === "gpt-6.1-terra")) return true;
         if ((catalog == null ? void 0 : catalog.offlineModels.has(full)) || (catalog == null ? void 0 : catalog.offlineModels.has(short))) return true;
         return !liveWinners.has(full) && !liveWinners.has(short);
       });
@@ -70147,7 +70166,9 @@ function createFactoryAppComponent(ctx, opts = {}) {
       let firstError = "";
       const assignedModels = /* @__PURE__ */ new Set();
       for (const ag of targets) {
+        const isIris = /\biris\b/i.test(`${ag.name || ""} ${ag.agentKey || ""}`);
         const rec = pickLiveRecommendedModel(`${ag.papel || ""} ${ag.name || ""}`, catalog);
+        if (!isIris && rec.model.toLowerCase() === "gpt-6.1-terra") continue;
         const provider = rec.provider;
         const model = rec.model;
         const fresh = freshAgents.find((c) => (c == null ? void 0 : c.key) === ag.agentKey) || liveCrew.find((c) => c.key === ag.agentKey);

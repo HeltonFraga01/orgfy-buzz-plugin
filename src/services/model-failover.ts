@@ -122,18 +122,25 @@ export async function reconcileAgentsViaBuzzApi(
     }
     if (!isIris && nextModel.toLowerCase() === "gpt-6.1-terra") continue;
     if (!opts.dryRun && typeof agentsApi?.save === "function") {
-      await agentsApi.save(ag.key, { config: { ...cfg, provider: nextProv, model: nextModel } });
+      try {
+        await agentsApi.save(ag.key, { config: { ...cfg, provider: nextProv, model: nextModel } });
+        updated.push({ key: String(ag.key || ag.name || ""), from: `${prov}/${model}`, to: `${nextProv}/${nextModel}` });
+      } catch (err) {
+        // Isola erro de um agente (ex.: config ainda não sincronizada no relay ou agente hosted) sem abortar os demais
+        console.warn(`[ORGFY AUTO-RECONCILE] pulando ${ag.key}:`, err);
+      }
+    } else {
+      updated.push({ key: String(ag.key || ag.name || ""), from: `${prov}/${model}`, to: `${nextProv}/${nextModel}` });
     }
-    updated.push({ key: String(ag.key || ag.name || ""), from: `${prov}/${model}`, to: `${nextProv}/${nextModel}` });
   }
   return { total: list.length, updated };
 }
 
 /**
  * Auto-Reconciliador Eval-First (100% autônomo via ctx.agents.save):
- * Executa 8s após o boot do plugin e a cada 10 min, corrigindo automaticamente qualquer agente
- * preso em modelos banidos/0-10/offline (ex.: gemini-3.8-flash-medium, mistral-large-4-1t-a52b)
- * com assinatura Nostr nativa do Buzz Desktop — zero ação manual do operador.
+ * Executa em 8s, 25s e 60s após o boot do plugin (garantindo sincronização do relay) e a cada 10 min,
+ * corrigindo automaticamente qualquer agente preso em modelos banidos/0-10/offline ou em gpt-6.1-terra
+ * (exclusivo da OrgFy Iris) sem nunca alterar o modelo da OrgFy Iris.
  */
 export function startAutoAgentModelReconciler(ctx: Context): () => void {
   const agentsApi = (ctx as any)?.agents;
@@ -158,12 +165,18 @@ export function startAutoAgentModelReconciler(ctx: Context): () => void {
       running = false;
     }
   };
-  const bootTimer = setTimeout(() => { void runOnce(); }, 8_000);
+  const bootTimer1 = setTimeout(() => { void runOnce(); }, 8_000);
+  const bootTimer2 = setTimeout(() => { void runOnce(); }, 25_000);
+  const bootTimer3 = setTimeout(() => { void runOnce(); }, 60_000);
   const intervalTimer = setInterval(() => { void runOnce(); }, 10 * 60_000);
-  (bootTimer as any)?.unref?.();
+  (bootTimer1 as any)?.unref?.();
+  (bootTimer2 as any)?.unref?.();
+  (bootTimer3 as any)?.unref?.();
   (intervalTimer as any)?.unref?.();
   return () => {
-    clearTimeout(bootTimer);
+    clearTimeout(bootTimer1);
+    clearTimeout(bootTimer2);
+    clearTimeout(bootTimer3);
     clearInterval(intervalTimer);
   };
 }

@@ -1109,8 +1109,13 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
 
       const targets = tenantAgents.filter((a) => {
         if (!a.inBuzz || !a.agentKey) return false;
+        const isIris = /\biris\b/i.test(`${a.name || ""} ${a.agentKey || ""}`);
         const full = String(a.model || "").trim().toLowerCase();
         const short = String(full.split("/").pop() || full).trim();
+        // Regra soberana: nunca mexer no modelo da OrgFy Iris na reconciliação em lote
+        if (isIris && full && !full.includes(":free")) return false;
+        // Qualquer agente que NÃO seja a Iris com gpt-6.1-terra deve ser retirado imediatamente
+        if (!isIris && (full === "gpt-6.1-terra" || short === "gpt-6.1-terra")) return true;
         if (catalog?.offlineModels.has(full) || catalog?.offlineModels.has(short)) return true;
         return !liveWinners.has(full) && !liveWinners.has(short);
       });
@@ -1123,7 +1128,9 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
       let firstError = "";
       const assignedModels = new Set<string>();
       for (const ag of targets) {
+        const isIris = /\biris\b/i.test(`${ag.name || ""} ${ag.agentKey || ""}`);
         const rec = pickLiveRecommendedModel(`${ag.papel || ""} ${ag.name || ""}`, catalog);
+        if (!isIris && rec.model.toLowerCase() === "gpt-6.1-terra") continue;
         const provider = rec.provider;
         const model = rec.model;
         const fresh = freshAgents.find((c: any) => c?.key === ag.agentKey) || liveCrew.find((c) => c.key === ag.agentKey);
