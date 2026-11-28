@@ -1075,6 +1075,7 @@ console.log("[MODEL FAILOVER NEXUSMIND + FALLBACK OK]", JSON.stringify({ selecte
     host: {
       request: async () => ({ status: 200, body: JSON.stringify({ content: [{ type: "text", text: "ok" }] }) }),
       readFile: async (p) => {
+        if (p.endsWith("model-control-plane.json")) throw new Error("ENOENT");
         if (p.endsWith("kpis-esteira.json")) return new TextEncoder().encode(fakeKpis);
         if (p.endsWith("goose-loop-radar.json")) return new TextEncoder().encode(fakeRadarSingle404);
         if (p.endsWith("nexusmind-model-ranking.json")) return new TextEncoder().encode(fakeRanking);

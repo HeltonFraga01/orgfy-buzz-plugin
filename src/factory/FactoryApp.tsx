@@ -1107,6 +1107,15 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         liveWinners.add("gpt-6.1-terra");
       }
 
+      const nonIrisCounts = new Map<string, number>();
+      for (const a of tenantAgents) {
+        if (!a.inBuzz || !a.agentKey) continue;
+        if (/\biris\b/i.test(`${a.name || ""} ${a.agentKey || ""}`)) continue;
+        const m = String(a.model || "").trim().toLowerCase();
+        if (m) nonIrisCounts.set(m, (nonIrisCounts.get(m) || 0) + 1);
+      }
+      const flattenedMassModel = Array.from(nonIrisCounts.entries()).find(([, count]) => count >= 6)?.[0] || null;
+
       const targets = tenantAgents.filter((a) => {
         if (!a.inBuzz || !a.agentKey) return false;
         const isIris = /\biris\b/i.test(`${a.name || ""} ${a.agentKey || ""}`);
@@ -1116,6 +1125,10 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
         if (isIris && full && !full.includes(":free")) return false;
         // Qualquer agente que NÃO seja a Iris com gpt-6.1-terra deve ser retirado imediatamente
         if (!isIris && (full === "gpt-6.1-terra" || short === "gpt-6.1-terra")) return true;
+        if (flattenedMassModel && full === flattenedMassModel) {
+          const rec = pickLiveRecommendedModel(`${a.papel || ""} ${a.name || ""}`, catalog);
+          if (rec.model.toLowerCase() !== full) return true;
+        }
         if (catalog?.offlineModels.has(full) || catalog?.offlineModels.has(short)) return true;
         return !liveWinners.has(full) && !liveWinners.has(short);
       });

@@ -2090,19 +2090,25 @@ const FALLBACK_MODEL_PRESETS = [
   {
     provider: "nexusmind_antigravity",
     model: "gemini-2.5-flash",
-    label: "gemini-2.5-flash · Fallback (Rápido)",
+    label: "gemini-2.5-flash · Fallback (Tier 2 · Código)",
+    group: "fallback"
+  },
+  {
+    provider: "nexusmind_antigravity",
+    model: "gemini-2.5-flash-thinking",
+    label: "gemini-2.5-flash-thinking · Fallback (Raciocínio L-01)",
+    group: "fallback"
+  },
+  {
+    provider: "nexusmind_anthropic",
+    model: "claude-sonnet-4-6",
+    label: "claude-sonnet-4-6 · Fallback (VIP Liderança)",
     group: "fallback"
   },
   {
     provider: "nexusmind_openai",
     model: "gpt-6.1-terra",
-    label: "gpt-6.1-terra · Fallback (Qualidade)",
-    group: "fallback"
-  },
-  {
-    provider: "nexusmind_antigravity",
-    model: "claude-opus-4-6-thinking",
-    label: "claude-opus-4-6-thinking · Fallback (Complexo)",
+    label: "gpt-6.1-terra · Fallback (VIP Exclusivo Iris)",
     group: "fallback"
   }
 ];
@@ -2113,7 +2119,7 @@ function inferProviderForModel(modelId) {
   const m = String(modelId || "").toLowerCase();
   if (m.includes("/") || m.includes(":free")) return "nexusmind_openai";
   if (m.includes("grok")) return "nexusmind_grok";
-  if (m.includes("gemini") || m.includes("antigravity") || m.includes("thinking")) return "nexusmind_antigravity";
+  if (m.includes("gemini") || m.includes("antigravity") || m.includes("thinking") || m.includes("-hydrogen")) return "nexusmind_antigravity";
   if (m.includes("claude")) return "nexusmind_anthropic";
   return "nexusmind_openai";
 }
@@ -2129,11 +2135,25 @@ function decodeTextBytes(raw) {
 function isBlockedGatewayCatalogModel(modelId) {
   const m = String(modelId || "").trim().toLowerCase();
   if (!m) return true;
-  return m === "haiku" || m === "grok-4.5" || m.includes("gemini-3.8-flash-medium") || m.includes("gemini-3-pro-low") || m.includes("gemini-3-pro-high") || m.includes("mistral-large-4-1t-a52b") || m.includes("claude-opus-5-5") || m.includes("minimax-m3.1-flash") || m.startsWith("pol/") || m.startsWith("pollinations/") || m.includes("pol/community/") || m.includes("pollinations/community/") || m.startsWith("auto/");
+  return m === "haiku" || m === "grok-4.5" || m === "grok-4.5-latest" || m === "nex-n2-pro" || m.includes("gemini-3.8-flash-medium") || m.includes("gemini-4-hydrogen-medium") || m.includes("gemini-3-pro-low") || m.includes("gemini-3-pro-high") || m.includes("mistral-large-4-1t-a52b") || m.includes("claude-opus-5-5") || m.includes("minimax-m3.1-flash") || m.startsWith("pol/") || m.startsWith("pollinations/") || m.includes("pol/community/") || m.includes("pollinations/community/") || m.startsWith("auto/");
+}
+function resolveAgentRoutingTier(roleOrName) {
+  const lower = normName$1(roleOrName);
+  if (/\biris\b/.test(lower)) return "vip_iris";
+  if (/(\bbento\b(?!\s*arquit)|conselho|board|\bcoo\b|\bceo\b|\bcfo\b|\bcto\b|\bcro\b|\bcpo\b|\bcgo\b|lara)/.test(lower) && !/arquit/.test(lower)) {
+    return "vip_leadership";
+  }
+  if (/(arquit|teo|vera|hugo|revis|\bqa\b|segur|secur|lumen\s*qa)/.test(lower)) {
+    return "reasoning";
+  }
+  if (/(\bpo\b|sol\s*po|lumen\s*po|or[aá]culo|scout|cron|pesquisa|\bsol\b)/.test(lower)) {
+    return "tier1_fast";
+  }
+  return "tier2_balanced";
 }
 function isVipOrLeadershipAgent(roleOrName) {
-  const lower = normName$1(roleOrName);
-  return /(iris|bento|arquit|teo|vera|hugo|lara|ceo|coo|revis|qa|segur|secur|oraculo|conselho|board)/.test(lower);
+  const t = resolveAgentRoutingTier(roleOrName);
+  return t === "vip_iris" || t === "vip_leadership" || t === "reasoning";
 }
 function formatLatencyShort(ms) {
   if (typeof ms !== "number" || !Number.isFinite(ms) || ms <= 0) return "";
@@ -2362,6 +2382,12 @@ async function loadLiveGatewayModelCatalog(ctx) {
   }
   if (controlPlaneParsed && Array.isArray(controlPlaneParsed.models)) {
     const cpForceFree = Boolean((_e = controlPlaneParsed == null ? void 0 : controlPlaneParsed.policy) == null ? void 0 : _e.forceFree);
+    const cpBestByTier = {};
+    if (controlPlaneParsed.bestByTier && typeof controlPlaneParsed.bestByTier === "object") {
+      for (const [k, v2] of Object.entries(controlPlaneParsed.bestByTier)) {
+        cpBestByTier[k] = typeof v2 === "string" ? v2 : typeof (v2 == null ? void 0 : v2.model) === "string" ? v2.model : null;
+      }
+    }
     const cpApproved = [];
     for (const m of controlPlaneParsed.models) {
       const mid = String((m == null ? void 0 : m.model) || "").trim();
@@ -2375,6 +2401,7 @@ async function loadLiveGatewayModelCatalog(ctx) {
       const score = typeof m.evalScore === "number" ? m.evalScore : void 0;
       const latencyMs = typeof m.latencyMs === "number" ? m.latencyMs : void 0;
       const isFree = Boolean(m.isFree);
+      const tierScores = m.tierScores && typeof m.tierScores === "object" ? m.tierScores : void 0;
       const blockedByPolicy = isBlockedGatewayCatalogModel(mid) || !cpForceFree && isFree || policyState === "blocked";
       if (evalApproved && !blockedByPolicy) {
         approvedModels.add(keyLower);
@@ -2394,7 +2421,8 @@ async function loadLiveGatewayModelCatalog(ctx) {
           mode: policyState,
           qualityScore: score,
           rankingScore: score,
-          latencyMs
+          latencyMs,
+          tierScores
         });
       } else if (!isOnline || blockedByPolicy) {
         approvedModels.delete(keyLower);
@@ -2411,8 +2439,16 @@ async function loadLiveGatewayModelCatalog(ctx) {
         approvedModels,
         offlineModels,
         forceFree: cpForceFree,
+        bestByTier: cpBestByTier,
         updatedAt
       };
+    }
+  }
+  const rankBestByTier = {};
+  const rawBest = (rankingParsed == null ? void 0 : rankingParsed.bestModelByTier) || (rankingParsed == null ? void 0 : rankingParsed.bestByTier);
+  if (rawBest && typeof rawBest === "object") {
+    for (const [k, v2] of Object.entries(rawBest)) {
+      rankBestByTier[k] = typeof v2 === "string" ? v2 : typeof (v2 == null ? void 0 : v2.model) === "string" ? v2.model : null;
     }
   }
   const filteredApproved = approvedOptions.filter(
@@ -2428,47 +2464,93 @@ async function loadLiveGatewayModelCatalog(ctx) {
     approvedModels,
     offlineModels,
     forceFree: Boolean(((_f = rankingParsed == null ? void 0 : rankingParsed.policy) == null ? void 0 : _f.forceFree) ?? (rankingParsed == null ? void 0 : rankingParsed.forceFree)),
+    bestByTier: rankBestByTier,
     updatedAt
   };
-}
-function isIrisOnlyAgent(roleOrName) {
-  return /\biris\b/i.test(normName$1(roleOrName));
 }
 function isIrisExclusiveModel(modelId) {
   return normName$1(modelId) === "gpt-6.1-terra";
 }
 function pickLiveRecommendedModel(roleOrName, catalog) {
-  const isIris = isIrisOnlyAgent(roleOrName);
-  const isTier1 = isVipOrLeadershipAgent(roleOrName);
-  const tierLabel = isIris ? "VIP Exclusivo (OrgFy Iris)" : isTier1 ? "Tier 1 (Liderança · Somente Pago)" : "Tier 2 (Execução · Pool Auto)";
+  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
+  const tier = resolveAgentRoutingTier(roleOrName);
+  const lowerRole = normName$1(roleOrName);
+  const isArchitectOrSecurity = /(arquit|segur|secur|hugo)/.test(lowerRole);
+  const tierLabel = tier === "vip_iris" ? "VIP Exclusivo (OrgFy Iris · Frontier)" : tier === "vip_leadership" ? "VIP Liderança (COO & Conselho · Somente Pago)" : tier === "reasoning" ? "Tier Reasoning (Revisão L-01, QA & Arquitetura)" : tier === "tier1_fast" ? "Tier 1 · Rápido (PO, Discovery & Cron · Pool Auto)" : "Tier 2 · Código & Execução (Builders · Pool Auto)";
   if (catalog && catalog.approvedOptions.length > 0) {
+    const isIris = tier === "vip_iris";
+    const canUseVip = tier === "vip_iris" || tier === "vip_leadership";
     const unblocked = catalog.approvedOptions.filter((o) => {
       if (isBlockedGatewayCatalogModel(o.model) || o.mode === "blocked") return false;
       if (!isIris && isIrisExclusiveModel(o.model)) return false;
-      if (!isTier1 && o.mode === "vip") return false;
+      if (!canUseVip && o.mode === "vip") return false;
       return true;
     });
-    if (isIris) {
+    const findOption = (modelId) => {
+      if (!modelId) return void 0;
+      const target = modelId.trim().toLowerCase();
+      return unblocked.find((o) => o.model.toLowerCase() === target);
+    };
+    const sortByTierScore = (pool, tierKey) => [...pool].sort((a, b) => {
+      var _a2, _b2;
+      const sa = ((_a2 = a.tierScores) == null ? void 0 : _a2[tierKey]) ?? a.rankingScore ?? a.qualityScore ?? 0;
+      const sb = ((_b2 = b.tierScores) == null ? void 0 : _b2[tierKey]) ?? b.rankingScore ?? b.qualityScore ?? 0;
+      if (sb !== sa) return sb - sa;
+      return (a.latencyMs ?? 999999) - (b.latencyMs ?? 999999);
+    });
+    if (tier === "vip_iris") {
       const paidPool = unblocked.filter((o) => !o.isFree);
       if (paidPool.length > 0) {
-        const preferredIris = paidPool.find((o) => isIrisExclusiveModel(o.model)) || paidPool.find((o) => o.mode === "vip") || paidPool.find((o) => /(claude-sonnet-4-6|claude-opus-4-6|claude-sonnet-5)/.test(o.model.toLowerCase())) || paidPool[0];
-        return { provider: preferredIris.provider, model: preferredIris.model, tierLabel };
+        const chosen = findOption((_a = catalog.bestByTier) == null ? void 0 : _a.vip_iris) || paidPool.find((o) => isIrisExclusiveModel(o.model)) || paidPool.find((o) => o.mode === "vip") || sortByTierScore(paidPool, "tier3_frontier")[0];
+        return { provider: chosen.provider, model: chosen.model, tierLabel, tier };
       }
-    } else if (isTier1) {
+    } else if (tier === "vip_leadership") {
       const paidPool = unblocked.filter((o) => !o.isFree);
       if (paidPool.length > 0) {
-        const preferredPaid = paidPool.find((o) => o.model.toLowerCase() === "gemini-4-hydrogen-high") || paidPool.find((o) => o.model.toLowerCase() === "gemini-4-hydrogen-sonar") || paidPool.find((o) => /(claude-sonnet-4-6|gemini-4-hydrogen|gemini-2\.5-flash)/.test(o.model.toLowerCase())) || paidPool[0];
-        return { provider: preferredPaid.provider, model: preferredPaid.model, tierLabel };
+        const chosen = findOption((_b = catalog.bestByTier) == null ? void 0 : _b.vip_leadership) || paidPool.find((o) => o.mode === "vip" && !isIrisExclusiveModel(o.model)) || findOption((_c = catalog.bestByTier) == null ? void 0 : _c.tier3_frontier) || sortByTierScore(paidPool, "tier3_frontier")[0];
+        return { provider: chosen.provider, model: chosen.model, tierLabel, tier };
+      }
+    } else if (tier === "reasoning") {
+      const paidAutoPool = unblocked.filter((o) => !o.isFree && o.mode !== "vip");
+      const pool = paidAutoPool.length > 0 ? paidAutoPool : unblocked.filter((o) => !o.isFree);
+      if (pool.length > 0) {
+        const tierKey = isArchitectOrSecurity ? "tier3_frontier" : "reasoning";
+        const preferredWinner = isArchitectOrSecurity ? findOption((_d = catalog.bestByTier) == null ? void 0 : _d.tier3_frontier) || findOption((_e = catalog.bestByTier) == null ? void 0 : _e.reasoning) : findOption((_f = catalog.bestByTier) == null ? void 0 : _f.reasoning) || findOption((_g = catalog.bestByTier) == null ? void 0 : _g.tier3_frontier);
+        const chosen = preferredWinner || sortByTierScore(pool, tierKey)[0];
+        return { provider: chosen.provider, model: chosen.model, tierLabel, tier };
+      }
+    } else if (tier === "tier1_fast") {
+      const autoPool = unblocked.filter((o) => (catalog.forceFree || !o.isFree) && o.mode !== "vip");
+      if (autoPool.length > 0) {
+        const chosen = (catalog.forceFree ? autoPool.find((o) => o.isFree) : null) || autoPool.find((o) => o.model.toLowerCase() === "gemini-4-hydrogen-low") || autoPool.find((o) => o.model.toLowerCase() === "gemini-3-flash") || findOption((_h = catalog.bestByTier) == null ? void 0 : _h.tier1_fast) || sortByTierScore(autoPool, "tier1_fast")[0];
+        return { provider: chosen.provider, model: chosen.model, tierLabel, tier };
       }
     } else {
-      const pool = unblocked.filter((o) => catalog.forceFree || !o.isFree);
-      if (pool.length > 0) {
-        const preferredFast = (catalog.forceFree ? pool.find((o) => o.isFree) : null) || pool.find((o) => !o.isFree && o.model.toLowerCase() === "gemini-4-hydrogen-sonar") || pool.find((o) => !o.isFree && o.model.toLowerCase() === "gemini-4-hydrogen-high") || pool.find((o) => !o.isFree && o.model.toLowerCase() === "gemini-4-hydrogen-low") || pool.find((o) => !o.isFree && o.model.toLowerCase() === "gemini-2.5-flash") || pool.find((o) => !o.isFree) || pool[0];
-        return { provider: preferredFast.provider, model: preferredFast.model, tierLabel };
+      const autoPool = unblocked.filter((o) => (catalog.forceFree || !o.isFree) && o.mode !== "vip");
+      if (autoPool.length > 0) {
+        const chosen = (catalog.forceFree ? autoPool.find((o) => o.isFree) : null) || findOption((_i = catalog.bestByTier) == null ? void 0 : _i.tier2_balanced) || findOption((_j = catalog.bestByTier) == null ? void 0 : _j.geral) || sortByTierScore(autoPool, "tier2_balanced")[0];
+        return { provider: chosen.provider, model: chosen.model, tierLabel, tier };
       }
     }
   }
-  return isIris ? { provider: "nexusmind_openai", model: "gpt-6.1-terra", tierLabel } : { provider: "nexusmind_antigravity", model: "gemini-4-hydrogen-sonar", tierLabel };
+  if (tier === "vip_iris") {
+    return { provider: "nexusmind_openai", model: "gpt-6.1-terra", tierLabel, tier };
+  }
+  if (tier === "vip_leadership") {
+    return { provider: "nexusmind_anthropic", model: "claude-sonnet-4-6", tierLabel, tier };
+  }
+  if (tier === "reasoning") {
+    return {
+      provider: "nexusmind_antigravity",
+      model: isArchitectOrSecurity ? "gemini-4-hydrogen-high" : "gemini-2.5-flash-thinking",
+      tierLabel,
+      tier
+    };
+  }
+  if (tier === "tier1_fast") {
+    return { provider: "nexusmind_antigravity", model: "gemini-4-hydrogen-low", tierLabel, tier };
+  }
+  return { provider: "nexusmind_antigravity", model: "gemini-2.5-flash", tierLabel, tier };
 }
 const SURFACE_BG = "var(--affordance-subtle, rgba(255, 255, 255, 0.035))";
 const CARD_BG$1 = "var(--bg-panel, rgba(255, 255, 255, 0.03))";
@@ -3267,12 +3349,21 @@ function isTopVipModel(modelId, policyState) {
   return /(opus|sonnet-4-6|sonnet-5|gpt-5|gpt-6|\bo3\b|gemini-2\.5-pro|gemini-3\.5-pro|gemini-4-hydrogen-high|deepseek-r1)/.test(m);
 }
 async function reconcileAgentsViaBuzzApi(ctx, opts = {}) {
+  var _a, _b;
   const agentsApi = ctx == null ? void 0 : ctx.agents;
   const snap = typeof (agentsApi == null ? void 0 : agentsApi.snapshot) === "function" ? agentsApi.snapshot() : null;
   const list = Array.isArray(snap == null ? void 0 : snap.agents) ? snap.agents : [];
   const catalog = await loadLiveGatewayModelCatalog(ctx).catch(() => null);
   const hasLiveCatalog = Boolean((catalog == null ? void 0 : catalog.hasLiveData) && catalog.approvedOptions.length > 0);
   const updated = [];
+  const nonIrisModelCounts = /* @__PURE__ */ new Map();
+  for (const ag of list) {
+    const label = String((ag == null ? void 0 : ag.name) || (ag == null ? void 0 : ag.key) || "");
+    if (isIrisAgent(label)) continue;
+    const m = String(((_a = ag == null ? void 0 : ag.config) == null ? void 0 : _a.model) || (ag == null ? void 0 : ag.model) || "").trim().toLowerCase();
+    if (m) nonIrisModelCounts.set(m, (nonIrisModelCounts.get(m) || 0) + 1);
+  }
+  const flattenedMassModel = ((_b = Array.from(nonIrisModelCounts.entries()).find(([, count]) => count >= 6)) == null ? void 0 : _b[0]) || null;
   for (const ag of list) {
     const cfg = (ag == null ? void 0 : ag.config) && typeof ag.config === "object" ? { ...ag.config } : {};
     const prov = cfg.provider || (ag == null ? void 0 : ag.provider) || null;
@@ -3282,9 +3373,11 @@ async function reconcileAgentsViaBuzzApi(ctx, opts = {}) {
     const agentLabel = String((ag == null ? void 0 : ag.name) || (ag == null ? void 0 : ag.key) || "");
     const isIris = isIrisAgent(agentLabel);
     const isVip = isVipOrLeadershipAgent(agentLabel);
+    const tier = resolveAgentRoutingTier(agentLabel);
     if (isIris && prov && model && !isUnsupportedAgentModel(mlow) && !isFreeModelId(mlow)) {
       continue;
     }
+    const rec = pickLiveRecommendedModel(agentLabel, catalog);
     const hasAnyPaidApproved = Boolean(!hasLiveCatalog || (catalog == null ? void 0 : catalog.approvedOptions.some((o) => !o.isFree)));
     const isOfflineInGateway = Boolean(
       hasLiveCatalog && ((catalog == null ? void 0 : catalog.offlineModels.has(mlow)) || (catalog == null ? void 0 : catalog.offlineModels.has(shortM)))
@@ -3293,19 +3386,17 @@ async function reconcileAgentsViaBuzzApi(ctx, opts = {}) {
       hasLiveCatalog && (catalog == null ? void 0 : catalog.approvedModels) && catalog.approvedModels.size > 0 && !catalog.approvedModels.has(mlow) && !catalog.approvedModels.has(shortM)
     );
     const leakedIrisExclusiveModel = !isIris && (mlow === "gpt-6.1-terra" || shortM === "gpt-6.1-terra");
-    const needsFix = !prov || !model || leakedIrisExclusiveModel || isUnsupportedAgentModel(mlow) || isOfflineInGateway || isNotEvalApproved || isVip && isFreeModelId(mlow) && hasAnyPaidApproved || !isVip && !(catalog == null ? void 0 : catalog.forceFree) && isFreeModelId(mlow) || prov === "nexusmind_openai" && mlow.startsWith("antigravity/");
+    const isFlattenedVictim = Boolean(
+      flattenedMassModel && mlow === flattenedMassModel && rec.model.toLowerCase() !== mlow
+    );
+    const currentOpt = catalog == null ? void 0 : catalog.approvedOptions.find((o) => o.model.toLowerCase() === mlow || o.model.toLowerCase() === shortM);
+    const leakedVipToWorker = (tier === "tier2_balanced" || tier === "tier1_fast") && ((currentOpt == null ? void 0 : currentOpt.mode) === "vip" || /^(claude-opus|claude-sonnet-5|claude-sonnet-4-6)/.test(shortM));
+    const needsFix = !prov || !model || leakedIrisExclusiveModel || leakedVipToWorker || isFlattenedVictim || isUnsupportedAgentModel(mlow) || isOfflineInGateway || isNotEvalApproved || isVip && isFreeModelId(mlow) && hasAnyPaidApproved || !isVip && !(catalog == null ? void 0 : catalog.forceFree) && isFreeModelId(mlow) || prov === "nexusmind_openai" && mlow.startsWith("antigravity/");
     if (!needsFix) continue;
-    let nextModel;
-    let nextProv;
-    if (hasLiveCatalog) {
-      const rec = pickLiveRecommendedModel(agentLabel, catalog);
-      nextModel = rec.model;
-      nextProv = rec.provider;
-    } else {
-      nextModel = isIris ? "gpt-6.1-terra" : "gemini-2.5-flash";
-      nextProv = isIris ? "nexusmind_openai" : "nexusmind_antigravity";
-    }
+    const nextModel = rec.model;
+    const nextProv = rec.provider;
     if (!isIris && nextModel.toLowerCase() === "gpt-6.1-terra") continue;
+    if (nextModel.toLowerCase() === mlow && String(prov || "").toLowerCase() === nextProv.toLowerCase()) continue;
     if (!opts.dryRun && typeof (agentsApi == null ? void 0 : agentsApi.save) === "function") {
       try {
         await agentsApi.save(ag.key, { config: { ...cfg, provider: nextProv, model: nextModel } });
@@ -3490,7 +3581,7 @@ function isFreeModelId(modelId) {
 function isUnsupportedAgentModel(modelId) {
   const m = String(modelId || "").trim().toLowerCase();
   if (!m) return true;
-  return m === "haiku" || m === "grok-4.5" || m.includes("gemini-3.8-flash-medium") || m.includes("gemini-3-pro-low") || m.includes("gemini-3-pro-high") || m.includes("mistral-large-4-1t-a52b") || m.includes("claude-opus-5-5") || m.includes("minimax-m3.1-flash") || m.startsWith("pol/") || m.startsWith("pollinations/") || m.includes("pol/community/") || m.includes("pollinations/community/") || m.startsWith("auto/") || m.includes("tab_jump") || m.includes("autocomplete") || m.includes("fim-") || m.includes("embedding") || m.includes("rerank") || m.includes("whisper") || m.includes("tts") || m.includes("imagen") || m.includes("dall-e") || m.includes("moderation");
+  return m === "haiku" || m === "grok-4.5" || m === "grok-4.5-latest" || m === "nex-n2-pro" || m.includes("gemini-3.8-flash-medium") || m.includes("gemini-4-hydrogen-medium") || m.includes("gemini-3-pro-low") || m.includes("gemini-3-pro-high") || m.includes("mistral-large-4-1t-a52b") || m.includes("claude-opus-5-5") || m.includes("minimax-m3.1-flash") || m.startsWith("pol/") || m.startsWith("pollinations/") || m.includes("pol/community/") || m.includes("pollinations/community/") || m.startsWith("auto/") || m.includes("tab_jump") || m.includes("autocomplete") || m.includes("fim-") || m.includes("embedding") || m.includes("rerank") || m.includes("whisper") || m.includes("tts") || m.includes("imagen") || m.includes("dall-e") || m.includes("moderation");
 }
 function estimateModelIntelligence(modelId) {
   const m = String(modelId || "").toLowerCase();
@@ -70127,7 +70218,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
       [notify2]
     );
     const handleReconcileAgentsR51 = React.useCallback(async () => {
-      var _a2, _b2;
+      var _a2, _b2, _c2;
       const agentsApi = ctx == null ? void 0 : ctx.agents;
       if (typeof (agentsApi == null ? void 0 : agentsApi.save) !== "function") {
         notify2("API ctx.agents.save indisponível nesta versão do Buzz.");
@@ -70147,6 +70238,14 @@ function createFactoryAppComponent(ctx, opts = {}) {
         liveWinners.add("gemini-2.5-flash");
         liveWinners.add("gpt-6.1-terra");
       }
+      const nonIrisCounts = /* @__PURE__ */ new Map();
+      for (const a of tenantAgents) {
+        if (!a.inBuzz || !a.agentKey) continue;
+        if (/\biris\b/i.test(`${a.name || ""} ${a.agentKey || ""}`)) continue;
+        const m = String(a.model || "").trim().toLowerCase();
+        if (m) nonIrisCounts.set(m, (nonIrisCounts.get(m) || 0) + 1);
+      }
+      const flattenedMassModel = ((_a2 = Array.from(nonIrisCounts.entries()).find(([, count]) => count >= 6)) == null ? void 0 : _a2[0]) || null;
       const targets = tenantAgents.filter((a) => {
         if (!a.inBuzz || !a.agentKey) return false;
         const isIris = /\biris\b/i.test(`${a.name || ""} ${a.agentKey || ""}`);
@@ -70154,6 +70253,10 @@ function createFactoryAppComponent(ctx, opts = {}) {
         const short = String(full.split("/").pop() || full).trim();
         if (isIris && full && !full.includes(":free")) return false;
         if (!isIris && (full === "gpt-6.1-terra" || short === "gpt-6.1-terra")) return true;
+        if (flattenedMassModel && full === flattenedMassModel) {
+          const rec = pickLiveRecommendedModel(`${a.papel || ""} ${a.name || ""}`, catalog);
+          if (rec.model.toLowerCase() !== full) return true;
+        }
         if ((catalog == null ? void 0 : catalog.offlineModels.has(full)) || (catalog == null ? void 0 : catalog.offlineModels.has(short))) return true;
         return !liveWinners.has(full) && !liveWinners.has(short);
       });
@@ -70161,7 +70264,7 @@ function createFactoryAppComponent(ctx, opts = {}) {
         notify2("Todos os agentes provisionados já estão em modelos online aprovados no Eval.");
         return;
       }
-      const freshAgents = ((_b2 = (_a2 = agentsApi.snapshot) == null ? void 0 : _a2.call(agentsApi)) == null ? void 0 : _b2.agents) || [];
+      const freshAgents = ((_c2 = (_b2 = agentsApi.snapshot) == null ? void 0 : _b2.call(agentsApi)) == null ? void 0 : _c2.agents) || [];
       let updated = 0;
       let firstError = "";
       const assignedModels = /* @__PURE__ */ new Set();

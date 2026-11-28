@@ -40,6 +40,7 @@ export interface AgentModelOption {
   qualityScore?: number;
   rankingScore?: number;
   latencyMs?: number;
+  tierScores?: Record<string, number>;
 }
 
 export interface LiveGatewayModelCatalog {
@@ -49,6 +50,7 @@ export interface LiveGatewayModelCatalog {
   approvedModels: Set<string>;
   offlineModels: Set<string>;
   forceFree: boolean;
+  bestByTier?: Record<string, string | null>;
   updatedAt?: string;
 }
 
@@ -56,19 +58,25 @@ const FALLBACK_MODEL_PRESETS: AgentModelOption[] = [
   {
     provider: "nexusmind_antigravity",
     model: "gemini-2.5-flash",
-    label: "gemini-2.5-flash · Fallback (Rápido)",
+    label: "gemini-2.5-flash · Fallback (Tier 2 · Código)",
+    group: "fallback",
+  },
+  {
+    provider: "nexusmind_antigravity",
+    model: "gemini-2.5-flash-thinking",
+    label: "gemini-2.5-flash-thinking · Fallback (Raciocínio L-01)",
+    group: "fallback",
+  },
+  {
+    provider: "nexusmind_anthropic",
+    model: "claude-sonnet-4-6",
+    label: "claude-sonnet-4-6 · Fallback (VIP Liderança)",
     group: "fallback",
   },
   {
     provider: "nexusmind_openai",
     model: "gpt-6.1-terra",
-    label: "gpt-6.1-terra · Fallback (Qualidade)",
-    group: "fallback",
-  },
-  {
-    provider: "nexusmind_antigravity",
-    model: "claude-opus-4-6-thinking",
-    label: "claude-opus-4-6-thinking · Fallback (Complexo)",
+    label: "gpt-6.1-terra · Fallback (VIP Exclusivo Iris)",
     group: "fallback",
   },
 ];
@@ -81,7 +89,7 @@ function inferProviderForModel(modelId: string): string {
   const m = String(modelId || "").toLowerCase();
   if (m.includes("/") || m.includes(":free")) return "nexusmind_openai";
   if (m.includes("grok")) return "nexusmind_grok";
-  if (m.includes("gemini") || m.includes("antigravity") || m.includes("thinking")) return "nexusmind_antigravity";
+  if (m.includes("gemini") || m.includes("antigravity") || m.includes("thinking") || m.includes("-hydrogen")) return "nexusmind_antigravity";
   if (m.includes("claude")) return "nexusmind_anthropic";
   return "nexusmind_openai";
 }
@@ -102,7 +110,10 @@ function isBlockedGatewayCatalogModel(modelId: string): boolean {
   return (
     m === "haiku" ||
     m === "grok-4.5" ||
+    m === "grok-4.5-latest" ||
+    m === "nex-n2-pro" ||
     m.includes("gemini-3.8-flash-medium") ||
+    m.includes("gemini-4-hydrogen-medium") ||
     m.includes("gemini-3-pro-low") ||
     m.includes("gemini-3-pro-high") ||
     m.includes("mistral-large-4-1t-a52b") ||
@@ -116,9 +127,31 @@ function isBlockedGatewayCatalogModel(modelId: string): boolean {
   );
 }
 
-export function isVipOrLeadershipAgent(roleOrName: string): boolean {
+export type OrgfyAgentRoutingTier =
+  | "vip_iris"
+  | "vip_leadership"
+  | "reasoning"
+  | "tier2_balanced"
+  | "tier1_fast";
+
+export function resolveAgentRoutingTier(roleOrName: string): OrgfyAgentRoutingTier {
   const lower = normName(roleOrName);
-  return /(iris|bento|arquit|teo|vera|hugo|lara|ceo|coo|revis|qa|segur|secur|oraculo|conselho|board)/.test(lower);
+  if (/\biris\b/.test(lower)) return "vip_iris";
+  if (/(\bbento\b(?!\s*arquit)|conselho|board|\bcoo\b|\bceo\b|\bcfo\b|\bcto\b|\bcro\b|\bcpo\b|\bcgo\b|lara)/.test(lower) && !/arquit/.test(lower)) {
+    return "vip_leadership";
+  }
+  if (/(arquit|teo|vera|hugo|revis|\bqa\b|segur|secur|lumen\s*qa)/.test(lower)) {
+    return "reasoning";
+  }
+  if (/(\bpo\b|sol\s*po|lumen\s*po|or[aá]culo|scout|cron|pesquisa|\bsol\b)/.test(lower)) {
+    return "tier1_fast";
+  }
+  return "tier2_balanced";
+}
+
+export function isVipOrLeadershipAgent(roleOrName: string): boolean {
+  const t = resolveAgentRoutingTier(roleOrName);
+  return t === "vip_iris" || t === "vip_leadership" || t === "reasoning";
 }
 
 function formatLatencyShort(ms?: number): string {
@@ -388,6 +421,12 @@ export async function loadLiveGatewayModelCatalog(ctx: Context): Promise<LiveGat
 
   if (controlPlaneParsed && Array.isArray(controlPlaneParsed.models)) {
     const cpForceFree = Boolean(controlPlaneParsed?.policy?.forceFree);
+    const cpBestByTier: Record<string, string | null> = {};
+    if (controlPlaneParsed.bestByTier && typeof controlPlaneParsed.bestByTier === "object") {
+      for (const [k, v] of Object.entries(controlPlaneParsed.bestByTier as Record<string, any>)) {
+        cpBestByTier[k] = typeof v === "string" ? v : typeof v?.model === "string" ? v.model : null;
+      }
+    }
     const cpApproved: AgentModelOption[] = [];
     for (const m of controlPlaneParsed.models) {
       const mid = String(m?.model || "").trim();
@@ -401,6 +440,7 @@ export async function loadLiveGatewayModelCatalog(ctx: Context): Promise<LiveGat
       const score = typeof m.evalScore === "number" ? m.evalScore : undefined;
       const latencyMs = typeof m.latencyMs === "number" ? m.latencyMs : undefined;
       const isFree = Boolean(m.isFree);
+      const tierScores = m.tierScores && typeof m.tierScores === "object" ? (m.tierScores as Record<string, number>) : undefined;
 
       const blockedByPolicy = isBlockedGatewayCatalogModel(mid) || (!cpForceFree && isFree) || policyState === "blocked";
       if (evalApproved && !blockedByPolicy) {
@@ -422,6 +462,7 @@ export async function loadLiveGatewayModelCatalog(ctx: Context): Promise<LiveGat
           qualityScore: score,
           rankingScore: score,
           latencyMs,
+          tierScores,
         });
       } else if (!isOnline || blockedByPolicy) {
         approvedModels.delete(keyLower);
@@ -438,8 +479,17 @@ export async function loadLiveGatewayModelCatalog(ctx: Context): Promise<LiveGat
         approvedModels,
         offlineModels,
         forceFree: cpForceFree,
+        bestByTier: cpBestByTier,
         updatedAt,
       };
+    }
+  }
+
+  const rankBestByTier: Record<string, string | null> = {};
+  const rawBest = rankingParsed?.bestModelByTier || rankingParsed?.bestByTier;
+  if (rawBest && typeof rawBest === "object") {
+    for (const [k, v] of Object.entries(rawBest as Record<string, any>)) {
+      rankBestByTier[k] = typeof v === "string" ? v : typeof v?.model === "string" ? v.model : null;
     }
   }
 
@@ -453,6 +503,7 @@ export async function loadLiveGatewayModelCatalog(ctx: Context): Promise<LiveGat
     approvedModels,
     offlineModels,
     forceFree: Boolean(rankingParsed?.policy?.forceFree ?? rankingParsed?.forceFree),
+    bestByTier: rankBestByTier,
     updatedAt,
   };
 }
@@ -468,62 +519,121 @@ function isIrisExclusiveModel(modelId: string): boolean {
 export function pickLiveRecommendedModel(
   roleOrName: string,
   catalog: LiveGatewayModelCatalog | null
-): { provider: string; model: string; tierLabel: string } {
-  const isIris = isIrisOnlyAgent(roleOrName);
-  const isTier1 = isVipOrLeadershipAgent(roleOrName);
-  const tierLabel = isIris
-    ? "VIP Exclusivo (OrgFy Iris)"
-    : isTier1
-    ? "Tier 1 (Liderança · Somente Pago)"
-    : "Tier 2 (Execução · Pool Auto)";
+): { provider: string; model: string; tierLabel: string; tier: OrgfyAgentRoutingTier } {
+  const tier = resolveAgentRoutingTier(roleOrName);
+  const lowerRole = normName(roleOrName);
+  const isArchitectOrSecurity = /(arquit|segur|secur|hugo)/.test(lowerRole);
+
+  const tierLabel =
+    tier === "vip_iris"
+      ? "VIP Exclusivo (OrgFy Iris · Frontier)"
+      : tier === "vip_leadership"
+      ? "VIP Liderança (COO & Conselho · Somente Pago)"
+      : tier === "reasoning"
+      ? "Tier Reasoning (Revisão L-01, QA & Arquitetura)"
+      : tier === "tier1_fast"
+      ? "Tier 1 · Rápido (PO, Discovery & Cron · Pool Auto)"
+      : "Tier 2 · Código & Execução (Builders · Pool Auto)";
 
   if (catalog && catalog.approvedOptions.length > 0) {
-    // Regra soberana: gpt-6.1-terra é EXCLUSIVO da OrgFy Iris; workers nunca recebem modelos VIP.
+    const isIris = tier === "vip_iris";
+    const canUseVip = tier === "vip_iris" || tier === "vip_leadership";
+
     const unblocked = catalog.approvedOptions.filter((o) => {
       if (isBlockedGatewayCatalogModel(o.model) || o.mode === "blocked") return false;
       if (!isIris && isIrisExclusiveModel(o.model)) return false;
-      if (!isTier1 && o.mode === "vip") return false;
+      if (!canUseVip && o.mode === "vip") return false;
       return true;
     });
-    if (isIris) {
+
+    const findOption = (modelId?: string | null) => {
+      if (!modelId) return undefined;
+      const target = modelId.trim().toLowerCase();
+      return unblocked.find((o) => o.model.toLowerCase() === target);
+    };
+
+    const sortByTierScore = (pool: AgentModelOption[], tierKey: string) =>
+      [...pool].sort((a, b) => {
+        const sa = a.tierScores?.[tierKey] ?? a.rankingScore ?? a.qualityScore ?? 0;
+        const sb = b.tierScores?.[tierKey] ?? b.rankingScore ?? b.qualityScore ?? 0;
+        if (sb !== sa) return sb - sa;
+        return (a.latencyMs ?? 999999) - (b.latencyMs ?? 999999);
+      });
+
+    if (tier === "vip_iris") {
       const paidPool = unblocked.filter((o) => !o.isFree);
       if (paidPool.length > 0) {
-        const preferredIris =
+        const chosen =
+          findOption(catalog.bestByTier?.vip_iris) ||
           paidPool.find((o) => isIrisExclusiveModel(o.model)) ||
           paidPool.find((o) => o.mode === "vip") ||
-          paidPool.find((o) => /(claude-sonnet-4-6|claude-opus-4-6|claude-sonnet-5)/.test(o.model.toLowerCase())) ||
-          paidPool[0];
-        return { provider: preferredIris.provider, model: preferredIris.model, tierLabel };
+          sortByTierScore(paidPool, "tier3_frontier")[0];
+        return { provider: chosen.provider, model: chosen.model, tierLabel, tier };
       }
-    } else if (isTier1) {
+    } else if (tier === "vip_leadership") {
       const paidPool = unblocked.filter((o) => !o.isFree);
       if (paidPool.length > 0) {
-        const preferredPaid =
-          paidPool.find((o) => o.model.toLowerCase() === "gemini-4-hydrogen-high") ||
-          paidPool.find((o) => o.model.toLowerCase() === "gemini-4-hydrogen-sonar") ||
-          paidPool.find((o) => /(claude-sonnet-4-6|gemini-4-hydrogen|gemini-2\.5-flash)/.test(o.model.toLowerCase())) ||
-          paidPool[0];
-        return { provider: preferredPaid.provider, model: preferredPaid.model, tierLabel };
+        const chosen =
+          findOption(catalog.bestByTier?.vip_leadership) ||
+          paidPool.find((o) => o.mode === "vip" && !isIrisExclusiveModel(o.model)) ||
+          findOption(catalog.bestByTier?.tier3_frontier) ||
+          sortByTierScore(paidPool, "tier3_frontier")[0];
+        return { provider: chosen.provider, model: chosen.model, tierLabel, tier };
+      }
+    } else if (tier === "reasoning") {
+      const paidAutoPool = unblocked.filter((o) => !o.isFree && o.mode !== "vip");
+      const pool = paidAutoPool.length > 0 ? paidAutoPool : unblocked.filter((o) => !o.isFree);
+      if (pool.length > 0) {
+        const tierKey = isArchitectOrSecurity ? "tier3_frontier" : "reasoning";
+        const preferredWinner = isArchitectOrSecurity
+          ? findOption(catalog.bestByTier?.tier3_frontier) || findOption(catalog.bestByTier?.reasoning)
+          : findOption(catalog.bestByTier?.reasoning) || findOption(catalog.bestByTier?.tier3_frontier);
+        const chosen = preferredWinner || sortByTierScore(pool, tierKey)[0];
+        return { provider: chosen.provider, model: chosen.model, tierLabel, tier };
+      }
+    } else if (tier === "tier1_fast") {
+      const autoPool = unblocked.filter((o) => (catalog.forceFree || !o.isFree) && o.mode !== "vip");
+      if (autoPool.length > 0) {
+        const chosen =
+          (catalog.forceFree ? autoPool.find((o) => o.isFree) : null) ||
+          autoPool.find((o) => o.model.toLowerCase() === "gemini-4-hydrogen-low") ||
+          autoPool.find((o) => o.model.toLowerCase() === "gemini-3-flash") ||
+          findOption(catalog.bestByTier?.tier1_fast) ||
+          sortByTierScore(autoPool, "tier1_fast")[0];
+        return { provider: chosen.provider, model: chosen.model, tierLabel, tier };
       }
     } else {
-      const pool = unblocked.filter((o) => catalog.forceFree || !o.isFree);
-      if (pool.length > 0) {
-        const preferredFast =
-          (catalog.forceFree ? pool.find((o) => o.isFree) : null) ||
-          pool.find((o) => !o.isFree && o.model.toLowerCase() === "gemini-4-hydrogen-sonar") ||
-          pool.find((o) => !o.isFree && o.model.toLowerCase() === "gemini-4-hydrogen-high") ||
-          pool.find((o) => !o.isFree && o.model.toLowerCase() === "gemini-4-hydrogen-low") ||
-          pool.find((o) => !o.isFree && o.model.toLowerCase() === "gemini-2.5-flash") ||
-          pool.find((o) => !o.isFree) ||
-          pool[0];
-        return { provider: preferredFast.provider, model: preferredFast.model, tierLabel };
+      // tier2_balanced (Builders: backend, frontend, infra, prompts, release, growth)
+      const autoPool = unblocked.filter((o) => (catalog.forceFree || !o.isFree) && o.mode !== "vip");
+      if (autoPool.length > 0) {
+        const chosen =
+          (catalog.forceFree ? autoPool.find((o) => o.isFree) : null) ||
+          findOption(catalog.bestByTier?.tier2_balanced) ||
+          findOption(catalog.bestByTier?.geral) ||
+          sortByTierScore(autoPool, "tier2_balanced")[0];
+        return { provider: chosen.provider, model: chosen.model, tierLabel, tier };
       }
     }
   }
 
-  return isIris
-    ? { provider: "nexusmind_openai", model: "gpt-6.1-terra", tierLabel }
-    : { provider: "nexusmind_antigravity", model: "gemini-4-hydrogen-sonar", tierLabel };
+  if (tier === "vip_iris") {
+    return { provider: "nexusmind_openai", model: "gpt-6.1-terra", tierLabel, tier };
+  }
+  if (tier === "vip_leadership") {
+    return { provider: "nexusmind_anthropic", model: "claude-sonnet-4-6", tierLabel, tier };
+  }
+  if (tier === "reasoning") {
+    return {
+      provider: "nexusmind_antigravity",
+      model: isArchitectOrSecurity ? "gemini-4-hydrogen-high" : "gemini-2.5-flash-thinking",
+      tierLabel,
+      tier,
+    };
+  }
+  if (tier === "tier1_fast") {
+    return { provider: "nexusmind_antigravity", model: "gemini-4-hydrogen-low", tierLabel, tier };
+  }
+  return { provider: "nexusmind_antigravity", model: "gemini-2.5-flash", tierLabel, tier };
 }
 
 const SURFACE_BG = "var(--affordance-subtle, rgba(255, 255, 255, 0.035))";

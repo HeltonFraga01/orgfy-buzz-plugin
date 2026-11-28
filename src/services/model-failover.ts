@@ -1,6 +1,11 @@
 import { joinHome } from "../config";
 import type { Context } from "@buzz/author";
-import { isVipOrLeadershipAgent, loadLiveGatewayModelCatalog, pickLiveRecommendedModel } from "../components/AgentOrgfyTab";
+import {
+  isVipOrLeadershipAgent,
+  loadLiveGatewayModelCatalog,
+  pickLiveRecommendedModel,
+  resolveAgentRoutingTier,
+} from "../components/AgentOrgfyTab";
 
 export interface ModelCandidateScore {
   model: string;
@@ -74,6 +79,17 @@ export async function reconcileAgentsViaBuzzApi(
   const catalog = await loadLiveGatewayModelCatalog(ctx).catch(() => null);
   const hasLiveCatalog = Boolean(catalog?.hasLiveData && catalog.approvedOptions.length > 0);
   const updated: Array<{ key: string; from: string; to: string }> = [];
+
+  // Detecta se uma reconciliação anterior achatou >= 6 agentes não-Iris no mesmo modelo (ex.: gemini-4-hydrogen-sonar)
+  const nonIrisModelCounts = new Map<string, number>();
+  for (const ag of list) {
+    const label = String(ag?.name || ag?.key || "");
+    if (isIrisAgent(label)) continue;
+    const m = String(ag?.config?.model || ag?.model || "").trim().toLowerCase();
+    if (m) nonIrisModelCounts.set(m, (nonIrisModelCounts.get(m) || 0) + 1);
+  }
+  const flattenedMassModel = Array.from(nonIrisModelCounts.entries()).find(([, count]) => count >= 6)?.[0] || null;
+
   for (const ag of list) {
     const cfg = ag?.config && typeof ag.config === "object" ? { ...ag.config } : {};
     const prov = cfg.provider || ag?.provider || null;
@@ -83,10 +99,12 @@ export async function reconcileAgentsViaBuzzApi(
     const agentLabel = String(ag?.name || ag?.key || "");
     const isIris = isIrisAgent(agentLabel);
     const isVip = isVipOrLeadershipAgent(agentLabel);
+    const tier = resolveAgentRoutingTier(agentLabel);
     // Regra soberana: NUNCA alterar o modelo da OrgFy Iris na reconciliação automática de fundo
     if (isIris && prov && model && !isUnsupportedAgentModel(mlow) && !isFreeModelId(mlow)) {
       continue;
     }
+    const rec = pickLiveRecommendedModel(agentLabel, catalog);
     const hasAnyPaidApproved = Boolean(!hasLiveCatalog || catalog?.approvedOptions.some((o) => !o.isFree));
     const isOfflineInGateway = Boolean(
       hasLiveCatalog && (catalog?.offlineModels.has(mlow) || catalog?.offlineModels.has(shortM))
@@ -99,10 +117,22 @@ export async function reconcileAgentsViaBuzzApi(
         !catalog.approvedModels.has(shortM)
     );
     const leakedIrisExclusiveModel = !isIris && (mlow === "gpt-6.1-terra" || shortM === "gpt-6.1-terra");
+    const isFlattenedVictim = Boolean(
+      flattenedMassModel &&
+        mlow === flattenedMassModel &&
+        rec.model.toLowerCase() !== mlow
+    );
+    const currentOpt = catalog?.approvedOptions.find((o) => o.model.toLowerCase() === mlow || o.model.toLowerCase() === shortM);
+    const leakedVipToWorker =
+      (tier === "tier2_balanced" || tier === "tier1_fast") &&
+      (currentOpt?.mode === "vip" || /^(claude-opus|claude-sonnet-5|claude-sonnet-4-6)/.test(shortM));
+
     const needsFix =
       !prov ||
       !model ||
       leakedIrisExclusiveModel ||
+      leakedVipToWorker ||
+      isFlattenedVictim ||
       isUnsupportedAgentModel(mlow) ||
       isOfflineInGateway ||
       isNotEvalApproved ||
@@ -110,17 +140,12 @@ export async function reconcileAgentsViaBuzzApi(
       (!isVip && !catalog?.forceFree && isFreeModelId(mlow)) ||
       (prov === "nexusmind_openai" && mlow.startsWith("antigravity/"));
     if (!needsFix) continue;
-    let nextModel: string;
-    let nextProv: string;
-    if (hasLiveCatalog) {
-      const rec = pickLiveRecommendedModel(agentLabel, catalog);
-      nextModel = rec.model;
-      nextProv = rec.provider;
-    } else {
-      nextModel = isIris ? "gpt-6.1-terra" : "gemini-2.5-flash";
-      nextProv = isIris ? "nexusmind_openai" : "nexusmind_antigravity";
-    }
+
+    const nextModel = rec.model;
+    const nextProv = rec.provider;
     if (!isIris && nextModel.toLowerCase() === "gpt-6.1-terra") continue;
+    if (nextModel.toLowerCase() === mlow && String(prov || "").toLowerCase() === nextProv.toLowerCase()) continue;
+
     if (!opts.dryRun && typeof agentsApi?.save === "function") {
       try {
         await agentsApi.save(ag.key, { config: { ...cfg, provider: nextProv, model: nextModel } });
@@ -369,7 +394,10 @@ export function isUnsupportedAgentModel(modelId: string): boolean {
   return (
     m === "haiku" ||
     m === "grok-4.5" ||
+    m === "grok-4.5-latest" ||
+    m === "nex-n2-pro" ||
     m.includes("gemini-3.8-flash-medium") ||
+    m.includes("gemini-4-hydrogen-medium") ||
     m.includes("gemini-3-pro-low") ||
     m.includes("gemini-3-pro-high") ||
     m.includes("mistral-large-4-1t-a52b") ||
