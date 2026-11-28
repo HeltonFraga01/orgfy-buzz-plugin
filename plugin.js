@@ -2135,7 +2135,7 @@ function decodeTextBytes(raw) {
 function isBlockedGatewayCatalogModel(modelId) {
   const m = String(modelId || "").trim().toLowerCase();
   if (!m) return true;
-  return m === "haiku" || m === "grok-4.5" || m === "grok-4.5-latest" || m === "nex-n2-pro" || m.includes("gemini-3.8-flash-medium") || m.includes("gemini-4-hydrogen-medium") || m.includes("gemini-3-pro-low") || m.includes("gemini-3-pro-high") || m.includes("mistral-large-4-1t-a52b") || m.includes("claude-opus-5-5") || m.includes("minimax-m3.1-flash") || m.startsWith("pol/") || m.startsWith("pollinations/") || m.includes("pol/community/") || m.includes("pollinations/community/") || m.startsWith("auto/");
+  return m === "haiku" || m === "grok-4.5" || m === "grok-4.5-latest" || m === "nex-n2-pro" || m.includes("claude-sonnet-5-5") || m.includes("gemini-3.8-flash-medium") || m.includes("gemini-4-hydrogen-medium") || m.includes("gemini-3-pro-low") || m.includes("gemini-3-pro-high") || m.includes("mistral-large-4-1t-a52b") || m.includes("claude-opus-5-5") || m.includes("minimax-m3.1-flash") || m.startsWith("pol/") || m.startsWith("pollinations/") || m.includes("pol/community/") || m.includes("pollinations/community/") || m.startsWith("auto/");
 }
 function resolveAgentRoutingTier(roleOrName) {
   const lower = normName$1(roleOrName);
@@ -2542,7 +2542,7 @@ function pickLiveRecommendedModel(roleOrName, catalog) {
   if (tier === "reasoning") {
     return {
       provider: "nexusmind_antigravity",
-      model: isArchitectOrSecurity ? "gemini-4-hydrogen-high" : "gemini-2.5-flash-thinking",
+      model: "gemini-4-hydrogen-high",
       tierLabel,
       tier
     };

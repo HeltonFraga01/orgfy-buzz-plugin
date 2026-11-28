@@ -112,6 +112,7 @@ function isBlockedGatewayCatalogModel(modelId: string): boolean {
     m === "grok-4.5" ||
     m === "grok-4.5-latest" ||
     m === "nex-n2-pro" ||
+    m.includes("claude-sonnet-5-5") ||
     m.includes("gemini-3.8-flash-medium") ||
     m.includes("gemini-4-hydrogen-medium") ||
     m.includes("gemini-3-pro-low") ||
@@ -625,7 +626,7 @@ export function pickLiveRecommendedModel(
   if (tier === "reasoning") {
     return {
       provider: "nexusmind_antigravity",
-      model: isArchitectOrSecurity ? "gemini-4-hydrogen-high" : "gemini-2.5-flash-thinking",
+      model: "gemini-4-hydrogen-high",
       tierLabel,
       tier,
     };
