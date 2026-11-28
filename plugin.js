@@ -4033,7 +4033,12 @@ async function executeSmartModelFailover(ctx, input = {}) {
       }
     } catch {
     }
-    const nexusDelegator = (_d = ctx == null ? void 0 : ctx.nexusmind) == null ? void 0 : _d.applyBestModel;
+    let nexusDelegator = null;
+    try {
+      nexusDelegator = ((_d = ctx == null ? void 0 : ctx.nexusmind) == null ? void 0 : _d.applyBestModel) ?? null;
+    } catch {
+      nexusDelegator = null;
+    }
     if (input.delegate_only || typeof nexusDelegator === "function") {
       if (typeof nexusDelegator === "function") {
         await nexusDelegator({

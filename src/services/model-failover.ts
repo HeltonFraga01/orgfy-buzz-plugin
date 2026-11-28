@@ -1114,7 +1114,13 @@ export async function executeSmartModelFailover(
       }
     } catch {}
 
-    const nexusDelegator = (ctx as any)?.nexusmind?.applyBestModel;
+    let nexusDelegator: any = null;
+    try {
+      nexusDelegator = (ctx as any)?.nexusmind?.applyBestModel ?? null;
+    } catch {
+      // Buzz Desktop bloqueia leitura de propriedades não injetadas no Proxy de ctx (cannot get property "nexusmind" without inject)
+      nexusDelegator = null;
+    }
     if (input.delegate_only || typeof nexusDelegator === "function") {
       if (typeof nexusDelegator === "function") {
         await nexusDelegator({
