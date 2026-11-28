@@ -70516,34 +70516,35 @@ function createFactoryAppComponent(ctx, opts = {}) {
       [resolveActiveChannelId, tenant]
     );
     const handleRunScoutNow = React.useCallback(async () => {
-      var _a2, _b2;
+      var _a2, _b2, _c2, _d2;
       const isBoard = tenant === "board";
-      const scoutTenant = isBoard ? tenantAgents.find((a) => a.papel === "cpo" || /conselho\s+cpo/i.test(a.name)) || tenantAgents.find((a) => a.papel === "po" || a.papel === "oraculo" || /sol\s*po|or[aá]culo|scout/i.test(a.name)) : tenantAgents.find((a) => a.papel === "po" || /\bpo\b/i.test(a.name)) || tenantAgents.find((a) => a.papel === "oraculo" || /or[aá]culo|scout/i.test(a.name));
-      const scoutLive = isBoard ? liveCrew.find((a) => {
-        var _a3;
-        return a.key === (scoutTenant == null ? void 0 : scoutTenant.agentKey) || (scoutTenant == null ? void 0 : scoutTenant.pubkey) && ((_a3 = a.pubkey) == null ? void 0 : _a3.toLowerCase()) === scoutTenant.pubkey.toLowerCase() || /conselho\s+cpo/i.test(a.name);
-      }) : liveCrew.find((a) => {
-        var _a3;
-        return a.key === (scoutTenant == null ? void 0 : scoutTenant.agentKey) || (scoutTenant == null ? void 0 : scoutTenant.pubkey) && ((_a3 = a.pubkey) == null ? void 0 : _a3.toLowerCase()) === scoutTenant.pubkey.toLowerCase() || /sol\s*po|\bpo\b/i.test(a.name);
-      });
+      const tenantPrefix = String(tenant || "orgfy").split("-")[0].toLowerCase();
+      const scoutTenant = isBoard ? tenantAgents.find((a) => a.papel === "cpo" || /conselho\s+cpo/i.test(a.name)) || tenantAgents.find((a) => a.papel === "po" || a.papel === "oraculo" || /or[aá]culo|scout/i.test(a.name)) : tenantAgents.find((a) => a.papel === "po" || /\bpo\b/i.test(a.name)) || tenantAgents.find((a) => a.papel === "oraculo" || /or[aá]culo|scout/i.test(a.name));
+      const scoutLive = scoutTenant ? liveCrew.find(
+        (a) => {
+          var _a3;
+          return scoutTenant.agentKey && a.key === scoutTenant.agentKey || scoutTenant.pubkey && ((_a3 = a.pubkey) == null ? void 0 : _a3.toLowerCase()) === scoutTenant.pubkey.toLowerCase() || a.name.toLowerCase() === scoutTenant.name.toLowerCase();
+        }
+      ) : isBoard ? liveCrew.find((a) => /conselho\s+cpo/i.test(a.name)) : liveCrew.find((a) => a.name.toLowerCase().includes(tenantPrefix) && /\bpo\b|or[aá]culo|scout/i.test(a.name)) || (tenant === "orgfy" ? liveCrew.find((a) => /sol\s*po|or[aá]culo/i.test(a.name)) : void 0);
       const agentKey = (scoutTenant == null ? void 0 : scoutTenant.agentKey) || (scoutLive == null ? void 0 : scoutLive.key);
-      const scoutName = (scoutTenant == null ? void 0 : scoutTenant.name) || (scoutLive == null ? void 0 : scoutLive.name) || (isBoard ? "Conselho CPO" : "OrgFy Sol PO");
+      const scoutName = (scoutTenant == null ? void 0 : scoutTenant.name) || (scoutLive == null ? void 0 : scoutLive.name) || (isBoard ? "Conselho CPO" : tenant === "orgfy" ? "OrgFy Sol PO" : `${tenant} PO`);
       if (!agentKey) {
         notify2(`Nenhum agente ${isBoard ? "Conselho CPO" : "PO / Discovery"} encontrado em ${tenant}.`);
         return;
       }
-      const targetChannelId = resolveActiveChannelId(tenant);
+      const empManifest = holding == null ? void 0 : holding.empresas.find((e) => e.slug === tenant);
+      const targetChannelId = (isBoard ? resolveActiveChannelId("board") : (empManifest == null ? void 0 : empManifest.canal) || (((_a2 = status.tenantManifest) == null ? void 0 : _a2.slug) === tenant ? (_b2 = status.tenantManifest) == null ? void 0 : _b2.canal : null)) || resolveActiveChannelId(tenant);
       const councilNames = Array.from(
         new Set(
           ((holding == null ? void 0 : holding.conselho) || []).map((c) => c.responsavel).filter((n) => n && n.toLowerCase() !== scoutName.toLowerCase())
         )
       );
-      const cooName = ((_a2 = status.tenantManifest) == null ? void 0 : _a2.coo) || "OrgFy Bento";
+      const cooName = ((_c2 = status.tenantManifest) == null ? void 0 : _c2.coo) || "OrgFy Bento";
       const promptText = isBoard ? `@${scoutName} [CONSELHO CPO · PAUTA DE PORTFÓLIO · board]
 Audite o portfólio da Holding (OrgFy Core, Lumen IPTV, SaaS Tributário) contra o Canvas/Visão atual, identifique os gaps de maior impacto em produto, receita, segurança, testes e governança, e proponha os próximos cards/pautas canônicos.
 
 **Regra de Reunião:** responda **aqui neste canal do Conselho** (não em DM) usando \`buzz__send\` com sua própria assinatura e as pubkeys em \`mentions\` (${councilNames.join(", ") || "OrgFy Iris, Conselho CTO, Conselho CRO, Conselho COO, Conselho CGO"}). Se precisar garantir o disparo de algum conselheiro, chame \`orgfy_mention_wake\` (que apenas acorda sem postar como o Fundador).` : `@${scoutName} [ORGFY PO DISCOVERY · ${tenant}]
-Audite o workspace atual contra o Canvas/Visão de ${((_b2 = status.tenantManifest) == null ? void 0 : _b2.nome) || tenant}, identifique os gaps de maior impacto (segurança, testes, UX ou dívida técnica) e crie o próximo card canônico (\`<!-- orgfy:card v4 -->\`).
+Audite o workspace atual contra o Canvas/Visão de ${((_d2 = status.tenantManifest) == null ? void 0 : _d2.nome) || tenant}, identifique os gaps de maior impacto (segurança, testes, UX ou dívida técnica) e crie o próximo card canônico (\`<!-- orgfy:card v4 -->\`).
 
 **Regra de Canal:** responda **aqui neste canal da empresa** (não em DM) usando \`buzz__send\` com \`mentions\` para \`${cooName}\` (COO) e especialistas responsáveis (e \`orgfy_mention_wake\` se precisar garantir o wake).`;
       setRunningScout(true);

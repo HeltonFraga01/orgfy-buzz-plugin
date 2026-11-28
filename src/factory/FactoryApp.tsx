@@ -1609,21 +1609,34 @@ export function createFactoryAppComponent(ctx: Context, opts: CreateFactoryAppOp
     // com menção NIP-27 real (`nostr:npub1...` + tag `p`) e `ensureWake: true` (zero risco de não disparar).
     const handleRunScoutNow = React.useCallback(async () => {
       const isBoard = tenant === "board";
+      const tenantPrefix = String(tenant || "orgfy").split("-")[0].toLowerCase();
       const scoutTenant = isBoard
         ? tenantAgents.find((a) => a.papel === "cpo" || /conselho\s+cpo/i.test(a.name)) ||
-          tenantAgents.find((a) => a.papel === "po" || a.papel === "oraculo" || /sol\s*po|or[aá]culo|scout/i.test(a.name))
+          tenantAgents.find((a) => a.papel === "po" || a.papel === "oraculo" || /or[aá]culo|scout/i.test(a.name))
         : tenantAgents.find((a) => a.papel === "po" || /\bpo\b/i.test(a.name)) ||
           tenantAgents.find((a) => a.papel === "oraculo" || /or[aá]culo|scout/i.test(a.name));
-      const scoutLive = isBoard
-        ? liveCrew.find((a) => a.key === scoutTenant?.agentKey || (scoutTenant?.pubkey && a.pubkey?.toLowerCase() === scoutTenant.pubkey.toLowerCase()) || /conselho\s+cpo/i.test(a.name))
-        : liveCrew.find((a) => a.key === scoutTenant?.agentKey || (scoutTenant?.pubkey && a.pubkey?.toLowerCase() === scoutTenant.pubkey.toLowerCase()) || /sol\s*po|\bpo\b/i.test(a.name));
+      // Nunca usar `|| /sol\s*po/` dentro do mesmo `.find()`, pois captura OrgFy Sol PO antes de chegar no PO da subsidiária!
+      const scoutLive = scoutTenant
+        ? liveCrew.find(
+            (a) =>
+              (scoutTenant.agentKey && a.key === scoutTenant.agentKey) ||
+              (scoutTenant.pubkey && a.pubkey?.toLowerCase() === scoutTenant.pubkey.toLowerCase()) ||
+              a.name.toLowerCase() === scoutTenant.name.toLowerCase()
+          )
+        : isBoard
+        ? liveCrew.find((a) => /conselho\s+cpo/i.test(a.name))
+        : liveCrew.find((a) => a.name.toLowerCase().includes(tenantPrefix) && /\bpo\b|or[aá]culo|scout/i.test(a.name)) ||
+          (tenant === "orgfy" ? liveCrew.find((a) => /sol\s*po|or[aá]culo/i.test(a.name)) : undefined);
       const agentKey = scoutTenant?.agentKey || scoutLive?.key;
-      const scoutName = scoutTenant?.name || scoutLive?.name || (isBoard ? "Conselho CPO" : "OrgFy Sol PO");
+      const scoutName = scoutTenant?.name || scoutLive?.name || (isBoard ? "Conselho CPO" : tenant === "orgfy" ? "OrgFy Sol PO" : `${tenant} PO`);
       if (!agentKey) {
         notify(`Nenhum agente ${isBoard ? "Conselho CPO" : "PO / Discovery"} encontrado em ${tenant}.`);
         return;
       }
-      const targetChannelId = resolveActiveChannelId(tenant);
+      const empManifest = holding?.empresas.find((e) => e.slug === tenant);
+      const targetChannelId =
+        (isBoard ? resolveActiveChannelId("board") : empManifest?.canal || (status.tenantManifest?.slug === tenant ? status.tenantManifest?.canal : null)) ||
+        resolveActiveChannelId(tenant);
       const councilNames = Array.from(
         new Set(
           (holding?.conselho || [])
