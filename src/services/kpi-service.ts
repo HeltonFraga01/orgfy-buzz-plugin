@@ -384,16 +384,101 @@ export async function fetchGooseLoopRadar(ctx: Context): Promise<GooseLoopRadarP
   }
 }
 
+interface StoppedRadarRecord {
+  sessionId?: string;
+  agentKeyOrName: string;
+  agentPubkey: string;
+  channelId: string;
+  threadRoot: string;
+  stoppedAtMs: number;
+}
+
+const STOPPED_RADAR_TTL_MS = 15 * 60 * 1000; // 15 min (espelha janela ativa do radar)
+const stoppedRadarRecords: StoppedRadarRecord[] = [];
+
+export function resetStoppedSessionsForRadarForTests(): void {
+  stoppedRadarRecords.length = 0;
+}
+
+export function recordStoppedSessionForRadar(input: {
+  session_id?: string | null;
+  agente?: string | null;
+  agent_pubkey?: string | null;
+  channel_id?: string | null;
+  thread_root?: string | null;
+  nowMs?: number;
+}): void {
+  const nowMs = input.nowMs ?? Date.now();
+  // Purga expirados
+  for (let i = stoppedRadarRecords.length - 1; i >= 0; i--) {
+    if (nowMs - stoppedRadarRecords[i].stoppedAtMs > STOPPED_RADAR_TTL_MS) {
+      stoppedRadarRecords.splice(i, 1);
+    }
+  }
+  stoppedRadarRecords.push({
+    sessionId: input.session_id ? String(input.session_id).trim() : undefined,
+    agentKeyOrName: String(input.agente || "").trim().toLowerCase(),
+    agentPubkey: String(input.agent_pubkey || "").trim().toLowerCase(),
+    channelId: String(input.channel_id || "").trim(),
+    threadRoot: String(input.thread_root || "").trim(),
+    stoppedAtMs: nowMs,
+  });
+}
+
+export function isSessionRecentlyStoppedForRadar(
+  session: GooseLoopSession,
+  nowMs: number = Date.now()
+): boolean {
+  const sessId = String(session.session_id || "").trim();
+  const sessAgent = String(session.agente || "").trim().toLowerCase();
+  const sessPubkey = String(session.agent_pubkey || "").trim().toLowerCase();
+  const sessChannel = String(session.channel_id || "").trim();
+  const sessRoot = String(session.thread_root || "").trim();
+  const lastUpdateMs = nowMs - Math.max(0, Number(session.ultima_atualizacao_min || 0)) * 60_000;
+
+  for (let i = stoppedRadarRecords.length - 1; i >= 0; i--) {
+    const rec = stoppedRadarRecords[i];
+    if (nowMs - rec.stoppedAtMs > STOPPED_RADAR_TTL_MS) {
+      stoppedRadarRecords.splice(i, 1);
+      continue;
+    }
+    if (rec.sessionId && sessId && rec.sessionId === sessId) {
+      return true;
+    }
+    const agentMatch =
+      (rec.agentPubkey && sessPubkey && rec.agentPubkey === sessPubkey) ||
+      (rec.agentKeyOrName && sessAgent && rec.agentKeyOrName === sessAgent);
+    if (!agentMatch) continue;
+    const channelMatch = !rec.channelId || !sessChannel || rec.channelId === sessChannel;
+    const rootMatch = !rec.threadRoot || !sessRoot || rec.threadRoot === sessRoot;
+    if (!channelMatch || !rootMatch) continue;
+    // Se a última atividade da sessão no Goose é anterior (ou até 90s após) ao stop, é a mesma sessão já curada.
+    // Se o agente abriu trabalho novo significativamente depois do stop, volta a ser monitorado normalmente.
+    if (lastUpdateMs <= rec.stoppedAtMs + 90_000) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function filterGooseLoopRadar(
   payload: GooseLoopRadarPayload,
-  opts?: { apenas_ativos?: boolean; agente?: string }
+  opts?: { apenas_ativos?: boolean; agente?: string; incluir_recem_curadas?: boolean }
 ) {
   const onlyActive = opts?.apenas_ativos !== false;
   const agentFilter = (opts?.agente || "").trim().toLowerCase();
+  const includeHealed = Boolean(opts?.incluir_recem_curadas);
+  const nowMs = Date.now();
 
   let filtered = payload.sessoes || [];
+  let suprimidasRecemCuradas = 0;
   if (onlyActive) {
     filtered = filtered.filter((s) => (typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15));
+    if (!includeHealed) {
+      const before = filtered.length;
+      filtered = filtered.filter((s) => !isSessionRecentlyStoppedForRadar(s, nowMs));
+      suprimidasRecemCuradas = before - filtered.length;
+    }
   }
   if (agentFilter) {
     filtered = filtered.filter(
@@ -409,12 +494,14 @@ export function filterGooseLoopRadar(
     gerado_em: payload.gerado_em,
     filtro_aplicado: { apenas_ativos: onlyActive, agente: agentFilter || null },
     resumo: payload.resumo,
+    suprimidas_auto_cura_recente: suprimidasRecemCuradas,
     total_exibidas: filtered.length,
     sessoes: filtered,
     protocolo_resolucao: [
       "ITEM_JA_FECHADO (critico): A sessão está trabalhando em issue/PR/branch já integrada na main ou fechada. INTERROMPA IMEDIATAMENTE com orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt' }).",
       "CONTEXTO_COMPACTADO / TURNO_EXCESSIVO / COLISAO_WORKTREE (critico): Estouro de janela de contexto, turno contínuo >=35m/>=35 shells ou 2+ sessões do mesmo agente na mesma worktree. Inspecione gatilho_resumo e ultimo_shell e INTERROMPA com orgfy_session_stop(action='interrupt').",
       "COMANDO_REPETIDO / ERRO_REPETIDO / STALLED_THINKING / TEMPESTADE_5XX: Loop real ou tempestade 502/503 confirmada — interromper com orgfy_session_stop(action='interrupt') e liberar lock se necessário.",
+      "ANTI-LOOP DE MENÇÃO: Se usou retrigger:true ou relaunch:true, a ferramenta já acordou o agente na thread exata para continuar de onde parou — NÃO mencione @Agente novamente no resumo de encerramento 'AUTO-CURA | ...'.",
     ],
   };
 }

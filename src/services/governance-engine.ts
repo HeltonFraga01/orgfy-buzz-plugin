@@ -1,6 +1,13 @@
 import { SCRATCH_ROOT, ORGFY_ESTADO_DIR, ORGFY_EMPRESAS_DIR } from "../config";
 import type { Context } from "@buzz/author";
-import { fetchKpisEsteira, fetchGooseLoopRadar, type KpisEsteiraPayload } from "./kpi-service";
+import {
+  fetchKpisEsteira,
+  fetchGooseLoopRadar,
+  recordStoppedSessionForRadar,
+  isSessionRecentlyStoppedForRadar,
+  resetStoppedSessionsForRadarForTests,
+  type KpisEsteiraPayload,
+} from "./kpi-service";
 import { requestModelFailover } from "./model-failover";
 import { reconcileAgentPresenceAndLocks } from "./presence-dispatcher";
 
@@ -128,6 +135,7 @@ export function resetGovernanceMemoryStateForTests(): void {
   memoryLocks.clear();
   alertCooldowns.clear();
   lastHealedProviderErrorTs.clear();
+  resetStoppedSessionsForRadarForTests();
 }
 
 function purgeExpiredLocks(now: number): number {
@@ -774,6 +782,10 @@ export async function evaluateGovernanceAndReact(
               skippedByCooldown.push(`auto_failover_already_healed:${s.agente}`);
               continue;
             }
+            if (!options.bypassCooldown && isSessionRecentlyStoppedForRadar(s, nowMs)) {
+              skippedByCooldown.push(`auto_failover_recently_stopped:${s.agente}`);
+              continue;
+            }
 
             const failCooldownKey = `auto_model_failover:${agentDedupKey}`;
             if (!options.bypassCooldown && !canTriggerWithCooldown(failCooldownKey, nowMs, true, 30 * 1000)) {
@@ -827,6 +839,14 @@ export async function evaluateGovernanceAndReact(
                 } catch {
                   // Notificação nativa opcional
                 }
+                recordStoppedSessionForRadar({
+                  session_id: s.session_id,
+                  agente: s.agente,
+                  agent_pubkey: s.agent_pubkey || null,
+                  channel_id: s.channel_id || DEFAULT_ORGFY_CHANNEL,
+                  thread_root: s.thread_root || null,
+                  nowMs,
+                });
                 const otherFlags = (s.flags || []).filter((f) => f !== "TEMPESTADE_5XX");
                 if (otherFlags.length === 0) {
                   healedSessionIds.add(s.session_id);
@@ -841,11 +861,15 @@ export async function evaluateGovernanceAndReact(
         const activeCrit = radar.sessoes.filter(
           (s) =>
             !healedSessionIds.has(s.session_id) &&
+            !isSessionRecentlyStoppedForRadar(s, nowMs) &&
             (typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15) &&
             s.severidade === "critical"
         );
         const activeDup = radar.sessoes.filter(
-          (s) => (typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15) && (s.flags || []).includes("SESSAO_DUPLICADA")
+          (s) =>
+            !isSessionRecentlyStoppedForRadar(s, nowMs) &&
+            (typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15) &&
+            (s.flags || []).includes("SESSAO_DUPLICADA")
         );
         const anchorSession = activeCrit[0] || activeDup[0];
         if (anchorSession?.channel_id) radarChannelId = anchorSession.channel_id;
@@ -867,7 +891,8 @@ export async function evaluateGovernanceAndReact(
             severidade: "critical",
             mensagem: `${activeCrit.length} sessão(ões) ativa(s) em loop no Goose: ${top}.`,
             acao_sugerida:
-              "Ciclo Fechado de Auto-Cura (PARAR NUNCA ENCERRA O TURNO): chame orgfy_loop_radar({ apenas_ativos: true }) e execute 1 dos 3 desfechos: (A) Erro de API/5xx/provider -> orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', reason }) + orgfy_model_failover({ agente, agent_pubkey, channel_id, thread_root, prefer_free: false, apply: true, retrigger: true }); (B) Card ainda aberto (ESCOPO_ABERTO, COMPACTACAO_LOOP, ERRO_REPETIDO) -> orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', relaunch: true, reset_session_before_relaunch: true, relaunch_instruction: '<o que fazer agora>', target_files: ['<1-3 arquivos>'], acceptance_command: '<comando L-22>', max_shells: 10, reason }); (C) PR/issue já na main -> orgfy_session_stop({ agente, action: 'interrupt', release_issue_id, reason }) sem relançar. Publique 'AUTO-CURA | agente | causa-raiz | ação' no canal.",
+              "Ciclo Fechado de Auto-Cura (PARAR NUNCA ENCERRA O TURNO): chame orgfy_loop_radar({ apenas_ativos: true }) e execute 1 dos 3 desfechos: (A) Erro de API/5xx/provider -> orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', reason }) + orgfy_model_failover({ agente, agent_pubkey, channel_id, thread_root, prefer_free: false, apply: true, retrigger: true }); (B) Card ainda aberto (ESCOPO_ABERTO, COMPACTACAO_LOOP, ERRO_REPETIDO) -> orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', relaunch: true, reset_session_before_relaunch: true, relaunch_instruction: '<o que fazer agora>', target_files: ['<1-3 arquivos>'], acceptance_command: '<comando L-22>', max_shells: 10, reason }); (C) PR/issue já na main -> orgfy_session_stop({ agente, action: 'interrupt', release_issue_id, reason }) sem relançar. Publique 'AUTO-CURA | agente | causa-raiz | ação' no canal SEM usar @menção no resumo final (retrigger/relaunch já acorda o agente na thread exata onde parou).",
+
           });
         }
         if (activeDup.length >= 2) {
@@ -1458,6 +1483,14 @@ export async function stopAgentSession(
       message: `Falha ao executar '${action}' em ${resolvedName}: ${err?.message || err}`,
     };
   }
+
+  // Marca imediatamente a sessão/thread como recém-curada no radar para impedir re-disparo em loop pelo cache do sessions.db
+  recordStoppedSessionForRadar({
+    agente: resolvedName,
+    agent_pubkey: matched.pubkey || input.agent_pubkey || null,
+    channel_id: place.channelId,
+    thread_root: place.root || null,
+  });
 
   let lockReleased = false;
   if (input.release_issue_id && String(input.release_issue_id).trim()) {

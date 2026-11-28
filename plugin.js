@@ -1174,12 +1174,65 @@ async function fetchGooseLoopRadar(ctx) {
     return { ...empty, error: (err == null ? void 0 : err.message) || "Snapshot goose-loop-radar.json ainda não gerado." };
   }
 }
+const STOPPED_RADAR_TTL_MS = 15 * 60 * 1e3;
+const stoppedRadarRecords = [];
+function recordStoppedSessionForRadar(input) {
+  const nowMs = input.nowMs ?? Date.now();
+  for (let i = stoppedRadarRecords.length - 1; i >= 0; i--) {
+    if (nowMs - stoppedRadarRecords[i].stoppedAtMs > STOPPED_RADAR_TTL_MS) {
+      stoppedRadarRecords.splice(i, 1);
+    }
+  }
+  stoppedRadarRecords.push({
+    sessionId: input.session_id ? String(input.session_id).trim() : void 0,
+    agentKeyOrName: String(input.agente || "").trim().toLowerCase(),
+    agentPubkey: String(input.agent_pubkey || "").trim().toLowerCase(),
+    channelId: String(input.channel_id || "").trim(),
+    threadRoot: String(input.thread_root || "").trim(),
+    stoppedAtMs: nowMs
+  });
+}
+function isSessionRecentlyStoppedForRadar(session, nowMs = Date.now()) {
+  const sessId = String(session.session_id || "").trim();
+  const sessAgent = String(session.agente || "").trim().toLowerCase();
+  const sessPubkey = String(session.agent_pubkey || "").trim().toLowerCase();
+  const sessChannel = String(session.channel_id || "").trim();
+  const sessRoot = String(session.thread_root || "").trim();
+  const lastUpdateMs = nowMs - Math.max(0, Number(session.ultima_atualizacao_min || 0)) * 6e4;
+  for (let i = stoppedRadarRecords.length - 1; i >= 0; i--) {
+    const rec = stoppedRadarRecords[i];
+    if (nowMs - rec.stoppedAtMs > STOPPED_RADAR_TTL_MS) {
+      stoppedRadarRecords.splice(i, 1);
+      continue;
+    }
+    if (rec.sessionId && sessId && rec.sessionId === sessId) {
+      return true;
+    }
+    const agentMatch = rec.agentPubkey && sessPubkey && rec.agentPubkey === sessPubkey || rec.agentKeyOrName && sessAgent && rec.agentKeyOrName === sessAgent;
+    if (!agentMatch) continue;
+    const channelMatch = !rec.channelId || !sessChannel || rec.channelId === sessChannel;
+    const rootMatch = !rec.threadRoot || !sessRoot || rec.threadRoot === sessRoot;
+    if (!channelMatch || !rootMatch) continue;
+    if (lastUpdateMs <= rec.stoppedAtMs + 9e4) {
+      return true;
+    }
+  }
+  return false;
+}
 function filterGooseLoopRadar(payload, opts) {
   const onlyActive = (opts == null ? void 0 : opts.apenas_ativos) !== false;
   const agentFilter = ((opts == null ? void 0 : opts.agente) || "").trim().toLowerCase();
+  const includeHealed = Boolean(opts == null ? void 0 : opts.incluir_recem_curadas);
+  const nowMs = Date.now();
   let filtered = payload.sessoes || [];
+  let suprimidasRecemCuradas = 0;
   if (onlyActive) {
     filtered = filtered.filter((s) => typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15);
+    if (!includeHealed) {
+      const before = filtered.length;
+      filtered = filtered.filter((s) => !isSessionRecentlyStoppedForRadar(s, nowMs));
+      suprimidasRecemCuradas = before - filtered.length;
+    }
   }
   if (agentFilter) {
     filtered = filtered.filter(
@@ -1192,12 +1245,14 @@ function filterGooseLoopRadar(payload, opts) {
     gerado_em: payload.gerado_em,
     filtro_aplicado: { apenas_ativos: onlyActive, agente: agentFilter || null },
     resumo: payload.resumo,
+    suprimidas_auto_cura_recente: suprimidasRecemCuradas,
     total_exibidas: filtered.length,
     sessoes: filtered,
     protocolo_resolucao: [
       "ITEM_JA_FECHADO (critico): A sessão está trabalhando em issue/PR/branch já integrada na main ou fechada. INTERROMPA IMEDIATAMENTE com orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt' }).",
       "CONTEXTO_COMPACTADO / TURNO_EXCESSIVO / COLISAO_WORKTREE (critico): Estouro de janela de contexto, turno contínuo >=35m/>=35 shells ou 2+ sessões do mesmo agente na mesma worktree. Inspecione gatilho_resumo e ultimo_shell e INTERROMPA com orgfy_session_stop(action='interrupt').",
-      "COMANDO_REPETIDO / ERRO_REPETIDO / STALLED_THINKING / TEMPESTADE_5XX: Loop real ou tempestade 502/503 confirmada — interromper com orgfy_session_stop(action='interrupt') e liberar lock se necessário."
+      "COMANDO_REPETIDO / ERRO_REPETIDO / STALLED_THINKING / TEMPESTADE_5XX: Loop real ou tempestade 502/503 confirmada — interromper com orgfy_session_stop(action='interrupt') e liberar lock se necessário.",
+      "ANTI-LOOP DE MENÇÃO: Se usou retrigger:true ou relaunch:true, a ferramenta já acordou o agente na thread exata para continuar de onde parou — NÃO mencione @Agente novamente no resumo de encerramento 'AUTO-CURA | ...'."
     ]
   };
 }
@@ -3183,6 +3238,15 @@ function createAgentOrgfyTabComponent(ctx) {
   };
 }
 const ORGFY_FAILOVER_REQUEST_EVENT = "orgfy.failover.requested";
+const IRIS_VIP_RETRY_DELAYS_MS = [5e3, 5e3];
+function isIrisAgent(nameOrKey) {
+  return /\biris\b/i.test(String(nameOrKey || ""));
+}
+function isTopVipModel(modelId, policyState) {
+  if (String(policyState || "").toLowerCase() === "vip") return true;
+  const m = String(modelId || "").toLowerCase();
+  return /(opus|sonnet-4-6|sonnet-5|gpt-5|gpt-6|\bo3\b|gemini-2\.5-pro|gemini-3\.5-pro|gemini-4-hydrogen-high|deepseek-r1)/.test(m);
+}
 async function reconcileAgentsViaBuzzApi(ctx, opts = {}) {
   const agentsApi = ctx == null ? void 0 : ctx.agents;
   const snap = typeof (agentsApi == null ? void 0 : agentsApi.snapshot) === "function" ? agentsApi.snapshot() : null;
@@ -3442,13 +3506,14 @@ async function loadSharedNexusMindRanking(ctx, excludeSet, preferFree, isVip = f
             if (effectivePreferFree && !free) continue;
             if (!effectivePreferFree && free) continue;
             const evalScore = Number(m.evalScore ?? estimateModelIntelligence(mid));
+            const vipBoost = isVip ? m.policyState === "vip" ? 30 : isTopVipModel(mid, m.policyState) ? 15 : 0 : 0;
             cpCandidates.push({
               model: mid,
               provider: String(m.provider || inferProviderId(mid)),
               isFree: free,
               intelligenceScore: evalScore,
               latencyMs: typeof m.latencyMs === "number" ? m.latencyMs : null,
-              combinedScore: evalScore,
+              combinedScore: Number((evalScore + vipBoost).toFixed(2)),
               online: true,
               calls: Number(((_a = m.prod24h) == null ? void 0 : _a.turns24h) || 0),
               source: "nexusmind_ranking"
@@ -3726,9 +3791,68 @@ async function executeSmartModelFailover(ctx, input = {}) {
   const failedNorm = String(input.failed_model || "").trim().toLowerCase();
   const agentsApi = ctx.agents;
   const matchedAgent = input.agente || input.agent_pubkey ? findAgentInSnapshot(agentsApi, input.agente, input.agent_pubkey) : void 0;
-  const isVip = isVipOrLeadershipAgent(String((matchedAgent == null ? void 0 : matchedAgent.name) || input.agente || ""));
+  const resolvedAgentLabel = String((matchedAgent == null ? void 0 : matchedAgent.name) || input.agente || "");
+  const isVip = isVipOrLeadershipAgent(resolvedAgentLabel);
+  const isIris = isIrisAgent(resolvedAgentLabel);
   const preferFree = isVip ? false : Boolean(input.prefer_free);
   const previousModel = ((matchedAgent == null ? void 0 : matchedAgent.config) && typeof matchedAgent.config === "object" ? String(matchedAgent.config.model || "") : "") || (input.failed_model || null);
+  const previousProvider = ((matchedAgent == null ? void 0 : matchedAgent.config) && typeof matchedAgent.config === "object" ? String(matchedAgent.config.provider || "") : "") || (previousModel ? inferProviderId(previousModel) : null);
+  const hostForRetry = ctx == null ? void 0 : ctx.host;
+  if (applyChange && isIris && previousModel && !isUnsupportedAgentModel(previousModel) && typeof (hostForRetry == null ? void 0 : hostForRetry.request) === "function") {
+    const delays = Array.isArray(input.vipRetryDelaysMs) ? input.vipRetryDelaysMs : [...IRIS_VIP_RETRY_DELAYS_MS];
+    const currentProv = NEXUSMIND_PROVIDERS.find((p) => p.id === previousProvider) || NEXUSMIND_PROVIDERS.find((p) => p.id === inferProviderId(previousModel)) || NEXUSMIND_PROVIDERS[0];
+    for (let i = 0; i < delays.length; i++) {
+      const waitMs = Math.max(0, Number(delays[i] || 0));
+      if (waitMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+      }
+      const retryProbe = await probeModelLive(ctx, previousModel, currentProv);
+      if (retryProbe.online) {
+        let retriggeredOnRetry = false;
+        if (retrigger && matchedAgent && typeof (agentsApi == null ? void 0 : agentsApi.wake) === "function") {
+          try {
+            const channel = String(input.channel_id || DEFAULT_ORGFY_CHANNEL$2).trim() || DEFAULT_ORGFY_CHANNEL$2;
+            const root = input.thread_root ? String(input.thread_root).trim() : void 0;
+            await agentsApi.wake(matchedAgent.key, {
+              channel,
+              ...root ? { root } : {},
+              text: input.retrigger_text || `[ORGFY RETRY VIP ESCALONADO] Modelo VIP '${previousModel}' voltou a responder HTTP 200 na tentativa ${i + 1}/${delays.length} (${retryProbe.latencyMs ?? 0}ms). Retome imediatamente o ponto exato onde parou nesta thread.`
+            });
+            retriggeredOnRetry = true;
+          } catch {
+          }
+        }
+        return {
+          ok: true,
+          mode: "applied",
+          recoveredOnRetry: true,
+          retryAttempts: i + 1,
+          agentName: (matchedAgent == null ? void 0 : matchedAgent.name) || input.agente || null,
+          agentKey: (matchedAgent == null ? void 0 : matchedAgent.key) || null,
+          previousModel,
+          selectedModel: previousModel,
+          selectedProvider: currentProv.id,
+          selectedLatencyMs: retryProbe.latencyMs,
+          selectedIntelligenceScore: estimateModelIntelligence(previousModel),
+          retriggered: retriggeredOnRetry,
+          candidatesTested: i + 1,
+          ranking: [
+            {
+              model: previousModel,
+              provider: currentProv.id,
+              isFree: isFreeModelId(previousModel),
+              intelligenceScore: estimateModelIntelligence(previousModel),
+              latencyMs: retryProbe.latencyMs,
+              combinedScore: computeCombinedModelScore(estimateModelIntelligence(previousModel), retryProbe.latencyMs),
+              online: true,
+              source: "live_probe"
+            }
+          ],
+          message: `OrgFy Iris recuperou no modelo VIP '${previousModel}' após retry escalonado (${i + 1}/${delays.length} · ${retryProbe.latencyMs ?? 0}ms) — modelo de topo preservado sem rebaixamento.`
+        };
+      }
+    }
+  }
   if (failedNorm) {
     await quarantineFailedModel(ctx, input.failed_model || failedNorm, "reported_failed");
   }
@@ -4094,7 +4218,8 @@ async function requestModelFailover(ctx, input) {
       channel_id: input.channel_id || null,
       thread_root: input.thread_root || null,
       retrigger_text: input.retrigger_text,
-      max_probes: input.max_probes
+      max_probes: input.max_probes,
+      vipRetryDelaysMs: Array.isArray(input.vipRetryDelaysMs) ? input.vipRetryDelaysMs : void 0
     });
     if (directRes.ok && directRes.selectedModel) {
       return {
@@ -5837,6 +5962,10 @@ async function evaluateGovernanceAndReact(ctx, options = {}) {
               skippedByCooldown.push(`auto_failover_already_healed:${s.agente}`);
               continue;
             }
+            if (!options.bypassCooldown && isSessionRecentlyStoppedForRadar(s, nowMs)) {
+              skippedByCooldown.push(`auto_failover_recently_stopped:${s.agente}`);
+              continue;
+            }
             const failCooldownKey = `auto_model_failover:${agentDedupKey}`;
             if (!options.bypassCooldown && !canTriggerWithCooldown(failCooldownKey, nowMs, true, 30 * 1e3)) {
               skippedByCooldown.push(`auto_failover:${s.agente}`);
@@ -5881,6 +6010,14 @@ async function evaluateGovernanceAndReact(ctx, options = {}) {
                   }
                 } catch {
                 }
+                recordStoppedSessionForRadar({
+                  session_id: s.session_id,
+                  agente: s.agente,
+                  agent_pubkey: s.agent_pubkey || null,
+                  channel_id: s.channel_id || DEFAULT_ORGFY_CHANNEL,
+                  thread_root: s.thread_root || null,
+                  nowMs
+                });
                 const otherFlags = (s.flags || []).filter((f) => f !== "TEMPESTADE_5XX");
                 if (otherFlags.length === 0) {
                   healedSessionIds.add(s.session_id);
@@ -5892,10 +6029,10 @@ async function evaluateGovernanceAndReact(ctx, options = {}) {
           }
         }
         const activeCrit = radar.sessoes.filter(
-          (s) => !healedSessionIds.has(s.session_id) && (typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15) && s.severidade === "critical"
+          (s) => !healedSessionIds.has(s.session_id) && !isSessionRecentlyStoppedForRadar(s, nowMs) && (typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15) && s.severidade === "critical"
         );
         const activeDup = radar.sessoes.filter(
-          (s) => (typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15) && (s.flags || []).includes("SESSAO_DUPLICADA")
+          (s) => !isSessionRecentlyStoppedForRadar(s, nowMs) && (typeof s.ativa === "boolean" ? s.ativa : s.ultima_atualizacao_min <= 15) && (s.flags || []).includes("SESSAO_DUPLICADA")
         );
         const anchorSession = activeCrit[0] || activeDup[0];
         if (anchorSession == null ? void 0 : anchorSession.channel_id) radarChannelId = anchorSession.channel_id;
@@ -5910,7 +6047,7 @@ async function evaluateGovernanceAndReact(ctx, options = {}) {
             codigo: "GOOSE_ACTIVE_LOOP",
             severidade: "critical",
             mensagem: `${activeCrit.length} sessão(ões) ativa(s) em loop no Goose: ${top}.`,
-            acao_sugerida: "Ciclo Fechado de Auto-Cura (PARAR NUNCA ENCERRA O TURNO): chame orgfy_loop_radar({ apenas_ativos: true }) e execute 1 dos 3 desfechos: (A) Erro de API/5xx/provider -> orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', reason }) + orgfy_model_failover({ agente, agent_pubkey, channel_id, thread_root, prefer_free: false, apply: true, retrigger: true }); (B) Card ainda aberto (ESCOPO_ABERTO, COMPACTACAO_LOOP, ERRO_REPETIDO) -> orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', relaunch: true, reset_session_before_relaunch: true, relaunch_instruction: '<o que fazer agora>', target_files: ['<1-3 arquivos>'], acceptance_command: '<comando L-22>', max_shells: 10, reason }); (C) PR/issue já na main -> orgfy_session_stop({ agente, action: 'interrupt', release_issue_id, reason }) sem relançar. Publique 'AUTO-CURA | agente | causa-raiz | ação' no canal."
+            acao_sugerida: "Ciclo Fechado de Auto-Cura (PARAR NUNCA ENCERRA O TURNO): chame orgfy_loop_radar({ apenas_ativos: true }) e execute 1 dos 3 desfechos: (A) Erro de API/5xx/provider -> orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', reason }) + orgfy_model_failover({ agente, agent_pubkey, channel_id, thread_root, prefer_free: false, apply: true, retrigger: true }); (B) Card ainda aberto (ESCOPO_ABERTO, COMPACTACAO_LOOP, ERRO_REPETIDO) -> orgfy_session_stop({ agente, agent_pubkey, channel_id, thread_root, action: 'interrupt', relaunch: true, reset_session_before_relaunch: true, relaunch_instruction: '<o que fazer agora>', target_files: ['<1-3 arquivos>'], acceptance_command: '<comando L-22>', max_shells: 10, reason }); (C) PR/issue já na main -> orgfy_session_stop({ agente, action: 'interrupt', release_issue_id, reason }) sem relançar. Publique 'AUTO-CURA | agente | causa-raiz | ação' no canal SEM usar @menção no resumo final (retrigger/relaunch já acorda o agente na thread exata onde parou)."
           });
         }
         if (activeDup.length >= 2) {
@@ -6322,6 +6459,12 @@ async function stopAgentSession(ctx, input) {
       message: `Falha ao executar '${action}' em ${resolvedName}: ${(err == null ? void 0 : err.message) || err}`
     };
   }
+  recordStoppedSessionForRadar({
+    agente: resolvedName,
+    agent_pubkey: matched.pubkey || input.agent_pubkey || null,
+    channel_id: place.channelId,
+    thread_root: place.root || null
+  });
   let lockReleased = false;
   if (input.release_issue_id && String(input.release_issue_id).trim()) {
     try {

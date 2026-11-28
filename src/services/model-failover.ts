@@ -29,12 +29,16 @@ export interface ModelFailoverInput {
   thread_root?: string | null;
   retrigger_text?: string | null;
   max_probes?: number;
+  /** Backoff escalonado (ms) antes de trocar o modelo da OrgFy Iris. Padrão: [5000, 5000]. */
+  vipRetryDelaysMs?: number[];
 }
 
 export interface ModelFailoverResult {
   ok: boolean;
   mode: "dry_run" | "applied" | "delegated";
   delegatedToNexusMind?: boolean;
+  recoveredOnRetry?: boolean;
+  retryAttempts?: number;
   agentName: string | null;
   agentKey: string | null;
   previousModel: string | null;
@@ -46,6 +50,18 @@ export interface ModelFailoverResult {
   candidatesTested: number;
   ranking: ModelCandidateScore[];
   message: string;
+}
+
+export const IRIS_VIP_RETRY_DELAYS_MS = [5000, 5000] as const;
+
+export function isIrisAgent(nameOrKey: string): boolean {
+  return /\biris\b/i.test(String(nameOrKey || ""));
+}
+
+export function isTopVipModel(modelId: string, policyState?: string): boolean {
+  if (String(policyState || "").toLowerCase() === "vip") return true;
+  const m = String(modelId || "").toLowerCase();
+  return /(opus|sonnet-4-6|sonnet-5|gpt-5|gpt-6|\bo3\b|gemini-2\.5-pro|gemini-3\.5-pro|gemini-4-hydrogen-high|deepseek-r1)/.test(m);
 }
 
 export async function reconcileAgentsViaBuzzApi(
@@ -422,13 +438,22 @@ async function loadSharedNexusMindRanking(
             if (effectivePreferFree && !free) continue;
             if (!effectivePreferFree && free) continue;
             const evalScore = Number(m.evalScore ?? estimateModelIntelligence(mid));
+            // Hierarquia VIP: para Iris/VIP, modelos marcados como 'vip' ou flagship (Opus/Sonnet/GPT-6/Hydrogen-High)
+            // têm precedência absoluta sobre modelos rápidos/worker (ex.: gemini-2.5-flash), evitando rebaixamento indevido.
+            const vipBoost = isVip
+              ? m.policyState === "vip"
+                ? 30
+                : isTopVipModel(mid, m.policyState)
+                ? 15
+                : 0
+              : 0;
             cpCandidates.push({
               model: mid,
               provider: String(m.provider || inferProviderId(mid)),
               isFree: free,
               intelligenceScore: evalScore,
               latencyMs: typeof m.latencyMs === "number" ? m.latencyMs : null,
-              combinedScore: evalScore,
+              combinedScore: Number((evalScore + vipBoost).toFixed(2)),
               online: true,
               calls: Number(m.prod24h?.turns24h || 0),
               source: "nexusmind_ranking",
@@ -768,7 +793,9 @@ export async function executeSmartModelFailover(
   const matchedAgent = input.agente || input.agent_pubkey
     ? findAgentInSnapshot(agentsApi, input.agente, input.agent_pubkey)
     : undefined;
-  const isVip = isVipOrLeadershipAgent(String(matchedAgent?.name || input.agente || ""));
+  const resolvedAgentLabel = String(matchedAgent?.name || input.agente || "");
+  const isVip = isVipOrLeadershipAgent(resolvedAgentLabel);
+  const isIris = isIrisAgent(resolvedAgentLabel);
   // Regra estrita VIP: nunca prefere :free enquanto existir qualquer modelo pago disponível.
   const preferFree = isVip ? false : Boolean(input.prefer_free);
 
@@ -776,8 +803,78 @@ export async function executeSmartModelFailover(
     (matchedAgent?.config && typeof matchedAgent.config === "object"
       ? String((matchedAgent.config as any).model || "")
       : "") || (input.failed_model || null);
+  const previousProvider =
+    (matchedAgent?.config && typeof matchedAgent.config === "object"
+      ? String((matchedAgent.config as any).provider || "")
+      : "") || (previousModel ? inferProviderId(previousModel) : null);
 
-  // Quarentena (20 min) dos modelos que acabaram de falhar para eliminar ping-pong entre dois modelos em 503
+  // Proteção VIP Escalonada da OrgFy Iris: antes de trocar o modelo de topo da Iris por um glitch transitório,
+  // executa tentativas escalonadas no modelo VIP atual (padrão: aguarda 5s -> tenta; falha -> aguarda 5s -> tenta).
+  // Só troca de modelo se TODAS as tentativas falharem (evitando rebaixamento indevido sem nunca parar a empresa).
+  const hostForRetry = (ctx as any)?.host;
+  if (applyChange && isIris && previousModel && !isUnsupportedAgentModel(previousModel) && typeof hostForRetry?.request === "function") {
+    const delays = Array.isArray(input.vipRetryDelaysMs) ? input.vipRetryDelaysMs : [...IRIS_VIP_RETRY_DELAYS_MS];
+    const currentProv =
+      NEXUSMIND_PROVIDERS.find((p) => p.id === previousProvider) ||
+      NEXUSMIND_PROVIDERS.find((p) => p.id === inferProviderId(previousModel)) ||
+      NEXUSMIND_PROVIDERS[0];
+    for (let i = 0; i < delays.length; i++) {
+      const waitMs = Math.max(0, Number(delays[i] || 0));
+      if (waitMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+      }
+      const retryProbe = await probeModelLive(ctx, previousModel, currentProv);
+      if (retryProbe.online) {
+        let retriggeredOnRetry = false;
+        if (retrigger && matchedAgent && typeof agentsApi?.wake === "function") {
+          try {
+            const channel = String(input.channel_id || DEFAULT_ORGFY_CHANNEL).trim() || DEFAULT_ORGFY_CHANNEL;
+            const root = input.thread_root ? String(input.thread_root).trim() : undefined;
+            await agentsApi.wake(matchedAgent.key, {
+              channel,
+              ...(root ? { root } : {}),
+              text:
+                input.retrigger_text ||
+                `[ORGFY RETRY VIP ESCALONADO] Modelo VIP '${previousModel}' voltou a responder HTTP 200 na tentativa ${i + 1}/${delays.length} (${retryProbe.latencyMs ?? 0}ms). Retome imediatamente o ponto exato onde parou nesta thread.`,
+            });
+            retriggeredOnRetry = true;
+          } catch {
+            // Wake opcional
+          }
+        }
+        return {
+          ok: true,
+          mode: "applied",
+          recoveredOnRetry: true,
+          retryAttempts: i + 1,
+          agentName: matchedAgent?.name || input.agente || null,
+          agentKey: matchedAgent?.key || null,
+          previousModel,
+          selectedModel: previousModel,
+          selectedProvider: currentProv.id,
+          selectedLatencyMs: retryProbe.latencyMs,
+          selectedIntelligenceScore: estimateModelIntelligence(previousModel),
+          retriggered: retriggeredOnRetry,
+          candidatesTested: i + 1,
+          ranking: [
+            {
+              model: previousModel,
+              provider: currentProv.id,
+              isFree: isFreeModelId(previousModel),
+              intelligenceScore: estimateModelIntelligence(previousModel),
+              latencyMs: retryProbe.latencyMs,
+              combinedScore: computeCombinedModelScore(estimateModelIntelligence(previousModel), retryProbe.latencyMs),
+              online: true,
+              source: "live_probe",
+            },
+          ],
+          message: `OrgFy Iris recuperou no modelo VIP '${previousModel}' após retry escalonado (${i + 1}/${delays.length} · ${retryProbe.latencyMs ?? 0}ms) — modelo de topo preservado sem rebaixamento.`,
+        };
+      }
+    }
+  }
+
+  // Quarentena (backoff progressivo) dos modelos que acabaram de falhar para eliminar ping-pong entre dois modelos em 503
   if (failedNorm) {
     await quarantineFailedModel(ctx, input.failed_model || failedNorm, "reported_failed");
   }
@@ -1247,6 +1344,7 @@ export async function requestModelFailover(
       thread_root: input.thread_root || null,
       retrigger_text: input.retrigger_text,
       max_probes: input.max_probes,
+      vipRetryDelaysMs: Array.isArray(input.vipRetryDelaysMs) ? (input.vipRetryDelaysMs as number[]) : undefined,
     });
     if (directRes.ok && directRes.selectedModel) {
       return {

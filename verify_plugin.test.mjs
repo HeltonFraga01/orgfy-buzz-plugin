@@ -2465,4 +2465,181 @@ console.log("[MODEL FAILOVER NEXUSMIND + FALLBACK OK]", JSON.stringify({ selecte
     assert.ok(holdingSrc.includes("protocolSummary"), "holding-service deve expor protocolSummary (NIP-99/89 + Intercompany)");
     assert.ok(avatarSrc.includes("Pin dourado") && avatarSrc.includes("const neck"), "Avatar3DBuilder deve incluir refinos de pescoço, sapatos e pin Mônaco");
   });
+
+  test("v18.10: Auto-Cura anti-loop (supressão pós-stop no radar) + Proteção VIP Escalonada da OrgFy Iris (retry 5s+5s antes de failover e prioridade VIP)", async () => {
+    const channelId = "c074653c-200f-4cdb-9005-cd230538d811";
+    const threadRoot = "fc69cf97945d7766322c6bcd1634299689b150120fb026d998d270da092cd706";
+    const irisPubkey = "1fae49a2a9836feaeed54650c0314324e6c9c2bf7138ab17855fcaa399a0406b";
+
+    // 1. Auto-Cura anti-loop: após orgfy_session_stop, a sessão interrompida é suprimida no orgfy_loop_radar
+    const antiLoopTools = new Map();
+    const fakeStaleRadar = JSON.stringify({
+      ok: true,
+      error: null,
+      gerado_em: new Date().toISOString(),
+      resumo: { total_recentes: 1, ativas_total: 1, criticos: 1, criticos_ativos: 1, avisos: 0, duplicadas: 0 },
+      sessoes: [
+        {
+          session_id: "20261127_535_stale",
+          agente: "OrgFy Bento",
+          nome: "OrgFy Bento · Community",
+          agent_pubkey: "d24eb749d921ee4f3465073252abc3779faa92dee1d333e40d6b03c6fb814711",
+          channel_id: channelId,
+          thread_root: threadRoot,
+          ativa: true,
+          ultima_atualizacao_min: 3.0,
+          duracao_min: 10.0,
+          msgs: 12,
+          shells: 4,
+          help_calls: 0,
+          severidade: "critical",
+          flags: ["TEMPESTADE_5XX"],
+          ultimo_shell: "",
+        },
+      ],
+    });
+    orgfyMod.apply({
+      react: { createElement: () => null },
+      pages: { register: () => {} },
+      settingsCards: { register: () => {} },
+      panels: { register: () => {} },
+      navigation: { open: async () => ({ status: "opened" }) },
+      notifications: { notify: async () => {} },
+      agents: {
+        addInstructions: () => {},
+        addTool: (t) => antiLoopTools.set(t.name, t),
+        registerHook: () => {},
+        snapshot: () => ({
+          agents: [{ key: "local:orgfy-bento", pubkey: "d24eb749d921ee4f3465073252abc3779faa92dee1d333e40d6b03c6fb814711", name: "OrgFy Bento", place: "here" }],
+          running: [],
+        }),
+        session: async () => {},
+      },
+      host: {
+        readFile: async (p) => {
+          if (p.endsWith("goose-loop-radar.json")) return new TextEncoder().encode(fakeStaleRadar);
+          throw new Error("ENOENT");
+        },
+        writeFile: async () => {},
+        serveMcp: async () => ({ url: "mcp://test-antiloop", close: () => {} }),
+      },
+    });
+    const beforeStop = JSON.parse(await antiLoopTools.get("orgfy_loop_radar").call({}, {}, { apenas_ativos: true }));
+    assert.equal(beforeStop.total_exibidas, 1, "antes do stop, sessão crítica aparece ativa no radar");
+    const stopOk = JSON.parse(await antiLoopTools.get("orgfy_session_stop").call({}, {}, {
+      agente: "OrgFy Bento",
+      agent_pubkey: "d24eb749d921ee4f3465073252abc3779faa92dee1d333e40d6b03c6fb814711",
+      channel_id: channelId,
+      thread_root: threadRoot,
+      action: "interrupt",
+      reason: "Teste anti-loop",
+    }));
+    assert.equal(stopOk.ok, true);
+    const afterStop = JSON.parse(await antiLoopTools.get("orgfy_loop_radar").call({}, {}, { apenas_ativos: true }));
+    assert.equal(afterStop.total_exibidas, 0, "após stop, mesma sessão em cache deve ser suprimida para não gerar loop de auto-cura");
+    assert.equal(afterStop.suprimidas_auto_cura_recente, 1);
+
+    // 2. OrgFy Iris Retry Escalonado (Cenário A): falha na 1ª tentativa (503) e recupera na 2ª (200) -> preserva modelo VIP sem chamar save()
+    let irisProbesA = 0;
+    const irisSavesA = [];
+    const irisWakesA = [];
+    const irisCtxA = {
+      agents: {
+        snapshot: () => ({
+          agents: [
+            {
+              key: "local:orgfy-iris",
+              pubkey: irisPubkey,
+              name: "OrgFy Iris",
+              place: "here",
+              config: { model: "claude-opus-4-6-thinking", provider: "nexusmind_antigravity" },
+            },
+          ],
+          running: [],
+        }),
+        save: async (k, ch) => irisSavesA.push({ k, ch }),
+        wake: async (k, pl) => irisWakesA.push({ k, pl }),
+      },
+      host: {
+        request: async () => {
+          irisProbesA += 1;
+          if (irisProbesA === 1) return { status: 503, body: '{"error":"transient"}' };
+          return { status: 200, body: '{"choices":[{"message":{"content":"ok"}}]}' };
+        },
+        readFile: async () => { throw new Error("ENOENT"); },
+        writeFile: async () => {},
+      },
+    };
+    const resRetryOk = await orgfyMod.requestModelFailover(irisCtxA, {
+      agente: "OrgFy Iris",
+      agent_pubkey: irisPubkey,
+      failed_model: "claude-opus-4-6-thinking",
+      apply: true,
+      retrigger: true,
+      channel_id: channelId,
+      thread_root: threadRoot,
+      vipRetryDelaysMs: [0, 0],
+    });
+    assert.equal(resRetryOk.ok, true);
+    assert.equal(resRetryOk.selectedModel, "claude-opus-4-6-thinking", "Iris deve manter o modelo VIP quando recupera no retry escalonado");
+    assert.equal(irisProbesA, 2, "deve ter feito exatamente 2 tentativas escalonadas antes de recuperar");
+    assert.equal(irisSavesA.length, 0, "não deve chamar save() para trocar modelo se recuperou no retry");
+    assert.equal(irisWakesA.length, 1, "deve acordar a Iris na thread exata para continuar de onde parou");
+
+    // 3. OrgFy Iris Retry Escalonado (Cenário B): falha em todas as tentativas -> faz failover para outro modelo VIP/flagship (NUNCA rebaixa para gemini-2.5-flash se houver VIP online)
+    const irisSavesB = [];
+    const fakeCpVip = JSON.stringify({
+      policy: { forceFree: false },
+      models: [
+        { model: "gemini-2.5-flash", provider: "nexusmind_antigravity", online: true, evalApproved: true, evalScore: 99.2, policyState: "auto", isFree: false },
+        { model: "gpt-6.1-terra", provider: "nexusmind_openai", online: true, evalApproved: true, evalScore: 98.2, policyState: "auto", isFree: false },
+        { model: "claude-sonnet-5-5", provider: "nexusmind_anthropic", online: true, evalApproved: true, evalScore: 93.0, policyState: "vip", isFree: false },
+      ],
+    });
+    const irisCtxB = {
+      agents: {
+        snapshot: () => ({
+          agents: [
+            {
+              key: "local:orgfy-iris",
+              pubkey: irisPubkey,
+              name: "OrgFy Iris",
+              place: "here",
+              config: { model: "claude-opus-4-6-thinking", provider: "nexusmind_antigravity" },
+            },
+          ],
+          running: [],
+        }),
+        save: async (k, ch) => irisSavesB.push({ k, ch }),
+        wake: async () => {},
+      },
+      host: {
+        request: async (req) => {
+          const body = JSON.parse(req.body || "{}");
+          if (body.model === "claude-opus-4-6-thinking") {
+            return { status: 503, body: '{"error":"outage"}' };
+          }
+          return { status: 200, body: '{"content":[{"type":"text","text":"ok"}]}' };
+        },
+        readFile: async (p) => {
+          if (p.endsWith("model-control-plane.json")) return new TextEncoder().encode(fakeCpVip);
+          throw new Error("ENOENT");
+        },
+        writeFile: async () => {},
+      },
+    };
+    const resVipFallback = await orgfyMod.requestModelFailover(irisCtxB, {
+      agente: "OrgFy Iris",
+      agent_pubkey: irisPubkey,
+      failed_model: "claude-opus-4-6-thinking",
+      apply: true,
+      retrigger: true,
+      channel_id: channelId,
+      thread_root: threadRoot,
+      vipRetryDelaysMs: [0, 0],
+    });
+    assert.equal(resVipFallback.ok, true);
+    assert.equal(resVipFallback.selectedModel, "claude-sonnet-5-5", "quando VIP atual cai em definitivo, Iris deve migrar para outro modelo VIP (não gemini-2.5-flash)");
+    assert.equal(irisSavesB.length, 1);
+  });
 }
