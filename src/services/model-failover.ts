@@ -85,11 +85,19 @@ export async function reconcileAgentsViaBuzzApi(
     const isOfflineInGateway = Boolean(
       hasLiveCatalog && (catalog?.offlineModels.has(mlow) || catalog?.offlineModels.has(shortM))
     );
+    const isNotEvalApproved = Boolean(
+      hasLiveCatalog &&
+        catalog?.approvedModels &&
+        catalog.approvedModels.size > 0 &&
+        !catalog.approvedModels.has(mlow) &&
+        !catalog.approvedModels.has(shortM)
+    );
     const needsFix =
       !prov ||
       !model ||
       isUnsupportedAgentModel(mlow) ||
       isOfflineInGateway ||
+      isNotEvalApproved ||
       (isVip && isFreeModelId(mlow) && hasAnyPaidApproved) ||
       (!isVip && !catalog?.forceFree && isFreeModelId(mlow)) ||
       (prov === "nexusmind_openai" && mlow.startsWith("antigravity/"));
@@ -320,12 +328,19 @@ function inferProviderId(modelId: string): string {
 }
 
 export function isFreeModelId(modelId: string): boolean {
-  const lower = String(modelId || "").toLowerCase();
-  return lower.includes(":free") || lower.includes("-free") || lower.includes("/free") || lower.endsWith("free");
+  const lower = String(modelId || "").trim().toLowerCase();
+  return (
+    lower.includes(":free") ||
+    lower.includes("-free") ||
+    lower.includes("/free") ||
+    lower.endsWith("free") ||
+    lower.startsWith("pol/") ||
+    lower.startsWith("pollinations/")
+  );
 }
 
 /**
- * Bloqueia modelos incompatíveis com agentes (autocomplete IDE, combos sem tool-calling, embeddings, áudio/imagem).
+ * Bloqueia modelos incompatíveis com agentes (Pollinations/community, autocomplete IDE, combos sem tool-calling, embeddings, áudio/imagem).
  */
 export function isUnsupportedAgentModel(modelId: string): boolean {
   const m = String(modelId || "").trim().toLowerCase();
@@ -339,6 +354,8 @@ export function isUnsupportedAgentModel(modelId: string): boolean {
     m.includes("mistral-large-4-1t-a52b") ||
     m.includes("claude-opus-5-5") ||
     m.includes("minimax-m3.1-flash") ||
+    m.startsWith("pol/") ||
+    m.startsWith("pollinations/") ||
     m.includes("pol/community/") ||
     m.includes("pollinations/community/") ||
     m.startsWith("auto/") ||

@@ -108,6 +108,8 @@ function isBlockedGatewayCatalogModel(modelId: string): boolean {
     m.includes("mistral-large-4-1t-a52b") ||
     m.includes("claude-opus-5-5") ||
     m.includes("minimax-m3.1-flash") ||
+    m.startsWith("pol/") ||
+    m.startsWith("pollinations/") ||
     m.includes("pol/community/") ||
     m.includes("pollinations/community/") ||
     m.startsWith("auto/")

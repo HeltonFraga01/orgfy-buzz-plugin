@@ -2129,7 +2129,7 @@ function decodeTextBytes(raw) {
 function isBlockedGatewayCatalogModel(modelId) {
   const m = String(modelId || "").trim().toLowerCase();
   if (!m) return true;
-  return m === "haiku" || m === "grok-4.5" || m.includes("gemini-3.8-flash-medium") || m.includes("gemini-3-pro-low") || m.includes("gemini-3-pro-high") || m.includes("mistral-large-4-1t-a52b") || m.includes("claude-opus-5-5") || m.includes("minimax-m3.1-flash") || m.includes("pol/community/") || m.includes("pollinations/community/") || m.startsWith("auto/");
+  return m === "haiku" || m === "grok-4.5" || m.includes("gemini-3.8-flash-medium") || m.includes("gemini-3-pro-low") || m.includes("gemini-3-pro-high") || m.includes("mistral-large-4-1t-a52b") || m.includes("claude-opus-5-5") || m.includes("minimax-m3.1-flash") || m.startsWith("pol/") || m.startsWith("pollinations/") || m.includes("pol/community/") || m.includes("pollinations/community/") || m.startsWith("auto/");
 }
 function isVipOrLeadershipAgent(roleOrName) {
   const lower = normName$1(roleOrName);
@@ -3269,7 +3269,10 @@ async function reconcileAgentsViaBuzzApi(ctx, opts = {}) {
     const isOfflineInGateway = Boolean(
       hasLiveCatalog && ((catalog == null ? void 0 : catalog.offlineModels.has(mlow)) || (catalog == null ? void 0 : catalog.offlineModels.has(shortM)))
     );
-    const needsFix = !prov || !model || isUnsupportedAgentModel(mlow) || isOfflineInGateway || isVip && isFreeModelId(mlow) && hasAnyPaidApproved || !isVip && !(catalog == null ? void 0 : catalog.forceFree) && isFreeModelId(mlow) || prov === "nexusmind_openai" && mlow.startsWith("antigravity/");
+    const isNotEvalApproved = Boolean(
+      hasLiveCatalog && (catalog == null ? void 0 : catalog.approvedModels) && catalog.approvedModels.size > 0 && !catalog.approvedModels.has(mlow) && !catalog.approvedModels.has(shortM)
+    );
+    const needsFix = !prov || !model || isUnsupportedAgentModel(mlow) || isOfflineInGateway || isNotEvalApproved || isVip && isFreeModelId(mlow) && hasAnyPaidApproved || !isVip && !(catalog == null ? void 0 : catalog.forceFree) && isFreeModelId(mlow) || prov === "nexusmind_openai" && mlow.startsWith("antigravity/");
     if (!needsFix) continue;
     let nextModel;
     let nextProv;
@@ -3444,13 +3447,13 @@ function inferProviderId(modelId) {
   return "nexusmind_openai";
 }
 function isFreeModelId(modelId) {
-  const lower = String(modelId || "").toLowerCase();
-  return lower.includes(":free") || lower.includes("-free") || lower.includes("/free") || lower.endsWith("free");
+  const lower = String(modelId || "").trim().toLowerCase();
+  return lower.includes(":free") || lower.includes("-free") || lower.includes("/free") || lower.endsWith("free") || lower.startsWith("pol/") || lower.startsWith("pollinations/");
 }
 function isUnsupportedAgentModel(modelId) {
   const m = String(modelId || "").trim().toLowerCase();
   if (!m) return true;
-  return m === "haiku" || m === "grok-4.5" || m.includes("gemini-3.8-flash-medium") || m.includes("gemini-3-pro-low") || m.includes("gemini-3-pro-high") || m.includes("mistral-large-4-1t-a52b") || m.includes("claude-opus-5-5") || m.includes("minimax-m3.1-flash") || m.includes("pol/community/") || m.includes("pollinations/community/") || m.startsWith("auto/") || m.includes("tab_jump") || m.includes("autocomplete") || m.includes("fim-") || m.includes("embedding") || m.includes("rerank") || m.includes("whisper") || m.includes("tts") || m.includes("imagen") || m.includes("dall-e") || m.includes("moderation");
+  return m === "haiku" || m === "grok-4.5" || m.includes("gemini-3.8-flash-medium") || m.includes("gemini-3-pro-low") || m.includes("gemini-3-pro-high") || m.includes("mistral-large-4-1t-a52b") || m.includes("claude-opus-5-5") || m.includes("minimax-m3.1-flash") || m.startsWith("pol/") || m.startsWith("pollinations/") || m.includes("pol/community/") || m.includes("pollinations/community/") || m.startsWith("auto/") || m.includes("tab_jump") || m.includes("autocomplete") || m.includes("fim-") || m.includes("embedding") || m.includes("rerank") || m.includes("whisper") || m.includes("tts") || m.includes("imagen") || m.includes("dall-e") || m.includes("moderation");
 }
 function estimateModelIntelligence(modelId) {
   const m = String(modelId || "").toLowerCase();
