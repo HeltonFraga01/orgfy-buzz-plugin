@@ -1307,24 +1307,36 @@ export async function executeSmartModelFailover(
       try {
         const channel = String(input.channel_id || DEFAULT_ORGFY_CHANNEL).trim() || DEFAULT_ORGFY_CHANNEL;
         const root = input.thread_root ? String(input.thread_root).trim() : undefined;
-        // Renova a sessão Goose na thread para que o próximo turno suba com o novo modelo (sem herdar o modelo antigo preso na sessão)
+        // Guarda contra sessão duplicada: interrompe sessão anterior ativa antes de renovar ("new") e acordar
         if (typeof agentsApi?.session === "function") {
           try {
             const place = root ? { channelId: channel, root } : { channelId: channel };
+            await agentsApi.session(matchedAgent.key, place, "interrupt");
             await agentsApi.session(matchedAgent.key, place, "new");
           } catch {
             // Sessão pode ainda não existir
           }
         }
-        await agentsApi.wake(matchedAgent.key, {
-          channel,
-          ...(root ? { root } : {}),
-          text:
-            input.retrigger_text ||
-            `[ORGFY FAILOVER AUTOMÁTICO] Seu modelo foi migrado para '${winner.model}' (${winner.provider} · ${sourceTag}) após erro de API no modelo anterior. Retome imediatamente o último passo da tarefa com escopo fechado.`,
-        });
-        retriggered = true;
-        applyNote += " Sessão renovada e agente re-disparado automaticamente.";
+        const runningList: any[] = Array.isArray(agentsApi?.snapshot?.()?.running) ? agentsApi.snapshot().running : [];
+        const alreadyRunningElsewhere = runningList.some(
+          (r: any) =>
+            r?.key === matchedAgent.key &&
+            r?.place?.channelId === channel &&
+            (!root || (r?.place?.root && r.place.root !== root))
+        );
+        if (alreadyRunningElsewhere) {
+          applyNote += " Sessão paralela já ativa no mesmo canal; wake suprimido para evitar duplicidade.";
+        } else {
+          await agentsApi.wake(matchedAgent.key, {
+            channel,
+            ...(root ? { root } : {}),
+            text:
+              input.retrigger_text ||
+              `[ORGFY FAILOVER AUTOMÁTICO] Seu modelo foi migrado para '${winner.model}' (${winner.provider} · ${sourceTag}) após erro de API no modelo anterior. Retome imediatamente o último passo da tarefa com escopo fechado.`,
+          });
+          retriggered = true;
+          applyNote += " Sessão renovada e agente re-disparado automaticamente.";
+        }
       } catch (wErr: any) {
         applyNote += ` (Aviso: falha no re-disparo wake: ${wErr?.message || wErr})`;
       }

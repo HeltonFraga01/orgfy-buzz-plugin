@@ -3924,7 +3924,7 @@ function findAgentInSnapshot(agentsApi, query, pubkey) {
   return pkLower && pool.find((a) => String(a.pubkey || "").toLowerCase() === pkLower) || qLower && pool.find((a) => String(a.key || "").toLowerCase() === qLower) || qLower && pool.find((a) => String(a.name || "").toLowerCase() === qLower) || (qLower ? pool.find((a) => String(a.name || "").toLowerCase().includes(qLower)) : void 0);
 }
 async function executeSmartModelFailover(ctx, input = {}) {
-  var _a, _b, _c, _d;
+  var _a, _b, _c, _d, _e, _f;
   const applyChange = Boolean(input.apply);
   const retrigger = input.retrigger !== false;
   const maxProbes = Math.max(1, Math.min(10, Number(input.max_probes || 6)));
@@ -4278,17 +4278,29 @@ async function executeSmartModelFailover(ctx, input = {}) {
         if (typeof (agentsApi == null ? void 0 : agentsApi.session) === "function") {
           try {
             const place = root ? { channelId: channel, root } : { channelId: channel };
+            await agentsApi.session(matchedAgent.key, place, "interrupt");
             await agentsApi.session(matchedAgent.key, place, "new");
           } catch {
           }
         }
-        await agentsApi.wake(matchedAgent.key, {
-          channel,
-          ...root ? { root } : {},
-          text: input.retrigger_text || `[ORGFY FAILOVER AUTOMÁTICO] Seu modelo foi migrado para '${winner.model}' (${winner.provider} · ${sourceTag}) após erro de API no modelo anterior. Retome imediatamente o último passo da tarefa com escopo fechado.`
-        });
-        retriggered = true;
-        applyNote += " Sessão renovada e agente re-disparado automaticamente.";
+        const runningList = Array.isArray((_f = (_e = agentsApi == null ? void 0 : agentsApi.snapshot) == null ? void 0 : _e.call(agentsApi)) == null ? void 0 : _f.running) ? agentsApi.snapshot().running : [];
+        const alreadyRunningElsewhere = runningList.some(
+          (r) => {
+            var _a2, _b2;
+            return (r == null ? void 0 : r.key) === matchedAgent.key && ((_a2 = r == null ? void 0 : r.place) == null ? void 0 : _a2.channelId) === channel && (!root || ((_b2 = r == null ? void 0 : r.place) == null ? void 0 : _b2.root) && r.place.root !== root);
+          }
+        );
+        if (alreadyRunningElsewhere) {
+          applyNote += " Sessão paralela já ativa no mesmo canal; wake suprimido para evitar duplicidade.";
+        } else {
+          await agentsApi.wake(matchedAgent.key, {
+            channel,
+            ...root ? { root } : {},
+            text: input.retrigger_text || `[ORGFY FAILOVER AUTOMÁTICO] Seu modelo foi migrado para '${winner.model}' (${winner.provider} · ${sourceTag}) após erro de API no modelo anterior. Retome imediatamente o último passo da tarefa com escopo fechado.`
+          });
+          retriggered = true;
+          applyNote += " Sessão renovada e agente re-disparado automaticamente.";
+        }
       } catch (wErr) {
         applyNote += ` (Aviso: falha no re-disparo wake: ${(wErr == null ? void 0 : wErr.message) || wErr})`;
       }
