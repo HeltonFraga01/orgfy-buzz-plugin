@@ -97,10 +97,47 @@ export async function reconcileAgentsViaBuzzApi(
     const mlow = String(model || "").trim().toLowerCase();
     const shortM = String(mlow.split("/").pop() || mlow).trim();
     const agentLabel = String(ag?.name || ag?.key || "");
+    const agentNorm = agentLabel.trim().toLowerCase();
     const isIris = isIrisAgent(agentLabel);
     const isVip = isVipOrLeadershipAgent(agentLabel);
     const tier = resolveAgentRoutingTier(agentLabel);
-    // Preserva agentes roteados pelo Roteador Local (nexusmind_router / tier/*) sem sobrescrever para modelo estático
+
+    // Piloto ativo do Roteador Local (127.0.0.1:4199): migra automaticamente via ctx.agents.save()
+    const LOCAL_ROUTER_PILOT_TARGETS: Array<{ match: RegExp; model: string }> = [
+      { match: /^orgfy\s+bento$/, model: "tier/diretoria" },
+      { match: /^lumen\s+dev$/, model: "tier/code" },
+      { match: /^lumen\s+po$/, model: "tier/fast" },
+    ];
+    const pilotTarget = LOCAL_ROUTER_PILOT_TARGETS.find((p) => p.match.test(agentNorm));
+    if (pilotTarget) {
+      const alreadyOnPilot =
+        String(prov || "").toLowerCase() === "nexusmind_router" && mlow === pilotTarget.model;
+      if (!alreadyOnPilot) {
+        if (!opts.dryRun && typeof agentsApi?.save === "function") {
+          try {
+            await agentsApi.save(ag.key, {
+              config: { ...cfg, provider: "nexusmind_router", model: pilotTarget.model },
+            });
+            updated.push({
+              key: String(ag.key || ag.name || ""),
+              from: `${prov}/${model}`,
+              to: `nexusmind_router/${pilotTarget.model}`,
+            });
+          } catch (err) {
+            console.warn(`[ORGFY AUTO-RECONCILE] pulando piloto ${ag.key}:`, err);
+          }
+        } else {
+          updated.push({
+            key: String(ag.key || ag.name || ""),
+            from: `${prov}/${model}`,
+            to: `nexusmind_router/${pilotTarget.model}`,
+          });
+        }
+      }
+      continue;
+    }
+
+    // Preserva quaisquer outros agentes já roteados pelo Roteador Local (nexusmind_router / tier/*)
     if (String(prov || "").toLowerCase() === "nexusmind_router" || mlow.startsWith("tier/")) {
       continue;
     }
