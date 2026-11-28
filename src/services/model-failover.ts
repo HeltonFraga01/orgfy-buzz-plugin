@@ -314,6 +314,7 @@ export async function getQuarantinedModels(
   if (typeof host?.readFile === "function") {
     try {
       const raw = await host.readFile(MODEL_QUARANTINE_PATH);
+      modelQuarantineMemory.clear();
       if (raw) {
         const parsed = JSON.parse(decodeHostBytes(raw));
         if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
@@ -335,7 +336,8 @@ export async function getQuarantinedModels(
         }
       }
     } catch {
-      // Arquivo pode não existir ainda
+      // Arquivo não existe neste contexto/teste -> não vaza quarentena em memória de outro harness
+      modelQuarantineMemory.clear();
     }
   }
   const active = new Set<string>();
@@ -478,7 +480,8 @@ async function loadSharedNexusMindRanking(
   excludeSet: Set<string>,
   preferFree: boolean,
   isVip: boolean = false,
-  isIris: boolean = false
+  isIris: boolean = false,
+  agentTier: string = "tier2_balanced"
 ): Promise<ModelCandidateScore[]> {
   const disabled = getDisabledModelsFromLocalStorage();
   let parsed: any = null;
@@ -505,7 +508,19 @@ async function loadSharedNexusMindRanking(
             const free = Boolean(m.isFree) || isFreeModelId(mid);
             if (effectivePreferFree && !free) continue;
             if (!effectivePreferFree && free) continue;
-            const evalScore = Number(m.evalScore ?? estimateModelIntelligence(mid));
+            const tierKey =
+              agentTier === "vip_iris" || agentTier === "vip_leadership"
+                ? "tier3_frontier"
+                : agentTier === "reasoning"
+                ? "reasoning"
+                : agentTier === "tier1_fast"
+                ? "tier1_fast"
+                : "tier2_balanced";
+            const tierSpecificScore = Number(
+              (!isVip && m?.tierScores?.[tierKey] !== undefined)
+                ? m.tierScores[tierKey]
+                : (m.evalScore ?? estimateModelIntelligence(mid))
+            );
             // Hierarquia VIP: para Iris/VIP, modelos marcados como 'vip' ou flagship (Opus/Sonnet/GPT-6/Hydrogen-High)
             // têm precedência absoluta sobre modelos rápidos/worker (ex.: gemini-2.5-flash), evitando rebaixamento indevido.
             const vipBoost = isVip
@@ -519,9 +534,9 @@ async function loadSharedNexusMindRanking(
               model: mid,
               provider: String(m.provider || inferProviderId(mid)),
               isFree: free,
-              intelligenceScore: evalScore,
+              intelligenceScore: tierSpecificScore,
               latencyMs: typeof m.latencyMs === "number" ? m.latencyMs : null,
-              combinedScore: Number((evalScore + vipBoost).toFixed(2)),
+              combinedScore: Number((tierSpecificScore + vipBoost).toFixed(2)),
               online: true,
               calls: Number(m.prod24h?.turns24h || 0),
               source: "nexusmind_ranking",
@@ -977,13 +992,13 @@ export async function executeSmartModelFailover(
   if (previousModel) excludeSet.add(previousModel.toLowerCase());
 
   // 1. Primeiro verifica o ranking real compartilhado pelo NexusMind Gateway
-  let sharedRanking = await loadSharedNexusMindRanking(ctx, excludeSet, preferFree, isVip, isIris);
+  let sharedRanking = await loadSharedNexusMindRanking(ctx, excludeSet, preferFree, isVip, isIris, resolveAgentRoutingTier(resolvedAgentLabel));
   // Se todos os modelos do ranking estiverem em quarentena, relaxa quarentena mantendo apenas o modelo atual excluído
   if (sharedRanking.length === 0 && quarantined.size > 0) {
     const minimalExclude = new Set<string>();
     if (failedNorm) minimalExclude.add(failedNorm);
     if (previousModel) minimalExclude.add(previousModel.toLowerCase());
-    sharedRanking = await loadSharedNexusMindRanking(ctx, minimalExclude, preferFree, isVip, isIris);
+    sharedRanking = await loadSharedNexusMindRanking(ctx, minimalExclude, preferFree, isVip, isIris, resolveAgentRoutingTier(resolvedAgentLabel));
   }
   // Separação de domínio de falha (Cross-Provider Preference): prioriza fortemente provedor distinto do que falhou
   // (+45 supera o vipBoost de +30 para que VIPs escapem imediatamente de quedas de pool inteiro como 503 No available accounts)
@@ -1042,7 +1057,7 @@ export async function executeSmartModelFailover(
       const minimalEx = new Set<string>();
       if (failedNorm) minimalEx.add(failedNorm);
       if (previousModel) minimalEx.add(previousModel.toLowerCase());
-      const halfOpenPool = (await loadSharedNexusMindRanking(ctx, minimalEx, preferFree, isVip, isIris))
+      const halfOpenPool = (await loadSharedNexusMindRanking(ctx, minimalEx, preferFree, isVip, isIris, resolveAgentRoutingTier(resolvedAgentLabel)))
         .filter((c) => quarantined.has(c.model.toLowerCase()) && (!failedProvider || c.provider !== failedProvider))
         .slice(0, 4);
       for (const cand of halfOpenPool) {

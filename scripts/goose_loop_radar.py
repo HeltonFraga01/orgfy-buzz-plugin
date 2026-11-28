@@ -465,12 +465,6 @@ def main() -> int:
                         closed_ev = closed_hex[h7]
                         break
 
-            if ativa:
-                if thread_root:
-                    thread_collision_counts[(ag, thread_root)] += 1
-                if active_worktree:
-                    worktree_collision_counts[(ag, active_worktree)] += 1
-
             extracted.append({
                 "sid": sid,
                 "name": name or sid,
@@ -500,6 +494,36 @@ def main() -> int:
             })
 
         conn.close()
+
+        # Deduplicação pós-failover/relaunch: quando session(..., 'new') cria uma sessão mais nova
+        # para o mesmo agente na mesma thread_root (ou mesmo nome de sessão), a sessão antiga que ficou
+        # parada em erro de provider ou sem atualização recente (>1.0m atrás da nova) foi substituída
+        # e não deve continuar marcada como ativa por 15 minutos.
+        newest_by_thread: dict[tuple[str, str], dict] = {}
+        newest_by_name: dict[tuple[str, str], dict] = {}
+        for item in extracted:
+            if not item["ativa"]:
+                continue
+            t_key = (item["ag"], item["thread_root"]) if item["thread_root"] else None
+            n_key = (item["ag"], item["name"])
+            newer = (newest_by_thread.get(t_key) if t_key else None) or newest_by_name.get(n_key)
+            if newer is not None:
+                age_gap = item["age_upd_min"] - newer["age_upd_min"]
+                if item["last_msg_is_provider_error"] or age_gap >= 0.8:
+                    item["ativa"] = False
+                    item["superseded_by"] = newer["sid"]
+            if item["ativa"]:
+                if t_key and t_key not in newest_by_thread:
+                    newest_by_thread[t_key] = item
+                if n_key not in newest_by_name:
+                    newest_by_name[n_key] = item
+
+        for item in extracted:
+            if item["ativa"]:
+                if item["thread_root"]:
+                    thread_collision_counts[(item["ag"], item["thread_root"])] += 1
+                if item["active_worktree"]:
+                    worktree_collision_counts[(item["ag"], item["active_worktree"])] += 1
 
         sessoes = []
         ativas_total = 0

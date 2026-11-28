@@ -3528,6 +3528,7 @@ async function getQuarantinedModels(ctx, nowMs = Date.now()) {
   if (typeof (host == null ? void 0 : host.readFile) === "function") {
     try {
       const raw = await host.readFile(MODEL_QUARANTINE_PATH);
+      modelQuarantineMemory.clear();
       if (raw) {
         const parsed = JSON.parse(decodeHostBytes$2(raw));
         if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
@@ -3544,6 +3545,7 @@ async function getQuarantinedModels(ctx, nowMs = Date.now()) {
         }
       }
     } catch {
+      modelQuarantineMemory.clear();
     }
   }
   const active = /* @__PURE__ */ new Set();
@@ -3617,8 +3619,8 @@ function getDisabledModelsFromLocalStorage() {
     return /* @__PURE__ */ new Set();
   }
 }
-async function loadSharedNexusMindRanking(ctx, excludeSet, preferFree, isVip = false, isIris = false) {
-  var _a, _b, _c, _d;
+async function loadSharedNexusMindRanking(ctx, excludeSet, preferFree, isVip = false, isIris = false, agentTier = "tier2_balanced") {
+  var _a, _b, _c, _d, _e;
   const disabled = getDisabledModelsFromLocalStorage();
   let parsed = null;
   const host = ctx == null ? void 0 : ctx.host;
@@ -3641,17 +3643,20 @@ async function loadSharedNexusMindRanking(ctx, excludeSet, preferFree, isVip = f
             const free = Boolean(m.isFree) || isFreeModelId(mid);
             if (effectivePreferFree && !free) continue;
             if (!effectivePreferFree && free) continue;
-            const evalScore = Number(m.evalScore ?? estimateModelIntelligence(mid));
+            const tierKey = agentTier === "vip_iris" || agentTier === "vip_leadership" ? "tier3_frontier" : agentTier === "reasoning" ? "reasoning" : agentTier === "tier1_fast" ? "tier1_fast" : "tier2_balanced";
+            const tierSpecificScore = Number(
+              !isVip && ((_a = m == null ? void 0 : m.tierScores) == null ? void 0 : _a[tierKey]) !== void 0 ? m.tierScores[tierKey] : m.evalScore ?? estimateModelIntelligence(mid)
+            );
             const vipBoost = isVip ? m.policyState === "vip" ? 30 : isTopVipModel(mid, m.policyState) ? 15 : 0 : 0;
             cpCandidates.push({
               model: mid,
               provider: String(m.provider || inferProviderId(mid)),
               isFree: free,
-              intelligenceScore: evalScore,
+              intelligenceScore: tierSpecificScore,
               latencyMs: typeof m.latencyMs === "number" ? m.latencyMs : null,
-              combinedScore: Number((evalScore + vipBoost).toFixed(2)),
+              combinedScore: Number((tierSpecificScore + vipBoost).toFixed(2)),
               online: true,
-              calls: Number(((_a = m.prod24h) == null ? void 0 : _a.turns24h) || 0),
+              calls: Number(((_b = m.prod24h) == null ? void 0 : _b.turns24h) || 0),
               source: "nexusmind_ranking"
             });
           }
@@ -3681,7 +3686,7 @@ async function loadSharedNexusMindRanking(ctx, excludeSet, preferFree, isVip = f
   }
   if (!parsed) {
     try {
-      const raw = (_c = (_b = globalThis == null ? void 0 : globalThis.localStorage) == null ? void 0 : _b.getItem) == null ? void 0 : _c.call(_b, "nexusmind_model_ranking");
+      const raw = (_d = (_c = globalThis == null ? void 0 : globalThis.localStorage) == null ? void 0 : _c.getItem) == null ? void 0 : _d.call(_c, "nexusmind_model_ranking");
       if (raw) {
         const obj = JSON.parse(raw);
         if (obj && Array.isArray(obj.models) && obj.models.length > 0) {
@@ -3742,7 +3747,7 @@ async function loadSharedNexusMindRanking(ctx, excludeSet, preferFree, isVip = f
         if (byteLen > 12e6) continue;
         const txt = decodeHostBytes$2(raw);
         const obj = JSON.parse(txt);
-        const items = Array.isArray((_d = obj == null ? void 0 : obj.data) == null ? void 0 : _d.items) ? obj.data.items : Array.isArray(obj == null ? void 0 : obj.items) ? obj.items : [];
+        const items = Array.isArray((_e = obj == null ? void 0 : obj.data) == null ? void 0 : _e.items) ? obj.data.items : Array.isArray(obj == null ? void 0 : obj.items) ? obj.items : [];
         if (items.length === 0) continue;
         const acc = /* @__PURE__ */ new Map();
         for (const it of items) {
@@ -4007,12 +4012,12 @@ async function executeSmartModelFailover(ctx, input = {}) {
   const excludeSet = new Set(quarantined);
   if (failedNorm) excludeSet.add(failedNorm);
   if (previousModel) excludeSet.add(previousModel.toLowerCase());
-  let sharedRanking = await loadSharedNexusMindRanking(ctx, excludeSet, preferFree, isVip, isIris);
+  let sharedRanking = await loadSharedNexusMindRanking(ctx, excludeSet, preferFree, isVip, isIris, resolveAgentRoutingTier(resolvedAgentLabel));
   if (sharedRanking.length === 0 && quarantined.size > 0) {
     const minimalExclude = /* @__PURE__ */ new Set();
     if (failedNorm) minimalExclude.add(failedNorm);
     if (previousModel) minimalExclude.add(previousModel.toLowerCase());
-    sharedRanking = await loadSharedNexusMindRanking(ctx, minimalExclude, preferFree, isVip, isIris);
+    sharedRanking = await loadSharedNexusMindRanking(ctx, minimalExclude, preferFree, isVip, isIris, resolveAgentRoutingTier(resolvedAgentLabel));
   }
   const failedProvider = previousModel ? inferProviderId(previousModel) : failedNorm ? inferProviderId(failedNorm) : null;
   if (failedProvider && sharedRanking.length > 1) {
@@ -4058,7 +4063,7 @@ async function executeSmartModelFailover(ctx, input = {}) {
       const minimalEx = /* @__PURE__ */ new Set();
       if (failedNorm) minimalEx.add(failedNorm);
       if (previousModel) minimalEx.add(previousModel.toLowerCase());
-      const halfOpenPool = (await loadSharedNexusMindRanking(ctx, minimalEx, preferFree, isVip, isIris)).filter((c) => quarantined.has(c.model.toLowerCase()) && (!failedProvider || c.provider !== failedProvider)).slice(0, 4);
+      const halfOpenPool = (await loadSharedNexusMindRanking(ctx, minimalEx, preferFree, isVip, isIris, resolveAgentRoutingTier(resolvedAgentLabel))).filter((c) => quarantined.has(c.model.toLowerCase()) && (!failedProvider || c.provider !== failedProvider)).slice(0, 4);
       for (const cand of halfOpenPool) {
         const prov = NEXUSMIND_PROVIDERS.find((p) => p.id === cand.provider) || NEXUSMIND_PROVIDERS.find((p) => p.id === inferProviderId(cand.model)) || NEXUSMIND_PROVIDERS[0];
         const res = await probeModelLive(ctx, cand.model, prov);
